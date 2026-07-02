@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import { gameNameFromPath, type Game } from "../types/game";
+import ImportModal, { type ExeInfo } from "./ImportModal";
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -16,6 +17,8 @@ export default function Sidebar() {
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ gameId: string; x: number; y: number } | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [scannedExes, setScannedExes] = useState<ExeInfo[]>([]);
 
   const importMenuRef = useRef<HTMLDivElement>(null);
   const importBtnRef = useRef<HTMLButtonElement>(null);
@@ -60,6 +63,7 @@ export default function Sidebar() {
           playTime: "0h",
           addedAt: Date.now(),
         });
+        showToast(`Imported ${gameNameFromPath(filePath)}`, "success");
       }
     } catch (err) {
       console.error("Failed to import exe:", err);
@@ -75,31 +79,43 @@ export default function Sidebar() {
         title: "Select Folder to Scan for Games",
       });
       if (folderPath && typeof folderPath === "string") {
-        const exes: string[] = await invoke("scan_folder_for_exes", {
+        const exes: ExeInfo[] = await invoke("scan_folder_for_exes", {
           folderPath,
         });
         if (exes.length === 0) {
-          // Could show a toast/notification here
+          showToast("No executable files found in the selected folder", "info");
           return;
         }
-        // Deduplicate by path to avoid duplicates on re-import
+        // Deduplicate against existing games before showing modal
         const existingPaths = new Set(games.map((g) => g.path.toLowerCase()));
-        const importedGames = exes
-          .filter((exePath) => !existingPaths.has(exePath.toLowerCase()))
-          .map((exePath) => ({
-            id: "",
-            name: gameNameFromPath(exePath),
-            path: exePath,
-            platform: "Local",
-            installed: true,
-            playTime: "0h",
-            addedAt: Date.now(),
-          }));
-        addGames(importedGames);
+        const newExes = exes.filter(
+          (exe) => !existingPaths.has(exe.path.toLowerCase())
+        );
+        if (newExes.length === 0) {
+          showToast("All executables in this folder are already in your library", "info");
+          return;
+        }
+        setScannedExes(newExes);
+        setShowImportModal(true);
       }
     } catch (err) {
       console.error("Failed to import folder:", err);
     }
+  }
+
+  function handleConfirmImport(selectedPaths: string[]) {
+    setShowImportModal(false);
+    const importedGames = selectedPaths.map((exePath) => ({
+      id: "",
+      name: gameNameFromPath(exePath),
+      path: exePath,
+      platform: "Local",
+      installed: true,
+      playTime: "0h",
+      addedAt: Date.now(),
+    }));
+    addGames(importedGames);
+    showToast(`Imported ${importedGames.length} game${importedGames.length !== 1 ? "s" : ""}`, "success");
   }
 
   function handleGameContextMenu(e: React.MouseEvent, game: Game) {
@@ -307,6 +323,14 @@ export default function Sidebar() {
           x={contextMenu.x}
           y={contextMenu.y}
           onRemove={handleRemoveFromContextMenu}
+        />
+      )}
+
+      {showImportModal && (
+        <ImportModal
+          exeInfos={scannedExes}
+          onConfirm={handleConfirmImport}
+          onCancel={() => setShowImportModal(false)}
         />
       )}
     </aside>

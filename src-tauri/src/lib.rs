@@ -133,9 +133,18 @@ fn base64_encode(data: &[u8]) -> String {
     out
 }
 
-/// Recursively scan a directory for .exe files and return their paths.
+/// Serializable struct holding metadata about a scanned executable.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ExeInfo {
+    path: String,
+    size: u64,
+    modified_at: u64,
+}
+
+/// Recursively scan a directory for .exe files and return their paths, sizes, and modified dates.
 #[tauri::command]
-fn scan_folder_for_exes(folder_path: String) -> Vec<String> {
+fn scan_folder_for_exes(folder_path: String) -> Vec<ExeInfo> {
     let mut exes = Vec::new();
     let path = Path::new(&folder_path);
     if path.is_dir() {
@@ -144,7 +153,10 @@ fn scan_folder_for_exes(folder_path: String) -> Vec<String> {
     exes
 }
 
-fn scan_dir(dir: &Path, exes: &mut Vec<String>) {
+/// Non-game executables to skip during folder scanning.
+const SKIP_KEYWORDS: &[&str] = &["redist", "autorun", "helper", "unin", "crash", "setup", "install", "plugin", "manual", "readme", "register", "7za"];
+
+fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let entry_path = entry.path();
@@ -158,7 +170,25 @@ fn scan_dir(dir: &Path, exes: &mut Vec<String>) {
                 scan_dir(&entry_path, exes);
             } else if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
                 if ext.eq_ignore_ascii_case("exe") {
-                    exes.push(entry_path.to_string_lossy().to_string());
+                    // Skip non-game executables (installers, helpers, crash reporters, etc.)
+                    if let Some(stem) = entry_path.file_stem().and_then(|s| s.to_str()) {
+                        if SKIP_KEYWORDS.iter().any(|kw| stem.to_lowercase().contains(kw)) {
+                            continue;
+                        }
+                    }
+                    if let Ok(meta) = entry.metadata() {
+                        let size = meta.len();
+                        let modified_at = meta.modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        exes.push(ExeInfo {
+                            path: entry_path.to_string_lossy().to_string(),
+                            size,
+                            modified_at,
+                        });
+                    }
                 }
             }
         }
