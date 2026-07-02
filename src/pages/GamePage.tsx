@@ -44,6 +44,7 @@ function GameDetail({ game }: { game: Game }) {
   const [editName, setEditName] = useState(game.name);
   const [editPlatform, setEditPlatform] = useState(game.platform);
   const [editCover, setEditCover] = useState(game.coverArtUrl || "");
+  const [editNotes, setEditNotes] = useState(game.notes || "");
 
   function handleLaunch() {
     invoke("launch_game", { gameId: game.id, gamePath: game.path })
@@ -59,6 +60,7 @@ function GameDetail({ game }: { game: Game }) {
     setEditName(game.name);
     setEditPlatform(game.platform);
     setEditCover(game.coverArtUrl || "");
+    setEditNotes(game.notes || "");
     setEditing(true);
   }
 
@@ -101,12 +103,13 @@ function GameDetail({ game }: { game: Game }) {
     const newName = editName.trim() || game.name;
     const newPlatform = editPlatform.trim() || game.platform;
     const newCover = editCover || undefined;
+    const newNotes = editNotes.trim() || undefined;
 
-    // Skip save if nothing changed
     if (
       newName === game.name &&
       newPlatform === game.platform &&
-      newCover === game.coverArtUrl
+      newCover === game.coverArtUrl &&
+      newNotes === game.notes
     ) {
       setEditing(false);
       return;
@@ -116,6 +119,7 @@ function GameDetail({ game }: { game: Game }) {
       name: newName,
       platform: newPlatform,
       coverArtUrl: newCover,
+      notes: newNotes,
     });
     setEditing(false);
     showToast("Game updated", "success");
@@ -310,6 +314,20 @@ function GameDetail({ game }: { game: Game }) {
                 value={editPlatform}
                 onChange={(e) => setEditPlatform(e.target.value)}
                 placeholder="e.g., Steam, GOG, Local"
+              />
+            </div>
+
+            <div className="edit-field">
+              <label className="edit-label" htmlFor="edit-notes">
+                Notes
+              </label>
+              <textarea
+                id="edit-notes"
+                className="edit-input edit-textarea"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Personal notes about this game..."
+                rows={3}
               />
             </div>
 

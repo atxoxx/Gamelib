@@ -585,6 +585,116 @@
   color: var(--color-text-muted);
 }
 
+/* Library Card Grid */
+.library-grid {
+  padding: var(--space-2xl);
+}
+
+.library-heading {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-xl);
+}
+
+.library-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-lg);
+}
+
+.library-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.library-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-accent);
+  box-shadow: 0 8px 24px rgba(108, 92, 231, 0.2);
+}
+
+.library-card:active {
+  transform: translateY(-1px);
+}
+
+.library-card-cover {
+  width: 100%;
+  height: 160px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.library-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+}
+
+.library-card:hover .library-card-cover img {
+  transform: scale(1.05);
+}
+
+.library-card-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.library-card-cover-placeholder svg {
+  width: 40px;
+  height: 40px;
+  opacity: 0.3;
+}
+
+.library-card-body {
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+}
+
+.library-card-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: var(--space-xs);
+}
+
+.library-card-platform {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-accent);
+  background: rgba(108, 92, 231, 0.1);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-sm);
+}
+
+.library-card-notes {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.library-card-notes-empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 /* Empty State */
 .main-empty {
   display: flex;
@@ -1019,6 +1129,13 @@
 
 .edit-input:focus {
   border-color: var(--color-accent);
+}
+
+.edit-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+  font-family: inherit;
 }
 
 .edit-cover-row {

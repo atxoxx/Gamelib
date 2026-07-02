@@ -17,6 +17,8 @@ struct GameData {
     added_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     cover_art_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
 }
 
 /// Persist the game library to the app's data directory.

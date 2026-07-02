@@ -7,6 +7,7 @@ export interface Game {
   playTime: string;
   addedAt: number; // timestamp
   coverArtUrl?: string; // base64 data URL for cover art image
+  notes?: string; // user notes about the game
 }
 
 /** Extract a human-readable game name from an executable file path. */

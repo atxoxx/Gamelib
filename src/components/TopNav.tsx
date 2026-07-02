@@ -128,24 +128,6 @@ export default function TopNav() {
           ))}
         </div>
       </div>
-      <div className="topnav-right">
-        <button className="topnav-btn" title="Minimize">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-        <button className="topnav-btn" title="Maximize">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="4" y="4" width="16" height="16" />
-          </svg>
-        </button>
-        <button className="topnav-btn" title="Close">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
     </nav>
   );
 }
