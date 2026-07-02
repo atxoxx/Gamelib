@@ -3,10 +3,13 @@ import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import MainContent from "./components/MainContent";
 import LibraryPage from "./pages/LibraryPage";
+import GamePage from "./pages/GamePage";
 import StorePage from "./pages/StorePage";
 import CommunityPage from "./pages/CommunityPage";
 import SettingsPage from "./pages/SettingsPage";
 import PluginsPage from "./pages/PluginsPage";
+import { GameProvider } from "./context/GameContext";
+import { ToastProvider } from "./context/ToastContext";
 import "./App.css";
 
 function AppLayout() {
@@ -28,16 +31,21 @@ function AppLayout() {
 function App() {
   return (
     <HashRouter>
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/library" replace />} />
-          <Route path="library" element={<LibraryPage />} />
-          <Route path="store" element={<StorePage />} />
-          <Route path="community" element={<CommunityPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="plugins" element={<PluginsPage />} />
-        </Route>
-      </Routes>
+      <GameProvider>
+        <ToastProvider>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<Navigate to="/library" replace />} />
+            <Route path="library" element={<LibraryPage />} />
+            <Route path="library/:gameId" element={<GamePage />} />
+            <Route path="store" element={<StorePage />} />
+            <Route path="community" element={<CommunityPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="plugins" element={<PluginsPage />} />
+          </Route>
+        </Routes>
+        </ToastProvider>
+      </GameProvider>
     </HashRouter>
   );
 }

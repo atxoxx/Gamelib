@@ -1,38 +1,125 @@
-import { useState } from "react";
-
-interface Game {
-  id: string;
-  name: string;
-  platform: string;
-  installed: boolean;
-  playTime: string;
-  iconUrl?: string;
-}
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { useGames } from "../context/GameContext";
+import { useToast } from "../context/ToastContext";
+import { gameNameFromPath, type Game } from "../types/game";
 
 export default function Sidebar() {
+  const navigate = useNavigate();
+  const { games, selectedGameId, addGame, addGames, setSelectedGameId, removeGame } =
+    useGames();
+  const { showToast } = useToast();
+
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const [showImportMenu, setShowImportMenu] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ gameId: string; x: number; y: number } | null>(null);
 
-  // Placeholder data
-  const games: Game[] = [
-    { id: "1", name: "The Witcher 3: Wild Hunt", platform: "Steam", installed: true, playTime: "142h" },
-    { id: "2", name: "Cyberpunk 2077", platform: "GOG", installed: true, playTime: "89h" },
-    { id: "3", name: "Hades II", platform: "Steam", installed: false, playTime: "0h" },
-    { id: "4", name: "Elden Ring", platform: "Steam", installed: true, playTime: "210h" },
-    { id: "5", name: "Baldur's Gate 3", platform: "GOG", installed: false, playTime: "0h" },
-  ];
+  const importMenuRef = useRef<HTMLDivElement>(null);
+  const importBtnRef = useRef<HTMLButtonElement>(null);
 
-  const filters = ["All", "Installed", "Favorites", "Steam", "GOG", "Action", "RPG"];
+  // Close import menu and context menu on outside click
+  useEffect(() => {
+    function handleClick() {
+      setShowImportMenu(false);
+      setContextMenu(null);
+    }
+    if (showImportMenu || contextMenu) {
+      document.addEventListener("mousedown", handleClick);
+    }
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showImportMenu, contextMenu]);
+
+  const filters = ["All", "Installed"];
 
   const filteredGames = games.filter((game) => {
     const matchesSearch = game.name.toLowerCase().includes(search.toLowerCase());
     if (!activeFilter || activeFilter === "All") return matchesSearch;
     if (activeFilter === "Installed") return matchesSearch && game.installed;
-    if (activeFilter === "Favorites") return matchesSearch; // TODO: favorites logic
-    if (activeFilter === "Steam" || activeFilter === "GOG") return matchesSearch && game.platform === activeFilter;
     return matchesSearch;
   });
+
+  async function handleImportExe() {
+    setShowImportMenu(false);
+    try {
+      const filePath = await open({
+        multiple: false,
+        directory: false,
+        title: "Select Game Executable",
+        filters: [{ name: "Executable", extensions: ["exe"] }],
+      });
+      if (filePath && typeof filePath === "string") {
+        addGame({
+          id: "",
+          name: gameNameFromPath(filePath),
+          path: filePath,
+          platform: "Local",
+          installed: true,
+          playTime: "0h",
+          addedAt: Date.now(),
+        });
+      }
+    } catch (err) {
+      console.error("Failed to import exe:", err);
+    }
+  }
+
+  async function handleImportFolder() {
+    setShowImportMenu(false);
+    try {
+      const folderPath = await open({
+        multiple: false,
+        directory: true,
+        title: "Select Folder to Scan for Games",
+      });
+      if (folderPath && typeof folderPath === "string") {
+        const exes: string[] = await invoke("scan_folder_for_exes", {
+          folderPath,
+        });
+        if (exes.length === 0) {
+          // Could show a toast/notification here
+          return;
+        }
+        // Deduplicate by path to avoid duplicates on re-import
+        const existingPaths = new Set(games.map((g) => g.path.toLowerCase()));
+        const importedGames = exes
+          .filter((exePath) => !existingPaths.has(exePath.toLowerCase()))
+          .map((exePath) => ({
+            id: "",
+            name: gameNameFromPath(exePath),
+            path: exePath,
+            platform: "Local",
+            installed: true,
+            playTime: "0h",
+            addedAt: Date.now(),
+          }));
+        addGames(importedGames);
+      }
+    } catch (err) {
+      console.error("Failed to import folder:", err);
+    }
+  }
+
+  function handleGameContextMenu(e: React.MouseEvent, game: Game) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ gameId: game.id, x: e.clientX, y: e.clientY });
+  }
+
+  function handleRemoveFromContextMenu() {
+    if (!contextMenu) return;
+    const game = games.find((g) => g.id === contextMenu.gameId);
+    removeGame(contextMenu.gameId);
+    setContextMenu(null);
+    if (game) showToast(`Removed ${game.name}`, "info");
+  }
+
+  function handleGameClick(game: Game) {
+    setSelectedGameId(game.id);
+    navigate(`/library/${game.id}`);
+  }
 
   return (
     <aside className="sidebar">
@@ -57,6 +144,83 @@ export default function Sidebar() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
+        <div className="sidebar-import-wrapper">
+          <button
+            ref={importBtnRef}
+            className="sidebar-import-btn"
+            title="Import games"
+            onClick={() => setShowImportMenu((v) => !v)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+
+          {showImportMenu && (
+            <div ref={importMenuRef} className="sidebar-import-menu" onMouseDown={(e) => e.stopPropagation()}>
+              <button
+                className="sidebar-import-option"
+                onClick={handleImportExe}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="18" x2="12" y2="12" />
+                  <line x1="9" y1="15" x2="15" y2="15" />
+                </svg>
+                <div className="sidebar-import-option-text">
+                  <span className="sidebar-import-option-title">
+                    Import Game EXE
+                  </span>
+                  <span className="sidebar-import-option-desc">
+                    Add a single game executable
+                  </span>
+                </div>
+              </button>
+              <button
+                className="sidebar-import-option"
+                onClick={handleImportFolder}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  <line x1="12" y1="11" x2="12" y2="17" />
+                  <line x1="9" y1="14" x2="15" y2="14" />
+                </svg>
+                <div className="sidebar-import-option-text">
+                  <span className="sidebar-import-option-title">
+                    Import Folder
+                  </span>
+                  <span className="sidebar-import-option-desc">
+                    Scan folder for all executables
+                  </span>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="sidebar-filters">
@@ -64,7 +228,9 @@ export default function Sidebar() {
           <button
             key={filter}
             className={`sidebar-filter-btn${activeFilter === filter ? " active" : ""}`}
-            onClick={() => setActiveFilter(activeFilter === filter ? null : filter)}
+            onClick={() =>
+              setActiveFilter(activeFilter === filter ? null : filter)
+            }
           >
             {filter}
           </button>
@@ -81,24 +247,34 @@ export default function Sidebar() {
       <div className="sidebar-list">
         {filteredGames.length === 0 ? (
           <div className="sidebar-empty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
               <line x1="8" y1="21" x2="16" y2="21" />
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
-            <p>No games found</p>
-            <button>+ Import Games</button>
+            <p>{games.length === 0 ? "No games imported yet" : "No games found"}</p>
+            {games.length === 0 && (
+              <button onClick={() => setShowImportMenu(true)}>
+                + Import Games
+              </button>
+            )}
           </div>
         ) : (
           filteredGames.map((game) => (
             <div
               key={game.id}
               className={`sidebar-game-item${selectedGameId === game.id ? " active" : ""}`}
-              onClick={() => setSelectedGameId(game.id)}
+              onClick={() => handleGameClick(game)}
+              onContextMenu={(e) => handleGameContextMenu(e, game)}
             >
               <div className="sidebar-game-icon">
-                {game.iconUrl ? (
-                  <img src={game.iconUrl} alt={game.name} />
+                {game.coverArtUrl ? (
+                  <img src={game.coverArtUrl} alt={game.name} />
                 ) : (
                   <svg
                     width="20"
@@ -126,6 +302,28 @@ export default function Sidebar() {
           ))
         )}
       </div>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onRemove={handleRemoveFromContextMenu}
+        />
+      )}
     </aside>
+  );
+}
+
+/* Inline context menu */
+function ContextMenu({ x, y, onRemove }: { x: number; y: number; onRemove: () => void }) {
+  return (
+    <div className="context-menu" style={{ left: x, top: y }} onMouseDown={(e) => e.stopPropagation()}>
+      <button className="context-menu-item" onClick={onRemove}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        </svg>
+        Remove from Library
+      </button>
+    </div>
   );
 }
