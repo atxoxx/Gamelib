@@ -818,6 +818,50 @@
   height: 18px;
 }
 
+/* Game Tabs */
+.game-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-xl);
+  padding: 0 var(--space-xs);
+}
+
+.game-tab {
+  padding: var(--space-md) var(--space-lg);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.game-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.game-tab.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.game-tab-placeholder {
+  text-align: center;
+}
+
+.game-tab-placeholder-text {
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+  padding: var(--space-2xl) 0;
+}
+
 /* Game Content Grid */
 .game-content-grid {
   display: grid;

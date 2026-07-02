@@ -39,6 +39,7 @@ function GameDetail({ game }: { game: Game }) {
   const { updateGame, removeGame } = useGames();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks">("overview");
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(game.name);
@@ -270,6 +271,19 @@ function GameDetail({ game }: { game: Game }) {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="game-tabs">
+        {(["overview", "reviews", "activity", "weblinks"] as const).map((tab) => (
+          <button
+            key={tab}
+            className={`game-tab ${activeTab === tab ? "active" : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
       {/* Edit Form */}
       {editing && (
         <section className="game-section game-edit-section">
@@ -363,74 +377,113 @@ function GameDetail({ game }: { game: Game }) {
         </section>
       )}
 
-      {/* Content Grid */}
-      <div className="game-content-grid">
-        <div className="game-main-col">
-          <section className="game-section">
-            <h2 className="game-section-title">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              Details
-            </h2>
-            <p className="game-description">
-              <strong>Executable Path:</strong>{" "}
-              <code className="game-path">{game.path}</code>
-            </p>
-          </section>
-        </div>
+      {/* Tab Content */}
+      {activeTab === "overview" && (
+        <div className="game-content-grid">
+          <div className="game-main-col">
+            <section className="game-section">
+              <h2 className="game-section-title">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                Details
+              </h2>
+              <p className="game-description">
+                <strong>Executable Path:</strong>{" "}
+                <code className="game-path">{game.path}</code>
+              </p>
+            </section>
+          </div>
 
-        <div className="game-side-col">
-          <section className="game-section">
-            <h2 className="game-section-title">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-              Info
-            </h2>
-            <div className="info-grid">
-              <div className="info-item">
-                <span className="info-label">Platform</span>
-                <span className="info-value">{game.platform}</span>
+          <div className="game-side-col">
+            <section className="game-section">
+              <h2 className="game-section-title">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                Info
+              </h2>
+              <div className="info-grid">
+                <div className="info-item">
+                  <span className="info-label">Platform</span>
+                  <span className="info-value">{game.platform}</span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Status</span>
+                  <span className="info-value">
+                    {game.installed ? "Installed" : "Not Installed"}
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Play Time</span>
+                  <span className="info-value">{game.playTime}</span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Added</span>
+                  <span className="info-value">{addedDate}</span>
+                </div>
               </div>
-              <div className="info-item">
-                <span className="info-label">Status</span>
-                <span className="info-value">
-                  {game.installed ? "Installed" : "Not Installed"}
-                </span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Play Time</span>
-                <span className="info-value">{game.playTime}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Added</span>
-                <span className="info-value">{addedDate}</span>
-              </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
-      </div>
+      )}
+
+      {activeTab === "reviews" && (
+        <div className="game-section game-tab-placeholder">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Reviews
+          </h2>
+          <p className="game-tab-placeholder-text">No reviews yet.</p>
+        </div>
+      )}
+
+      {activeTab === "activity" && (
+        <div className="game-section game-tab-placeholder">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            Activity
+          </h2>
+          <p className="game-tab-placeholder-text">No recent activity.</p>
+        </div>
+      )}
+
+      {activeTab === "weblinks" && (
+        <div className="game-section game-tab-placeholder">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            Web Links
+          </h2>
+          <p className="game-tab-placeholder-text">No links added yet.</p>
+        </div>
+      )}
     </div>
   );
 }
