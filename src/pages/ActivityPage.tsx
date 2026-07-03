@@ -1,495 +1,348 @@
 import { useState, useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import html2canvas from "html2canvas";
 import { useActivity } from "../context/ActivityContext";
-import { formatPlayTime, buildSessionMetricsSeries, type ActivityStats } from "../types/game";
-import BarChart from "../components/charts/BarChart";
-import LineChart from "../components/charts/LineChart";
-import DonutChart from "../components/charts/DonutChart";
+import { useGames } from "../context/GameContext";
+import { ActivityDashboard } from "./activity/ActivityDashboard";
+import { ActivityGantt } from "./activity/ActivityGantt";
+import { ActivitySessions } from "./activity/ActivitySessions";
+import { ActivityPerformance } from "./activity/ActivityPerformance";
+import * as Icons from "./activity/Icons";
+import "./activity/ActivityPage.css";
 
-type ActivityTab = "overview" | "performance" | "timeline";
+type TabType = "dashboard" | "timeline" | "sessions" | "performance";
+type DateRangePreset = "7d" | "30d" | "90d" | "all";
+type AggregationType = "day" | "week" | "month";
+type ChartType = "bar" | "line";
 
 export default function ActivityPage() {
-  const { sessions, getAllStats, selectedGpu } = useActivity();
-  const [activeTab, setActiveTab] = useState<ActivityTab>("overview");
-  const stats = useMemo(() => getAllStats(), [getAllStats]);
+  const { sessions, deleteSession } = useActivity();
+  const { games } = useGames();
 
-  return (
-    <div className="activity-page">
-      <header className="activity-header">
-        <h1 className="activity-title">Activity</h1>
-        <p className="activity-subtitle">
-          Track gameplay sessions, playtime trends, and hardware performance metrics.
-        </p>
-      </header>
+  // Tab & Filter States
+  const [activeTab, setActiveTab] = useState<TabType>("dashboard");
+  const [dateRange, setDateRange] = useState<DateRangePreset>("7d");
+  const [aggregation, setAggregation] = useState<AggregationType>("day");
+  const [chartType, setChartType] = useState<ChartType>("bar");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
 
-      {/* Tabbed sub-navigation */}
-      <div className="activity-tabs-wrapper">
-        <div className="activity-tabs">
-          {([
-            ["overview", "Overview"],
-            ["performance", "Performance"],
-            ["timeline", "Timeline"],
-          ] as [ActivityTab, string][]).map(([tab, label]) => (
-            <button
-              key={tab}
-              className={`activity-tab ${activeTab === tab ? "active" : ""}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+  // Determine date boundaries based on timeframe preset
+  const { startDate, endDate } = useMemo(() => {
+    const today = new Date();
+    const endStr = today.toISOString().slice(0, 10);
+    const start = new Date(today);
 
-      <div className="activity-content">
-        {activeTab === "overview" && <OverviewTab stats={stats} />}
-        {activeTab === "performance" && <PerformanceTab stats={stats} selectedGpuName={selectedGpu?.name} />}
-        {activeTab === "timeline" && <TimelineTab sessions={sessions} />}
-      </div>
-    </div>
-  );
-}
+    if (dateRange === "7d") {
+      start.setDate(today.getDate() - 6);
+    } else if (dateRange === "30d") {
+      start.setDate(today.getDate() - 29);
+    } else if (dateRange === "90d") {
+      start.setDate(today.getDate() - 89);
+    } else {
+      // All time
+      if (sessions.length > 0) {
+        const sortedDates = sessions.map((s) => s.date.slice(0, 10)).sort();
+        return { startDate: sortedDates[0], endDate: endStr };
+      }
+      start.setFullYear(today.getFullYear() - 1);
+    }
 
-// ─── Overview Tab ──────────────────────────────────────────────────────────────
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: endStr,
+    };
+  }, [dateRange, sessions]);
 
-function OverviewTab({ stats }: { stats: ActivityStats }) {
-  const hasAnyData = stats.totalSessions > 0;
-  const hasDailyData = stats.dailyAvg.some((v) => v > 0);
-  const hasWeeklyData = stats.weeklyAvg.some((v) => v > 0);
-  const hasGenreData = stats.genreBreakdown.length > 0;
-  const hasPlatformData = stats.platformBreakdown.length > 0;
-
-  if (!hasAnyData) {
-    return (
-      <div className="activity-tab-content">
-        <div className="activity-empty">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-          </svg>
-          <p>No sessions recorded yet. Launch a game for at least a minute to start tracking activity.</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="activity-tab-content">
-      {/* Summary stat cards — all derived from real sessions */}
-      <div className="activity-stat-cards">
-        <StatCard
-          label="Total Sessions"
-          value={String(stats.totalSessions)}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-          }
-          color="var(--color-accent)"
-        />
-        <StatCard
-          label="Total Play Time"
-          value={formatPlayTime(stats.totalPlayTimeMin)}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-            </svg>
-          }
-          color="var(--color-success)"
-        />
-        <StatCard
-          label="Avg Session"
-          value={formatPlayTime(stats.avgSessionMin)}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          }
-          color="var(--color-info)"
-        />
-        <StatCard
-          label="Most Played"
-          value={stats.mostPlayedGame}
-          sub={`${formatPlayTime(stats.mostPlayedGameTimeMin)}`}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-            </svg>
-          }
-          color="var(--color-warning)"
-        />
-      </div>
-
-      {/* Charts grid */}
-      <div className="activity-charts-grid">
-        <section className="activity-section">
-          <h2 className="activity-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-            </svg>
-            Playtime (Last 7 Days)
-          </h2>
-          {hasDailyData ? (
-            <BarChart
-              data={stats.dailyAvg}
-              labels={stats.dailyLabels}
-              formatValue={(v) => formatPlayTime(v)}
-              height={200}
-            />
-          ) : (
-            <div className="activity-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-              </svg>
-              <p>No playtime recorded in the last 7 days.</p>
-            </div>
-          )}
-        </section>
-
-        <section className="activity-section">
-          <h2 className="activity-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-            </svg>
-            Weekly Playtime
-          </h2>
-          {hasWeeklyData ? (
-            <BarChart
-              data={stats.weeklyAvg}
-              labels={stats.weeklyLabels}
-              formatValue={(v) => formatPlayTime(v)}
-              color="var(--color-success)"
-              height={200}
-            />
-          ) : (
-            <div className="activity-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-              </svg>
-              <p>No playtime recorded in the last 4 weeks.</p>
-            </div>
-          )}
-        </section>
-      </div>
-
-      {/* Genre & Platform breakdown */}
-      <div className="activity-charts-grid">
-        <section className="activity-section">
-          <h2 className="activity-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" />
-            </svg>
-            Genre Distribution
-          </h2>
-          {hasGenreData ? (
-            <DonutChart
-              slices={stats.genreBreakdown.map((g) => ({
-                value: g.minutes,
-                color: "",
-                label: g.genre,
-              }))}
-              formatValue={(v) => formatPlayTime(v)}
-              size={200}
-            />
-          ) : (
-            <div className="activity-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" />
-              </svg>
-              <p>No genre data yet. Fetch metadata for your games (Steam, LaunchBox) to see genre distribution.</p>
-            </div>
-          )}
-        </section>
-
-        <section className="activity-section">
-          <h2 className="activity-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" />
-            </svg>
-            Platform Distribution
-          </h2>
-          {hasPlatformData ? (
-            <DonutChart
-              slices={stats.platformBreakdown.map((p) => ({
-                value: p.minutes,
-                color: "",
-                label: p.platform,
-              }))}
-              formatValue={(v) => formatPlayTime(v)}
-              size={200}
-            />
-          ) : (
-            <div className="activity-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" />
-              </svg>
-              <p>No platform data yet. Play some games to see platform distribution.</p>
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  sub,
-  icon,
-  color,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  icon: React.ReactNode;
-  color: string;
-}) {
-  return (
-    <div className="activity-stat-card" style={{ borderTopColor: color }}>
-      <div className="activity-stat-icon" style={{ color }}>
-        {icon}
-      </div>
-      <div className="activity-stat-info">
-        <span className="activity-stat-label">{label}</span>
-        <span className="activity-stat-value">{value}</span>
-        {sub && <span className="activity-stat-sub">{sub}</span>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Performance Tab ───────────────────────────────────────────────────────────
-
-function PerformanceTab({ stats, selectedGpuName }: { stats: ActivityStats; selectedGpuName?: string }) {
-  const { sessions } = useActivity();
-
-  // Real per-session metric series — one data point per recorded session.
-  // No synthetic interpolation: every value comes from a real measurement.
-  const series = useMemo(() => buildSessionMetricsSeries(sessions), [sessions]);
-  const hasMetrics = series.fps.length > 0;
-  const hasTemps = series.gpuTemp.some((t) => t > 0) || series.cpuTemp.some((t) => t > 0);
-
-  return (
-    <div className="activity-tab-content">
-      {/* Hardware summary cards */}
-      <div className="activity-stat-cards">
-        <StatCard
-          label="Average FPS"
-          value={stats.avgFpsAll > 0 ? `${stats.avgFpsAll}` : "-"}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          }
-          color="var(--color-accent)"
-        />
-        <StatCard
-          label="GPU Usage"
-          value={stats.avgGpuAll > 0 ? `${stats.avgGpuAll}%` : "-"}
-          sub={selectedGpuName ? `GPU: ${selectedGpuName}` : undefined}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20" /><path d="M17 2v20" /><path d="M2 12h20" /><path d="M2 7h5" /><path d="M2 17h5" /><path d="M17 17h5" /><path d="M17 7h5" />
-            </svg>
-          }
-          color="var(--color-success)"
-        />
-        <StatCard
-          label="CPU Usage"
-          value={stats.avgCpuAll > 0 ? `${stats.avgCpuAll}%` : "-"}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="8" y="8" width="8" height="8" rx="1" ry="1" /><line x1="4" y1="12" x2="1" y2="12" /><line x1="9" y1="4" x2="9" y2="1" /><line x1="15" y1="4" x2="15" y2="1" /><line x1="20" y1="12" x2="23" y2="12" />
-            </svg>
-          }
-          color="var(--color-info)"
-        />
-        <StatCard
-          label="GPU Selected"
-          value={selectedGpuName || "None"}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          }
-          color="var(--color-warning)"
-        />
-      </div>
-
-      {/* Real per-session line charts */}
-      {hasMetrics ? (
-        <div className="activity-charts-grid">
-          <section className="activity-section">
-            <h2 className="activity-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-              FPS Over Time
-            </h2>
-            <LineChart
-              series={[{ data: series.fps, color: "var(--color-accent)", label: "Avg FPS" }]}
-              labels={series.labels}
-              height={220}
-              formatValue={(v) => `${Math.round(v)} FPS`}
-            />
-          </section>
-
-          <section className="activity-section">
-            <h2 className="activity-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20" /><path d="M17 2v20" /><path d="M2 12h20" />
-              </svg>
-              CPU & GPU Load Over Time
-            </h2>
-            <LineChart
-              series={[
-                { data: series.gpu, color: "var(--color-success)", label: "GPU" },
-                { data: series.cpu, color: "var(--color-info)", label: "CPU" },
-              ]}
-              labels={series.labels}
-              height={220}
-              formatValue={(v) => `${Math.round(v)}%`}
-            />
-          </section>
-
-          <section className="activity-section">
-            <h2 className="activity-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              RAM Usage Over Time
-            </h2>
-            <LineChart
-              series={[{ data: series.ram, color: "#e040fb", label: "RAM" }]}
-              labels={series.labels}
-              height={220}
-              formatValue={(v) => `${Math.round(v)}%`}
-            />
-          </section>
-
-          <section className="activity-section">
-            <h2 className="activity-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
-              </svg>
-              Temperature Over Time
-            </h2>
-            {hasTemps ? (
-              <LineChart
-                series={[
-                  { data: series.gpuTemp, color: "#ff5252", label: "GPU Temp" },
-                  { data: series.cpuTemp, color: "#ffab00", label: "CPU Temp" },
-                ]}
-                labels={series.labels}
-                height={220}
-                formatValue={(v) => `${Math.round(v)}°C`}
-              />
-            ) : (
-              <div className="activity-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
-                </svg>
-                <p>Temperature data is not available. WMI thermal sensors are not currently supported.</p>
-              </div>
-            )}
-          </section>
-        </div>
-      ) : (
-        <div className="activity-empty">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-          <p>Launch a game and play for a while to see performance metrics.</p>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-// ─── Timeline Tab ──────────────────────────────────────────────────────────────
-
-function TimelineTab({ sessions }: { sessions: import("../types/game").GameSession[] }) {
-  // Group sessions by date
-  const grouped = useMemo(() => {
-    const map = new Map<string, import("../types/game").GameSession[]>();
-    sessions.forEach((s) => {
-      const dateKey = new Date(s.date).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-      const existing = map.get(dateKey) || [];
-      existing.push(s);
-      map.set(dateKey, existing);
+  // Dynamically extract all available game platforms
+  const availablePlatforms = useMemo(() => {
+    const set = new Set<string>();
+    games.forEach((g) => {
+      if (g.platform) set.add(g.platform);
     });
-    return Array.from(map.entries()).sort(
-      (a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()
-    );
-  }, [sessions]);
+    return Array.from(set).sort();
+  }, [games]);
 
-  if (sessions.length === 0) {
-    return (
-      <div className="activity-empty">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-        </svg>
-        <p>No sessions recorded yet. Launch some games to start tracking.</p>
-      </div>
-    );
-  }
+  // Handler to export session history to a CSV file
+  const handleExportCSV = () => {
+    if (sessions.length === 0) {
+      alert("No sessions to export!");
+      return;
+    }
+
+    const headers = [
+      "Session ID",
+      "Game Name",
+      "Game ID",
+      "Date Played",
+      "Duration (Minutes)",
+      "Platform",
+      "Avg FPS",
+      "Min FPS",
+      "Max FPS",
+      "Avg CPU Usage (%)",
+      "Avg GPU Usage (%)",
+      "Avg RAM Usage (%)",
+      "Avg CPU Temp (°C)",
+      "Avg GPU Temp (°C)",
+    ];
+
+    const rows = sessions.map((s) => {
+      const game = games.find((g) => g.id === s.gameId);
+      return [
+        s.id,
+        s.gameName,
+        s.gameId,
+        s.date,
+        s.durationMin,
+        game?.platform || "Local",
+        s.metrics?.avgFps || "—",
+        s.metrics?.minFps || "—",
+        s.metrics?.maxFps || "—",
+        s.metrics?.avgCpuUsage || "—",
+        s.metrics?.avgGpuUsage || "—",
+        s.metrics?.avgRamUsage || "—",
+        s.metrics?.avgCpuTemp || "—",
+        s.metrics?.avgGpuTemp || "—",
+      ];
+    });
+
+    const csvContent = [headers.join(","), ...rows.map((row) => row.map((val) => `"${val}"`).join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `gamelib_activity_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCaptureScreenshot = async () => {
+    try {
+      const container = document.querySelector(".activity__container");
+      if (!container) return;
+
+      const canvas = await html2canvas(container as HTMLElement, {
+        backgroundColor: "#0f1117",
+        scale: 2,
+        logging: false,
+        useCORS: true,
+      });
+
+      const dataUrl = canvas.toDataURL("image/png");
+
+      const filePath = await save({
+        title: "Save Activity Screenshot",
+        defaultPath: `gamelib_activity_screenshot_${new Date().toISOString().slice(0, 10)}.png`,
+        filters: [{ name: "PNG Image", extensions: ["png"] }],
+      });
+
+      if (!filePath) return;
+
+      await invoke("save_screenshot", { filePath, base64Data: dataUrl });
+    } catch (error) {
+      console.error("Screenshot error:", error);
+      alert(`Failed to save screenshot: ${error}`);
+    }
+  };
 
   return (
-    <div className="activity-tab-content">
-      <div className="activity-timeline">
-        {grouped.map(([date, daySessions]) => (
-          <div key={date} className="activity-timeline-day">
-            <div className="activity-timeline-date">
-              <span className="activity-timeline-date-text">{date}</span>
-              <span className="activity-timeline-date-count">
-                {daySessions.length} session{daySessions.length !== 1 ? "s" : ""} ·{" "}
-                {formatPlayTime(daySessions.reduce((s, sess) => s + sess.durationMin, 0))}
-              </span>
-            </div>
-            <div className="activity-timeline-items">
-              {daySessions.map((session) => (
-                <div key={session.id} className="activity-timeline-item">
-                  <div className="activity-timeline-dot" />
-                  <div className="activity-timeline-card">
-                    <div className="activity-timeline-card-header">
-                      <span className="activity-timeline-game">{session.gameName}</span>
-                      <span className="activity-timeline-duration">
-                        {formatPlayTime(session.durationMin)}
-                      </span>
-                    </div>
-                    {session.metrics && (
-                      <div className="activity-timeline-metrics">
-                        <span className="activity-metric-tag" title="Average FPS">
-                          {session.metrics.avgFps} FPS
-                        </span>
-                        <span className="activity-metric-tag" title="GPU Usage">
-                          GPU {session.metrics.avgGpuUsage}%
-                        </span>
-                        <span className="activity-metric-tag" title="CPU Usage">
-                          CPU {session.metrics.avgCpuUsage}%
-                        </span>
-                        <span className="activity-metric-tag" title="Resolution">
-                          {session.metrics.resolution}
-                        </span>
-                      </div>
-                    )}
-                    <div className="activity-timeline-time">
-                      {new Date(session.date).toLocaleTimeString(undefined, {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </div>
-                  </div>
-                </div>
+    <div className="activity__container">
+      {/* Page Header */}
+      <header className="activity__header">
+        <div className="activity__header-left">
+          <h1 className="activity__title">Activity Page</h1>
+          
+          {/* Main Navigation Tabs */}
+          <nav className="activity__tabs">
+            <button
+              type="button"
+              className={`activity__tab-btn ${activeTab === "dashboard" ? "activity__tab-btn--active" : ""}`}
+              onClick={() => setActiveTab("dashboard")}
+            >
+              <Icons.LayoutDashboard size={13} />
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className={`activity__tab-btn ${activeTab === "timeline" ? "activity__tab-btn--active" : ""}`}
+              onClick={() => setActiveTab("timeline")}
+            >
+              <Icons.GanttChart size={13} />
+              Timeline
+            </button>
+            <button
+              type="button"
+              className={`activity__tab-btn ${activeTab === "sessions" ? "activity__tab-btn--active" : ""}`}
+              onClick={() => setActiveTab("sessions")}
+            >
+              <Icons.History size={13} />
+              Sessions Log
+            </button>
+            <button
+              type="button"
+              className={`activity__tab-btn ${activeTab === "performance" ? "activity__tab-btn--active" : ""}`}
+              onClick={() => setActiveTab("performance")}
+            >
+              <Icons.BarChart3 size={13} />
+              Performance
+            </button>
+          </nav>
+        </div>
+
+        {/* Global Toolbar Filters */}
+        <div className="activity__header-right">
+          <div className="activity-toolbar">
+            {/* Timeframe Presets */}
+            <div className="activity-toolbar__group activity-toolbar__date-range">
+              {(["7d", "30d", "90d", "all"] as const).map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`activity-toolbar__pill ${dateRange === preset ? "activity-toolbar__pill--active" : ""}`}
+                  onClick={() => setDateRange(preset)}
+                >
+                  {preset === "all" ? "All Time" : preset.toUpperCase()}
+                </button>
               ))}
             </div>
+
+            <div className="activity-toolbar__divider" />
+
+            {/* Platform/Source Selector */}
+            <div className="activity-toolbar__group">
+              <Icons.Filter size={11} className="activity-toolbar__filter-icon" />
+              <select
+                className="activity-toolbar__select"
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value)}
+              >
+                <option value="all">Source: All</option>
+                {availablePlatforms.map((plat) => (
+                  <option key={plat} value={plat}>
+                    {plat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Dashboard Specific Sub-options */}
+            {activeTab === "dashboard" && (
+              <>
+                <div className="activity-toolbar__divider" />
+
+                {/* Aggregation interval (Day/Week/Month) */}
+                <div className="activity-toolbar__group">
+                  <span className="activity-toolbar__label">Interval</span>
+                  <div className="activity-toolbar__segmented">
+                    {(["day", "week", "month"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`activity-toolbar__segmented-btn ${
+                          aggregation === mode ? "activity-toolbar__segmented-btn--active" : ""
+                        }`}
+                        onClick={() => setAggregation(mode)}
+                      >
+                        {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="activity-toolbar__divider" />
+
+                {/* Chart Type (Bar / Line) */}
+                <div className="activity-toolbar__group">
+                  <div className="activity-toolbar__icon-toggle">
+                    <button
+                      type="button"
+                      className={`activity-toolbar__icon-btn ${
+                        chartType === "bar" ? "activity-toolbar__icon-btn--active" : ""
+                      }`}
+                      onClick={() => setChartType("bar")}
+                      title="Bar Chart"
+                    >
+                      <Icons.BarChart3 size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`activity-toolbar__icon-btn ${
+                        chartType === "line" ? "activity-toolbar__icon-btn--active" : ""
+                      }`}
+                      onClick={() => setChartType("line")}
+                      title="Line Chart"
+                    >
+                      <Icons.TrendingUp size={11} />
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        ))}
-      </div>
+
+          {/* Action Actions */}
+          <div className="activity__export-actions">
+            <button
+              type="button"
+              className="activity__icon-btn"
+              onClick={handleCaptureScreenshot}
+              title="Capture screenshot / Print"
+            >
+              <Icons.Camera size={13} />
+            </button>
+            <button
+              type="button"
+              className="activity__icon-btn"
+              onClick={handleExportCSV}
+              title="Export CSV"
+            >
+              <Icons.Download size={13} />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Tab Router Content Panels */}
+      <main style={{ marginTop: "20px", flex: 1, minHeight: 0 }}>
+        {activeTab === "dashboard" && (
+          <ActivityDashboard
+            sessions={sessions}
+            games={games}
+            dateRange={dateRange}
+            startDate={startDate}
+            endDate={endDate}
+            aggregation={aggregation}
+            chartType={chartType}
+            sourceFilter={sourceFilter}
+          />
+        )}
+
+        {activeTab === "timeline" && (
+          <ActivityGantt
+            sessions={sessions}
+            games={games}
+            startDate={startDate}
+            endDate={endDate}
+          />
+        )}
+
+        {activeTab === "sessions" && (
+          <ActivitySessions
+            sessions={sessions}
+            games={games}
+            onDeleteSession={deleteSession}
+          />
+        )}
+
+        {activeTab === "performance" && (
+          <ActivityPerformance
+            sessions={sessions}
+            games={games}
+          />
+        )}
+      </main>
     </div>
   );
 }

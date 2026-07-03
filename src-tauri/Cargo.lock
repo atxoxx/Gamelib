@@ -1398,6 +1398,7 @@ dependencies = [
 name = "gamelib"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "mime_guess",
  "reqwest 0.12.28",
  "scraper",

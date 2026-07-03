@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import html2canvas from "html2canvas";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
@@ -1377,6 +1378,35 @@ export function GameActivityTab({ game }: { game: Game }) {
   const [playtimeAgg, setPlaytimeAgg] = useState<PlaytimeAggregation>("AGG_DAY");
   const [isolatedSessionIndex, setIsolatedSessionIndex] = useState<number | null>(null);
 
+  const handleCaptureScreenshot = async () => {
+    try {
+      const container = document.querySelector(".game-activity-tab");
+      if (!container) return;
+
+      const canvas = await html2canvas(container as HTMLElement, {
+        backgroundColor: "#0f1117",
+        scale: 2,
+        logging: false,
+        useCORS: true,
+      });
+
+      const dataUrl = canvas.toDataURL("image/png");
+
+      const filePath = await save({
+        title: `Save ${game.name} Activity Screenshot`,
+        defaultPath: `${game.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_activity_screenshot_${new Date().toISOString().slice(0, 10)}.png`,
+        filters: [{ name: "PNG Image", extensions: ["png"] }],
+      });
+
+      if (!filePath) return;
+
+      await invoke("save_screenshot", { filePath, base64Data: dataUrl });
+    } catch (error) {
+      console.error("Screenshot error:", error);
+      alert(`Failed to save screenshot: ${error}`);
+    }
+  };
+
   // Timeframe-filtered sessions (for stats computation and sessions list)
   const filteredSessions = useMemo(() => {
     if (timeframe === "all") return sessions;
@@ -1753,7 +1783,7 @@ export function GameActivityTab({ game }: { game: Game }) {
           </div>
 
           {/* Camera screenshot button */}
-          <button className="game-activity-action-btn" title="Save Screenshot" onClick={() => window.print()}>
+          <button className="game-activity-action-btn" title="Save Screenshot" onClick={handleCaptureScreenshot}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" />
             </svg>

@@ -244,6 +244,27 @@ async fn search_launchbox_images(game_name: String) -> Result<Vec<LaunchBoxImage
     game_scraper::search_launchbox_images(&game_name).await
 }
 
+/// Save screenshot image base64 data to the specified path.
+#[tauri::command]
+fn save_screenshot(file_path: String, base64_data: String) -> Result<(), String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let clean_data = if base64_data.contains(",") {
+        base64_data.split(',').nth(1).unwrap_or(&base64_data)
+    } else {
+        &base64_data
+    };
+
+    let bytes = general_purpose::STANDARD
+        .decode(clean_data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    std::fs::write(&file_path, bytes)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(())
+}
+
 fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -286,7 +307,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
