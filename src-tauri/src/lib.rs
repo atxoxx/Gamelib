@@ -9,7 +9,7 @@ mod gpu_detector;
 mod metrics_collector;
 mod rtss_reader;
 mod mahm_reader;
-use game_scraper::{GameMetadataResult, LaunchBoxImageResult};
+use game_scraper::{GameMetadataResult, LaunchBoxImageResult, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
 
@@ -48,6 +48,32 @@ struct GameData {
     metadata_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    storyline: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    igdb_rating: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    critic_rating: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    themes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    game_modes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    player_perspectives: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    screenshots: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    videos: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    websites: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    time_to_beat: Option<TimeToBeat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    similar_games: Option<Vec<SimilarGame>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    releases: Option<Vec<ReleaseDateInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    igdb_reviews: Option<Vec<IgdbReview>>,
 }
 
 /// Persist the game library to the app's data directory.

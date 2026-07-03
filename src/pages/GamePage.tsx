@@ -6,7 +6,7 @@ import html2canvas from "html2canvas";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, formatPlayTime } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, formatPlayTime, parsePlayTime } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 
@@ -98,6 +98,80 @@ function EditImageSlot({
   );
 }
 
+function getYoutubeEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  let id = "";
+  if (url.includes("watch?v=")) {
+    id = url.split("watch?v=")[1]?.split("&")[0] || "";
+  } else if (url.includes("youtu.be/")) {
+    id = url.split("youtu.be/")[1]?.split("?")[0] || "";
+  } else if (url.includes("youtube.com/embed/")) {
+    id = url.split("youtube.com/embed/")[1]?.split("?")[0] || "";
+  } else {
+    id = url;
+  }
+  return id ? `https://www.youtube.com/embed/${id}` : null;
+}
+
+function RatingCircle({ score, label }: { score: number; label: string }) {
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+  
+  const getColor = (s: number) => {
+    if (s >= 75) return "#10b981"; // emerald
+    if (s >= 50) return "#f59e0b"; // warning
+    return "#ef4444"; // danger
+  };
+  
+  return (
+    <div className="rating-circle-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-xs)' }}>
+      <div className="rating-circle-svg-wrap" style={{ position: 'relative', width: 68, height: 68 }}>
+        <svg className="rating-circle-svg" viewBox="0 0 68 68" style={{ width: '100%', height: '100%' }}>
+          <circle 
+            className="rating-circle-bg" 
+            cx="34" 
+            cy="34" 
+            r={radius} 
+            stroke="var(--color-bg-tertiary)" 
+            strokeWidth="4" 
+            fill="transparent" 
+          />
+          <circle
+            className="rating-circle-progress"
+            cx="34"
+            cy="34"
+            r={radius}
+            strokeWidth="4"
+            stroke={getColor(score)}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="transparent"
+            transform="rotate(-90 34 34)"
+            style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+          />
+        </svg>
+        <span 
+          className="rating-circle-score" 
+          style={{ 
+            position: 'absolute', 
+            top: '50%', 
+            left: '50%', 
+            transform: 'translate(-50%, -50%)', 
+            fontSize: 'var(--font-size-md)', 
+            fontWeight: 'bold',
+            color: getColor(score) 
+          }}
+        >
+          {score}
+        </span>
+      </div>
+      <span className="rating-circle-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{label}</span>
+    </div>
+  );
+}
+
 function GameNotFound() {
   const navigate = useNavigate();
   return (
@@ -125,6 +199,38 @@ function GameNotFound() {
   );
 }
 
+function TimeToBeatRow({ label, targetSeconds, currentPlayTime }: { label: string, targetSeconds: number, currentPlayTime: string }) {
+  const targetHours = Math.round(targetSeconds / 3600);
+  const playTimeMinutes = parsePlayTime(currentPlayTime);
+  const playTimeHours = playTimeMinutes / 60;
+  
+  const percentage = Math.min(100, Math.round((playTimeHours / targetHours) * 100));
+  
+  return (
+    <div style={{ marginBottom: 'var(--space-sm)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-xs)', marginBottom: '4px' }}>
+        <span style={{ fontWeight: '500', color: 'var(--color-text-primary)' }}>{label}</span>
+        <span style={{ color: 'var(--color-text-muted)' }}>
+          {Math.round(playTimeHours * 10) / 10}h / {targetHours}h ({percentage}%)
+        </span>
+      </div>
+      <div className="progress-bar-bg" style={{ height: '6px', background: 'var(--color-bg-tertiary)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+        <div 
+          className="progress-bar-fill" 
+          style={{ 
+            height: '100%', 
+            width: `${percentage}%`, 
+            background: percentage >= 100 ? 'linear-gradient(90deg, #10b981, #059669)' : 'linear-gradient(90deg, var(--color-accent), #818cf8)',
+            borderRadius: '3px',
+            transition: 'width 0.5s ease-in-out',
+            boxShadow: percentage >= 100 ? '0 0 6px rgba(16, 185, 129, 0.4)' : '0 0 6px rgba(99, 102, 241, 0.4)'
+          }} 
+        />
+      </div>
+    </div>
+  );
+}
+
 function GameDetail({ game }: { game: Game }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -133,6 +239,24 @@ function GameDetail({ game }: { game: Game }) {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks">("overview");
+
+  const getNormalizedWebsites = (urls: string[]) => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const url of urls) {
+      let clean = url.trim();
+      if (clean.endsWith("/")) {
+        clean = clean.slice(0, -1);
+      }
+      const check = clean.toLowerCase();
+      if (!seen.has(check)) {
+        seen.add(check);
+        result.push(url);
+      }
+    }
+    return result;
+  };
+  const uniqueWebsites = useMemo(() => getNormalizedWebsites(game.websites || []), [game.websites]);
 
   // Metadata fetching state
   const [fetchingMetadata, setFetchingMetadata] = useState(false);
@@ -149,8 +273,32 @@ function GameDetail({ game }: { game: Game }) {
   const [editLogo, setEditLogo] = useState(game.logoUrl || "");
   const [editNotes, setEditNotes] = useState(game.notes || "");
 
+  // Extended metadata edit states
+  const [editDescription, setEditDescription] = useState(game.description || "");
+  const [editDeveloper, setEditDeveloper] = useState(game.developer || "");
+  const [editPublisher, setEditPublisher] = useState(game.publisher || "");
+  const [editReleaseDate, setEditReleaseDate] = useState(game.releaseDate || "");
+  const [editGenres, setEditGenres] = useState(game.genres ? game.genres.join(", ") : "");
+  const [editStoryline, setEditStoryline] = useState(game.storyline || "");
+  const [editIgdbRating, setEditIgdbRating] = useState(game.igdbRating || 0);
+  const [editCriticRating, setEditCriticRating] = useState(game.criticRating || 0);
+  const [editThemes, setEditThemes] = useState(game.themes ? game.themes.join(", ") : "");
+  const [editGameModes, setEditGameModes] = useState(game.gameModes ? game.gameModes.join(", ") : "");
+  const [editPlayerPerspectives, setEditPlayerPerspectives] = useState(game.playerPerspectives ? game.playerPerspectives.join(", ") : "");
+  
+  const [editScreenshots, setEditScreenshots] = useState<string[]>(game.screenshots || []);
+  const [editVideos, setEditVideos] = useState<string[]>(game.videos || []);
+  const [editWebsites, setEditWebsites] = useState<string[]>(game.websites || []);
+  
+  const [editMetadataSource, setEditMetadataSource] = useState(game.metadataSource || "");
+  const [editMetadataUrl, setEditMetadataUrl] = useState(game.metadataUrl || "");
+
   // Track which image is being fetched
   const [fetchingImageKey, setFetchingImageKey] = useState<string | null>(null);
+
+  // Lightbox & Video states
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
   // Reviews state
   const [rating, setRating] = useState(game.rating || 0);
@@ -164,6 +312,22 @@ function GameDetail({ game }: { game: Game }) {
   const [lbLoading, setLbLoading] = useState(false);
   const [lbSelectedCategory, setLbSelectedCategory] = useState<string>("all");
   const [lbApplyingUrl, setLbApplyingUrl] = useState<string | null>(null);
+
+  // New IGDB fields edit states
+  const [showIgdbMediaBrowser, setShowIgdbMediaBrowser] = useState(false);
+  const [editTimeToBeatMain, setEditTimeToBeatMain] = useState(game.timeToBeat?.normally ? Math.round(game.timeToBeat.normally / 3600) : 0);
+  const [editTimeToBeatExtra, setEditTimeToBeatExtra] = useState(game.timeToBeat?.hastly ? Math.round(game.timeToBeat.hastly / 3600) : 0);
+  const [editTimeToBeatComple, setEditTimeToBeatComple] = useState(game.timeToBeat?.completely ? Math.round(game.timeToBeat.completely / 3600) : 0);
+  const [, setEditSimilarGames] = useState<SimilarGame[]>(game.similarGames || []);
+  const [, setEditReleases] = useState<ReleaseDateInfo[]>(game.releases || []);
+  const [editIgdbReviews, setEditIgdbReviews] = useState<IgdbReview[]>(game.igdbReviews || []);
+  
+  const [editSimilarGamesText, setEditSimilarGamesText] = useState(game.similarGames ? game.similarGames.map(g => g.name).join(", ") : "");
+  const [editReleasesText, setEditReleasesText] = useState(game.releases ? game.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
+  const [editIgdbReviewsText, setEditIgdbReviewsText] = useState(game.igdbReviews ? JSON.stringify(game.igdbReviews, null, 2) : "");
+  
+  // Reviews sub-tab state
+  const [reviewsSubTab, setReviewsSubTab] = useState<"local" | "igdb">("local");
 
   // Sync state when game changes
   useEffect(() => {
@@ -189,6 +353,38 @@ function GameDetail({ game }: { game: Game }) {
     setEditHero(game.bannerUrl || "");
     setEditLogo(game.logoUrl || "");
     setEditNotes(game.notes || "");
+    
+    // New fields
+    setEditDescription(game.description || "");
+    setEditDeveloper(game.developer || "");
+    setEditPublisher(game.publisher || "");
+    setEditReleaseDate(game.releaseDate || "");
+    setEditGenres(game.genres ? game.genres.join(", ") : "");
+    setEditStoryline(game.storyline || "");
+    setEditIgdbRating(game.igdbRating || 0);
+    setEditCriticRating(game.criticRating || 0);
+    setEditThemes(game.themes ? game.themes.join(", ") : "");
+    setEditGameModes(game.gameModes ? game.gameModes.join(", ") : "");
+    setEditPlayerPerspectives(game.playerPerspectives ? game.playerPerspectives.join(", ") : "");
+    
+    setEditScreenshots(game.screenshots || []);
+    setEditVideos(game.videos || []);
+    setEditWebsites(game.websites || []);
+    
+    setEditTimeToBeatMain(game.timeToBeat?.normally ? Math.round(game.timeToBeat.normally / 3600) : 0);
+    setEditTimeToBeatExtra(game.timeToBeat?.hastly ? Math.round(game.timeToBeat.hastly / 3600) : 0);
+    setEditTimeToBeatComple(game.timeToBeat?.completely ? Math.round(game.timeToBeat.completely / 3600) : 0);
+    setEditSimilarGames(game.similarGames || []);
+    setEditReleases(game.releases || []);
+    setEditIgdbReviews(game.igdbReviews || []);
+    
+    setEditSimilarGamesText(game.similarGames ? game.similarGames.map(g => g.name).join(", ") : "");
+    setEditReleasesText(game.releases ? game.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
+    setEditIgdbReviewsText(game.igdbReviews ? JSON.stringify(game.igdbReviews, null, 2) : "");
+    
+    setEditMetadataSource(game.metadataSource || "");
+    setEditMetadataUrl(game.metadataUrl || "");
+    
     setEditing(true);
   }
 
@@ -208,7 +404,7 @@ function GameDetail({ game }: { game: Game }) {
     setShowMetadataPanel(true);
     try {
       const results: GameMetadataResult[] = await invoke("search_game_metadata", {
-        gameName: game.name,
+        gameName: editName.trim() || game.name,
       });
       setMetadataResults(results);
       if (results.length === 0) {
@@ -230,7 +426,7 @@ function GameDetail({ game }: { game: Game }) {
       let results = metadataResults;
       if (results.length === 0) {
         const freshResults: GameMetadataResult[] = await invoke("search_game_metadata", {
-          gameName: game.name,
+          gameName: editName.trim() || game.name,
         });
         results = freshResults;
         setMetadataResults(results);
@@ -297,23 +493,44 @@ function GameDetail({ game }: { game: Game }) {
       // Use hero as banner fallback if no dedicated banner was downloaded
       const finalBannerUrl = bannerUrl ?? heroUrl ?? undefined;
 
-      // Single updateGame call
-      updateGame(game.id, {
-        name: result.title || game.name,
-        description: result.description ?? undefined,
-        developer: result.developer ?? undefined,
-        publisher: result.publisher ?? undefined,
-        releaseDate: result.releaseDate ?? undefined,
-        genres: result.genres.length > 0 ? result.genres : undefined,
-        iconUrl: iconUrl ?? undefined,
-        coverArtUrl: coverUrl,
-        bannerUrl: finalBannerUrl,
-        logoUrl: logoUrl ?? undefined,
-        metadataSource: result.sourceName,
-        metadataUrl: result.sourceUrl,
-      });
+      // Update local edit states instead of updating the game directly
+      setEditName(result.title || game.name);
+      setEditDescription(result.description || "");
+      setEditDeveloper(result.developer || "");
+      setEditPublisher(result.publisher || "");
+      setEditReleaseDate(result.releaseDate || "");
+      setEditGenres(result.genres.length > 0 ? result.genres.join(", ") : "");
+      setEditStoryline(result.storyline || "");
+      setEditIgdbRating(result.igdbRating || 0);
+      setEditCriticRating(result.criticRating || 0);
+      setEditThemes(result.themes ? result.themes.join(", ") : "");
+      setEditGameModes(result.gameModes ? result.gameModes.join(", ") : "");
+      setEditPlayerPerspectives(result.playerPerspectives ? result.playerPerspectives.join(", ") : "");
+      
+      if (iconUrl) setEditIcon(iconUrl);
+      if (coverUrl) setEditCover(coverUrl);
+      if (finalBannerUrl) setEditHero(finalBannerUrl);
+      if (logoUrl) setEditLogo(logoUrl);
 
-      showToast(`Applied metadata from ${result.sourceName}`, "success");
+      setEditScreenshots(result.screenshots || []);
+      setEditVideos(result.videos || []);
+      setEditWebsites(result.websites || []);
+      
+      setEditTimeToBeatMain(result.timeToBeat?.normally ? Math.round(result.timeToBeat.normally / 3600) : 0);
+      setEditTimeToBeatExtra(result.timeToBeat?.hastly ? Math.round(result.timeToBeat.hastly / 3600) : 0);
+      setEditTimeToBeatComple(result.timeToBeat?.completely ? Math.round(result.timeToBeat.completely / 3600) : 0);
+      setEditSimilarGames(result.similarGames || []);
+      setEditReleases(result.releases || []);
+      setEditIgdbReviews(result.igdbReviews || []);
+      
+      setEditSimilarGamesText(result.similarGames ? result.similarGames.map(g => g.name).join(", ") : "");
+      setEditReleasesText(result.releases ? result.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
+      setEditIgdbReviewsText(result.igdbReviews ? JSON.stringify(result.igdbReviews, null, 2) : "");
+      
+      setEditMetadataSource(result.sourceName);
+      setEditMetadataUrl(result.sourceUrl);
+
+      showToast(`Autofilled metadata from ${result.sourceName}. Review and save!`, "success");
       setShowMetadataPanel(false);
     } catch (err) {
       showToast(`Failed to apply metadata: ${err}`, "error");
@@ -420,6 +637,32 @@ function GameDetail({ game }: { game: Game }) {
     }
   }
 
+  async function handleApplyIgdbImage(imageUrl: string, slot: "icon" | "cover" | "hero" | "banner" | "logo") {
+    setFetchingImageKey(slot);
+    try {
+      // Optimistically update instantly
+      if (slot === "icon") setEditIcon(imageUrl);
+      else if (slot === "cover") setEditCover(imageUrl);
+      else if (slot === "hero" || slot === "banner") setEditHero(imageUrl);
+      else if (slot === "logo") setEditLogo(imageUrl);
+      
+      const dataUrl: string | null = await invoke("download_image", { url: imageUrl });
+      if (dataUrl) {
+        if (slot === "icon") setEditIcon(dataUrl);
+        else if (slot === "cover") setEditCover(dataUrl);
+        else if (slot === "hero" || slot === "banner") setEditHero(dataUrl);
+        else if (slot === "logo") setEditLogo(dataUrl);
+        showToast(`Applied and saved image as ${slot}`, "success");
+      } else {
+        showToast("Failed to download image", "error");
+      }
+    } catch (err) {
+      showToast(`Failed to apply image: ${err}`, "error");
+    } finally {
+      setFetchingImageKey(null);
+    }
+  }
+
   function getLbCategories(): string[] {
     const cats = new Set(lbImages.map((i) => i.category));
     return Array.from(cats);
@@ -439,17 +682,45 @@ function GameDetail({ game }: { game: Game }) {
     const newLogo = editLogo || undefined;
     const newNotes = editNotes.trim() || undefined;
 
-    if (
-      newName === game.name &&
-      newPlatform === game.platform &&
-      newIcon === game.iconUrl &&
-      newCover === game.coverArtUrl &&
-      newHero === game.bannerUrl &&
-      newLogo === game.logoUrl &&
-      newNotes === game.notes
-    ) {
-      setEditing(false);
-      return;
+    // Extended metadata
+    const newDescription = editDescription.trim() || undefined;
+    const newDeveloper = editDeveloper.trim() || undefined;
+    const newPublisher = editPublisher.trim() || undefined;
+    const newReleaseDate = editReleaseDate.trim() || undefined;
+    const newGenres = editGenres ? editGenres.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+    const newStoryline = editStoryline.trim() || undefined;
+    const newIgdbRating = editIgdbRating > 0 ? Number(editIgdbRating) : undefined;
+    const newCriticRating = editCriticRating > 0 ? Number(editCriticRating) : undefined;
+    const newThemes = editThemes ? editThemes.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+    const newGameModes = editGameModes ? editGameModes.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+    const newPlayerPerspectives = editPlayerPerspectives ? editPlayerPerspectives.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+
+    // Parse similar games, releases, and reviews
+    const newSimilarGames = editSimilarGamesText.split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map((name, index) => ({ id: index, name }));
+
+    const newReleases = editReleasesText.split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        const parts = line.split("|").map(p => p.trim());
+        return {
+          platform: parts[0] || "",
+          dateStr: parts[1] || "",
+          region: parts[2] || ""
+        };
+      })
+      .filter(rel => rel.platform);
+
+    let newIgdbReviews = editIgdbReviews.length > 0 ? editIgdbReviews : undefined;
+    if (editIgdbReviewsText.trim()) {
+      try {
+        newIgdbReviews = JSON.parse(editIgdbReviewsText.trim());
+      } catch (e) {
+        // Warning will show, but we keep the current ones
+      }
     }
 
     updateGame(game.id, {
@@ -460,6 +731,30 @@ function GameDetail({ game }: { game: Game }) {
       bannerUrl: newHero,
       logoUrl: newLogo,
       notes: newNotes,
+      description: newDescription,
+      developer: newDeveloper,
+      publisher: newPublisher,
+      releaseDate: newReleaseDate,
+      genres: newGenres,
+      storyline: newStoryline,
+      igdbRating: newIgdbRating,
+      criticRating: newCriticRating,
+      themes: newThemes,
+      gameModes: newGameModes,
+      playerPerspectives: newPlayerPerspectives,
+      screenshots: editScreenshots.length > 0 ? editScreenshots : undefined,
+      videos: editVideos.length > 0 ? editVideos : undefined,
+      websites: editWebsites.length > 0 ? editWebsites : undefined,
+      timeToBeat: {
+        normally: editTimeToBeatMain > 0 ? editTimeToBeatMain * 3600 : undefined,
+        hastly: editTimeToBeatExtra > 0 ? editTimeToBeatExtra * 3600 : undefined,
+        completely: editTimeToBeatComple > 0 ? editTimeToBeatComple * 3600 : undefined,
+      },
+      similarGames: newSimilarGames.length > 0 ? newSimilarGames : undefined,
+      releases: newReleases.length > 0 ? newReleases : undefined,
+      igdbReviews: newIgdbReviews,
+      metadataSource: editMetadataSource ? editMetadataSource : undefined,
+      metadataUrl: editMetadataUrl ? editMetadataUrl : undefined,
     });
     setEditing(false);
     showToast("Game updated", "success");
@@ -675,15 +970,16 @@ function GameDetail({ game }: { game: Game }) {
                   </svg>
                   About
                 </h2>
-                <p className="game-description">{game.description}</p>
+                <p className="game-description" style={{ lineHeight: 1.6, color: 'var(--color-text-primary)' }}>{game.description}</p>
                 {game.metadataSource && game.metadataUrl && (
                   <a
                     className="metadata-source-link"
                     href={game.metadataUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    style={{ marginTop: 'var(--space-md)', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', color: 'var(--color-accent)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500 }}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                       <polyline points="15 3 21 3 21 9" />
                       <line x1="10" y1="14" x2="21" y2="3" />
@@ -693,6 +989,122 @@ function GameDetail({ game }: { game: Game }) {
                 )}
               </section>
             )}
+
+            {game.storyline && (
+              <section className="game-section storyline-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  Storyline
+                </h2>
+                <div className="storyline-quote-wrap" style={{ position: 'relative', paddingLeft: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}>
+                  <p className="game-storyline" style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>"{game.storyline}"</p>
+                </div>
+              </section>
+            )}
+
+            {game.screenshots && game.screenshots.length > 0 && (
+              <section className="game-section screenshots-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                  Screenshots ({game.screenshots.length})
+                </h2>
+                <div className="screenshots-carousel" style={{ display: 'flex', gap: 'var(--space-md)', overflowX: 'auto', paddingBottom: 'var(--space-sm)', scrollbarWidth: 'thin' }}>
+                  {game.screenshots.map((src, index) => (
+                    <div 
+                      key={index} 
+                      className="screenshot-item" 
+                      onClick={() => setLightboxImage(src)} 
+                      style={{ flexShrink: 0, width: 220, height: 124, borderRadius: 'var(--radius-md)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--color-border)', transition: 'all var(--transition-fast)' }}
+                    >
+                      <img src={src} alt={`${game.name} Screenshot ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform var(--transition-fast)' }} className="screenshot-img" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {game.videos && game.videos.length > 0 && (
+              <section className="game-section videos-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                  Trailers & Videos
+                </h2>
+                {(() => {
+                  const activeUrl = activeVideoUrl || game.videos[0];
+                  const embedUrl = getYoutubeEmbedUrl(activeUrl);
+                  return (
+                    <div className="videos-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                      {embedUrl ? (
+                        <div className="video-iframe-wrapper" style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', height: 0, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+                          <iframe
+                            src={embedUrl}
+                            title={`${game.name} Video Trailer`}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                          />
+                        </div>
+                      ) : (
+                        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>Video link is invalid</p>
+                      )}
+                      {game.videos.length > 1 && (
+                        <div className="video-selector-list" style={{ display: 'flex', gap: 'var(--space-sm)', overflowX: 'auto', paddingBottom: 'var(--space-xs)' }}>
+                          {game.videos.map((url, idx) => {
+                            const isSelected = activeUrl === url;
+                            const ytId = url.includes("watch?v=") 
+                              ? url.split("watch?v=")[1]?.split("&")[0] 
+                              : url.includes("youtu.be/") 
+                                ? url.split("youtu.be/")[1]?.split("?")[0] 
+                                : "";
+                            const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` : null;
+                            return (
+                              <button
+                                key={idx}
+                                className={`video-selector-btn${isSelected ? " active" : ""}`}
+                                onClick={() => setActiveVideoUrl(url)}
+                                style={{
+                                  flexShrink: 0,
+                                  border: isSelected ? '2px solid var(--color-accent)' : '2px solid transparent',
+                                  padding: 0,
+                                  background: 'none',
+                                  borderRadius: 'var(--radius-sm)',
+                                  overflow: 'hidden',
+                                  cursor: 'pointer',
+                                  width: 96,
+                                  height: 54,
+                                  position: 'relative'
+                                }}
+                              >
+                                {thumbUrl ? (
+                                  <>
+                                    <img src={thumbUrl} alt={`Trailer ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <div className="video-selector-play-overlay" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', opacity: isSelected ? 1 : 0.6, transition: 'opacity var(--transition-fast)' }}>
+                                      <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16, color: '#fff' }}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span style={{ fontSize: 10, color: 'var(--color-text-primary)' }}>Trailer {idx + 1}</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
+
             <section className="game-section">
               <h2 className="game-section-title">
                 <svg
@@ -716,9 +1128,272 @@ function GameDetail({ game }: { game: Game }) {
                 <code className="game-path">{game.path}</code>
               </p>
             </section>
+
+            {/* Related Content section */}
+            {(game.metadataUrl || game.metadataSource) && (
+              <section className="game-section related-content-card">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                  </svg>
+                  Related Content
+                </h2>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)' }}>
+                  {game.metadataUrl && (
+                    <a 
+                      href={game.metadataUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="related-content-btn"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                      View on {game.metadataSource || 'Metadata Provider'}
+                    </a>
+                  )}
+                  {game.platform === "Steam" && (
+                    <a 
+                      href={`https://steamcommunity.com/app/${game.path.match(/steam:\/\/run\/(\d+)/)?.[1] || game.path.match(/\/app\/(\d+)/)?.[1] || ''}`}
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="related-content-btn"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                      </svg>
+                      Steam Community Hub
+                    </a>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* Similar Games Section */}
+            {game.similarGames && game.similarGames.length > 0 && (
+              <section className="game-section similar-games-section" style={{ marginTop: 'var(--space-xl)' }}>
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                  </svg>
+                  Similar Games
+                </h2>
+                <div className="similar-games-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
+                  {game.similarGames.slice(0, 6).map((sim) => (
+                    <div 
+                      key={sim.id} 
+                      className="similar-game-card" 
+                    >
+                      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
+                        {sim.coverUrl ? (
+                          <img 
+                            src={sim.coverUrl} 
+                            alt={sim.name} 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            className="similar-game-cover"
+                          />
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
+                        )}
+                      </div>
+                      <div style={{ padding: 'var(--space-sm)' }}>
+                        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
+                          {sim.name}
+                        </h4>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
 
           <div className="game-side-col">
+            {(game.igdbRating || game.criticRating) && (
+              <section className="game-section ratings-card">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  IGDB Ratings
+                </h2>
+                <div className="ratings-circle-wrap" style={{ display: 'flex', justifyContent: 'space-around', gap: 'var(--space-md)' }}>
+                  {game.igdbRating && (
+                    <RatingCircle score={Math.round(game.igdbRating)} label="Community" />
+                  )}
+                  {game.criticRating && (
+                    <RatingCircle score={Math.round(game.criticRating)} label="Critics" />
+                  )}
+                </div>
+                {(() => {
+                  const breakdown = (() => {
+                    let exceptional = 0, recommended = 0, meh = 0, skip = 0;
+                    let total = 0;
+                    if (game.igdbReviews && game.igdbReviews.length > 0) {
+                      game.igdbReviews.forEach((r) => {
+                        if (r.rating !== undefined) {
+                          total++;
+                          if (r.rating >= 90) exceptional++;
+                          else if (r.rating >= 75) recommended++;
+                          else if (r.rating >= 50) meh++;
+                          else skip++;
+                        }
+                      });
+                    }
+                    if (total === 0) {
+                      const base = game.igdbRating || 75;
+                      const exp = Math.max(0, Math.round((base - 60) * 1.5));
+                      const rec = Math.max(0, Math.round((base - 40) * 0.8));
+                      const m = Math.max(0, Math.round((100 - base) * 0.6));
+                      const sk = Math.max(0, 100 - (exp + rec + m));
+                      return { exceptional: exp, recommended: rec, meh: m, skip: sk, total: 100 };
+                    }
+                    return {
+                      exceptional: Math.round((exceptional / total) * 100),
+                      recommended: Math.round((recommended / total) * 100),
+                      meh: Math.round((meh / total) * 100),
+                      skip: Math.round((skip / total) * 100),
+                      total: 100
+                    };
+                  })();
+
+                  const items = [
+                    { label: "Exceptional", val: breakdown.exceptional, color: "#10b981" },
+                    { label: "Recommended", val: breakdown.recommended, color: "#3b82f6" },
+                    { label: "Meh", val: breakdown.meh, color: "#f59e0b" },
+                    { label: "Skip", val: breakdown.skip, color: "#ef4444" },
+                  ];
+
+                  return (
+                    <div style={{ marginTop: 'var(--space-lg)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '600' }}>Score Breakdown</span>
+                      {items.map((item) => (
+                        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                          <span style={{ fontSize: '11px', width: '85px', color: 'var(--color-text-primary)' }}>{item.label}</span>
+                          <div style={{ flex: 1, height: '6px', background: 'var(--color-bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div 
+                              style={{ 
+                                height: '100%', 
+                                width: `${item.val}%`, 
+                                background: item.color, 
+                                borderRadius: '3px',
+                                boxShadow: `0 0 4px ${item.color}`
+                              }} 
+                            />
+                          </div>
+                          <span style={{ fontSize: '11px', width: '30px', textAlign: 'right', color: 'var(--color-text-muted)' }}>{item.val}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
+
+            {(game.gameModes || game.themes || game.playerPerspectives) && (
+              <section className="game-section specs-card">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                    <line x1="6" y1="6" x2="6.01" y2="6" />
+                    <line x1="6" y1="18" x2="6.01" y2="18" />
+                  </svg>
+                  Game Specs
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                  {game.gameModes && game.gameModes.length > 0 && (
+                    <div>
+                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Modes</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {game.gameModes.map((m) => <span key={m} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{m}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {game.themes && game.themes.length > 0 && (
+                    <div>
+                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Themes</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {game.themes.map((t) => <span key={t} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{t}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {game.playerPerspectives && game.playerPerspectives.length > 0 && (
+                    <div>
+                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Perspectives</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {game.playerPerspectives.map((p) => <span key={p} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{p}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {game.timeToBeat && (game.timeToBeat.normally || game.timeToBeat.completely || game.timeToBeat.hastly) && (
+              <section className="game-section time-to-beat-card">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  Time to Beat
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                  {game.timeToBeat.normally !== undefined && game.timeToBeat.normally > 0 && (
+                    <TimeToBeatRow 
+                      label="Main Story" 
+                      targetSeconds={game.timeToBeat.normally} 
+                      currentPlayTime={game.playTime} 
+                    />
+                  )}
+                  {game.timeToBeat.completely !== undefined && game.timeToBeat.completely > 0 && (
+                    <TimeToBeatRow 
+                      label="Completionist" 
+                      targetSeconds={game.timeToBeat.completely} 
+                      currentPlayTime={game.playTime} 
+                    />
+                  )}
+                  {game.timeToBeat.hastly !== undefined && game.timeToBeat.hastly > 0 && (
+                    <TimeToBeatRow 
+                      label="Rushed" 
+                      targetSeconds={game.timeToBeat.hastly} 
+                      currentPlayTime={game.playTime} 
+                    />
+                  )}
+                </div>
+              </section>
+            )}
+
+            {game.releases && game.releases.length > 0 && (
+              <section className="game-section releases-card">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                  Releases
+                </h2>
+                <div className="releases-list" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {game.releases.map((rel, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', padding: '6px 0', borderBottom: '1px solid var(--color-border)' }}>
+                      <span style={{ fontWeight: '500', color: 'var(--color-text-primary)' }}>{rel.platform}</span>
+                      <span style={{ color: 'var(--color-text-muted)' }}>{rel.dateStr} ({rel.region})</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="game-section">
               <h2 className="game-section-title">
                 <svg
@@ -774,13 +1449,75 @@ function GameDetail({ game }: { game: Game }) {
                 )}
               </div>
               {game.genres && game.genres.length > 0 && (
-                <div className="info-genres">
+                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
                   {game.genres.map((g) => (
                     <span key={g} className="metadata-genre-tag">{g}</span>
                   ))}
                 </div>
               )}
             </section>
+
+            {uniqueWebsites && uniqueWebsites.length > 0 && (
+              <section className="game-section websites-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-4z" />
+                  </svg>
+                  Web Links
+                </h2>
+                <div className="web-links-grid" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                  {uniqueWebsites.map((url, index) => {
+                    const getBrand = (link: string) => {
+                      const l = link.toLowerCase();
+                      if (l.includes("steam")) return { name: "Steam Store", class: "steam", color: "#1b2838" };
+                      if (l.includes("wikipedia")) return { name: "Wikipedia", class: "wikipedia", color: "#3a3a3a" };
+                      if (l.includes("reddit")) return { name: "Reddit Community", class: "reddit", color: "#ff4500" };
+                      if (l.includes("gog.com")) return { name: "GOG Store", class: "gog", color: "#5c2d91" };
+                      if (l.includes("epicgames")) return { name: "Epic Games", class: "epic", color: "#2a2a2a" };
+                      if (l.includes("twitch.tv")) return { name: "Twitch Stream", class: "twitch", color: "#9146ff" };
+                      if (l.includes("discord")) return { name: "Discord Server", class: "discord", color: "#5865f2" };
+                      if (l.includes("facebook")) return { name: "Facebook", class: "facebook", color: "#1877f2" };
+                      if (l.includes("twitter") || l.includes("x.com")) return { name: "Twitter/X", class: "twitter", color: "#0f1419" };
+                      if (l.includes("youtube")) return { name: "YouTube Channel", class: "youtube", color: "#ff0000" };
+                      return { name: "Official Website", class: "generic", color: "var(--color-accent)" };
+                    };
+                    const brand = getBrand(url);
+                    return (
+                      <a
+                        key={index}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`web-link-btn ${brand.class}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--space-sm)',
+                          padding: 'var(--space-sm) var(--space-md)',
+                          borderRadius: 'var(--radius-md)',
+                          background: brand.color,
+                          color: '#fff',
+                          textDecoration: 'none',
+                          fontSize: 'var(--font-size-sm)',
+                          fontWeight: 500,
+                          transition: 'all var(--transition-fast)',
+                          border: '1px solid rgba(255,255,255,0.05)'
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                          <polyline points="15 3 21 3 21 9" />
+                          <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                        {brand.name}
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             {/* LaunchBox Metadata Card */}
             <section className="game-section lb-card">
@@ -832,106 +1569,187 @@ function GameDetail({ game }: { game: Game }) {
 
       {activeTab === "reviews" && (
         <div className="game-section">
-          <h2 className="game-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            Player Review
-          </h2>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px', gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
+            <button 
+              onClick={() => setReviewsSubTab("local")} 
+              style={{ 
+                background: 'none', 
+                border: 'none', 
+                color: reviewsSubTab === "local" ? 'var(--color-accent)' : 'var(--color-text-muted)', 
+                fontWeight: '600', 
+                cursor: 'pointer', 
+                fontSize: 'var(--font-size-sm)',
+                paddingBottom: '8px',
+                borderBottom: reviewsSubTab === "local" ? '2px solid var(--color-accent)' : '2px solid transparent',
+                transition: 'all var(--transition-fast)'
+              }}
+            >
+              Your Review
+            </button>
+            <button 
+              onClick={() => setReviewsSubTab("igdb")} 
+              style={{ 
+                background: 'none', 
+                border: 'none', 
+                color: reviewsSubTab === "igdb" ? 'var(--color-accent)' : 'var(--color-text-muted)', 
+                fontWeight: '600', 
+                cursor: 'pointer', 
+                fontSize: 'var(--font-size-sm)',
+                paddingBottom: '8px',
+                borderBottom: reviewsSubTab === "igdb" ? '2px solid var(--color-accent)' : '2px solid transparent',
+                transition: 'all var(--transition-fast)'
+              }}
+            >
+              IGDB Reviews ({game.igdbReviews?.length || 0})
+            </button>
+          </div>
 
-          {(!reviewText && !rating && !isEditingReview) || isEditingReview ? (
-            <div className="review-writer">
-              <h3>{isEditingReview ? "Edit your review" : "Rate and review this game"}</h3>
-              <div className="review-stars-select">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    className={`star-select-btn${star <= rating ? " selected" : ""}`}
-                    onClick={() => setRating(star)}
-                    type="button"
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor">
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                    </svg>
-                  </button>
-                ))}
-              </div>
-              <textarea
-                className="edit-input edit-textarea"
-                value={reviewInput}
-                onChange={(e) => setReviewInput(e.target.value)}
-                placeholder="Write your review here..."
-                rows={4}
-              />
-              <div className="review-writer-actions">
-                {isEditingReview && (
-                  <button
-                    className="game-edit-btn game-edit-cancel"
-                    onClick={() => {
-                      setRating(game.rating || 0);
-                      setReviewInput(game.reviewText || "");
-                      setIsEditingReview(false);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  className="game-edit-btn game-edit-save"
-                  onClick={handleSaveReview}
-                  disabled={rating === 0 && !reviewInput.trim()}
-                >
-                  Save Review
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="user-review-card">
-              <div className="user-review-header">
-                <div className="user-review-avatar">
-                  <span>ME</span>
-                </div>
-                <div className="user-review-meta">
-                  <div className="user-review-name">
-                    You <span className="verified-badge">Verified Player</span>
-                  </div>
-                  <div className="user-review-stars">
+          {reviewsSubTab === "local" ? (
+            <>
+              <h2 className="game-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Player Review
+              </h2>
+
+              {(!reviewText && !rating && !isEditingReview) || isEditingReview ? (
+                <div className="review-writer">
+                  <h3>{isEditingReview ? "Edit your review" : "Rate and review this game"}</h3>
+                  <div className="review-stars-select">
                     {[1, 2, 3, 4, 5].map((star) => (
-                      <svg
+                      <button
                         key={star}
-                        className={`review-star-icon${star <= rating ? " active" : ""}`}
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
+                        className={`star-select-btn${star <= rating ? " selected" : ""}`}
+                        onClick={() => setRating(star)}
+                        type="button"
                       >
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                      </svg>
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                      </button>
                     ))}
                   </div>
+                  <textarea
+                    className="edit-input edit-textarea"
+                    value={reviewInput}
+                    onChange={(e) => setReviewInput(e.target.value)}
+                    placeholder="Write your review here..."
+                    rows={4}
+                  />
+                  <div className="review-writer-actions">
+                    {isEditingReview && (
+                      <button
+                        className="game-edit-btn game-edit-cancel"
+                        onClick={() => {
+                          setRating(game.rating || 0);
+                          setReviewInput(game.reviewText || "");
+                          setIsEditingReview(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      className="game-edit-btn game-edit-save"
+                      onClick={handleSaveReview}
+                      disabled={rating === 0 && !reviewInput.trim()}
+                    >
+                      Save Review
+                    </button>
+                  </div>
                 </div>
-                <div className="user-review-actions">
-                  <button
-                    className="review-action-btn"
-                    onClick={() => setIsEditingReview(true)}
-                    title="Edit Review"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                  </button>
-                  <button
-                    className="review-action-btn review-delete"
-                    onClick={handleDeleteReview}
-                    title="Delete Review"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </button>
+              ) : (
+                <div className="user-review-card">
+                  <div className="user-review-header">
+                    <div className="user-review-avatar">
+                      <span>ME</span>
+                    </div>
+                    <div className="user-review-meta">
+                      <div className="user-review-name">
+                        You <span className="verified-badge">Verified Player</span>
+                      </div>
+                      <div className="user-review-stars">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <svg
+                            key={star}
+                            className={`review-star-icon${star <= rating ? " active" : ""}`}
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                          >
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                          </svg>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="user-review-actions">
+                      <button
+                        className="review-action-btn"
+                        onClick={() => setIsEditingReview(true)}
+                        title="Edit Review"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                      <button
+                        className="review-action-btn review-delete"
+                        onClick={handleDeleteReview}
+                        title="Delete Review"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  {reviewText && <p className="user-review-text">{reviewText}</p>}
                 </div>
-              </div>
-              {reviewText && <p className="user-review-text">{reviewText}</p>}
+              )}
+            </>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+              {!game.igdbReviews || game.igdbReviews.length === 0 ? (
+                <div style={{ padding: 'var(--space-xl) 0', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 48, height: 48, margin: '0 auto var(--space-md) auto', display: 'block', opacity: 0.5 }}>
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <p>No community reviews available for this game on IGDB yet.</p>
+                </div>
+              ) : (
+                game.igdbReviews.map((rev, idx) => (
+                  <div 
+                    key={idx} 
+                    style={{ 
+                      background: 'var(--color-bg-secondary)', 
+                      border: '1px solid var(--color-border)', 
+                      borderRadius: 'var(--radius-lg)', 
+                      padding: 'var(--space-lg)' 
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
+                      <span style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
+                        {rev.username || 'Anonymous User'}
+                      </span>
+                      {rev.rating !== undefined && (
+                        <span style={{ background: 'var(--color-accent-opacity)', color: 'var(--color-accent)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 'bold' }}>
+                          Rating: {rev.rating}/100
+                        </span>
+                      )}
+                    </div>
+                    {rev.title && (
+                      <h4 style={{ margin: '0 0 var(--space-xs) 0', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>
+                        {rev.title}
+                      </h4>
+                    )}
+                    <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', lineHeight: '1.5', whiteSpace: 'pre-line' }}>
+                      {rev.content}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
@@ -961,8 +1779,8 @@ function GameDetail({ game }: { game: Game }) {
                 </svg>
               </div>
               <div className="weblink-info">
-                <h4>Steam Store</h4>
-                <p>View community hub, reviews, guides and patch notes on Steam.</p>
+                <h4>Steam Search</h4>
+                <p>View community hub, reviews, guides, and store listings on Steam.</p>
               </div>
               <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="5" y1="12" x2="19" y2="12" />
@@ -981,8 +1799,8 @@ function GameDetail({ game }: { game: Game }) {
                 </svg>
               </div>
               <div className="weblink-info">
-                <h4>GOG Store</h4>
-                <p>Check DRM-free listings, manuals, and classic downloads on GOG.</p>
+                <h4>GOG Search</h4>
+                <p>Check DRM-free listings, manuals, and downloads on GOG.</p>
               </div>
               <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="5" y1="12" x2="19" y2="12" />
@@ -1023,7 +1841,7 @@ function GameDetail({ game }: { game: Game }) {
                 </svg>
               </div>
               <div className="weblink-info">
-                <h4>YouTube Media</h4>
+                <h4>YouTube Search</h4>
                 <p>Search game trailers, reviews, Let's Plays, walkthroughs, and visual guides.</p>
               </div>
               <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1031,6 +1849,82 @@ function GameDetail({ game }: { game: Game }) {
                 <polyline points="12 5 19 12 12 19" />
               </svg>
             </a>
+
+            {uniqueWebsites.map((url) => {
+              const getBrandDetails = (link: string) => {
+                const l = link.toLowerCase();
+                if (l.includes("steam")) return { name: "Steam Store Page", colorClass: "steam", desc: "View the official store listing, community forums, and player reviews.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 2.13 11.28l5.86 2.43a3.5 3.5 0 0 1 6.55.8l5.34-1.8A10 10 0 0 0 12 2zm-3.5 13.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" /></svg>
+                )};
+                if (l.includes("wikipedia")) return { name: "Wikipedia Page", colorClass: "wikipedia", desc: "Read the comprehensive article detailing development, reception, and gameplay.", icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+                )};
+                if (l.includes("reddit")) return { name: "Reddit Community", colorClass: "reddit", desc: "Join community discussions, fanart, gameplay tips, and updates on Reddit.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 15a3 3 0 1 1 3-3a3 3 0 0 1-3 3z" /></svg>
+                )};
+                if (l.includes("gog.com")) return { name: "GOG Store Page", colorClass: "gog", desc: "Check DRM-free listings, manuals, and classic downloads on GOG.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
+                )};
+                if (l.includes("epicgames")) return { name: "Epic Games Store", colorClass: "epic", desc: "View the official listing on Epic Games Store.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" /></svg>
+                )};
+                if (l.includes("twitch.tv")) return { name: "Twitch Directory", colorClass: "twitch", desc: "Watch live streams, speedruns, and broadcasts on Twitch.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 2H3v16h5v4l4-4h5l4-4V2zm-10 9H9V6h2v5zm4 0h-2V6h2v5z" /></svg>
+                )};
+                if (l.includes("discord")) return { name: "Discord Server", colorClass: "discord", desc: "Chat in real-time with other community members and developers on Discord.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.873-.894a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.075.075 0 0 1 .077-.01c3.92 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.009c.12.099.244.197.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.894a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.156-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.156 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.156-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.156 2.418z" /></svg>
+                )};
+                if (l.includes("facebook")) return { name: "Facebook Official", colorClass: "facebook", desc: "Visit the official Facebook page for updates and community news.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" /></svg>
+                )};
+                if (l.includes("twitter") || l.includes("x.com")) return { name: "Twitter/X Feed", colorClass: "twitter", desc: "Follow the latest tweets, teasers, and announcements on Twitter/X.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>
+                )};
+                if (l.includes("youtube")) return { name: "YouTube Channel", colorClass: "youtube", desc: "Watch official dev diaries, trailer streams, and video updates.", icon: (
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.002 3.002 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
+                )};
+                return { name: "Official Website", colorClass: "generic", desc: "Visit the game's official homepage for support, forums, and updates.", icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+                )};
+              };
+              const brand = getBrandDetails(url);
+              return (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="weblink-card"
+                >
+                  <div className={`weblink-icon ${brand.colorClass}`}>
+                    {brand.icon}
+                  </div>
+                  <div className="weblink-info">
+                    <h4>{brand.name}</h4>
+                    <p>{brand.desc}</p>
+                    <span 
+                      className="weblink-url-sub" 
+                      style={{ 
+                        fontSize: '11px', 
+                        color: 'var(--color-text-muted)', 
+                        display: 'block', 
+                        marginTop: 'var(--space-xs)', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis', 
+                        whiteSpace: 'nowrap', 
+                        maxWidth: '280px' 
+                      }}
+                    >
+                      {url}
+                    </span>
+                  </div>
+                  <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </a>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1131,15 +2025,96 @@ function GameDetail({ game }: { game: Game }) {
               )}
 
               <div className="edit-form">
-                <div className="edit-field">
-                  <label className="edit-label" htmlFor="edit-name">Name</label>
-                  <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
+                <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-name">Name</label>
+                    <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-platform">Platform</label>
+                    <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-developer">Developer</label>
+                    <input id="edit-developer" className="edit-input" type="text" value={editDeveloper} onChange={(e) => setEditDeveloper(e.target.value)} placeholder="Developer name" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-publisher">Publisher</label>
+                    <input id="edit-publisher" className="edit-input" type="text" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} placeholder="Publisher name" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-release-date">Release Date</label>
+                    <input id="edit-release-date" className="edit-input" type="text" value={editReleaseDate} onChange={(e) => setEditReleaseDate(e.target.value)} placeholder="e.g., YYYY-MM-DD" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-genres">Genres</label>
+                    <input id="edit-genres" className="edit-input" type="text" value={editGenres} onChange={(e) => setEditGenres(e.target.value)} placeholder="Action, Adventure, Shooter" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-themes">Themes</label>
+                    <input id="edit-themes" className="edit-input" type="text" value={editThemes} onChange={(e) => setEditThemes(e.target.value)} placeholder="Sci-Fi, Survival, Sandbox" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-modes">Game Modes</label>
+                    <input id="edit-modes" className="edit-input" type="text" value={editGameModes} onChange={(e) => setEditGameModes(e.target.value)} placeholder="Single player, Multiplayer, Co-op" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
+                    <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
+                  </div>
+                  <div className="edit-field-row" style={{ display: 'flex', gap: 'var(--space-md)' }}>
+                    <div className="edit-field" style={{ flex: 1 }}>
+                      <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
+                      <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
+                    </div>
+                    <div className="edit-field" style={{ flex: 1 }}>
+                      <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
+                      <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
+                    </div>
+                  </div>
+                  
+                  <div className="edit-field-row" style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
+                    <div className="edit-field" style={{ flex: 1 }}>
+                      <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
+                      <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
+                    </div>
+                    <div className="edit-field" style={{ flex: 1 }}>
+                      <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (Hours)</label>
+                      <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
+                    </div>
+                    <div className="edit-field" style={{ flex: 1 }}>
+                      <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (Hours)</label>
+                      <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
+                    </div>
+                  </div>
                 </div>
-                <div className="edit-field">
-                  <label className="edit-label" htmlFor="edit-platform">Platform</label>
-                  <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-similar-games">Similar Games (Comma-separated)</label>
+                  <input id="edit-similar-games" className="edit-input" type="text" value={editSimilarGamesText} onChange={(e) => setEditSimilarGamesText(e.target.value)} placeholder="Game A, Game B, Game C" />
                 </div>
-                <div className="edit-field">
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-releases-list">Releases (Line-by-line: Platform | YYYY-MM-DD | Region)</label>
+                  <textarea id="edit-releases-list" className="edit-input edit-textarea" value={editReleasesText} onChange={(e) => setEditReleasesText(e.target.value)} placeholder="PC | 2020-12-10 | North America&#10;PS5 | 2020-12-10 | Worldwide" rows={3} />
+                </div>
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-igdb-reviews-json">Community Reviews (JSON format)</label>
+                  <textarea id="edit-igdb-reviews-json" className="edit-input edit-textarea" value={editIgdbReviewsText} onChange={(e) => setEditIgdbReviewsText(e.target.value)} placeholder="[ { &quot;username&quot;: &quot;Player1&quot;, &quot;rating&quot;: 90, &quot;content&quot;: &quot;Amazing!&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
+                </div>
+                
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-description">Description</label>
+                  <textarea id="edit-description" className="edit-input edit-textarea" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Short description or summary..." rows={3} />
+                </div>
+                
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-storyline">Storyline</label>
+                  <textarea id="edit-storyline" className="edit-input edit-textarea" value={editStoryline} onChange={(e) => setEditStoryline(e.target.value)} placeholder="Deep storyline/narrative summary..." rows={3} />
+                </div>
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
                   <label className="edit-label" htmlFor="edit-notes">Notes</label>
                   <textarea id="edit-notes" className="edit-input edit-textarea" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Personal notes about this game..." rows={3} />
                 </div>
@@ -1159,14 +2134,28 @@ function GameDetail({ game }: { game: Game }) {
                 <EditImageSlot label="Hero Banner" subtitle="Game page top" imageUrl={editHero} previewSize={{ w: 240, h: 100 }} isFetching={fetchingImageKey === "hero"} onChooseFile={() => handlePickImage("hero")} onFetchWeb={() => handleFetchImage("hero")} onRemove={() => handleRemoveImage("hero")} />
                 <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
               </div>
-              <button className="lb-browse-edit-btn" onClick={handleOpenImageBrowser} type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="2" width="20" height="20" rx="2" />
-                  <path d="M7 2v20" />
-                  <path d="M2 12h5" />
-                </svg>
-                Browse LaunchBox Images
-              </button>
+              <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
+                <button className="lb-browse-edit-btn" style={{ flex: 1 }} onClick={handleOpenImageBrowser} type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="2" width="20" height="20" rx="2" />
+                    <path d="M7 2v20" />
+                    <path d="M2 12h5" />
+                  </svg>
+                  Browse LaunchBox Images
+                </button>
+                <button 
+                  className="lb-browse-edit-btn" 
+                  style={{ flex: 1, background: 'var(--color-bg-tertiary)', borderColor: 'var(--color-accent)' }} 
+                  onClick={() => setShowIgdbMediaBrowser(true)} 
+                  type="button"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                  Browse IGDB Media
+                </button>
+              </div>
             </div>
 
             <div className="modal-footer">
@@ -1289,6 +2278,211 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* IGDB Media Browser Modal */}
+      {showIgdbMediaBrowser && (
+        <div className="modal-backdrop" onClick={() => setShowIgdbMediaBrowser(false)}>
+          <div className="modal lb-browser-modal" style={{ maxWidth: '820px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+              </div>
+              <div className="modal-header-text">
+                <h3 className="modal-title">IGDB Media Browser</h3>
+                <p className="modal-subtitle">Browse screenshots, manage trailers, and download high-resolution game media</p>
+              </div>
+              <button className="metadata-panel-close" onClick={() => setShowIgdbMediaBrowser(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="lb-browser-body" style={{ padding: 'var(--space-xl)', overflowY: 'auto' }}>
+              <div style={{ marginBottom: 'var(--space-xl)' }}>
+                <h4 style={{ margin: '0 0 var(--space-sm) 0', color: 'var(--color-text-primary)' }}>Screenshots ({editScreenshots.length})</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-md)' }}>
+                  {editScreenshots.map((url, idx) => (
+                    <div key={idx} style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                      <img src={url} alt={`Screenshot ${idx + 1}`} style={{ width: '100%', height: '110px', objectFit: 'cover' }} />
+                      <div style={{ padding: 'var(--space-xs)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                        <button 
+                          className="lb-apply-btn" 
+                          style={{ padding: '4px 8px', fontSize: '10px' }} 
+                          onClick={() => handleApplyIgdbImage(url, "cover")}
+                          disabled={fetchingImageKey !== null}
+                        >
+                          {fetchingImageKey === "cover" ? "Downloading..." : "Set as Cover Art"}
+                        </button>
+                        <button 
+                          className="lb-apply-btn" 
+                          style={{ padding: '4px 8px', fontSize: '10px' }} 
+                          onClick={() => handleApplyIgdbImage(url, "hero")}
+                          disabled={fetchingImageKey !== null}
+                        >
+                          {fetchingImageKey === "hero" ? "Downloading..." : "Set as Hero Banner"}
+                        </button>
+                        <button 
+                          className="lb-apply-btn" 
+                          style={{ padding: '4px 8px', fontSize: '10px', background: 'var(--color-danger-opacity)', color: 'var(--color-danger)' }} 
+                          onClick={() => setEditScreenshots(editScreenshots.filter((_, i) => i !== idx))}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
+                  <input 
+                    type="text" 
+                    className="edit-input" 
+                    placeholder="Add custom screenshot URL..." 
+                    id="new-screenshot-url" 
+                    style={{ flex: 1 }} 
+                  />
+                  <button 
+                    className="lb-apply-btn" 
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      const input = document.getElementById("new-screenshot-url") as HTMLInputElement;
+                      if (input && input.value.trim()) {
+                        setEditScreenshots([...editScreenshots, input.value.trim()]);
+                        input.value = "";
+                      }
+                    }}
+                  >
+                    Add URL
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-lg)' }}>
+                <h4 style={{ margin: '0 0 var(--space-sm) 0', color: 'var(--color-text-primary)' }}>Videos & Trailers ({editVideos.length})</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                  {editVideos.map((url, idx) => {
+                    const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/)?.[1];
+                    return (
+                      <div key={idx} style={{ display: 'flex', gap: 'var(--space-md)', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-sm)', alignItems: 'center' }}>
+                        {videoId ? (
+                          <img src={`https://img.youtube.com/vi/${videoId}/default.jpg`} alt="Video Thumbnail" style={{ width: '80px', height: '60px', objectFit: 'cover', borderRadius: 'var(--radius-sm)' }} />
+                        ) : (
+                          <div style={{ width: '80px', height: '60px', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-sm)' }} />
+                        )}
+                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                          <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)', wordBreak: 'break-all', display: 'block' }}>{url}</span>
+                        </div>
+                        <button 
+                          className="lb-apply-btn" 
+                          style={{ background: 'var(--color-danger-opacity)', color: 'var(--color-danger)', whiteSpace: 'nowrap' }} 
+                          onClick={() => setEditVideos(editVideos.filter((_, i) => i !== idx))}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
+                  <input 
+                    type="text" 
+                    className="edit-input" 
+                    placeholder="Add custom YouTube video URL..." 
+                    id="new-video-url" 
+                    style={{ flex: 1 }} 
+                  />
+                  <button 
+                    className="lb-apply-btn" 
+                    style={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      const input = document.getElementById("new-video-url") as HTMLInputElement;
+                      if (input && input.value.trim()) {
+                        setEditVideos([...editVideos, input.value.trim()]);
+                        input.value = "";
+                      }
+                    }}
+                  >
+                    Add URL
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <span className="modal-footer-count"></span>
+              <div className="modal-footer-actions">
+                <button className="modal-btn modal-btn-confirm" onClick={() => setShowIgdbMediaBrowser(false)}>Done</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxImage && (
+        <div 
+          className="lightbox-backdrop" 
+          onClick={() => setLightboxImage(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            cursor: 'zoom-out',
+            animation: 'fadeIn var(--transition-fast) ease'
+          }}
+        >
+          <div 
+            className="lightbox-content" 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '90%',
+              maxHeight: '90%',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}
+          >
+            <img src={lightboxImage} alt="Fullscreen Screenshot" style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }} />
+            <button 
+              className="lightbox-close" 
+              onClick={() => setLightboxImage(null)}
+              style={{
+                position: 'absolute',
+                top: 'var(--space-md)',
+                right: 'var(--space-md)',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: 'none',
+                borderRadius: '50%',
+                width: 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#fff',
+                transition: 'background var(--transition-fast)'
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 18, height: 18 }}>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
         </div>
       )}

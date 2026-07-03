@@ -21,6 +21,44 @@ export interface Game {
   metadataUrl?: string; // source page URL
   rating?: number; // user rating (1-5 stars)
   reviewText?: string; // user review text
+  storyline?: string;
+  igdbRating?: number; // IGDB community rating (0-100)
+  criticRating?: number; // IGDB critic rating (0-100)
+  themes?: string[];
+  gameModes?: string[];
+  playerPerspectives?: string[];
+  screenshots?: string[];
+  videos?: string[];
+  websites?: string[];
+  timeToBeat?: TimeToBeat;
+  similarGames?: SimilarGame[];
+  releases?: ReleaseDateInfo[];
+  igdbReviews?: IgdbReview[];
+}
+
+export interface TimeToBeat {
+  hastly?: number;
+  normally?: number;
+  completely?: number;
+}
+
+export interface SimilarGame {
+  id: number;
+  name: string;
+  coverUrl?: string;
+}
+
+export interface ReleaseDateInfo {
+  platform: string;
+  dateStr: string;
+  region: string;
+}
+
+export interface IgdbReview {
+  title?: string;
+  content?: string;
+  rating?: number;
+  username?: string;
 }
 
 /** Metadata returned from the backend scraper. */
@@ -34,6 +72,19 @@ export interface GameMetadataResult {
   images: GameMetadataImages;
   sourceUrl: string;
   sourceName: string;
+  storyline?: string;
+  igdbRating?: number;
+  criticRating?: number;
+  themes?: string[];
+  gameModes?: string[];
+  playerPerspectives?: string[];
+  screenshots?: string[];
+  videos?: string[];
+  websites?: string[];
+  timeToBeat?: TimeToBeat;
+  similarGames?: SimilarGame[];
+  releases?: ReleaseDateInfo[];
+  igdbReviews?: IgdbReview[];
 }
 
 /** Image URLs from a metadata source. */
