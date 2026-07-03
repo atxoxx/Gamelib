@@ -142,8 +142,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
         value = Math.max(g.avgCpuTemp, g.avgGpuTemp);
         label = `CPU ${g.avgCpuTemp}°C / GPU ${g.avgGpuTemp}°C`;
       } else {
-        // Assuming 32GB total RAM
-        const gb = Math.round((32 * g.avgRamUsage) / 10) / 10;
+        const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
+        const gb = Math.round((totalRam * g.avgRamUsage) / 10) / 10;
         value = g.avgRamUsage;
         label = `${gb} GB (${g.avgRamUsage}%)`;
       }
@@ -243,7 +243,14 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
         { data: cpuTemp, color: "var(--color-danger)", label: "CPU Temp" },
         { data: gpuTemp, color: "var(--color-warning)", label: "GPU Temp" },
       ],
-      ram: [{ data: ram.map((v) => Math.round((32 * v) / 10) / 10), color: "var(--color-success)", label: "RAM Usage (GB)" }],
+      ram: [{
+        data: ram.map((v) => {
+          const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
+          return Math.round((totalRam * v) / 10) / 10;
+        }),
+        color: "var(--color-success)",
+        label: "RAM Usage (GB)",
+      }],
       fps: [{ data: fps, color: "var(--color-brand-teal)", label: "FPS" }],
       // Averaged metrics for summary cards
       raw: avgMetrics,
@@ -376,7 +383,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     </td>
                     <td>
                       {g.avgRamUsage > 0
-                        ? `${Math.round((32 * g.avgRamUsage) / 10) / 10} GB`
+                        ? `${Math.round((Number(localStorage.getItem("gamelib-total-ram") || "16") * g.avgRamUsage) / 10) / 10} GB`
                         : "—"}
                     </td>
                     <td>{g.avgCpuUsage > 0 ? `${g.avgCpuUsage}%` : "—"}</td>

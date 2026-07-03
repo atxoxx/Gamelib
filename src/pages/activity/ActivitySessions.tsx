@@ -113,8 +113,9 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
         { data: chartProps.gpuTemp, color: "var(--color-warning)", label: "GPU Temp" },
       ];
     } else if (activeChartTab === "ram") {
-      // Assuming 32GB total RAM for display calculations
-      const ramGb = chartProps.ram.map((v) => Math.round((32 * v) / 10) / 10);
+      // Read total system RAM from localStorage
+      const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
+      const ramGb = chartProps.ram.map((v) => Math.round((totalRam * v) / 10) / 10);
       return [{ data: ramGb, color: "var(--color-success)", label: "RAM Usage" }];
     } else {
       return [{ data: chartProps.fps, color: "var(--color-brand-teal)", label: "FPS" }];

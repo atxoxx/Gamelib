@@ -124,7 +124,30 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // Optimistically add to running list
     setRunningGameIds((prev) => [...prev, game.id]);
     
-    invoke("launch_game", { gameId: game.id, gamePath: game.path })
+    // Read selected GPU from localStorage to pass to launch_game (avoids circular dependency with ActivityContext)
+    let gpuId = null;
+    let gpuName = null;
+    const savedGpu = localStorage.getItem("gamelib-gpus");
+    const savedGpuId = localStorage.getItem("gamelib-selected-gpu");
+    if (savedGpu && savedGpuId) {
+      try {
+        const gpus = JSON.parse(savedGpu);
+        const selected = gpus.find((g: any) => g.id === savedGpuId);
+        if (selected) {
+          gpuId = selected.id;
+          gpuName = selected.name;
+        }
+      } catch (e) {
+        console.error("Failed to parse selected GPU from storage", e);
+      }
+    }
+    
+    invoke("launch_game", { 
+      gameId: game.id, 
+      gamePath: game.path,
+      gpuId,
+      gpuName
+    })
       .then(() => {
         showToast(`Launched ${game.name}`, "success");
       })

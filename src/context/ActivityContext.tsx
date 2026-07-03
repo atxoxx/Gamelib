@@ -101,6 +101,16 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
           selectedGpuRef.current = found;
         }
       }
+
+      // Query and store total system RAM
+      try {
+        const totalRamGb = await invoke("get_system_ram_gb");
+        if (typeof totalRamGb === "number" && totalRamGb > 0) {
+          localStorage.setItem("gamelib-total-ram", totalRamGb.toString());
+        }
+      } catch (e) {
+        console.error("Failed to query total RAM from backend", e);
+      }
     };
     loadGpus();
   }, []);

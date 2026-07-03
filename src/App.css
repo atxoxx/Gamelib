@@ -4340,6 +4340,12 @@
   border-color: var(--color-border-light);
 }
 
+.game-activity-session-card.active {
+  background: var(--color-bg-tertiary) !important;
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+}
+
 .game-activity-session-info {
   display: flex;
   flex-direction: column;

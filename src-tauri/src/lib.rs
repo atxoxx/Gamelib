@@ -8,6 +8,7 @@ mod game_scraper;
 mod gpu_detector;
 mod metrics_collector;
 mod rtss_reader;
+mod mahm_reader;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
@@ -98,6 +99,8 @@ fn launch_game(
     app: tauri::AppHandle,
     game_id: String,
     game_path: String,
+    gpu_id: Option<String>,
+    gpu_name: Option<String>,
 ) -> Result<String, String> {
     let path = Path::new(&game_path);
 
@@ -119,7 +122,7 @@ fn launch_game(
 
     // Start metrics collection on a separate thread (polls every 5 seconds).
     // Pass the PID so RTSS can be used for real FPS data when available.
-    let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(5, pid);
+    let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(5, pid, gpu_id, gpu_name);
 
     // Background thread: wait for the game to exit, stop metrics, report results
     std::thread::spawn(move || {
@@ -302,12 +305,24 @@ fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
     }
 }
 
+/// Get total system RAM in GB.
+#[tauri::command]
+fn get_system_ram_gb() -> u32 {
+    metrics_collector::get_system_ram_gb()
+}
+
+/// Debug command: dump all MSI Afterburner shared memory entries for diagnostics.
+#[tauri::command]
+fn debug_mahm_entries() -> Vec<(String, String, f32)> {
+    mahm_reader::dump_mahm_entries().unwrap_or_default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

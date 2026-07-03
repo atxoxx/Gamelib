@@ -1869,6 +1869,10 @@ export function GameActivityTab({ game }: { game: Game }) {
               <span className="game-activity-sessions-count-tag">{filteredSessions.length}</span>
             </h3>
             {filteredSessions.map((session) => {
+              const hwIndex = sessionsWithHw.findIndex((s) => s.id === session.id);
+              const isSelected = isolatedSessionIndex === hwIndex && hwIndex !== -1;
+              const hasHw = hwIndex !== -1;
+
               const formattedDate = new Date(session.date).toLocaleDateString("en-US", {
                 weekday: "short",
                 day: "numeric",
@@ -1884,16 +1888,45 @@ export function GameActivityTab({ game }: { game: Game }) {
               });
 
               return (
-                <div key={session.id} className="game-activity-session-card">
+                <div
+                  key={session.id}
+                  className={`game-activity-session-card${isSelected ? " active" : ""}`}
+                  onClick={() => {
+                    if (hasHw) {
+                      setIsolatedSessionIndex(isSelected ? null : hwIndex);
+                    }
+                  }}
+                  style={{
+                    cursor: hasHw ? "pointer" : "default",
+                    opacity: hasHw ? 1 : 0.75
+                  }}
+                >
                   <div className="game-activity-session-info">
-                    <span className="game-activity-session-date">{formattedDate}</span>
+                    <span className="game-activity-session-date">
+                      {formattedDate}
+                      {hasHw && (
+                        <span
+                          style={{
+                            marginLeft: "var(--space-xs)",
+                            fontSize: "10px",
+                            background: isSelected ? "var(--color-accent)" : "var(--color-bg-tertiary)",
+                            color: isSelected ? "#fff" : "var(--color-text-secondary)",
+                            padding: "1px 4.5px",
+                            borderRadius: "var(--radius-xs)"
+                          }}
+                        >
+                          Telemetry
+                        </span>
+                      )}
+                    </span>
                     <span className="game-activity-session-time">{startTimeStr} — {endTimeStr}</span>
                   </div>
                   <span className="game-activity-session-duration">{formatPlayTime(session.durationMin)}</span>
                   <button
                     className="game-activity-session-delete-btn"
                     title="Delete Session"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       if (confirm("Delete this session?")) {
                         deleteSession(session.id);
                         setIsolatedSessionIndex(null);
