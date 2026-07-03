@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 mod game_scraper;
+mod gpu_detector;
+mod metrics_collector;
+mod rtss_reader;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult};
+use gpu_detector::GpuInfo;
+use metrics_collector::SessionMetrics;
 
 /// Serializable game data matching the frontend Game type.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,16 +73,26 @@ fn load_games(app: tauri::AppHandle) -> Result<Vec<GameData>, String> {
 }
 
 /// Payload emitted via the "game-exited" event when a launched process terminates.
+/// Now includes real hardware metrics collected during gameplay.
 #[derive(Clone, Serialize)]
 struct GameExitPayload {
     #[serde(rename = "gameId")]
     game_id: String,
     #[serde(rename = "elapsedSeconds")]
     elapsed_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metrics: Option<SessionMetrics>,
+}
+
+/// Detect GPUs on the system using WMI.
+#[tauri::command]
+fn detect_gpus() -> Vec<GpuInfo> {
+    gpu_detector::detect_gpus()
 }
 
 /// Launch a game executable. A background thread waits for the process to exit,
-/// then emits a "game-exited" event so the frontend can update play time.
+/// collects real-time performance metrics via WMI, and emits a "game-exited"
+/// event with aggregated metrics so the frontend can update play time and activity.
 #[tauri::command]
 fn launch_game(
     app: tauri::AppHandle,
@@ -99,18 +114,32 @@ fn launch_game(
         .spawn()
         .map_err(|e| format!("Failed to launch game: {}", e))?;
 
+    let pid = child.id();
     let start = Instant::now();
 
-    // Background thread: wait for the game to exit, then report elapsed time
+    // Start metrics collection on a separate thread (polls every 5 seconds).
+    // Pass the PID so RTSS can be used for real FPS data when available.
+    let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(5, pid);
+
+    // Background thread: wait for the game to exit, stop metrics, report results
     std::thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
+
+        // Signal the metrics collector to stop
+        let _ = stop_tx.send(());
+
         let elapsed = start.elapsed().as_secs();
+
+        // Collect the aggregated metrics (with a timeout)
+        let metrics = result_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(None);
+
         let _ = app.emit(
             "game-exited",
             GameExitPayload {
                 game_id,
                 elapsed_seconds: elapsed,
+                metrics,
             },
         );
     });
@@ -210,7 +239,6 @@ async fn spider_fetch_page(url: String) -> Result<String, String> {
 }
 
 /// Search the LaunchBox Games Database for images of a game.
-/// Returns categorized images with URLs, regions, and resolutions.
 #[tauri::command]
 async fn search_launchbox_images(game_name: String) -> Result<Vec<LaunchBoxImageResult>, String> {
     game_scraper::search_launchbox_images(&game_name).await
@@ -221,7 +249,6 @@ fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
         for entry in entries.flatten() {
             let entry_path = entry.path();
             if entry_path.is_dir() {
-                // Skip hidden folders and common non-game directories
                 if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with('.') || name.starts_with('_') {
                         continue;
@@ -230,7 +257,6 @@ fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
                 scan_dir(&entry_path, exes);
             } else if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
                 if ext.eq_ignore_ascii_case("exe") {
-                    // Skip non-game executables (installers, helpers, crash reporters, etc.)
                     if let Some(stem) = entry_path.file_stem().and_then(|s| s.to_str()) {
                         if SKIP_KEYWORDS.iter().any(|kw| stem.to_lowercase().contains(kw)) {
                             continue;
@@ -260,7 +286,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

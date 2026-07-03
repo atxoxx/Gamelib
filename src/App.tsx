@@ -9,8 +9,10 @@ import StorePage from "./pages/StorePage";
 import CommunityPage from "./pages/CommunityPage";
 import SettingsPage from "./pages/SettingsPage";
 import PluginsPage from "./pages/PluginsPage";
+import ActivityPage from "./pages/ActivityPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
+import { ActivityProvider } from "./context/ActivityContext";
 import "./App.css";
 
 function AppLayout() {
@@ -39,17 +41,20 @@ function App() {
     <HashRouter>
       <ToastProvider>
         <GameProvider>
+        <ActivityProvider>
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/library" replace />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="library/:gameId" element={<GamePage />} />
+            <Route path="activity" element={<ActivityPage />} />
             <Route path="store" element={<StorePage />} />
             <Route path="community" element={<CommunityPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="plugins" element={<PluginsPage />} />
           </Route>
         </Routes>
+        </ActivityProvider>
         </GameProvider>
       </ToastProvider>
     </HashRouter>

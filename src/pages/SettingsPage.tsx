@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useToast } from "../context/ToastContext";
+import { useActivity } from "../context/ActivityContext";
 
 interface ThemeOption {
   id: string;
@@ -23,6 +24,7 @@ const themes: ThemeOption[] = [
 
 export default function SettingsPage() {
   const { showToast } = useToast();
+  const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   
   // Theme State
   const [currentTheme, setCurrentTheme] = useState("dark");
@@ -174,6 +176,77 @@ export default function SettingsPage() {
                 Browse...
               </button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* GPU Selector */}
+      <section className="settings-section">
+        <h2 className="settings-section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="2" />
+            <path d="M7 2v20" />
+            <path d="M17 2v20" />
+            <path d="M2 12h20" />
+            <path d="M2 7h5" />
+            <path d="M2 17h5" />
+            <path d="M17 17h5" />
+            <path d="M17 7h5" />
+          </svg>
+          Hardware Monitoring
+        </h2>
+        <div className="settings-row">
+          <div className="settings-control">
+            <label className="settings-label">GPU Selection</label>
+            <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-xs)", marginBottom: "var(--space-sm)" }}>
+              Select a GPU to monitor during gameplay. Performance metrics will be collected from the selected GPU only.
+            </p>
+            <div className="settings-input-group">
+              <select
+                className="settings-select"
+                value={selectedGpu?.id || ""}
+                onChange={(e) => {
+                  const gpu = availableGpus.find((g) => g.id === e.target.value);
+                  setSelectedGpu(gpu || null);
+                  showToast(gpu ? `Selected ${gpu.name}` : "GPU selection cleared", "success");
+                }}
+                style={{ flex: 1 }}
+              >
+                <option value="">-- Select a GPU --</option>
+                {availableGpus.map((gpu) => (
+                  <option key={gpu.id} value={gpu.id}>
+                    {gpu.name} ({gpu.vramMb} MB)
+                  </option>
+                ))}
+              </select>
+              <button className="settings-btn" onClick={refreshGpus}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>{" "}
+                Refresh
+              </button>
+            </div>
+            {selectedGpu && (
+              <div className="gpu-info-card" style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--color-bg-tertiary)", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)" }}>
+                <div style={{ display: "flex", gap: "var(--space-md)", alignItems: "center" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: "var(--radius-md)", background: "var(--color-accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 22, height: 22 }}>
+                      <rect x="2" y="2" width="20" height="20" rx="2" />
+                      <path d="M7 2v20" />
+                      <path d="M17 2v20" />
+                      <path d="M2 12h20" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-primary)" }}>{selectedGpu.name}</div>
+                    <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-secondary)" }}>
+                      {selectedGpu.vendor} · {selectedGpu.vramMb} MB VRAM
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </section>

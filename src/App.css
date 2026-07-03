@@ -3407,3 +3407,667 @@
   width: 12px;
   height: 12px;
 }
+
+/* ==============================
+   Activity Page
+   ============================== */
+
+.activity-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-2xl);
+  animation: importMenuIn 200ms ease;
+}
+
+.activity-header {
+  margin-bottom: var(--space-xl);
+}
+
+.activity-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-xs);
+}
+
+.activity-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+/* Activity Tabbed Sub-Navigation */
+.activity-tabs-wrapper {
+  margin-bottom: var(--space-xl);
+}
+
+.activity-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0;
+}
+
+.activity-tab {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.activity-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.activity-tab.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+}
+
+/* Activity Content */
+.activity-content {
+  min-height: 400px;
+}
+
+.activity-tab-content {
+  animation: importMenuIn 200ms ease;
+}
+
+/* Stat Cards */
+.activity-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+}
+
+.activity-stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  border-top: 3px solid var(--color-accent);
+  transition: all var(--transition-fast);
+}
+
+.activity-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border-light);
+}
+
+.activity-stat-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  flex-shrink: 0;
+}
+
+.activity-stat-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.activity-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.activity-stat-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.activity-stat-value {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-stat-sub {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Charts Grid */
+.activity-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-xl);
+}
+
+@media (max-width: 900px) {
+  .activity-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Activity Section */
+.activity-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+}
+
+.activity-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-lg);
+}
+
+.activity-section-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+}
+
+/* Activity Empty State */
+.activity-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3xl) var(--space-lg);
+  color: var(--color-text-muted);
+  text-align: center;
+  gap: var(--space-md);
+}
+
+.activity-empty svg {
+  width: 48px;
+  height: 48px;
+  opacity: 0.3;
+}
+
+.activity-empty p {
+  font-size: var(--font-size-sm);
+  max-width: 320px;
+}
+
+/* Activity Timeline */
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.activity-timeline-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.activity-timeline-date {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) 0;
+}
+
+.activity-timeline-date-text {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.activity-timeline-date-count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.activity-timeline-items {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-left: var(--space-xl);
+}
+
+.activity-timeline-items::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 3px;
+  width: 2px;
+  background: var(--color-border);
+  border-radius: 1px;
+}
+
+.activity-timeline-item {
+  position: relative;
+  padding-bottom: var(--space-md);
+}
+
+.activity-timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+.activity-timeline-dot {
+  position: absolute;
+  top: 10px;
+  left: -20px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-bg-primary), 0 0 8px var(--color-accent-glow);
+}
+
+.activity-timeline-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  transition: all var(--transition-fast);
+}
+
+.activity-timeline-card:hover {
+  border-color: var(--color-border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.activity-timeline-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-xs);
+}
+
+.activity-timeline-game {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.activity-timeline-duration {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+}
+
+.activity-timeline-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+.activity-metric-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  letter-spacing: 0.3px;
+  transition: all var(--transition-fast);
+}
+
+.activity-metric-tag:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.activity-timeline-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}
+
+/* Chart Bar Hover Effects */
+.chart-bar {
+  transition: opacity var(--transition-fast);
+}
+
+.chart-bar-group:hover .chart-bar {
+  opacity: 1 !important;
+  filter: brightness(1.2);
+}
+
+/* ==============================
+   Game Page Activity Tab
+   ============================== */
+
+.game-activity-tab {
+  animation: importMenuIn 200ms ease;
+}
+
+/* Activity sub-tab navigation */
+.game-activity-subtabs {
+  display: flex;
+  gap: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-xl);
+}
+
+.game-activity-subtab {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.game-activity-subtab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.game-activity-subtab.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+}
+
+.game-activity-content {
+  animation: importMenuIn 180ms ease;
+}
+
+.game-activity-overview,
+.game-activity-performance,
+.game-activity-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.game-activity-cards {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+/* Performance summary bars - enhanced */
+.game-perf-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.game-perf-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.game-perf-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  width: 80px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.game-perf-bar {
+  flex: 1;
+  height: 10px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.game-perf-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%);
+  animation: perfBarShimmer 2s infinite;
+}
+
+@keyframes perfBarShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.game-perf-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 800ms cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.game-perf-val {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  width: 56px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Session list */
+.game-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.game-session-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-sm);
+  position: relative;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.game-session-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.game-session-item:last-child {
+  border-bottom: none;
+}
+
+.game-session-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  margin-top: 5px;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px var(--color-accent-glow);
+  transition: transform var(--transition-fast);
+}
+
+.game-session-item:hover .game-session-dot {
+  transform: scale(1.3);
+}
+
+.game-session-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.game-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-xs);
+}
+
+.game-session-date {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.game-session-duration {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+}
+
+.game-session-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+/* ==============================
+   Chart Interactive Tooltips
+   ============================== */
+
+/* LineChart hover tooltip card */
+.chart-tooltip-card {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  box-shadow: var(--shadow-lg);
+  min-width: 150px;
+  animation: tooltipIn 120ms ease;
+}
+
+@keyframes tooltipIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chart-tooltip-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chart-tooltip-values {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+}
+
+.chart-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chart-tooltip-name {
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+
+.chart-tooltip-val {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+/* BarChart hover tooltip */
+.chart-bar-tooltip {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  box-shadow: var(--shadow-md);
+  animation: tooltipIn 120ms ease;
+  white-space: nowrap;
+}
+
+.bar-tooltip-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.bar-tooltip-value {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+/* ==============================
+   Performance Charts Grid
+   ============================== */
+
+.perf-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+}
+
+@media (max-width: 900px) {
+  .perf-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.perf-chart-card {
+  margin-bottom: 0 !important;
+  overflow: hidden;
+}
+

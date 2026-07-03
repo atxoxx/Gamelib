@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGames } from "../context/GameContext";
+import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, parsePlayTime, formatPlayTime } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type ActivityStats, type GameSession, type SessionMetrics, formatPlayTime, deriveMetricsTimeSeries } from "../types/game";
+import BarChart from "../components/charts/BarChart";
+import LineChart from "../components/charts/LineChart";
 
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -933,46 +936,7 @@ function GameDetail({ game }: { game: Game }) {
         </div>
       )}
 
-      {activeTab === "activity" && (
-        <div className="game-section">
-          <h2 className="game-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-            Session Timeline
-          </h2>
-          {(() => {
-            const sessions = getMockSessions(game.playTime);
-            if (sessions.length === 0) {
-              return (
-                <div className="timeline-empty">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <p>No activity logged yet. Launch the game to start recording sessions.</p>
-                </div>
-              );
-            }
-            return (
-              <div className="timeline">
-                {sessions.map((session) => (
-                  <div key={session.id} className="timeline-item">
-                    <div className="timeline-dot" />
-                    <div className="timeline-content">
-                      <div className="timeline-header">
-                        <span className="timeline-date">{session.date}</span>
-                        <span className="timeline-duration">{session.duration} played</span>
-                      </div>
-                      <p className="timeline-desc">{session.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
-      )}
+      {activeTab === "activity" && <GameActivityTab game={game} />}
 
       {activeTab === "weblinks" && (
         <div className="game-section">
@@ -1350,40 +1314,405 @@ export default function GamePage() {
   return <GameDetail key={game.id} game={game} />;
 }
 
-function getMockSessions(playTimeStr: string) {
-  const totalMinutes = parsePlayTime(playTimeStr);
-  if (totalMinutes <= 0) return [];
-  
-  const sessions = [];
-  const now = new Date();
-  
-  if (totalMinutes > 30) {
-    const mins1 = Math.round(totalMinutes * 0.4);
-    const date1 = new Date();
-    date1.setDate(now.getDate() - 1);
-    sessions.push({
-      id: "session-1",
-      date: "Yesterday",
-      duration: formatPlayTime(mins1),
-      description: "Explored new areas and completed side quests.",
-    });
-    
-    const mins2 = totalMinutes - mins1;
-    const date2 = new Date();
-    date2.setDate(now.getDate() - 4);
-    sessions.push({
-      id: "session-2",
-      date: date2.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      duration: formatPlayTime(mins2),
-      description: "Initial playthrough and introduction session.",
-    });
-  } else {
-    sessions.push({
-      id: "session-1",
-      date: "2 days ago",
-      duration: playTimeStr,
-      description: "First launch and setup testing.",
-    });
+// ─── Game Activity Tab Component ──────────────────────────────────────────────
+
+type GameActivitySubTab = "overview" | "performance" | "sessions";
+
+function GameActivityTab({ game }: { game: Game }) {
+  const { getGameSessions, getGameStats } = useActivity();
+  const sessions = useMemo(() => getGameSessions(game.id), [game.id, getGameSessions]);
+  const stats = useMemo(() => getGameStats(game.id), [game.id, getGameStats]);
+  const [subTab, setSubTab] = useState<GameActivitySubTab>("overview");
+
+  // Derive time-series from the most recent session with real metrics
+  const sessionTimeSeries = useMemo(() => {
+    const withMetrics = sessions
+      .filter((s) => s.metrics)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    if (withMetrics.length === 0) return null;
+    const latest = withMetrics[0];
+    const points = deriveMetricsTimeSeries(latest.metrics!, latest.durationMin, 20);
+    const intervalMin = Math.max(1, Math.round(latest.durationMin / 20));
+    return {
+      fps: points.map((p) => p.fps),
+      gpu: points.map((p) => p.gpuUsage),
+      cpu: points.map((p) => p.cpuUsage),
+      ram: points.map((p) => p.ramUsage),
+      gpuTemp: points.map((p) => p.gpuTemp),
+      cpuTemp: points.map((p) => p.cpuTemp),
+      labels: points.map((_, i) => `${i * intervalMin}m`),
+    };
+  }, [sessions]);
+
+  if (sessions.length === 0) {
+    return (
+      <div className="game-section">
+        <h2 className="game-section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          Activity
+        </h2>
+        <div className="timeline-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <p>No activity logged yet. Launch the game to start recording sessions.</p>
+        </div>
+      </div>
+    );
   }
-  return sessions;
+
+  const sessionsWithMetrics = sessions.filter((s) => s.metrics);
+  const latestMetrics = sessionsWithMetrics.length > 0 ? sessionsWithMetrics[0].metrics! : null;
+
+  return (
+    <div className="game-activity-tab">
+      {/* Sub-tab navigation */}
+      <div className="game-activity-subtabs">
+        {([
+          ["overview", "Overview"],
+          ["performance", "Performance"],
+          ["sessions", "Sessions"],
+        ] as [GameActivitySubTab, string][]).map(([tab, label]) => (
+          <button
+            key={tab}
+            className={`game-activity-subtab ${subTab === tab ? "active" : ""}`}
+            onClick={() => setSubTab(tab)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="game-activity-content">
+        {subTab === "overview" && (
+          <ActivityOverview
+            stats={stats}
+            sessionsWithMetrics={sessionsWithMetrics}
+            latestMetrics={latestMetrics}
+          />
+        )}
+        {subTab === "performance" && (
+          <ActivityPerformance
+            sessionTimeSeries={sessionTimeSeries}
+            latestMetrics={latestMetrics}
+            stats={stats}
+          />
+        )}
+        {subTab === "sessions" && <ActivitySessions sessions={sessions} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-component: Overview ──────────────────────────────────────────────────
+
+function ActivityOverview({
+  stats,
+  sessionsWithMetrics,
+  latestMetrics,
+}: {
+  stats: ActivityStats;
+  sessionsWithMetrics: GameSession[];
+  latestMetrics: SessionMetrics | null;
+}) {
+  return (
+    <div className="game-activity-overview">
+      {/* Summary stat cards */}
+      <div className="activity-stat-cards game-activity-cards">
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-accent)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">Sessions</span>
+            <span className="activity-stat-value">{stats.totalSessions}</span>
+          </div>
+        </div>
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-success)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">Total Play Time</span>
+            <span className="activity-stat-value">{formatPlayTime(stats.totalPlayTimeMin)}</span>
+          </div>
+        </div>
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-info)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">Avg Session</span>
+            <span className="activity-stat-value">{formatPlayTime(stats.avgSessionMin)}</span>
+          </div>
+        </div>
+        {sessionsWithMetrics.length > 0 && (
+          <>
+            <div className="activity-stat-card">
+              <div className="activity-stat-icon" style={{ color: "var(--color-warning)" }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20" /><path d="M17 2v20" /><path d="M2 12h20" />
+                </svg>
+              </div>
+              <div className="activity-stat-info">
+                <span className="activity-stat-label">Avg FPS</span>
+                <span className="activity-stat-value">{stats.avgFpsAll}</span>
+              </div>
+            </div>
+            <div className="activity-stat-card">
+              <div className="activity-stat-icon" style={{ color: "#ff6d00" }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+              </div>
+              <div className="activity-stat-info">
+                <span className="activity-stat-label">Avg RAM</span>
+                <span className="activity-stat-value">{latestMetrics?.avgRamUsage ?? "-"}%</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Session History bar chart */}
+      <section className="game-section" style={{ marginBottom: 0 }}>
+        <h2 className="game-section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
+          </svg>
+          Session History
+        </h2>
+        <BarChart
+          data={stats.dailyAvg}
+          labels={stats.dailyLabels}
+          formatValue={(v) => formatPlayTime(v)}
+          height={200}
+        />
+      </section>
+    </div>
+  );
+}
+
+// ─── Sub-component: Performance ───────────────────────────────────────────────
+
+function ActivityPerformance({
+  sessionTimeSeries,
+  latestMetrics,
+  stats,
+}: {
+  sessionTimeSeries: {
+    fps: number[];
+    gpu: number[];
+    cpu: number[];
+    ram: number[];
+    gpuTemp: number[];
+    cpuTemp: number[];
+    labels: string[];
+  } | null;
+  latestMetrics: SessionMetrics | null;
+  stats: ActivityStats;
+}) {
+  if (!sessionTimeSeries) {
+    return (
+      <div className="activity-empty" style={{ padding: "var(--space-2xl) var(--space-lg)" }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+        <p>No performance data yet. Launch the game and play for at least a few minutes to record metrics.</p>
+      </div>
+    );
+  }
+
+  const { fps, gpu, cpu, ram, gpuTemp, cpuTemp, labels } = sessionTimeSeries;
+  const hasTemps = gpuTemp.some((v) => v > 0) || cpuTemp.some((v) => v > 0);
+  const hasRam = ram.some((v) => v > 0);
+
+  return (
+    <div className="game-activity-performance">
+      {/* Performance summary cards */}
+      <div className="activity-stat-cards game-activity-cards">
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-accent)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">Avg FPS</span>
+            <span className="activity-stat-value">{stats.avgFpsAll || "-"}</span>
+            {latestMetrics && (
+              <span className="activity-stat-sub">Min {latestMetrics.minFps} · Max {latestMetrics.maxFps}</span>
+            )}
+          </div>
+        </div>
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-success)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20" /><path d="M17 2v20" /><path d="M2 12h20" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">GPU Usage</span>
+            <span className="activity-stat-value">{stats.avgGpuAll || "-"}%</span>
+          </div>
+        </div>
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "var(--color-info)" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="8" y="8" width="8" height="8" rx="1" ry="1" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">CPU Usage</span>
+            <span className="activity-stat-value">{stats.avgCpuAll || "-"}%</span>
+          </div>
+        </div>
+        <div className="activity-stat-card">
+          <div className="activity-stat-icon" style={{ color: "#e040fb" }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </div>
+          <div className="activity-stat-info">
+            <span className="activity-stat-label">RAM Usage</span>
+            <span className="activity-stat-value">{latestMetrics?.avgRamUsage ?? "-"}%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2-column chart grid */}
+      <div className="perf-charts-grid">
+        {/* CPU / GPU Usage chart */}
+        <section className="game-section perf-chart-card">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            CPU &amp; GPU Usage
+          </h2>
+          <LineChart
+            series={[
+              { data: gpu, color: "var(--color-success)", label: "GPU %" },
+              { data: cpu, color: "var(--color-info)", label: "CPU %" },
+            ]}
+            labels={labels}
+            height={200}
+          />
+        </section>
+
+        {/* FPS chart */}
+        <section className="game-section perf-chart-card">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+            FPS Timeline
+          </h2>
+          <LineChart
+            series={[
+              { data: fps, color: "var(--color-accent)", label: "FPS" },
+            ]}
+            labels={labels}
+            height={200}
+          />
+        </section>
+
+        {/* RAM Usage chart */}
+        {hasRam && (
+          <section className="game-section perf-chart-card">
+            <h2 className="game-section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              RAM Usage
+            </h2>
+            <LineChart
+              series={[
+                { data: ram, color: "#e040fb", label: "RAM %" },
+              ]}
+              labels={labels}
+              formatValue={(v) => `${v}%`}
+              height={200}
+            />
+          </section>
+        )}
+
+        {/* Temperature chart */}
+        {hasTemps && (
+          <section className="game-section perf-chart-card">
+            <h2 className="game-section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+              </svg>
+              Temperature (°C)
+            </h2>
+            <LineChart
+              series={[
+                { data: gpuTemp, color: "#ff5252", label: "GPU °C" },
+                { data: cpuTemp, color: "#ffab00", label: "CPU °C" },
+              ]}
+              labels={labels}
+              formatValue={(v) => `${v}°C`}
+              height={200}
+            />
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-component: Sessions ──────────────────────────────────────────────────
+
+function ActivitySessions({ sessions }: { sessions: GameSession[] }) {
+  return (
+    <div className="game-activity-sessions">
+      <section className="game-section">
+        <h2 className="game-section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          Session Timeline
+        </h2>
+        <div className="game-session-list">
+          {sessions.slice(0, 25).map((session) => (
+            <div key={session.id} className="game-session-item">
+              <div className="game-session-dot" />
+              <div className="game-session-content">
+                <div className="game-session-header">
+                  <span className="game-session-date">
+                    {new Date(session.date).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  <span className="game-session-duration">{formatPlayTime(session.durationMin)}</span>
+                </div>
+                {session.metrics && (
+                  <div className="game-session-metrics">
+                    <span className="activity-metric-tag">{session.metrics.avgFps} FPS</span>
+                    <span className="activity-metric-tag">GPU {session.metrics.avgGpuUsage}%</span>
+                    <span className="activity-metric-tag">CPU {session.metrics.avgCpuUsage}%</span>
+                    <span className="activity-metric-tag">RAM {session.metrics.avgRamUsage}%</span>
+                    <span className="activity-metric-tag">{session.metrics.resolution}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
