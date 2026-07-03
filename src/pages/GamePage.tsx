@@ -9,6 +9,7 @@ import { useToast } from "../context/ToastContext";
 import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, formatPlayTime, parsePlayTime } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
+import WebLinksTab from "../components/WebLinksTab";
 
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -240,24 +241,6 @@ function GameDetail({ game }: { game: Game }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks">("overview");
 
-  const getNormalizedWebsites = (urls: string[]) => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const url of urls) {
-      let clean = url.trim();
-      if (clean.endsWith("/")) {
-        clean = clean.slice(0, -1);
-      }
-      const check = clean.toLowerCase();
-      if (!seen.has(check)) {
-        seen.add(check);
-        result.push(url);
-      }
-    }
-    return result;
-  };
-  const uniqueWebsites = useMemo(() => getNormalizedWebsites(game.websites || []), [game.websites]);
-
   // Metadata fetching state
   const [fetchingMetadata, setFetchingMetadata] = useState(false);
   const [metadataResults, setMetadataResults] = useState<GameMetadataResult[]>([]);
@@ -416,7 +399,6 @@ function GameDetail({ game }: { game: Game }) {
       setFetchingMetadata(false);
     }
   }
-
 
   /** Handle the "Fetch from Web" button for a specific image type. */
   async function handleFetchImage(key: "icon" | "cover" | "hero" | "logo") {
@@ -1456,68 +1438,7 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
               )}
             </section>
-
-            {uniqueWebsites && uniqueWebsites.length > 0 && (
-              <section className="game-section websites-section">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="2" y1="12" x2="22" y2="12" />
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-4z" />
-                  </svg>
-                  Web Links
-                </h2>
-                <div className="web-links-grid" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
-                  {uniqueWebsites.map((url, index) => {
-                    const getBrand = (link: string) => {
-                      const l = link.toLowerCase();
-                      if (l.includes("steam")) return { name: "Steam Store", class: "steam", color: "#1b2838" };
-                      if (l.includes("wikipedia")) return { name: "Wikipedia", class: "wikipedia", color: "#3a3a3a" };
-                      if (l.includes("reddit")) return { name: "Reddit Community", class: "reddit", color: "#ff4500" };
-                      if (l.includes("gog.com")) return { name: "GOG Store", class: "gog", color: "#5c2d91" };
-                      if (l.includes("epicgames")) return { name: "Epic Games", class: "epic", color: "#2a2a2a" };
-                      if (l.includes("twitch.tv")) return { name: "Twitch Stream", class: "twitch", color: "#9146ff" };
-                      if (l.includes("discord")) return { name: "Discord Server", class: "discord", color: "#5865f2" };
-                      if (l.includes("facebook")) return { name: "Facebook", class: "facebook", color: "#1877f2" };
-                      if (l.includes("twitter") || l.includes("x.com")) return { name: "Twitter/X", class: "twitter", color: "#0f1419" };
-                      if (l.includes("youtube")) return { name: "YouTube Channel", class: "youtube", color: "#ff0000" };
-                      return { name: "Official Website", class: "generic", color: "var(--color-accent)" };
-                    };
-                    const brand = getBrand(url);
-                    return (
-                      <a
-                        key={index}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`web-link-btn ${brand.class}`}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 'var(--space-sm)',
-                          padding: 'var(--space-sm) var(--space-md)',
-                          borderRadius: 'var(--radius-md)',
-                          background: brand.color,
-                          color: '#fff',
-                          textDecoration: 'none',
-                          fontSize: 'var(--font-size-sm)',
-                          fontWeight: 500,
-                          transition: 'all var(--transition-fast)',
-                          border: '1px solid rgba(255,255,255,0.05)'
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
-                        {brand.name}
-                      </a>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+
 
             {/* LaunchBox Metadata Card */}
             <section className="game-section lb-card">
@@ -1757,177 +1678,7 @@ function GameDetail({ game }: { game: Game }) {
 
       {activeTab === "activity" && <GameActivityTab game={game} />}
 
-      {activeTab === "weblinks" && (
-        <div className="game-section">
-          <h2 className="game-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            External Web Resources
-          </h2>
-          <div className="weblinks-grid">
-            <a
-              href={`https://store.steampowered.com/search/?term=${encodeURIComponent(game.name)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="weblink-card"
-            >
-              <div className="weblink-icon steam">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2A10 10 0 0 0 2.13 11.28l5.86 2.43a3.5 3.5 0 0 1 6.55.8l5.34-1.8A10 10 0 0 0 12 2zm-3.5 13.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />
-                </svg>
-              </div>
-              <div className="weblink-info">
-                <h4>Steam Search</h4>
-                <p>View community hub, reviews, guides, and store listings on Steam.</p>
-              </div>
-              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </a>
-            <a
-              href={`https://www.gog.com/en/games?query=${encodeURIComponent(game.name)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="weblink-card"
-            >
-              <div className="weblink-icon gog">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-              </div>
-              <div className="weblink-info">
-                <h4>GOG Search</h4>
-                <p>Check DRM-free listings, manuals, and downloads on GOG.</p>
-              </div>
-              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </a>
-            <a
-              href={`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.name)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="weblink-card"
-            >
-              <div className="weblink-icon pcwiki">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
-                  <line x1="9" y1="9" x2="15" y2="15" />
-                  <line x1="15" y1="9" x2="9" y2="15" />
-                </svg>
-              </div>
-              <div className="weblink-info">
-                <h4>PCGamingWiki</h4>
-                <p>Fix graphics issues, frame rate limits, support wide resolutions, and edit config files.</p>
-              </div>
-              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </a>
-            <a
-              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(game.name)}+game+trailer`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="weblink-card"
-            >
-              <div className="weblink-icon youtube">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.002 3.002 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                </svg>
-              </div>
-              <div className="weblink-info">
-                <h4>YouTube Search</h4>
-                <p>Search game trailers, reviews, Let's Plays, walkthroughs, and visual guides.</p>
-              </div>
-              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="5" y1="12" x2="19" y2="12" />
-                <polyline points="12 5 19 12 12 19" />
-              </svg>
-            </a>
-
-            {uniqueWebsites.map((url) => {
-              const getBrandDetails = (link: string) => {
-                const l = link.toLowerCase();
-                if (l.includes("steam")) return { name: "Steam Store Page", colorClass: "steam", desc: "View the official store listing, community forums, and player reviews.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 2.13 11.28l5.86 2.43a3.5 3.5 0 0 1 6.55.8l5.34-1.8A10 10 0 0 0 12 2zm-3.5 13.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" /></svg>
-                )};
-                if (l.includes("wikipedia")) return { name: "Wikipedia Page", colorClass: "wikipedia", desc: "Read the comprehensive article detailing development, reception, and gameplay.", icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
-                )};
-                if (l.includes("reddit")) return { name: "Reddit Community", colorClass: "reddit", desc: "Join community discussions, fanart, gameplay tips, and updates on Reddit.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 15a3 3 0 1 1 3-3a3 3 0 0 1-3 3z" /></svg>
-                )};
-                if (l.includes("gog.com")) return { name: "GOG Store Page", colorClass: "gog", desc: "Check DRM-free listings, manuals, and classic downloads on GOG.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
-                )};
-                if (l.includes("epicgames")) return { name: "Epic Games Store", colorClass: "epic", desc: "View the official listing on Epic Games Store.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2" /></svg>
-                )};
-                if (l.includes("twitch.tv")) return { name: "Twitch Directory", colorClass: "twitch", desc: "Watch live streams, speedruns, and broadcasts on Twitch.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 2H3v16h5v4l4-4h5l4-4V2zm-10 9H9V6h2v5zm4 0h-2V6h2v5z" /></svg>
-                )};
-                if (l.includes("discord")) return { name: "Discord Server", colorClass: "discord", desc: "Chat in real-time with other community members and developers on Discord.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.873-.894a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.075.075 0 0 1 .077-.01c3.92 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.009c.12.099.244.197.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.894a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.156-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.156 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.156-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.156 2.418z" /></svg>
-                )};
-                if (l.includes("facebook")) return { name: "Facebook Official", colorClass: "facebook", desc: "Visit the official Facebook page for updates and community news.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" /></svg>
-                )};
-                if (l.includes("twitter") || l.includes("x.com")) return { name: "Twitter/X Feed", colorClass: "twitter", desc: "Follow the latest tweets, teasers, and announcements on Twitter/X.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>
-                )};
-                if (l.includes("youtube")) return { name: "YouTube Channel", colorClass: "youtube", desc: "Watch official dev diaries, trailer streams, and video updates.", icon: (
-                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.002 3.002 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" /></svg>
-                )};
-                return { name: "Official Website", colorClass: "generic", desc: "Visit the game's official homepage for support, forums, and updates.", icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
-                )};
-              };
-              const brand = getBrandDetails(url);
-              return (
-                <a
-                  key={url}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="weblink-card"
-                >
-                  <div className={`weblink-icon ${brand.colorClass}`}>
-                    {brand.icon}
-                  </div>
-                  <div className="weblink-info">
-                    <h4>{brand.name}</h4>
-                    <p>{brand.desc}</p>
-                    <span 
-                      className="weblink-url-sub" 
-                      style={{ 
-                        fontSize: '11px', 
-                        color: 'var(--color-text-muted)', 
-                        display: 'block', 
-                        marginTop: 'var(--space-xs)', 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap', 
-                        maxWidth: '280px' 
-                      }}
-                    >
-                      {url}
-                    </span>
-                  </div>
-                  <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                    <polyline points="12 5 19 12 12 19" />
-                  </svg>
-                </a>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {activeTab === "weblinks" && <WebLinksTab game={game} />}
 
       {/* Edit Modal */}
       {editing && (
