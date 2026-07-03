@@ -115,23 +115,41 @@ export interface SessionMetrics {
   resolution: string;      // e.g. "1920x1080"
 }
 
-/** A time-series data point for charts. */
-export interface MetricsDataPoint {
-  timestamp: number;
-  fps: number;
-  cpuUsage: number;
-  gpuUsage: number;
-  ramUsage: number;
-  cpuTemp: number;
-  gpuTemp: number;
-}
-
 /** GPU info returned from the system. */
 export interface GpuInfo {
   id: string;
   name: string;
   vendor: string;
   vramMb: number;
+}
+
+/** Build per-session metric series for trend charts. Each data point comes from
+ * a single real recorded session (oldest → newest), so the line connects actual
+ * measurements, not synthetic interpolations. */
+export function buildSessionMetricsSeries(sessions: GameSession[]): {
+  fps: number[];
+  gpu: number[];
+  cpu: number[];
+  ram: number[];
+  gpuTemp: number[];
+  cpuTemp: number[];
+  labels: string[];
+} {
+  const withMetrics = sessions
+    .filter((s) => s.metrics !== undefined)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+
+  return {
+    fps: withMetrics.map((s) => s.metrics!.avgFps),
+    gpu: withMetrics.map((s) => s.metrics!.avgGpuUsage),
+    cpu: withMetrics.map((s) => s.metrics!.avgCpuUsage),
+    ram: withMetrics.map((s) => s.metrics!.avgRamUsage),
+    gpuTemp: withMetrics.map((s) => s.metrics!.avgGpuTemp),
+    cpuTemp: withMetrics.map((s) => s.metrics!.avgCpuTemp),
+    labels: withMetrics.map((s) => fmt.format(new Date(s.date))),
+  };
 }
 
 /** Aggregated activity stats over a time period. */
@@ -151,37 +169,4 @@ export interface ActivityStats {
   avgGpuAll: number;
   avgCpuAll: number;
 }
-
-/** Derive time-series data points from session metrics for chart rendering.
- *  Since we collect aggregated per-session metrics (not high-frequency samples),
- *  we generate synthetic data points that represent the session's performance profile. */
-export function deriveMetricsTimeSeries(
-  metrics: SessionMetrics,
-  durationMin: number,
-  pointCount: number = 20
-): MetricsDataPoint[] {
-  const points: MetricsDataPoint[] = [];
-  const baseTime = Date.now() - durationMin * 60000;
-  const intervalMs = (durationMin * 60000) / pointCount;
-
-  for (let i = 0; i < pointCount; i++) {
-    // Deterministic curve: start high, dip in middle, end high
-    const phase = i / pointCount;
-    const curveFactor = 1.0 - 0.15 * Math.sin(phase * Math.PI * 2);
-    // Deterministic micro-variation based on index (always same for same input)
-    const micro = Math.sin(i * 7.3 + phase * 11.1) * 0.05;
-
-    points.push({
-      timestamp: baseTime + Math.floor(i * intervalMs),
-      fps: Math.round(metrics.avgFps * (curveFactor + micro)),
-      cpuUsage: Math.round(metrics.avgCpuUsage * (curveFactor + micro)),
-      gpuUsage: Math.round(metrics.avgGpuUsage * (curveFactor + micro)),
-      ramUsage: Math.round(metrics.avgRamUsage * (curveFactor + micro * 0.5)),
-      cpuTemp: metrics.avgCpuTemp,
-      gpuTemp: metrics.avgGpuTemp,
-    });
-  }
-  return points;
-}
-
 

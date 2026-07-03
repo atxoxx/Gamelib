@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type ActivityStats, type GameSession, type SessionMetrics, formatPlayTime, deriveMetricsTimeSeries } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type ActivityStats, type GameSession, type SessionMetrics, formatPlayTime, buildSessionMetricsSeries } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 
@@ -1324,24 +1324,12 @@ function GameActivityTab({ game }: { game: Game }) {
   const stats = useMemo(() => getGameStats(game.id), [game.id, getGameStats]);
   const [subTab, setSubTab] = useState<GameActivitySubTab>("overview");
 
-  // Derive time-series from the most recent session with real metrics
-  const sessionTimeSeries = useMemo(() => {
+  // Get the most recent session with real metrics (no synthetic time-series)
+  const latestMetrics = useMemo(() => {
     const withMetrics = sessions
       .filter((s) => s.metrics)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    if (withMetrics.length === 0) return null;
-    const latest = withMetrics[0];
-    const points = deriveMetricsTimeSeries(latest.metrics!, latest.durationMin, 20);
-    const intervalMin = Math.max(1, Math.round(latest.durationMin / 20));
-    return {
-      fps: points.map((p) => p.fps),
-      gpu: points.map((p) => p.gpuUsage),
-      cpu: points.map((p) => p.cpuUsage),
-      ram: points.map((p) => p.ramUsage),
-      gpuTemp: points.map((p) => p.gpuTemp),
-      cpuTemp: points.map((p) => p.cpuTemp),
-      labels: points.map((_, i) => `${i * intervalMin}m`),
-    };
+    return withMetrics.length > 0 ? withMetrics[0].metrics! : null;
   }, [sessions]);
 
   if (sessions.length === 0) {
@@ -1365,7 +1353,6 @@ function GameActivityTab({ game }: { game: Game }) {
   }
 
   const sessionsWithMetrics = sessions.filter((s) => s.metrics);
-  const latestMetrics = sessionsWithMetrics.length > 0 ? sessionsWithMetrics[0].metrics! : null;
 
   return (
     <div className="game-activity-tab">
@@ -1395,11 +1382,7 @@ function GameActivityTab({ game }: { game: Game }) {
           />
         )}
         {subTab === "performance" && (
-          <ActivityPerformance
-            sessionTimeSeries={sessionTimeSeries}
-            latestMetrics={latestMetrics}
-            stats={stats}
-          />
+          <ActivityPerformance sessions={sessions} />
         )}
         {subTab === "sessions" && <ActivitySessions sessions={sessions} />}
       </div>
@@ -1505,23 +1488,16 @@ function ActivityOverview({
 // ─── Sub-component: Performance ───────────────────────────────────────────────
 
 function ActivityPerformance({
-  sessionTimeSeries,
-  latestMetrics,
-  stats,
+  sessions,
 }: {
-  sessionTimeSeries: {
-    fps: number[];
-    gpu: number[];
-    cpu: number[];
-    ram: number[];
-    gpuTemp: number[];
-    cpuTemp: number[];
-    labels: string[];
-  } | null;
-  latestMetrics: SessionMetrics | null;
-  stats: ActivityStats;
+  sessions: GameSession[];
 }) {
-  if (!sessionTimeSeries) {
+  // Real per-session metric series — one data point per recorded session
+  const series = useMemo(() => buildSessionMetricsSeries(sessions), [sessions]);
+  const hasMetrics = series.fps.length > 0;
+  const hasTemps = series.gpuTemp.some((t) => t > 0) || series.cpuTemp.some((t) => t > 0);
+
+  if (!hasMetrics) {
     return (
       <div className="activity-empty" style={{ padding: "var(--space-2xl) var(--space-lg)" }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1532,140 +1508,84 @@ function ActivityPerformance({
     );
   }
 
-  const { fps, gpu, cpu, ram, gpuTemp, cpuTemp, labels } = sessionTimeSeries;
-  const hasTemps = gpuTemp.some((v) => v > 0) || cpuTemp.some((v) => v > 0);
-  const hasRam = ram.some((v) => v > 0);
-
   return (
     <div className="game-activity-performance">
-      {/* Performance summary cards */}
-      <div className="activity-stat-cards game-activity-cards">
-        <div className="activity-stat-card">
-          <div className="activity-stat-icon" style={{ color: "var(--color-accent)" }}>
+      {/* Per-session trend charts (real measurements, one point per session) */}
+      <div className="activity-charts-grid">
+        <section className="activity-section">
+          <h2 className="activity-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
-          </div>
-          <div className="activity-stat-info">
-            <span className="activity-stat-label">Avg FPS</span>
-            <span className="activity-stat-value">{stats.avgFpsAll || "-"}</span>
-            {latestMetrics && (
-              <span className="activity-stat-sub">Min {latestMetrics.minFps} · Max {latestMetrics.maxFps}</span>
-            )}
-          </div>
-        </div>
-        <div className="activity-stat-card">
-          <div className="activity-stat-icon" style={{ color: "var(--color-success)" }}>
+            FPS Over Time
+          </h2>
+          <LineChart
+            series={[{ data: series.fps, color: "var(--color-accent)", label: "Avg FPS" }]}
+            labels={series.labels}
+            height={200}
+            formatValue={(v) => `${Math.round(v)} FPS`}
+          />
+        </section>
+
+        <section className="activity-section">
+          <h2 className="activity-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20" /><path d="M17 2v20" /><path d="M2 12h20" />
             </svg>
-          </div>
-          <div className="activity-stat-info">
-            <span className="activity-stat-label">GPU Usage</span>
-            <span className="activity-stat-value">{stats.avgGpuAll || "-"}%</span>
-          </div>
-        </div>
-        <div className="activity-stat-card">
-          <div className="activity-stat-icon" style={{ color: "var(--color-info)" }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="8" y="8" width="8" height="8" rx="1" ry="1" />
-            </svg>
-          </div>
-          <div className="activity-stat-info">
-            <span className="activity-stat-label">CPU Usage</span>
-            <span className="activity-stat-value">{stats.avgCpuAll || "-"}%</span>
-          </div>
-        </div>
-        <div className="activity-stat-card">
-          <div className="activity-stat-icon" style={{ color: "#e040fb" }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          </div>
-          <div className="activity-stat-info">
-            <span className="activity-stat-label">RAM Usage</span>
-            <span className="activity-stat-value">{latestMetrics?.avgRamUsage ?? "-"}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 2-column chart grid */}
-      <div className="perf-charts-grid">
-        {/* CPU / GPU Usage chart */}
-        <section className="game-section perf-chart-card">
-          <h2 className="game-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-            CPU &amp; GPU Usage
+            CPU & GPU Load Over Time
           </h2>
           <LineChart
             series={[
-              { data: gpu, color: "var(--color-success)", label: "GPU %" },
-              { data: cpu, color: "var(--color-info)", label: "CPU %" },
+              { data: series.gpu, color: "var(--color-success)", label: "GPU" },
+              { data: series.cpu, color: "var(--color-info)", label: "CPU" },
             ]}
-            labels={labels}
+            labels={series.labels}
             height={200}
+            formatValue={(v) => `${Math.round(v)}%`}
           />
         </section>
 
-        {/* FPS chart */}
-        <section className="game-section perf-chart-card">
-          <h2 className="game-section-title">
+        <section className="activity-section">
+          <h2 className="activity-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
             </svg>
-            FPS Timeline
+            RAM Usage Over Time
           </h2>
           <LineChart
-            series={[
-              { data: fps, color: "var(--color-accent)", label: "FPS" },
-            ]}
-            labels={labels}
+            series={[{ data: series.ram, color: "#e040fb", label: "RAM" }]}
+            labels={series.labels}
             height={200}
+            formatValue={(v) => `${Math.round(v)}%`}
           />
         </section>
 
-        {/* RAM Usage chart */}
-        {hasRam && (
-          <section className="game-section perf-chart-card">
-            <h2 className="game-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              RAM Usage
-            </h2>
+        <section className="activity-section">
+          <h2 className="activity-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+            </svg>
+            Temperature Over Time
+          </h2>
+          {hasTemps ? (
             <LineChart
               series={[
-                { data: ram, color: "#e040fb", label: "RAM %" },
+                { data: series.gpuTemp, color: "#ff5252", label: "GPU Temp" },
+                { data: series.cpuTemp, color: "#ffab00", label: "CPU Temp" },
               ]}
-              labels={labels}
-              formatValue={(v) => `${v}%`}
+              labels={series.labels}
               height={200}
+              formatValue={(v) => `${Math.round(v)}°C`}
             />
-          </section>
-        )}
-
-        {/* Temperature chart */}
-        {hasTemps && (
-          <section className="game-section perf-chart-card">
-            <h2 className="game-section-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          ) : (
+            <div className="activity-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
               </svg>
-              Temperature (°C)
-            </h2>
-            <LineChart
-              series={[
-                { data: gpuTemp, color: "#ff5252", label: "GPU °C" },
-                { data: cpuTemp, color: "#ffab00", label: "CPU °C" },
-              ]}
-              labels={labels}
-              formatValue={(v) => `${v}°C`}
-              height={200}
-            />
-          </section>
-        )}
+              <p>Temperature data is not available. WMI thermal sensors are not currently supported.</p>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

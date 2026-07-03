@@ -13,11 +13,9 @@ import { useGames } from "./GameContext";
 import {
   type GameSession,
   type SessionMetrics,
-  type MetricsDataPoint,
   type ActivityStats,
   type GpuInfo,
   type Game,
-  deriveMetricsTimeSeries,
 } from "../types/game";
 
 interface GameExitEvent {
@@ -35,7 +33,6 @@ interface ActivityContextType {
   getGameSessions: (gameId: string) => GameSession[];
   getAllStats: () => ActivityStats;
   getGameStats: (gameId: string) => ActivityStats;
-  getMetricsForSession: (sessionId: string) => MetricsDataPoint[];
   recordSession: (gameId: string, gameName: string, durationMin: number, metrics?: SessionMetrics) => void;
 }
 
@@ -158,12 +155,6 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     [sessions]
   );
 
-  const getMetricsForSession = useCallback((sessionId: string): MetricsDataPoint[] => {
-    const session = sessions.find((s) => s.id === sessionId);
-    if (!session || !session.metrics) return [];
-    return deriveMetricsTimeSeries(session.metrics, session.durationMin);
-  }, [sessions]);
-
   const handleSetSelectedGpu = useCallback(
     (gpu: GpuInfo | null) => {
       setSelectedGpu(gpu);
@@ -209,7 +200,6 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         getGameSessions,
         getAllStats,
         getGameStats,
-        getMetricsForSession,
         recordSession,
       }}
     >
@@ -318,7 +308,7 @@ function computeStats(sessions: GameSession[], games: Game[]): ActivityStats {
     gameIdToMinutes.set(gid, sessions.filter((s) => s.gameId === gid).reduce((sum, s) => sum + s.durationMin, 0));
   }
 
-  // Genre breakdown — aggregate playtime by real game genres
+  // Genre breakdown — aggregate playtime by real game genres (no mock fallback)
   const genreMap = new Map<string, number>();
   for (const gid of sessionGameIds) {
     const game = games.find((g) => g.id === gid);
@@ -329,15 +319,10 @@ function computeStats(sessions: GameSession[], games: Game[]): ActivityStats {
       }
     }
   }
-  const genreBreakdown = genreMap.size > 0
-    ? Array.from(genreMap.entries())
-        .map(([genre, minutes]) => ({ genre, minutes }))
-        .sort((a, b) => b.minutes - a.minutes)
-        .slice(0, 8)
-    : Array.from(gameMap.entries())
-        .map(([name, minutes]) => ({ genre: name, minutes }))
-        .sort((a, b) => b.minutes - a.minutes)
-        .slice(0, 8);
+  const genreBreakdown = Array.from(genreMap.entries())
+    .map(([genre, minutes]) => ({ genre, minutes }))
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, 8);
 
   // Platform breakdown — aggregate playtime by real game platforms
   const platformMap = new Map<string, number>();
