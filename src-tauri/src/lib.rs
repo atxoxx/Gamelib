@@ -4,6 +4,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+mod game_scraper;
+use game_scraper::GameMetadataResult;
+
 /// Serializable game data matching the frontend Game type.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +22,26 @@ struct GameData {
     cover_art_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    banner_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logo_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    developer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publisher: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    release_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    genres: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata_url: Option<String>,
 }
 
 /// Persist the game library to the app's data directory.
@@ -156,6 +179,36 @@ fn scan_folder_for_exes(folder_path: String) -> Vec<ExeInfo> {
 /// Non-game executables to skip during folder scanning.
 const SKIP_KEYWORDS: &[&str] = &["redist", "autorun", "helper", "unin", "crash", "setup", "install", "plugin", "manual", "readme", "register", "7za"];
 
+/// Download a single image URL and return it as a base64 data URL.
+#[tauri::command]
+async fn download_image(url: String) -> Result<Option<String>, String> {
+    Ok(game_scraper::download_image_to_base64(&url).await)
+}
+
+/// Search for game metadata across multiple online sources using Spider.
+#[tauri::command]
+async fn search_game_metadata(game_name: String) -> Vec<GameMetadataResult> {
+    game_scraper::search_game_metadata(&game_name).await
+}
+
+/// Download images from URLs and return them as base64 data URLs.
+#[tauri::command]
+async fn fetch_game_images(urls: Vec<String>) -> Vec<Option<String>> {
+    game_scraper::fetch_game_images(urls).await
+}
+
+/// Use Spider to crawl a URL and extract data using CSS selectors.
+#[tauri::command]
+async fn spider_extract(url: String, selectors: std::collections::HashMap<String, String>) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    game_scraper::spider_extract(&url, &selectors).await
+}
+
+/// Use Spider to fetch the raw HTML of a single page.
+#[tauri::command]
+async fn spider_fetch_page(url: String) -> Result<String, String> {
+    game_scraper::spider_fetch_page(&url).await
+}
+
 fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -200,7 +253,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

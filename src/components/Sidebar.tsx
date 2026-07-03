@@ -289,7 +289,9 @@ export default function Sidebar() {
               onContextMenu={(e) => handleGameContextMenu(e, game)}
             >
               <div className="sidebar-game-icon">
-                {game.coverArtUrl ? (
+                {game.iconUrl ? (
+                  <img src={game.iconUrl} alt={game.name} />
+                ) : game.coverArtUrl ? (
                   <img src={game.coverArtUrl} alt={game.name} />
                 ) : (
                   <svg

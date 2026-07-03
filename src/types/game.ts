@@ -6,8 +6,41 @@ export interface Game {
   installed: boolean;
   playTime: string;
   addedAt: number; // timestamp
-  coverArtUrl?: string; // base64 data URL for cover art image
+  coverArtUrl?: string; // base64 data URL for cover art image (used in library cards)
+  iconUrl?: string; // base64 data URL for small square icon (used in sidebar)
   notes?: string; // user notes about the game
+  /** Fetched metadata fields */
+  description?: string;
+  developer?: string;
+  publisher?: string;
+  releaseDate?: string;
+  genres?: string[];
+  bannerUrl?: string; // base64 data URL for hero/banner image (used at top of game page)
+  logoUrl?: string; // base64 data URL for logo/title image
+  metadataSource?: string; // e.g., "Steam", "IGDB"
+  metadataUrl?: string; // source page URL
+}
+
+/** Metadata returned from the backend scraper. */
+export interface GameMetadataResult {
+  title: string;
+  description: string | null;
+  developer: string | null;
+  publisher: string | null;
+  releaseDate: string | null;
+  genres: string[];
+  images: GameMetadataImages;
+  sourceUrl: string;
+  sourceName: string;
+}
+
+/** Image URLs from a metadata source. */
+export interface GameMetadataImages {
+  icon: string | null;
+  cover: string | null;
+  hero: string | null;
+  banner: string | null;
+  logo: string | null;
 }
 
 /** Extract a human-readable game name from an executable file path. */
