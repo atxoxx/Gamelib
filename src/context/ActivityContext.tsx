@@ -34,6 +34,7 @@ interface ActivityContextType {
   getAllStats: () => ActivityStats;
   getGameStats: (gameId: string) => ActivityStats;
   recordSession: (gameId: string, gameName: string, durationMin: number, metrics?: SessionMetrics) => void;
+  deleteSession: (sessionId: string) => void;
 }
 
 const ActivityContext = createContext<ActivityContextType | null>(null);
@@ -150,6 +151,17 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     [persistSessions]
   );
 
+  const deleteSession = useCallback(
+    (sessionId: string) => {
+      setSessions((prev) => {
+        const updated = prev.filter((s) => s.id !== sessionId);
+        persistSessions(updated);
+        return updated;
+      });
+    },
+    [persistSessions]
+  );
+
   const getGameSessions = useCallback(
     (gameId: string) => sessions.filter((s) => s.gameId === gameId),
     [sessions]
@@ -201,6 +213,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         getAllStats,
         getGameStats,
         recordSession,
+        deleteSession,
       }}
     >
       {children}
