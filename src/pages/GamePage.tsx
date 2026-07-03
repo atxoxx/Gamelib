@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, parsePlayTime, formatPlayTime } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, parsePlayTime, formatPlayTime } from "../types/game";
 
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -154,6 +154,13 @@ function GameDetail({ game }: { game: Game }) {
   const [reviewText, setReviewText] = useState(game.reviewText || "");
   const [isEditingReview, setIsEditingReview] = useState(false);
 
+  // LaunchBox Image Browser state
+  const [showImageBrowser, setShowImageBrowser] = useState(false);
+  const [lbImages, setLbImages] = useState<LaunchBoxImageResult[]>([]);
+  const [lbLoading, setLbLoading] = useState(false);
+  const [lbSelectedCategory, setLbSelectedCategory] = useState<string>("all");
+  const [lbApplyingUrl, setLbApplyingUrl] = useState<string | null>(null);
+
   // Sync state when game changes
   useEffect(() => {
     setRating(game.rating || 0);
@@ -210,43 +217,43 @@ function GameDetail({ game }: { game: Game }) {
     }
   }
 
-  /** Fetch a single image from a metadata result by image key. */
-  async function fetchImageFromMetadata(
-    imageKey: "icon" | "cover" | "hero" | "banner" | "logo"
-  ): Promise<string | undefined> {
-    // If we already have metadata results cached, use them
-    let results = metadataResults;
-    if (results.length === 0) {
-      // Search metadata first
-      const freshResults: GameMetadataResult[] = await invoke("search_game_metadata", {
-        gameName: game.name,
-      });
-      results = freshResults;
-      setMetadataResults(results);
-    }
-    if (results.length === 0) return undefined;
-
-    const imageUrl = results[0].images[imageKey];
-    if (!imageUrl) return undefined;
-
-    const dataUrl: string | null = await invoke("download_image", { url: imageUrl });
-    return dataUrl ?? undefined;
-  }
 
   /** Handle the "Fetch from Web" button for a specific image type. */
   async function handleFetchImage(key: "icon" | "cover" | "hero" | "logo") {
     setFetchingImageKey(key);
     try {
-      const dataUrl = await fetchImageFromMetadata(key);
-      if (dataUrl) {
-        if (key === "icon") setEditIcon(dataUrl);
-        else if (key === "cover") setEditCover(dataUrl);
-        else if (key === "hero") setEditHero(dataUrl);
-        else if (key === "logo") setEditLogo(dataUrl);
-        showToast(`Fetched ${key} image`, "success");
-      } else {
-        showToast(`No ${key} image found in metadata`, "info");
+      // Find remote image URL from results
+      let results = metadataResults;
+      if (results.length === 0) {
+        const freshResults: GameMetadataResult[] = await invoke("search_game_metadata", {
+          gameName: game.name,
+        });
+        results = freshResults;
+        setMetadataResults(results);
       }
+
+      if (results.length > 0) {
+        const imageUrl = results[0].images[key];
+        if (imageUrl) {
+          // Optimistically update instantly
+          if (key === "icon") setEditIcon(imageUrl);
+          else if (key === "cover") setEditCover(imageUrl);
+          else if (key === "hero") setEditHero(imageUrl);
+          else if (key === "logo") setEditLogo(imageUrl);
+
+          // Download in background
+          const dataUrl: string | null = await invoke("download_image", { url: imageUrl });
+          if (dataUrl) {
+            if (key === "icon") setEditIcon(dataUrl);
+            else if (key === "cover") setEditCover(dataUrl);
+            else if (key === "hero") setEditHero(dataUrl);
+            else if (key === "logo") setEditLogo(dataUrl);
+            showToast(`Fetched and saved ${key} image`, "success");
+            return;
+          }
+        }
+      }
+      showToast(`No ${key} image found in metadata`, "info");
     } catch (err) {
       showToast(`Failed to fetch image: ${err}`, "error");
     } finally {
@@ -340,6 +347,83 @@ function GameDetail({ game }: { game: Game }) {
     else if (key === "cover") setEditCover("");
     else if (key === "hero") setEditHero("");
     else if (key === "logo") setEditLogo("");
+  }
+
+  // ─── LaunchBox Image Browser Handlers ───────────────────────────────────────
+
+  async function handleOpenImageBrowser() {
+    setShowImageBrowser(true);
+    setLbSelectedCategory("all");
+    if (lbImages.length > 0) return; // already loaded
+    setLbLoading(true);
+    try {
+      const images: LaunchBoxImageResult[] = await invoke("search_launchbox_images", {
+        gameName: game.name,
+      });
+      setLbImages(images);
+      if (images.length === 0) {
+        showToast("No images found on LaunchBox", "info");
+      }
+    } catch (err) {
+      showToast(`LaunchBox image search failed: ${err}`, "error");
+    } finally {
+      setLbLoading(false);
+    }
+  }
+
+  async function handleApplyLbImage(imageUrl: string, slot: "icon" | "cover" | "hero" | "banner" | "logo") {
+    setLbApplyingUrl(imageUrl);
+    try {
+      // Optimistically update instantly
+      if (editing) {
+        if (slot === "icon") setEditIcon(imageUrl);
+        else if (slot === "cover") setEditCover(imageUrl);
+        else if (slot === "hero" || slot === "banner") setEditHero(imageUrl);
+        else if (slot === "logo") setEditLogo(imageUrl);
+      } else {
+        const update: Record<string, string | undefined> = {};
+        if (slot === "icon") update.iconUrl = imageUrl;
+        else if (slot === "cover") update.coverArtUrl = imageUrl;
+        else if (slot === "hero" || slot === "banner") update.bannerUrl = imageUrl;
+        else if (slot === "logo") update.logoUrl = imageUrl;
+        updateGame(game.id, update);
+      }
+
+      // Download in background
+      const dataUrl: string | null = await invoke("download_image", { url: imageUrl });
+      if (dataUrl) {
+        if (editing) {
+          if (slot === "icon") setEditIcon(dataUrl);
+          else if (slot === "cover") setEditCover(dataUrl);
+          else if (slot === "hero" || slot === "banner") setEditHero(dataUrl);
+          else if (slot === "logo") setEditLogo(dataUrl);
+        } else {
+          const update: Record<string, string | undefined> = {};
+          if (slot === "icon") update.iconUrl = dataUrl;
+          else if (slot === "cover") update.coverArtUrl = dataUrl;
+          else if (slot === "hero" || slot === "banner") update.bannerUrl = dataUrl;
+          else if (slot === "logo") update.logoUrl = dataUrl;
+          updateGame(game.id, update);
+        }
+        showToast(`Applied and saved image as ${slot}`, "success");
+      } else {
+        showToast("Failed to download image", "error");
+      }
+    } catch (err) {
+      showToast(`Failed to apply image: ${err}`, "error");
+    } finally {
+      setLbApplyingUrl(null);
+    }
+  }
+
+  function getLbCategories(): string[] {
+    const cats = new Set(lbImages.map((i) => i.category));
+    return Array.from(cats);
+  }
+
+  function getFilteredLbImages(): LaunchBoxImageResult[] {
+    if (lbSelectedCategory === "all") return lbImages;
+    return lbImages.filter((i) => i.category === lbSelectedCategory);
   }
 
   function saveEdits() {
@@ -690,6 +774,51 @@ function GameDetail({ game }: { game: Game }) {
                   {game.genres.map((g) => (
                     <span key={g} className="metadata-genre-tag">{g}</span>
                   ))}
+                </div>
+              )}
+            </section>
+
+            {/* LaunchBox Metadata Card */}
+            <section className="game-section lb-card">
+              <h2 className="game-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="2" />
+                  <path d="M7 2v20" />
+                  <path d="M2 12h5" />
+                  <path d="M2 7h5" />
+                  <path d="M2 17h5" />
+                </svg>
+                LaunchBox
+              </h2>
+              {game.metadataSource === "LaunchBox" && game.metadataUrl ? (
+                <div className="lb-card-content">
+                  <a className="lb-card-link" href={game.metadataUrl} target="_blank" rel="noopener noreferrer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    View on LaunchBox DB
+                  </a>
+                  <button className="lb-card-browse-btn" onClick={handleOpenImageBrowser} type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    Browse Images
+                  </button>
+                </div>
+              ) : (
+                <div className="lb-card-content">
+                  <p className="lb-card-desc">Search LaunchBox Games Database for box art, banners, logos, screenshots, and more.</p>
+                  <button className="lb-card-browse-btn" onClick={handleOpenImageBrowser} type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    Search LaunchBox Images
+                  </button>
                 </div>
               )}
             </section>
@@ -1065,6 +1194,14 @@ function GameDetail({ game }: { game: Game }) {
                 <EditImageSlot label="Hero Banner" subtitle="Game page top" imageUrl={editHero} previewSize={{ w: 240, h: 100 }} isFetching={fetchingImageKey === "hero"} onChooseFile={() => handlePickImage("hero")} onFetchWeb={() => handleFetchImage("hero")} onRemove={() => handleRemoveImage("hero")} />
                 <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
               </div>
+              <button className="lb-browse-edit-btn" onClick={handleOpenImageBrowser} type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="2" />
+                  <path d="M7 2v20" />
+                  <path d="M2 12h5" />
+                </svg>
+                Browse LaunchBox Images
+              </button>
             </div>
 
             <div className="modal-footer">
@@ -1073,6 +1210,119 @@ function GameDetail({ game }: { game: Game }) {
                 <button className="modal-btn modal-btn-cancel" onClick={cancelEditing}>Cancel</button>
                 <button className="modal-btn modal-btn-confirm" onClick={saveEdits}>Save Changes</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LaunchBox Image Browser Modal */}
+      {showImageBrowser && (
+        <div className="modal-backdrop" onClick={() => setShowImageBrowser(false)}>
+          <div className="modal lb-browser-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-header-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="20" rx="2" />
+                  <path d="M7 2v20" />
+                  <path d="M2 12h5" />
+                  <path d="M2 7h5" />
+                  <path d="M2 17h5" />
+                </svg>
+              </div>
+              <div className="modal-header-text">
+                <h3 className="modal-title">LaunchBox Image Browser</h3>
+                <p className="modal-subtitle">Browse and apply images from LaunchBox Games Database for {game.name}</p>
+              </div>
+              <button className="metadata-panel-close" onClick={() => setShowImageBrowser(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Category filter tabs */}
+            <div className="lb-category-tabs">
+              <button
+                className={`lb-cat-tab ${lbSelectedCategory === "all" ? "active" : ""}`}
+                onClick={() => setLbSelectedCategory("all")}
+              >
+                All ({lbImages.length})
+              </button>
+              {getLbCategories().map((cat) => (
+                <button
+                  key={cat}
+                  className={`lb-cat-tab ${lbSelectedCategory === cat ? "active" : ""}`}
+                  onClick={() => setLbSelectedCategory(cat)}
+                >
+                  {cat} ({lbImages.filter((i) => i.category === cat).length})
+                </button>
+              ))}
+            </div>
+
+            <div className="lb-browser-body">
+              {lbLoading ? (
+                <div className="metadata-loading">
+                  <div className="metadata-spinner" />
+                  <p>Searching LaunchBox for "{game.name}"...</p>
+                </div>
+              ) : lbImages.length === 0 ? (
+                <div className="metadata-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                  <p>No images found. Try editing the game name and searching again.</p>
+                </div>
+              ) : (
+                <div className="lb-image-grid">
+                  {getFilteredLbImages().map((img, idx) => (
+                    <div key={idx} className="lb-image-card">
+                      <div className="lb-image-thumb">
+                        <img src={img.url} alt={`${img.category} ${img.region || ""}`} loading="lazy" />
+                      </div>
+                      <div className="lb-image-info">
+                        <span className="lb-image-category">{img.category}</span>
+                        <span className="lb-image-meta">
+                          {img.region && <span className="lb-image-region">{img.region}</span>}
+                          {img.resolution && <span className="lb-image-res">{img.resolution}</span>}
+                        </span>
+                      </div>
+                      <div className="lb-image-actions">
+                        <button
+                          className="lb-apply-btn"
+                          onClick={() => handleApplyLbImage(img.url, "icon")}
+                          disabled={lbApplyingUrl === img.url}
+                        >
+                          {lbApplyingUrl === img.url ? "..." : "Icon"}
+                        </button>
+                        <button
+                          className="lb-apply-btn"
+                          onClick={() => handleApplyLbImage(img.url, "cover")}
+                          disabled={lbApplyingUrl === img.url}
+                        >
+                          {lbApplyingUrl === img.url ? "..." : "Cover"}
+                        </button>
+                        <button
+                          className="lb-apply-btn"
+                          onClick={() => handleApplyLbImage(img.url, "hero")}
+                          disabled={lbApplyingUrl === img.url}
+                        >
+                          {lbApplyingUrl === img.url ? "..." : "Hero"}
+                        </button>
+                        <button
+                          className="lb-apply-btn"
+                          onClick={() => handleApplyLbImage(img.url, "logo")}
+                          disabled={lbApplyingUrl === img.url}
+                        >
+                          {lbApplyingUrl === img.url ? "..." : "Logo"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 mod game_scraper;
-use game_scraper::GameMetadataResult;
+use game_scraper::{GameMetadataResult, LaunchBoxImageResult};
 
 /// Serializable game data matching the frontend Game type.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -209,6 +209,13 @@ async fn spider_fetch_page(url: String) -> Result<String, String> {
     game_scraper::spider_fetch_page(&url).await
 }
 
+/// Search the LaunchBox Games Database for images of a game.
+/// Returns categorized images with URLs, regions, and resolutions.
+#[tauri::command]
+async fn search_launchbox_images(game_name: String) -> Result<Vec<LaunchBoxImageResult>, String> {
+    game_scraper::search_launchbox_images(&game_name).await
+}
+
 fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -253,7 +260,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

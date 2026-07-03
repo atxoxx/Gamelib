@@ -45,6 +45,14 @@ export interface GameMetadataImages {
   logo: string | null;
 }
 
+/** A single categorized image from the LaunchBox Games Database. */
+export interface LaunchBoxImageResult {
+  category: string;
+  region: string | null;
+  resolution: string;
+  url: string;
+}
+
 /** Extract a human-readable game name from an executable file path. */
 export function gameNameFromPath(filePath: string): string {
   return (

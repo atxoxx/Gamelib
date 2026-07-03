@@ -3120,3 +3120,290 @@
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 0%, transparent);
   }
 }
+
+/* ==============================
+   LaunchBox Card (Game Page Side Column)
+   ============================== */
+
+.lb-card {
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.05), rgba(30, 33, 50, 0.6));
+}
+
+.lb-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.lb-card-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.lb-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.lb-card-link:hover {
+  color: var(--color-accent-hover);
+}
+
+.lb-card-link svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.lb-card-browse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  background: rgba(108, 92, 231, 0.12);
+  border: 1px solid rgba(108, 92, 231, 0.25);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lb-card-browse-btn:hover {
+  background: rgba(108, 92, 231, 0.2);
+  border-color: rgba(108, 92, 231, 0.4);
+  box-shadow: 0 0 12px rgba(108, 92, 231, 0.15);
+}
+
+.lb-card-browse-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* ==============================
+   LaunchBox Browse Button (Edit Modal)
+   ============================== */
+
+.lb-browse-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.1), rgba(68, 138, 255, 0.08));
+  border: 1px solid rgba(108, 92, 231, 0.2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.25s;
+  margin-top: var(--space-md);
+  width: 100%;
+}
+
+.lb-browse-edit-btn:hover {
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.18), rgba(68, 138, 255, 0.14));
+  border-color: rgba(108, 92, 231, 0.35);
+  box-shadow: 0 2px 16px rgba(108, 92, 231, 0.15);
+  transform: translateY(-1px);
+}
+
+.lb-browse-edit-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* ==============================
+   LaunchBox Image Browser Modal
+   ============================== */
+
+.lb-browser-modal {
+  width: min(95vw, 1000px);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Category filter tabs */
+.lb-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: var(--space-md) var(--space-xl);
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(0, 0, 0, 0.15);
+  overflow-x: auto;
+}
+
+.lb-cat-tab {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.lb-cat-tab:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.lb-cat-tab.active {
+  color: #fff;
+  background: rgba(108, 92, 231, 0.25);
+  border-color: rgba(108, 92, 231, 0.4);
+  box-shadow: 0 0 8px rgba(108, 92, 231, 0.2);
+}
+
+/* Image browser body */
+.lb-browser-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-xl);
+}
+
+/* Image grid */
+.lb-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+/* Individual image card */
+.lb-image-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.25s;
+}
+
+.lb-image-card:hover {
+  border-color: rgba(108, 92, 231, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Image thumbnail */
+.lb-image-thumb {
+  aspect-ratio: 4/3;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lb-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 0.3s;
+}
+
+.lb-image-card:hover .lb-image-thumb img {
+  transform: scale(1.05);
+}
+
+/* Image info */
+.lb-image-info {
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lb-image-category {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-image-meta {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.lb-image-region {
+  padding: 1px 6px;
+  background: rgba(108, 92, 231, 0.15);
+  border-radius: var(--radius-full);
+  color: var(--color-accent);
+  font-size: 10px;
+}
+
+.lb-image-res {
+  color: var(--color-text-muted);
+}
+
+/* Image action buttons */
+.lb-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.lb-apply-btn {
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  background: rgba(108, 92, 231, 0.1);
+  border: 1px solid rgba(108, 92, 231, 0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lb-apply-btn:hover:not(:disabled) {
+  background: rgba(108, 92, 231, 0.2);
+  border-color: rgba(108, 92, 231, 0.4);
+  color: #fff;
+}
+
+.lb-apply-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Generic apply buttons (icon-only) */
+.lb-apply-generic {
+  padding: 3px 6px;
+  margin-left: auto;
+}
+
+.lb-apply-generic svg {
+  width: 12px;
+  height: 12px;
+}
