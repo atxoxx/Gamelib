@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
@@ -29,10 +30,15 @@ function AppLayout() {
 }
 
 function App() {
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("gamelib-theme") || "dark";
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  }, []);
+
   return (
     <HashRouter>
-      <GameProvider>
-        <ToastProvider>
+      <ToastProvider>
+        <GameProvider>
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/library" replace />} />
@@ -44,8 +50,8 @@ function App() {
             <Route path="plugins" element={<PluginsPage />} />
           </Route>
         </Routes>
-        </ToastProvider>
-      </GameProvider>
+        </GameProvider>
+      </ToastProvider>
     </HashRouter>
   );
 }

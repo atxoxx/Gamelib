@@ -9,14 +9,14 @@ import ImportModal, { type ExeInfo } from "./ImportModal";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { games, selectedGameId, addGame, addGames, setSelectedGameId, removeGame } =
+  const { games, selectedGameId, addGame, addGames, setSelectedGameId, removeGame, runningGameIds, launchGame } =
     useGames();
   const { showToast } = useToast();
 
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [showImportMenu, setShowImportMenu] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ gameId: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ game: Game; x: number; y: number } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [scannedExes, setScannedExes] = useState<ExeInfo[]>([]);
 
@@ -121,15 +121,24 @@ export default function Sidebar() {
   function handleGameContextMenu(e: React.MouseEvent, game: Game) {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ gameId: game.id, x: e.clientX, y: e.clientY });
+    setContextMenu({ game, x: e.clientX, y: e.clientY });
   }
 
-  function handleRemoveFromContextMenu() {
-    if (!contextMenu) return;
-    const game = games.find((g) => g.id === contextMenu.gameId);
-    removeGame(contextMenu.gameId);
+  function handleLaunchFromContextMenu(game: Game) {
     setContextMenu(null);
-    if (game) showToast(`Removed ${game.name}`, "info");
+    launchGame(game);
+  }
+
+  function handleViewDetailsFromContextMenu(game: Game) {
+    setContextMenu(null);
+    setSelectedGameId(game.id);
+    navigate(`/library/${game.id}`);
+  }
+
+  function handleRemoveFromContextMenu(game: Game) {
+    removeGame(game.id);
+    setContextMenu(null);
+    showToast(`Removed ${game.name}`, "info");
   }
 
   function handleGameClick(game: Game) {
@@ -175,10 +184,12 @@ export default function Sidebar() {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ width: 16, height: 16 }}
             >
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
+            <span style={{ marginLeft: "var(--space-sm)", fontSize: "var(--font-size-sm)", fontWeight: "var(--font-weight-medium)" }}>Import Games</span>
           </button>
 
           {showImportMenu && (
@@ -314,7 +325,7 @@ export default function Sidebar() {
                 </div>
               </div>
               <div
-                className={`sidebar-game-status ${game.installed ? "installed" : "not-installed"}`}
+                className={`sidebar-game-status ${runningGameIds.includes(game.id) ? "running" : game.installed ? "installed" : "not-installed"}`}
               />
             </div>
           ))
@@ -324,7 +335,11 @@ export default function Sidebar() {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          onRemove={handleRemoveFromContextMenu}
+          game={contextMenu.game}
+          isRunning={runningGameIds.includes(contextMenu.game.id)}
+          onLaunch={() => handleLaunchFromContextMenu(contextMenu.game)}
+          onViewDetails={() => handleViewDetailsFromContextMenu(contextMenu.game)}
+          onRemove={() => handleRemoveFromContextMenu(contextMenu.game)}
         />
       )}
 
@@ -339,11 +354,59 @@ export default function Sidebar() {
   );
 }
 
-/* Inline context menu */
-function ContextMenu({ x, y, onRemove }: { x: number; y: number; onRemove: () => void }) {
+interface SidebarContextMenuProps {
+  x: number;
+  y: number;
+  game: Game;
+  isRunning: boolean;
+  onLaunch: () => void;
+  onViewDetails: () => void;
+  onRemove: () => void;
+}
+
+function ContextMenu({
+  x,
+  y,
+  game,
+  isRunning,
+  onLaunch,
+  onViewDetails,
+  onRemove,
+}: SidebarContextMenuProps) {
+  const menuWidth = 190;
+  const menuHeight = 130;
+  const adjustedX = window.innerWidth - x < menuWidth ? x - menuWidth : x;
+  const adjustedY = window.innerHeight - y < menuHeight ? y - menuHeight : y;
+
   return (
-    <div className="context-menu" style={{ left: x, top: y }} onMouseDown={(e) => e.stopPropagation()}>
-      <button className="context-menu-item" onClick={onRemove}>
+    <div
+      className="context-menu"
+      style={{ left: adjustedX, top: adjustedY }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="context-menu-header">
+        <span className="context-menu-title">{game.name}</span>
+      </div>
+      <button
+        className="context-menu-item play-action"
+        onClick={onLaunch}
+        disabled={isRunning}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+        {isRunning ? "Running" : "Play Game"}
+      </button>
+      <button className="context-menu-item" onClick={onViewDetails}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+        View Details
+      </button>
+      <div className="context-menu-separator" />
+      <button className="context-menu-item remove-action" onClick={onRemove}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="3 6 5 6 21 6" />
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

@@ -19,6 +19,8 @@ export interface Game {
   logoUrl?: string; // base64 data URL for logo/title image
   metadataSource?: string; // e.g., "Steam", "IGDB"
   metadataUrl?: string; // source page URL
+  rating?: number; // user rating (1-5 stars)
+  reviewText?: string; // user review text
 }
 
 /** Metadata returned from the backend scraper. */

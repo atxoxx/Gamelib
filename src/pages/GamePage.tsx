@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import type { Game, GameMetadataResult } from "../types/game";
+import { type Game, type GameMetadataResult, parsePlayTime, formatPlayTime } from "../types/game";
 
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -124,7 +124,8 @@ function GameNotFound() {
 function GameDetail({ game }: { game: Game }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { updateGame, removeGame } = useGames();
+  const { updateGame, removeGame, runningGameIds, launchGame } = useGames();
+  const isRunning = runningGameIds.includes(game.id);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks">("overview");
@@ -147,10 +148,22 @@ function GameDetail({ game }: { game: Game }) {
   // Track which image is being fetched
   const [fetchingImageKey, setFetchingImageKey] = useState<string | null>(null);
 
+  // Reviews state
+  const [rating, setRating] = useState(game.rating || 0);
+  const [reviewInput, setReviewInput] = useState(game.reviewText || "");
+  const [reviewText, setReviewText] = useState(game.reviewText || "");
+  const [isEditingReview, setIsEditingReview] = useState(false);
+
+  // Sync state when game changes
+  useEffect(() => {
+    setRating(game.rating || 0);
+    setReviewInput(game.reviewText || "");
+    setReviewText(game.reviewText || "");
+    setIsEditingReview(false);
+  }, [game.id, game.rating, game.reviewText]);
+
   function handleLaunch() {
-    invoke("launch_game", { gameId: game.id, gamePath: game.path })
-      .then(() => showToast(`Launched ${game.name}`, "success"))
-      .catch((err: string) => showToast(err, "error"));
+    launchGame(game);
   }
 
   function handleBack() {
@@ -364,6 +377,28 @@ function GameDetail({ game }: { game: Game }) {
     showToast("Game updated", "success");
   }
 
+  function handleSaveReview() {
+    updateGame(game.id, {
+      rating: rating > 0 ? rating : undefined,
+      reviewText: reviewInput.trim() || undefined,
+    });
+    setReviewText(reviewInput.trim());
+    setIsEditingReview(false);
+    showToast("Review saved", "success");
+  }
+
+  function handleDeleteReview() {
+    updateGame(game.id, {
+      rating: undefined,
+      reviewText: undefined,
+    });
+    setRating(0);
+    setReviewText("");
+    setReviewInput("");
+    setIsEditingReview(false);
+    showToast("Review deleted", "info");
+  }
+
   const displayName = editing ? editName : game.name;
   const displayPlatform = editing ? editPlatform : game.platform;
   const displayCover = editing ? editCover : game.coverArtUrl;
@@ -494,11 +529,24 @@ function GameDetail({ game }: { game: Game }) {
             </div>
           </div>
           {!editing && (
-            <button className="game-launch-btn" onClick={handleLaunch}>
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              Launch Game
+            <button
+              className={`game-launch-btn${isRunning ? " running" : ""}`}
+              onClick={handleLaunch}
+              disabled={isRunning}
+            >
+              {isRunning ? (
+                <>
+                  <span className="running-dot-pulse" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  Launch Game
+                </>
+              )}
             </button>
           )}
         </div>
@@ -650,39 +698,246 @@ function GameDetail({ game }: { game: Game }) {
       )}
 
       {activeTab === "reviews" && (
-        <div className="game-section game-tab-placeholder">
+        <div className="game-section">
           <h2 className="game-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            Reviews
+            Player Review
           </h2>
-          <p className="game-tab-placeholder-text">No reviews yet.</p>
+
+          {(!reviewText && !rating && !isEditingReview) || isEditingReview ? (
+            <div className="review-writer">
+              <h3>{isEditingReview ? "Edit your review" : "Rate and review this game"}</h3>
+              <div className="review-stars-select">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    className={`star-select-btn${star <= rating ? " selected" : ""}`}
+                    onClick={() => setRating(star)}
+                    type="button"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="edit-input edit-textarea"
+                value={reviewInput}
+                onChange={(e) => setReviewInput(e.target.value)}
+                placeholder="Write your review here..."
+                rows={4}
+              />
+              <div className="review-writer-actions">
+                {isEditingReview && (
+                  <button
+                    className="game-edit-btn game-edit-cancel"
+                    onClick={() => {
+                      setRating(game.rating || 0);
+                      setReviewInput(game.reviewText || "");
+                      setIsEditingReview(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  className="game-edit-btn game-edit-save"
+                  onClick={handleSaveReview}
+                  disabled={rating === 0 && !reviewInput.trim()}
+                >
+                  Save Review
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="user-review-card">
+              <div className="user-review-header">
+                <div className="user-review-avatar">
+                  <span>ME</span>
+                </div>
+                <div className="user-review-meta">
+                  <div className="user-review-name">
+                    You <span className="verified-badge">Verified Player</span>
+                  </div>
+                  <div className="user-review-stars">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <svg
+                        key={star}
+                        className={`review-star-icon${star <= rating ? " active" : ""}`}
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                      >
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                      </svg>
+                    ))}
+                  </div>
+                </div>
+                <div className="user-review-actions">
+                  <button
+                    className="review-action-btn"
+                    onClick={() => setIsEditingReview(true)}
+                    title="Edit Review"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                  <button
+                    className="review-action-btn review-delete"
+                    onClick={handleDeleteReview}
+                    title="Delete Review"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              {reviewText && <p className="user-review-text">{reviewText}</p>}
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === "activity" && (
-        <div className="game-section game-tab-placeholder">
+        <div className="game-section">
           <h2 className="game-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
-            Activity
+            Session Timeline
           </h2>
-          <p className="game-tab-placeholder-text">No recent activity.</p>
+          {(() => {
+            const sessions = getMockSessions(game.playTime);
+            if (sessions.length === 0) {
+              return (
+                <div className="timeline-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  <p>No activity logged yet. Launch the game to start recording sessions.</p>
+                </div>
+              );
+            }
+            return (
+              <div className="timeline">
+                {sessions.map((session) => (
+                  <div key={session.id} className="timeline-item">
+                    <div className="timeline-dot" />
+                    <div className="timeline-content">
+                      <div className="timeline-header">
+                        <span className="timeline-date">{session.date}</span>
+                        <span className="timeline-duration">{session.duration} played</span>
+                      </div>
+                      <p className="timeline-desc">{session.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {activeTab === "weblinks" && (
-        <div className="game-section game-tab-placeholder">
+        <div className="game-section">
           <h2 className="game-section-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
             </svg>
-            Web Links
+            External Web Resources
           </h2>
-          <p className="game-tab-placeholder-text">No links added yet.</p>
+          <div className="weblinks-grid">
+            <a
+              href={`https://store.steampowered.com/search/?term=${encodeURIComponent(game.name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="weblink-card"
+            >
+              <div className="weblink-icon steam">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2A10 10 0 0 0 2.13 11.28l5.86 2.43a3.5 3.5 0 0 1 6.55.8l5.34-1.8A10 10 0 0 0 12 2zm-3.5 13.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />
+                </svg>
+              </div>
+              <div className="weblink-info">
+                <h4>Steam Store</h4>
+                <p>View community hub, reviews, guides and patch notes on Steam.</p>
+              </div>
+              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </a>
+            <a
+              href={`https://www.gog.com/en/games?query=${encodeURIComponent(game.name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="weblink-card"
+            >
+              <div className="weblink-icon gog">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+              </div>
+              <div className="weblink-info">
+                <h4>GOG Store</h4>
+                <p>Check DRM-free listings, manuals, and classic downloads on GOG.</p>
+              </div>
+              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </a>
+            <a
+              href={`https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="weblink-card"
+            >
+              <div className="weblink-icon pcwiki">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                </svg>
+              </div>
+              <div className="weblink-info">
+                <h4>PCGamingWiki</h4>
+                <p>Fix graphics issues, frame rate limits, support wide resolutions, and edit config files.</p>
+              </div>
+              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </a>
+            <a
+              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(game.name)}+game+trailer`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="weblink-card"
+            >
+              <div className="weblink-icon youtube">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.517 3.545 12 3.545 12 3.545s-7.517 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.871.508 9.388.508 9.388.508s7.517 0 9.388-.508a3.002 3.002 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+              </div>
+              <div className="weblink-info">
+                <h4>YouTube Media</h4>
+                <p>Search game trailers, reviews, Let's Plays, walkthroughs, and visual guides.</p>
+              </div>
+              <svg className="weblink-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </a>
+          </div>
         </div>
       )}
 
@@ -843,4 +1098,42 @@ export default function GamePage() {
   }
 
   return <GameDetail key={game.id} game={game} />;
+}
+
+function getMockSessions(playTimeStr: string) {
+  const totalMinutes = parsePlayTime(playTimeStr);
+  if (totalMinutes <= 0) return [];
+  
+  const sessions = [];
+  const now = new Date();
+  
+  if (totalMinutes > 30) {
+    const mins1 = Math.round(totalMinutes * 0.4);
+    const date1 = new Date();
+    date1.setDate(now.getDate() - 1);
+    sessions.push({
+      id: "session-1",
+      date: "Yesterday",
+      duration: formatPlayTime(mins1),
+      description: "Explored new areas and completed side quests.",
+    });
+    
+    const mins2 = totalMinutes - mins1;
+    const date2 = new Date();
+    date2.setDate(now.getDate() - 4);
+    sessions.push({
+      id: "session-2",
+      date: date2.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      duration: formatPlayTime(mins2),
+      description: "Initial playthrough and introduction session.",
+    });
+  } else {
+    sessions.push({
+      id: "session-1",
+      date: "2 days ago",
+      duration: playTimeStr,
+      description: "First launch and setup testing.",
+    });
+  }
+  return sessions;
 }

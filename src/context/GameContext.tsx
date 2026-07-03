@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { addSessionTime } from "../types/game";
 import type { Game } from "../types/game";
+import { useToast } from "./ToastContext";
 
 interface GameExitEvent {
   gameId: string;
@@ -26,6 +27,8 @@ interface GameContextType {
   removeGame: (id: string) => void;
   updateGame: (id: string, updates: Partial<Game>) => void;
   getGame: (id: string) => Game | undefined;
+  runningGameIds: string[];
+  launchGame: (game: Game) => void;
 }
 
 const GameContext = createContext<GameContextType | null>(null);
@@ -36,8 +39,10 @@ function generateId(): string {
 }
 
 export function GameProvider({ children }: { children: ReactNode }) {
+  const { showToast } = useToast();
   const [games, setGames] = useState<Game[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const [runningGameIds, setRunningGameIds] = useState<string[]>([]);
   const loadedRef = useRef(false);
 
   // Load persisted games on mount
@@ -65,6 +70,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unlisten = listen<GameExitEvent>("game-exited", (event) => {
       const { gameId, elapsedSeconds } = event.payload;
+      
+      // Remove from running games list
+      setRunningGameIds((prev) => prev.filter((id) => id !== gameId));
+      
+      // Update session playtime
       setGames((prev) =>
         prev.map((g) =>
           g.id === gameId
@@ -105,6 +115,26 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [games]
   );
 
+  const launchGame = useCallback((game: Game) => {
+    if (runningGameIds.includes(game.id)) {
+      showToast(`${game.name} is already running`, "info");
+      return;
+    }
+    
+    // Optimistically add to running list
+    setRunningGameIds((prev) => [...prev, game.id]);
+    
+    invoke("launch_game", { gameId: game.id, gamePath: game.path })
+      .then(() => {
+        showToast(`Launched ${game.name}`, "success");
+      })
+      .catch((err: string) => {
+        // Rollback running state on failure
+        setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+        showToast(`Launch failed: ${err}`, "error");
+      });
+  }, [runningGameIds, showToast]);
+
   return (
     <GameContext.Provider
       value={{
@@ -116,6 +146,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         removeGame,
         updateGame,
         getGame,
+        runningGameIds,
+        launchGame,
       }}
     >
       {children}
