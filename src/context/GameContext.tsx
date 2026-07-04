@@ -10,7 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { addSessionTime } from "../types/game";
-import type { Game } from "../types/game";
+import type { Game, GameMetadataResult } from "../types/game";
 import { useToast } from "./ToastContext";
 
 interface GameExitEvent {
@@ -29,6 +29,7 @@ interface GameContextType {
   getGame: (id: string) => Game | undefined;
   runningGameIds: string[];
   launchGame: (game: Game) => void;
+  addStoreGame: (metadata: GameMetadataResult) => Promise<string>;
 }
 
 const GameContext = createContext<GameContextType | null>(null);
@@ -121,10 +122,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       return;
     }
     
-    // Optimistically add to running list
     setRunningGameIds((prev) => [...prev, game.id]);
     
-    // Read selected GPU from localStorage to pass to launch_game (avoids circular dependency with ActivityContext)
     let gpuId = null;
     let gpuName = null;
     const savedGpu = localStorage.getItem("gamelib-gpus");
@@ -152,11 +151,73 @@ export function GameProvider({ children }: { children: ReactNode }) {
         showToast(`Launched ${game.name}`, "success");
       })
       .catch((err: string) => {
-        // Rollback running state on failure
         setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
         showToast(`Launch failed: ${err}`, "error");
       });
   }, [runningGameIds, showToast]);
+
+  const addStoreGame = useCallback(async (metadata: GameMetadataResult): Promise<string> => {
+    // Duplicate check — normalized name comparison
+    const normName = metadata.title.toLowerCase().trim();
+    const existing = games.find(
+      (g) => g.name.toLowerCase().trim() === normName
+    );
+    if (existing) {
+      showToast(`${metadata.title} is already in your library`, "info");
+      return existing.id;
+    }
+
+    // Download cover image to base64 for offline use
+    let coverArtUrl: string | undefined;
+    const coverUrl = metadata.images.cover;
+    if (coverUrl) {
+      try {
+        const dataUrl: string | null = await invoke("download_image", { url: coverUrl });
+        if (dataUrl) coverArtUrl = dataUrl;
+      } catch {
+        // Fall back to the remote URL if download fails
+        coverArtUrl = coverUrl;
+      }
+    }
+
+    const newGame: Game = {
+      id: generateId(),
+      name: metadata.title,
+      path: "",
+      platform: "Unknown",
+      installed: false,
+      playTime: "0h",
+      addedAt: Date.now(),
+      coverArtUrl,
+      iconUrl: undefined,
+      bannerUrl: metadata.images.hero ?? metadata.images.banner ?? undefined,
+      logoUrl: metadata.images.logo ?? undefined,
+      description: metadata.description ?? undefined,
+      developer: metadata.developer ?? undefined,
+      publisher: metadata.publisher ?? undefined,
+      releaseDate: metadata.releaseDate ?? undefined,
+      genres: metadata.genres.length > 0 ? metadata.genres : undefined,
+      storyline: metadata.storyline,
+      igdbRating: metadata.igdbRating ?? undefined,
+      criticRating: metadata.criticRating ?? undefined,
+      themes: metadata.themes ?? undefined,
+      gameModes: metadata.gameModes ?? undefined,
+      playerPerspectives: metadata.playerPerspectives ?? undefined,
+      screenshots: metadata.screenshots ?? undefined,
+      videos: metadata.videos ?? undefined,
+      websites: metadata.websites ?? undefined,
+      timeToBeat: metadata.timeToBeat ?? undefined,
+      similarGames: metadata.similarGames ?? undefined,
+      releases: metadata.releases ?? undefined,
+      igdbReviews: metadata.igdbReviews ?? undefined,
+      metadataSource: metadata.sourceName,
+      metadataUrl: metadata.sourceUrl,
+    };
+
+    setGames((prev) => [...prev, newGame]);
+    showToast(`Added ${metadata.title} to your library`, "success");
+    return newGame.id;
+  }, [games, showToast]);
 
   return (
     <GameContext.Provider
@@ -171,6 +232,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         getGame,
         runningGameIds,
         launchGame,
+        addStoreGame,
       }}
     >
       {children}

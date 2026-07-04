@@ -102,6 +102,44 @@ pub struct IgdbReview {
     pub username: Option<String>,
 }
 
+// ─── Store Types (IGDB catalog browsing) ─────────────────────────────────────
+
+/// Lightweight game summary for store listings (cards, grids).
+/// Contains only what's needed for display — no full metadata.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreGameSummary {
+    pub id: u64,
+    pub name: String,
+    pub slug: String,
+    pub summary: Option<String>,
+    pub rating: Option<f64>,
+    pub aggregated_rating: Option<f64>,
+    pub cover_url: Option<String>,
+    pub genres: Vec<String>,
+    pub platforms: Vec<String>,
+    pub first_release_date: Option<String>,
+    pub total_rating_count: u64,
+    pub hypes: u64,
+}
+
+/// Internal IGDB deserialization type for store game listings.
+#[derive(Debug, Deserialize)]
+struct IgdbGameSummary {
+    id: u64,
+    name: String,
+    slug: String,
+    summary: Option<String>,
+    rating: Option<f64>,
+    aggregated_rating: Option<f64>,
+    cover: Option<IgdbCover>,
+    genres: Option<Vec<IgdbName>>,
+    platforms: Option<Vec<IgdbName>>,
+    first_release_date: Option<i64>,
+    total_rating_count: Option<u64>,
+    hypes: Option<u64>,
+}
+
 // ─── Steam API Types (internal) ───────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -1467,6 +1505,571 @@ limit 8;"#,
     }
     
     results
+}
+
+// ─── Store: Browse & Search IGDB Catalog ──────────────────────────────────────
+
+/// Fetch a page of store games by category from IGDB.
+///
+/// Categories:
+/// - "trending"  → sorted by hypes descending (recent buzz)
+/// - "popular"   → sorted by total_rating_count descending (most rated)
+/// - "top"       → sorted by rating descending (highest rated)
+/// - "all"        → sorted by total_rating_count (browse everything)
+pub async fn fetch_store_games(
+    category: &str,
+    offset: u32,
+    limit: u32,
+) -> Result<Vec<StoreGameSummary>, String> {
+    let token = get_twitch_token().await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    load_env_file();
+    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+
+    let (sort_clause, where_clause) = match category {
+        "trending" => ("sort hypes desc;", "where hypes > 0 & total_rating_count > 5;"),
+        "popular" => ("sort total_rating_count desc;", "where total_rating_count > 10;"),
+        "top" => ("sort rating desc;", "where rating >= 70 & total_rating_count > 20;"),
+        _ => ("sort total_rating_count desc;", "where total_rating_count > 0;"),
+    };
+
+    let body = format!(
+        "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; {} {} limit {}; offset {};",
+        where_clause, sort_clause, limit.min(50), offset
+    );
+
+    let resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB store request failed: {}", e))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!("IGDB store request failed with status {}: {}", status, err_text));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB response: {}", e))?;
+
+    let games: Vec<IgdbGameSummary> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB parse error: {}", e))?;
+
+    let summaries: Vec<StoreGameSummary> = games
+        .into_iter()
+        .map(|g| {
+            let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                };
+                clean.replace("t_thumb", "t_cover_big")
+            });
+
+            let release_date = g.first_release_date.map(format_unix_timestamp);
+
+            StoreGameSummary {
+                id: g.id,
+                name: g.name,
+                slug: g.slug,
+                summary: g.summary,
+                rating: g.rating,
+                aggregated_rating: g.aggregated_rating,
+                cover_url,
+                genres: g
+                    .genres
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|gen| gen.name)
+                    .collect(),
+                platforms: g
+                    .platforms
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect(),
+                first_release_date: release_date,
+                total_rating_count: g.total_rating_count.unwrap_or(0),
+                hypes: g.hypes.unwrap_or(0),
+            }
+        })
+        .collect();
+
+    Ok(summaries)
+}
+
+/// Search IGDB games by name (live search with debounce expected from frontend).
+pub async fn search_store_games(
+    query: &str,
+    offset: u32,
+    limit: u32,
+) -> Result<Vec<StoreGameSummary>, String> {
+    let token = get_twitch_token().await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    load_env_file();
+    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+
+    let escaped = query.replace('"', "\\\"");
+    let body = format!(
+        r#"search "{}"; fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes; limit {}; offset {};"#,
+        escaped,
+        limit.min(50),
+        offset
+    );
+
+    let resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB search request failed: {}", e))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!("IGDB search request failed with status {}: {}", status, err_text));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB response: {}", e))?;
+
+    let games: Vec<IgdbGameSummary> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB search parse error: {}", e))?;
+
+    let summaries: Vec<StoreGameSummary> = games
+        .into_iter()
+        .map(|g| {
+            let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                };
+                clean.replace("t_thumb", "t_cover_big")
+            });
+
+            let release_date = g.first_release_date.map(format_unix_timestamp);
+
+            StoreGameSummary {
+                id: g.id,
+                name: g.name,
+                slug: g.slug,
+                summary: g.summary,
+                rating: g.rating,
+                aggregated_rating: g.aggregated_rating,
+                cover_url,
+                genres: g
+                    .genres
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|gen| gen.name)
+                    .collect(),
+                platforms: g
+                    .platforms
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect(),
+                first_release_date: release_date,
+                total_rating_count: g.total_rating_count.unwrap_or(0),
+                hypes: g.hypes.unwrap_or(0),
+            }
+        })
+        .collect();
+
+    Ok(summaries)
+}
+
+/// Fetch full metadata for a single IGDB game by its slug.
+/// Returns the same rich GameMetadataResult used by the library detail page.
+pub async fn get_store_game_detail(slug: &str) -> Option<GameMetadataResult> {
+    let token = match get_twitch_token().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("IGDB token error: {}", e);
+            return None;
+        }
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+
+    let escaped_slug = slug.replace('"', "\\\"");
+    let body = format!(
+        r#"where slug = "{}";
+fields name, slug, summary, storyline, first_release_date, rating, aggregated_rating,
+       cover.url, screenshots.url, artworks.url, videos.video_id, videos.name,
+       genres.name, themes.name, game_modes.name, player_perspectives.name,
+       involved_companies.developer, involved_companies.publisher, involved_companies.company.name,
+       websites.url, websites.category,
+       similar_games.name, similar_games.cover.url,
+       release_dates.platform.name, release_dates.human, release_dates.region;
+limit 1;"#,
+        escaped_slug
+    );
+
+    load_env_file();
+    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+
+    let resp = match client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("IGDB detail request error: {}", e);
+            return None;
+        }
+    };
+
+    let status = resp.status();
+    if !status.is_success() {
+        let err_text = resp.text().await.unwrap_or_default();
+        eprintln!("IGDB detail request failed with status {}: {}", status, err_text);
+        return None;
+    }
+
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Failed to read IGDB detail response: {}", e);
+            return None;
+        }
+    };
+
+    let mut igdb_games: Vec<IgdbGame> = match serde_json::from_str(&text) {
+        Ok(games) => games,
+        Err(e) => {
+            eprintln!("IGDB detail parse error: {}", e);
+            return None;
+        }
+    };
+
+    let game = igdb_games.pop()?;
+
+    // Fetch reviews for this game
+    let mut reviews_by_game: std::collections::HashMap<u64, Vec<IgdbReview>> = std::collections::HashMap::new();
+    let review_body = format!(
+        "fields game, title, content, review, user_rating, rating, user.username; where game = {}; limit 50;",
+        game.id
+    );
+    if let Ok(r) = client
+        .post("https://api.igdb.com/v4/reviews")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .body(review_body)
+        .send()
+        .await
+    {
+        if r.status().is_success() {
+            if let Ok(text) = r.text().await {
+                #[derive(Debug, Deserialize)]
+                struct IgdbReviewInnerRaw {
+                    game: u64,
+                    title: Option<String>,
+                    content: Option<String>,
+                    review: Option<String>,
+                    user_rating: Option<u32>,
+                    rating: Option<u32>,
+                    user: Option<IgdbUserRaw>,
+                }
+                if let Ok(raw_reviews) = serde_json::from_str::<Vec<IgdbReviewInnerRaw>>(&text) {
+                    for rev in raw_reviews {
+                        let content_text = rev.content.or(rev.review);
+                        let final_rating = rev.rating.or(rev.user_rating);
+                        let username = rev.user.and_then(|u| u.username);
+                        let mapped = IgdbReview {
+                            title: rev.title,
+                            content: content_text,
+                            rating: final_rating,
+                            username,
+                        };
+                        reviews_by_game.entry(rev.game).or_default().push(mapped);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fetch time-to-beat for this game
+    let mut time_to_beat: Option<IgdbTimeToBeatRaw> = None;
+    let ttb_body = format!(
+        "fields game, hastly, normally, completely; where game = {}; limit 1;",
+        game.id
+    );
+    if let Ok(r) = client
+        .post("https://api.igdb.com/v4/game_time_to_beats")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .body(ttb_body)
+        .send()
+        .await
+    {
+        if r.status().is_success() {
+            if let Ok(text) = r.text().await {
+                #[derive(Debug, Deserialize)]
+                #[allow(dead_code)]
+                struct IgdbTimeToBeatRawInner {
+                    game: u64,
+                    hastly: Option<u64>,
+                    normally: Option<u64>,
+                    completely: Option<u64>,
+                }
+                if let Ok(raw_ttbs) =
+                    serde_json::from_str::<Vec<IgdbTimeToBeatRawInner>>(&text)
+                {
+                    if let Some(first) = raw_ttbs.into_iter().next() {
+                        time_to_beat = Some(IgdbTimeToBeatRaw {
+                            hastly: first.hastly,
+                            normally: first.normally,
+                            completely: first.completely,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Map the IgdbGame → GameMetadataResult
+    let mut developers = Vec::new();
+    let mut publishers = Vec::new();
+    if let Some(ref companies) = game.involved_companies {
+        for comp in companies {
+            if comp.developer {
+                developers.push(comp.company.name.clone());
+            }
+            if comp.publisher {
+                publishers.push(comp.company.name.clone());
+            }
+        }
+    }
+
+    let developer = if developers.is_empty() {
+        None
+    } else {
+        Some(developers.join("; "))
+    };
+    let publisher = if publishers.is_empty() {
+        None
+    } else {
+        Some(publishers.join("; "))
+    };
+
+    let release_date = game.first_release_date.map(format_unix_timestamp);
+
+    let genres: Vec<String> = game
+        .genres
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| g.name)
+        .collect();
+
+    let themes = game
+        .themes
+        .map(|list| list.into_iter().map(|item| item.name).collect::<Vec<_>>());
+
+    let game_modes = game
+        .game_modes
+        .map(|list| list.into_iter().map(|item| item.name).collect::<Vec<_>>());
+
+    let player_perspectives = game
+        .player_perspectives
+        .map(|list| list.into_iter().map(|item| item.name).collect::<Vec<_>>());
+
+    let cover_url = game.cover.and_then(|c| c.url).map(|url| {
+        let clean = if url.starts_with("//") {
+            format!("https:{}", url)
+        } else {
+            url
+        };
+        clean.replace("t_thumb", "t_cover_big")
+    });
+
+    let mut screenshot_urls = Vec::new();
+    if let Some(screenshots) = game.screenshots {
+        for scr in screenshots {
+            if let Some(ref url) = scr.url {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url.clone()
+                };
+                screenshot_urls.push(clean.replace("t_thumb", "t_720p"));
+            }
+        }
+    }
+
+    let mut artwork_urls = Vec::new();
+    if let Some(artworks) = game.artworks {
+        for art in artworks {
+            if let Some(ref url) = art.url {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url.clone()
+                };
+                artwork_urls.push(clean.replace("t_thumb", "t_720p"));
+            }
+        }
+    }
+
+    let hero = artwork_urls
+        .first()
+        .or_else(|| screenshot_urls.first())
+        .cloned();
+
+    let banner = screenshot_urls
+        .first()
+        .or_else(|| artwork_urls.first())
+        .cloned();
+
+    let images = GameImages {
+        icon: None,
+        cover: cover_url,
+        hero,
+        banner,
+        logo: None,
+    };
+
+    let videos = game.videos.map(|list| {
+        list.into_iter()
+            .filter_map(|v| {
+                v.video_id
+                    .map(|id| format!("https://www.youtube.com/watch?v={}", id))
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let websites = game.websites.map(|list| {
+        let mut unique_urls = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for w in list {
+            if let Some(url) = w.url {
+                if seen.insert(url.clone()) {
+                    unique_urls.push(url);
+                }
+            }
+        }
+        unique_urls
+    });
+
+    let mapped_time_to_beat = time_to_beat.map(|t| TimeToBeat {
+        hastly: t.hastly,
+        normally: t.normally,
+        completely: t.completely,
+    });
+
+    let similar_games = game.similar_games.map(|list| {
+        list.into_iter()
+            .map(|g| {
+                let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+                    let clean = if url.starts_with("//") {
+                        format!("https:{}", url)
+                    } else {
+                        url
+                    };
+                    clean.replace("t_thumb", "t_cover_big")
+                });
+                SimilarGame {
+                    id: g.id,
+                    name: g.name,
+                    cover_url,
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let releases = game.release_dates.map(|list| {
+        list.into_iter()
+            .map(|r| {
+                let platform = r
+                    .platform
+                    .map(|p| p.name)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let date_str = r
+                    .human
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let region = match r.region {
+                    Some(1) => "Europe",
+                    Some(2) => "North America",
+                    Some(3) => "Australia",
+                    Some(4) => "New Zealand",
+                    Some(5) => "Japan",
+                    Some(6) => "China",
+                    Some(7) => "Asia",
+                    Some(8) => "Worldwide",
+                    Some(9) => "Korea",
+                    Some(10) => "Brazil",
+                    _ => "Global",
+                }
+                .to_string();
+                ReleaseDateInfo {
+                    platform,
+                    date_str,
+                    region,
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let igdb_reviews = reviews_by_game.get(&game.id).cloned();
+
+    Some(GameMetadataResult {
+        title: game.name,
+        description: game.summary,
+        developer,
+        publisher,
+        release_date,
+        genres,
+        images,
+        source_url: format!("https://www.igdb.com/games/{}", game.slug),
+        source_name: "IGDB".to_string(),
+        storyline: game.storyline,
+        igdb_rating: game.rating,
+        critic_rating: game.aggregated_rating,
+        themes,
+        game_modes,
+        player_perspectives,
+        screenshots: if screenshot_urls.is_empty() {
+            None
+        } else {
+            Some(screenshot_urls)
+        },
+        videos,
+        websites,
+        time_to_beat: mapped_time_to_beat,
+        similar_games,
+        releases,
+        igdb_reviews,
+    })
 }
 
 // ─── Utility Functions ────────────────────────────────────────────────────────

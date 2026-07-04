@@ -1,0 +1,509 @@
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
+import { useGames } from "../context/GameContext";
+import { useToast } from "../context/ToastContext";
+import type { GameMetadataResult } from "../types/game";
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+function extractYouTubeId(url: string): string | null {
+  if (url.includes("watch?v=")) return url.split("watch?v=")[1]?.split("&")[0];
+  if (url.includes("youtu.be/")) return url.split("youtu.be/")[1]?.split("?")[0];
+  if (url.includes("youtube.com/embed/")) return url.split("youtube.com/embed/")[1]?.split("?")[0];
+  return null;
+}
+
+function handleImgError(e: React.SyntheticEvent<HTMLImageElement>) {
+  const img = e.currentTarget;
+  img.style.display = "none";
+}
+
+function RatingCircle({ score, label }: { score: number; label: string }) {
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  const getColor = (s: number) => {
+    if (s >= 75) return "#10b981";
+    if (s >= 50) return "#f59e0b";
+    return "#ef4444";
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-xs)' }}>
+      <div style={{ position: 'relative', width: 68, height: 68 }}>
+        <svg viewBox="0 0 68 68" style={{ width: '100%', height: '100%' }}>
+          <circle cx="34" cy="34" r={radius} stroke="var(--color-bg-tertiary)" strokeWidth="4" fill="transparent" />
+          <circle cx="34" cy="34" r={radius} strokeWidth="4" stroke={getColor(score)}
+            strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round" fill="transparent"
+            transform="rotate(-90 34 34)"
+            style={{ transition: 'stroke-dashoffset 0.8s ease' }} />
+        </svg>
+        <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          fontSize: 'var(--font-size-md)', fontWeight: 'bold', color: getColor(score) }}>{score}</span>
+      </div>
+      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{label}</span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  States                                                             */
+/* ------------------------------------------------------------------ */
+
+function StoreGameLoading() {
+  return (
+    <div className="game-page">
+      <div className="game-hero" style={{ background: 'var(--color-bg-tertiary)', height: 240, borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
+      <div style={{ display: 'flex', gap: 'var(--space-xl)', marginTop: 'var(--space-xl)' }}>
+        <div style={{ flex: 2, height: 300, background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
+        <div style={{ flex: 1, height: 300, background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
+      </div>
+      <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--color-text-muted)' }}>
+        <div className="store-spinner" style={{ margin: '0 auto var(--space-md) auto' }} />
+        Loading game details...
+      </div>
+    </div>
+  );
+}
+
+function StoreGameError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const navigate = useNavigate();
+  return (
+    <div className="main-empty">
+      <svg className="main-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <h2 className="main-empty-title">Failed to load game</h2>
+      <p className="main-empty-subtitle">{message}</p>
+      <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
+        <button className="store-retry-btn" onClick={onRetry}>Try Again</button>
+        <button className="game-back-btn" onClick={() => navigate("/store")}>Back to Store</button>
+      </div>
+    </div>
+  );
+}
+
+function StoreGameNotFound() {
+  const navigate = useNavigate();
+  return (
+    <div className="main-empty">
+      <svg className="main-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+      <h2 className="main-empty-title">Game Not Found</h2>
+      <p className="main-empty-subtitle">This game could not be found on IGDB.</p>
+      <button className="game-back-btn" onClick={() => navigate("/store")}>Back to Store</button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                     */
+/* ------------------------------------------------------------------ */
+
+type Tab = "overview" | "reviews" | "weblinks";
+
+export default function StoreGameDetail() {
+  const { gameSlug } = useParams<{ gameSlug: string }>();
+  const navigate = useNavigate();
+  const { games, addStoreGame } = useGames();
+  const { showToast } = useToast();
+
+  const [data, setData] = useState<GameMetadataResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const mountedRef = useRef(true);
+
+  // Abort-safe fetch (cleans up on unmount or slug change)
+  const fetchData = useCallback(() => {
+    if (!gameSlug) return;
+    setLoading(true);
+    setError(null);
+
+    invoke<GameMetadataResult | null>("get_store_game_detail", { slug: gameSlug })
+      .then((result) => {
+        if (!mountedRef.current) return;
+        if (result) setData(result);
+        else setData(null);
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        setError(String(err));
+      })
+      .finally(() => {
+        if (mountedRef.current) setLoading(false);
+      });
+  }, [gameSlug]);
+
+  useEffect(() => {
+    setData(null);
+    setActiveTab("overview");
+    fetchData();
+  }, [fetchData]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Check if this game is already in the library (by name)
+  const existingInLibrary = useMemo(() => {
+    if (!data) return null;
+    const norm = data.title.toLowerCase().trim();
+    return games.find((g) => g.name.toLowerCase().trim() === norm) ?? null;
+  }, [data, games]);
+
+  const handleAddToLibrary = async () => {
+    if (!data || adding) return;
+    setAdding(true);
+    try {
+      await addStoreGame(data);
+    } catch (err) {
+      showToast(`Failed to add game: ${err}`, "error");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  // ── Render states ─────────────────────────────────────────────────────
+  if (loading) return <StoreGameLoading />;
+  if (error) return <StoreGameError message={error} onRetry={fetchData} />;
+  if (!data) return <StoreGameNotFound />;
+
+  const isInLibrary = !!existingInLibrary;
+  const libraryGameId = existingInLibrary?.id;
+
+  const releaseYear = data.releaseDate
+    ? new Date(data.releaseDate).getFullYear()
+    : null;
+
+  return (
+    <div className="game-page">
+      {/* ── Top bar ─────────────────────────────────────────────────── */}
+      <div className="game-top-bar">
+        <button className="game-back-link" onClick={() => navigate("/store")}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Store
+        </button>
+      </div>
+
+      {/* ── Hero ─────────────────────────────────────────────────────── */}
+      <div className="game-hero">
+        {(data.images.hero || data.images.banner) && (
+          <div className="game-banner-bg" style={{ backgroundImage: `url(${data.images.hero ?? data.images.banner})` }} />
+        )}
+        <div className="game-banner">
+          {(data.images.hero ?? data.images.banner ?? data.images.cover) ? (
+            <img
+              src={data.images.hero ?? data.images.banner ?? data.images.cover ?? ""}
+              alt={data.title}
+              className="game-cover-img"
+              onError={handleImgError}
+            />
+          ) : (
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity={0.2}>
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          )}
+        </div>
+        <div className="game-hero-overlay">
+          <div className="game-hero-info">
+            <h1 className="game-hero-title">{data.title}</h1>
+            <div className="game-hero-meta">
+              {data.developer && <><span>{data.developer}</span><span className="game-hero-meta-dot" /></>}
+              {data.publisher && <><span>{data.publisher}</span><span className="game-hero-meta-dot" /></>}
+              {releaseYear && <><span>{releaseYear}</span><span className="game-hero-meta-dot" /></>}
+              <span>Source: {data.sourceName}</span>
+            </div>
+          </div>
+          {isInLibrary ? (
+            <button
+              className="game-launch-btn"
+              style={{ background: 'var(--color-text-muted)', boxShadow: 'none', cursor: 'pointer' }}
+              onClick={() => navigate(`/library/${libraryGameId}`)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              View in Library
+            </button>
+          ) : (
+            <button className="store-add-btn" onClick={handleAddToLibrary} disabled={adding}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {adding ? "Adding..." : "Add to Library"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Tabs ─────────────────────────────────────────────────────── */}
+      <div className="game-tabs">
+        {(["overview", "reviews", "weblinks"] as Tab[]).map((tab) => (
+          <button key={tab} className={`game-tab${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)}>
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Overview ──────────────────────────────────────────────────── */}
+      {activeTab === "overview" && (
+        <div className="game-content-grid">
+          <div className="game-main-col">
+            {data.description && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+                  About
+                </h2>
+                <p className="game-description">{data.description}</p>
+                {data.sourceUrl && (
+                  <a className="metadata-source-link" href={data.sourceUrl} target="_blank" rel="noopener noreferrer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                    View on {data.sourceName}
+                  </a>
+                )}
+              </section>
+            )}
+
+            {data.storyline && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                  Storyline
+                </h2>
+                <div style={{ position: 'relative', paddingLeft: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}>
+                  <p style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>"{data.storyline}"</p>
+                </div>
+              </section>
+            )}
+
+            {data.screenshots && data.screenshots.length > 0 && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
+                  Screenshots ({data.screenshots.length})
+                </h2>
+                <div className="screenshots-carousel" style={{ display: 'flex', gap: 'var(--space-md)', overflowX: 'auto', paddingBottom: 'var(--space-sm)' }}>
+                  {data.screenshots.map((src, i) => (
+                    <div key={i} className="screenshot-item" style={{ flexShrink: 0, width: 220, height: 124, borderRadius: 'var(--radius-md)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--color-border)' }}>
+                      <img src={src} alt={`${data.title} Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="screenshot-img" onError={handleImgError} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {data.videos && data.videos.length > 0 && (() => {
+              const embedId = extractYouTubeId(data.videos[0]);
+              return (
+                <section className="game-section">
+                  <h2 className="game-section-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+                    Trailers
+                  </h2>
+                  {embedId ? (
+                    <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', height: 0, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+                      <iframe src={`https://www.youtube.com/embed/${embedId}`} allowFullScreen style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }} />
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>Video link available on {data.sourceName}</p>
+                  )}
+                </section>
+              );
+            })()}
+
+            {data.similarGames && data.similarGames.length > 0 && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
+                  Similar Games
+                </h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
+                  {data.similarGames.slice(0, 6).map((sim) => (
+                    <div key={sim.id} style={{ textAlign: 'center' }}>
+                      <div style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md) var(--radius-md) 0 0', overflow: 'hidden' }}>
+                        {sim.coverUrl ? (
+                          <img src={sim.coverUrl} alt={sim.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImgError} />
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
+                        )}
+                      </div>
+                      <h4 style={{ fontSize: '11px', fontWeight: '600', margin: '4px 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sim.name}</h4>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+
+          <div className="game-side-col">
+            {(data.igdbRating || data.criticRating) && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                  Ratings
+                </h2>
+                <div style={{ display: 'flex', justifyContent: 'space-around', gap: 'var(--space-md)' }}>
+                  {data.igdbRating && <RatingCircle score={Math.round(data.igdbRating)} label="Community" />}
+                  {data.criticRating && <RatingCircle score={Math.round(data.criticRating)} label="Critics" />}
+                </div>
+              </section>
+            )}
+
+            {(data.gameModes || data.themes || data.playerPerspectives) && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>
+                  Game Specs
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                  {data.gameModes && data.gameModes.length > 0 && (
+                    <div>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: 'var(--space-xs)' }}>Modes</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {data.gameModes.map((m) => <span key={m} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{m}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {data.themes && data.themes.length > 0 && (
+                    <div>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: 'var(--space-xs)' }}>Themes</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {data.themes.map((t) => <span key={t} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{t}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {data.playerPerspectives && data.playerPerspectives.length > 0 && (
+                    <div>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: 'var(--space-xs)' }}>Perspectives</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                        {data.playerPerspectives.map((p) => <span key={p} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{p}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {data.timeToBeat && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                  Time to Beat
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                  {data.timeToBeat.normally && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Main Story: <strong>{Math.round(data.timeToBeat.normally / 3600)}h</strong></div>}
+                  {data.timeToBeat.hastly && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Rushed: <strong>{Math.round(data.timeToBeat.hastly / 3600)}h</strong></div>}
+                  {data.timeToBeat.completely && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Completionist: <strong>{Math.round(data.timeToBeat.completely / 3600)}h</strong></div>}
+                </div>
+              </section>
+            )}
+
+            {data.releases && data.releases.length > 0 && (
+              <section className="game-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  Releases
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: 180, overflowY: 'auto' }}>
+                  {data.releases.map((rel, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', padding: '6px 0', borderBottom: '1px solid var(--color-border)' }}>
+                      <span style={{ fontWeight: '500', color: 'var(--color-text-primary)' }}>{rel.platform}</span>
+                      <span style={{ color: 'var(--color-text-muted)' }}>{rel.dateStr} ({rel.region})</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section className="game-section">
+              <h2 className="game-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                Details
+              </h2>
+              <div className="info-grid">
+                <div className="info-item"><span className="info-label">Source</span><span className="info-value">{data.sourceName}</span></div>
+                {data.developer && <div className="info-item"><span className="info-label">Developer</span><span className="info-value">{data.developer}</span></div>}
+                {data.publisher && <div className="info-item"><span className="info-label">Publisher</span><span className="info-value">{data.publisher}</span></div>}
+                {data.releaseDate && <div className="info-item"><span className="info-label">Released</span><span className="info-value">{data.releaseDate}</span></div>}
+              </div>
+              {data.genres.length > 0 && (
+                <div className="info-genres">
+                  {data.genres.map((g) => <span key={g} className="metadata-genre-tag">{g}</span>)}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reviews ────────────────────────────────────────────────────── */}
+      {activeTab === "reviews" && (
+        <section className="game-section">
+          <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-md)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-sm)' }}>
+            <button style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontWeight: '600', cursor: 'pointer', fontSize: 'var(--font-size-sm)', paddingBottom: 'var(--space-sm)', borderBottom: '2px solid var(--color-accent)' }}>
+              IGDB Reviews ({data.igdbReviews?.length ?? 0})
+            </button>
+          </div>
+          {!data.igdbReviews || data.igdbReviews.length === 0 ? (
+            <div style={{ padding: 'var(--space-xl) 0', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 48, height: 48, margin: '0 auto var(--space-md) auto', display: 'block', opacity: 0.5 }}>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <p>No community reviews available on IGDB yet.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+              {data.igdbReviews.map((rev, idx) => (
+                <div key={idx} style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
+                    <span style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>{rev.username ?? 'Anonymous User'}</span>
+                    {rev.rating != null && <span style={{ background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)', color: 'var(--color-accent)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 'bold' }}>Rating: {rev.rating}/100</span>}
+                  </div>
+                  {rev.title && <h4 style={{ margin: '0 0 var(--space-xs) 0', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>{rev.title}</h4>}
+                  <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', lineHeight: '1.5', whiteSpace: 'pre-line' }}>{rev.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Weblinks ───────────────────────────────────────────────────── */}
+      {activeTab === "weblinks" && (
+        <section className="game-section">
+          <h2 className="game-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+            Related Links
+          </h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)' }}>
+            {data.sourceUrl && (
+              <a href={data.sourceUrl} target="_blank" rel="noopener noreferrer" className="related-content-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-lg)', background: 'rgba(108,92,231,0.12)', border: '1px solid rgba(108,92,231,0.25)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500, transition: 'all 0.2s' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                View on {data.sourceName}
+              </a>
+            )}
+            {data.websites && data.websites.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="related-content-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-lg)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500, transition: 'all 0.2s' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+                {new URL(url).hostname}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

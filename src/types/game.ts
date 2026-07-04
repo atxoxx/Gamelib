@@ -104,6 +104,47 @@ export interface LaunchBoxImageResult {
   url: string;
 }
 
+// ─── Store Browsing Types ────────────────────────────────────────────────────
+
+/** Category tabs in the Store page. */
+export type StoreCategory = "trending" | "popular" | "top" | "all";
+
+/** Lightweight game summary returned from IGDB for store browsing.
+ *  Mirrors the Rust StoreGameSummary struct — field names match the
+ *  camelCase serialization from the backend. */
+export interface StoreGameSummary {
+  id: number;
+  name: string;
+  slug: string;
+  summary: string | null;
+  rating: number | null;
+  aggregatedRating: number | null;
+  coverUrl: string | null;
+  genres: string[];
+  platforms: string[];
+  firstReleaseDate: string | null;
+  totalRatingCount: number;
+  hypes: number;
+}
+
+/** Cache entry wrapper with a fetchedAt timestamp for TTL checks. */
+export interface StoreCacheEntry<T> {
+  data: T;
+  fetchedAt: number;
+}
+
+/** Full store cache structure persisted to disk. */
+export interface StoreCache {
+  categories: Record<string, StoreCacheEntry<StoreGameSummary[]>>;
+  detailCache: Record<string, StoreCacheEntry<GameMetadataResult>>;
+}
+
+/** 6-hour cache TTL in milliseconds. */
+export const STORE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Number of store games per page (infinite scroll batch size). */
+export const STORE_PAGE_SIZE = 20;
+
 /** Extract a human-readable game name from an executable file path. */
 export function gameNameFromPath(filePath: string): string {
   return (

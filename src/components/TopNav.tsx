@@ -112,9 +112,9 @@ function ActivityIcon() {
 }
 
 const tabs: Tab[] = [
+  { path: "/store", label: "Store", icon: <StoreIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
-  { path: "/store", label: "Store/News", icon: <StoreIcon /> },
   { path: "/community", label: "Community", icon: <CommunityIcon /> },
   { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
   { path: "/plugins", label: "Plugins", icon: <PluginsIcon /> },

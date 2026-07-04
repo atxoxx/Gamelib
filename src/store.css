@@ -1,0 +1,644 @@
+/* ==============================
+   Store Page
+   ============================== */
+
+.store-page {
+  padding: var(--space-xl) var(--space-2xl);
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Store Tab Bar ─────────────────────────────────────────────────────── */
+
+.store-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-lg);
+}
+
+.store-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.store-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.store-tab.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+}
+
+.store-tab-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Store Search Bar ──────────────────────────────────────────────────── */
+
+.store-search-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+  transition: border-color var(--transition-fast);
+}
+
+.store-search-bar:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+.store-search-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.store-search-bar:focus-within .store-search-icon {
+  color: var(--color-accent);
+}
+
+.store-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  outline: none;
+}
+
+.store-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.store-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.store-search-clear:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.store-search-clear svg {
+  width: 14px;
+  height: 14px;
+}
+
+.store-search-results-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-md) 0;
+  padding-top: var(--space-sm);
+}
+
+.store-search-results-label strong {
+  color: var(--color-text-primary);
+}
+
+/* ── Store Layout (sidebar + main) ─────────────────────────────────────── */
+
+.store-layout {
+  display: flex;
+  gap: var(--space-xl);
+  flex: 1;
+  min-height: 0;
+}
+
+.store-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Store Filter Sidebar ──────────────────────────────────────────────── */
+
+.store-filter-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  height: fit-content;
+  position: sticky;
+  top: 0;
+}
+
+.store-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.store-filter-heading {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.store-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.store-filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 3px var(--space-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.store-filter-checkbox:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.store-filter-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.store-filter-year-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.store-filter-year-input {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  outline: none;
+  text-align: center;
+  transition: border-color var(--transition-fast);
+}
+
+.store-filter-year-input:focus {
+  border-color: var(--color-accent);
+}
+
+.store-filter-year-sep {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.store-filter-slider {
+  width: 100%;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.store-filter-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.store-filter-btn {
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.store-filter-btn.apply {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.store-filter-btn.apply:hover {
+  background: var(--color-accent-hover);
+}
+
+.store-filter-btn.reset {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.store-filter-btn.reset:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+/* ── Store Filter Chips ────────────────────────────────────────────────── */
+
+.store-filter-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) 0;
+}
+
+.store-filter-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-right: var(--space-sm);
+}
+
+.store-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 3px 10px;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-accent);
+  transition: all var(--transition-fast);
+}
+
+.store-filter-chip button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+
+.store-filter-chip button:hover {
+  opacity: 1;
+}
+
+.store-filter-chip button svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ── Store Game Grid ───────────────────────────────────────────────────── */
+
+.store-game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-lg);
+  align-content: start;
+}
+
+/* ── Store Game Card ───────────────────────────────────────────────────── */
+
+.store-game-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+}
+
+.store-game-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-accent);
+  box-shadow: 0 8px 24px var(--color-accent-glow), 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.store-game-card:active {
+  transform: translateY(-1px);
+}
+
+.store-card-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  position: relative;
+}
+
+.store-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+}
+
+.store-game-card:hover .store-card-cover img {
+  transform: scale(1.05);
+}
+
+.store-card-cover-skeleton {
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+.store-card-cover-skeleton svg {
+  width: 40px;
+  height: 40px;
+  color: var(--color-text-muted);
+}
+
+.store-card-rating {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.store-card-body {
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.store-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.store-card-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.store-card-genre {
+  font-size: 10px;
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-weight: var(--font-weight-medium);
+}
+
+.store-card-platforms {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: auto;
+}
+
+/* ── Store Game Card Skeleton ──────────────────────────────────────────── */
+
+.store-game-card-skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.store-game-card-skeleton .store-card-body {
+  gap: var(--space-xs);
+}
+
+.skeleton-line {
+  height: 10px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-title {
+  width: 70%;
+  height: 12px;
+}
+
+.skeleton-subtitle {
+  width: 50%;
+}
+
+.skeleton-subtitle.short {
+  width: 35%;
+}
+
+/* ── Store Sentinel & Loading ──────────────────────────────────────────── */
+
+.store-sentinel {
+  grid-column: 1 / -1;
+  height: 1px;
+}
+
+.store-loading-more {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.store-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: metadataSpin 800ms linear infinite;
+}
+
+.store-end-message {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--space-xl);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* ── Store Empty & Error States ────────────────────────────────────────── */
+
+.store-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3xl) var(--space-xl);
+  color: var(--color-text-muted);
+  text-align: center;
+  gap: var(--space-md);
+  grid-column: 1 / -1;
+}
+
+.store-empty svg {
+  width: 64px;
+  height: 64px;
+  opacity: 0.2;
+}
+
+.store-empty h3 {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.store-empty p {
+  font-size: var(--font-size-sm);
+  max-width: 400px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.store-retry-btn {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-xl);
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.store-retry-btn:hover {
+  background: var(--color-accent-hover);
+}
+
+/* ── Store Add Button ──────────────────────────────────────────────────── */
+
+.store-add-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-2xl);
+  background: var(--color-success);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-success) 40%, transparent);
+  flex-shrink: 0;
+}
+
+.store-add-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.store-add-btn.added {
+  background: var(--color-text-muted);
+  box-shadow: none;
+  cursor: default;
+}
+
+.store-add-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .store-layout {
+    flex-direction: column;
+  }
+
+  .store-filter-sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+
+  .store-game-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--space-md);
+  }
+
+  .store-page {
+    padding: var(--space-md);
+  }
+}
