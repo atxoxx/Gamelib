@@ -9,7 +9,7 @@ mod gpu_detector;
 mod metrics_collector;
 mod rtss_reader;
 mod mahm_reader;
-use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview};
+use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
 
@@ -74,6 +74,18 @@ struct GameData {
     releases: Option<Vec<ReleaseDateInfo>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     igdb_reviews: Option<Vec<IgdbReview>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    alternative_names: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    collection: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    franchise: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    game_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    release_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language_supports: Option<Vec<LanguageSupportInfo>>,
 }
 
 /// Persist the game library to the app's data directory.

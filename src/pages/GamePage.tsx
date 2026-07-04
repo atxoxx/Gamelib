@@ -6,7 +6,7 @@ import html2canvas from "html2canvas";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, formatPlayTime, parsePlayTime, slugify } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
@@ -340,6 +340,15 @@ function GameDetail({ game }: { game: Game }) {
   const [editSimilarGamesText, setEditSimilarGamesText] = useState(game.similarGames ? game.similarGames.map(g => g.name).join(", ") : "");
   const [editReleasesText, setEditReleasesText] = useState(game.releases ? game.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
   const [editIgdbReviewsText, setEditIgdbReviewsText] = useState(game.igdbReviews ? JSON.stringify(game.igdbReviews, null, 2) : "");
+
+  const [editCollection, setEditCollection] = useState(game.collection || "");
+  const [editFranchise, setEditFranchise] = useState(game.franchise || "");
+  const [editGameCategory, setEditGameCategory] = useState(game.gameCategory || "");
+  const [editReleaseStatus, setEditReleaseStatus] = useState(game.releaseStatus || "");
+  const [editLanguageSupports, setEditLanguageSupports] = useState<LanguageSupportInfo[]>(game.languageSupports || []);
+  
+  const [editAlternativeNamesText, setEditAlternativeNamesText] = useState(game.alternativeNames ? game.alternativeNames.join(", ") : "");
+  const [editLanguageSupportsText, setEditLanguageSupportsText] = useState(game.languageSupports ? JSON.stringify(game.languageSupports, null, 2) : "");
   
   // Reviews sub-tab state
   const [reviewsSubTab, setReviewsSubTab] = useState<"local" | "igdb">("local");
@@ -397,6 +406,14 @@ function GameDetail({ game }: { game: Game }) {
     setEditReleasesText(game.releases ? game.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
     setEditIgdbReviewsText(game.igdbReviews ? JSON.stringify(game.igdbReviews, null, 2) : "");
     
+    setEditCollection(game.collection || "");
+    setEditFranchise(game.franchise || "");
+    setEditGameCategory(game.gameCategory || "");
+    setEditReleaseStatus(game.releaseStatus || "");
+    setEditLanguageSupports(game.languageSupports || []);
+    setEditAlternativeNamesText(game.alternativeNames ? game.alternativeNames.join(", ") : "");
+    setEditLanguageSupportsText(game.languageSupports ? JSON.stringify(game.languageSupports, null, 2) : "");
+
     setEditMetadataSource(game.metadataSource || "");
     setEditMetadataUrl(game.metadataUrl || "");
     
@@ -541,6 +558,14 @@ function GameDetail({ game }: { game: Game }) {
       setEditReleasesText(result.releases ? result.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
       setEditIgdbReviewsText(result.igdbReviews ? JSON.stringify(result.igdbReviews, null, 2) : "");
       
+      setEditCollection(result.collection || "");
+      setEditFranchise(result.franchise || "");
+      setEditGameCategory(result.gameCategory || "");
+      setEditReleaseStatus(result.releaseStatus || "");
+      setEditLanguageSupports(result.languageSupports || []);
+      setEditAlternativeNamesText(result.alternativeNames ? result.alternativeNames.join(", ") : "");
+      setEditLanguageSupportsText(result.languageSupports ? JSON.stringify(result.languageSupports, null, 2) : "");
+
       setEditMetadataSource(result.sourceName);
       setEditMetadataUrl(result.sourceUrl);
 
@@ -745,6 +770,19 @@ function GameDetail({ game }: { game: Game }) {
       }
     }
 
+    let newLanguageSupports = editLanguageSupports;
+    if (editLanguageSupportsText.trim()) {
+      try {
+        newLanguageSupports = JSON.parse(editLanguageSupportsText.trim());
+      } catch (e) {
+        // keep current
+      }
+    }
+
+    const newAlternativeNames = editAlternativeNamesText.split(",")
+      .map(n => n.trim())
+      .filter(Boolean);
+
     updateGame(game.id, {
       name: newName,
       platform: newPlatform,
@@ -775,6 +813,12 @@ function GameDetail({ game }: { game: Game }) {
       similarGames: newSimilarGames.length > 0 ? newSimilarGames : undefined,
       releases: newReleases.length > 0 ? newReleases : undefined,
       igdbReviews: newIgdbReviews,
+      alternativeNames: newAlternativeNames.length > 0 ? newAlternativeNames : undefined,
+      collection: editCollection.trim() || undefined,
+      franchise: editFranchise.trim() || undefined,
+      gameCategory: editGameCategory.trim() || undefined,
+      releaseStatus: editReleaseStatus.trim() || undefined,
+      languageSupports: newLanguageSupports.length > 0 ? newLanguageSupports : undefined,
       metadataSource: editMetadataSource ? editMetadataSource : undefined,
       metadataUrl: editMetadataUrl ? editMetadataUrl : undefined,
     });
@@ -1218,9 +1262,105 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
               </section>
             )}
+
           </div>
 
           <div className="game-side-col">
+            <section className="game-section">
+              <h2 className="game-section-title">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                Info
+              </h2>
+              <div className="info-grid">
+                <div className="info-item">
+                  <span className="info-label">Platform</span>
+                  <span className="info-value">{game.platform}</span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Status</span>
+                  <span className="info-value">
+                    {game.installed ? "Installed" : "Not Installed"}
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Play Time</span>
+                  <span className="info-value">{game.playTime}</span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Added</span>
+                  <span className="info-value">{addedDate}</span>
+                </div>
+                {game.developer && (
+                  <div className="info-item">
+                    <span className="info-label">Developer</span>
+                    <span className="info-value">{game.developer}</span>
+                  </div>
+                )}
+                {game.publisher && (
+                  <div className="info-item">
+                    <span className="info-label">Publisher</span>
+                    <span className="info-value">{game.publisher}</span>
+                  </div>
+                )}
+                {game.releaseDate && (
+                  <div className="info-item">
+                    <span className="info-label">Released</span>
+                    <span className="info-value">{game.releaseDate}</span>
+                  </div>
+                )}
+                {game.collection && (
+                  <div className="info-item">
+                    <span className="info-label">Series</span>
+                    <span className="info-value">{game.collection}</span>
+                  </div>
+                )}
+                {game.franchise && (
+                  <div className="info-item">
+                    <span className="info-label">Franchise</span>
+                    <span className="info-value">{game.franchise}</span>
+                  </div>
+                )}
+                {game.gameCategory && (
+                  <div className="info-item">
+                    <span className="info-label">Game Type</span>
+                    <span className="info-value">{game.gameCategory}</span>
+                  </div>
+                )}
+                {game.releaseStatus && (
+                  <div className="info-item">
+                    <span className="info-label">Release Status</span>
+                    <span className="info-value">{game.releaseStatus}</span>
+                  </div>
+                )}
+                {game.alternativeNames && game.alternativeNames.length > 0 && (
+                  <div className="info-item" style={{ gridColumn: 'span 2' }}>
+                    <span className="info-label">Also Known As</span>
+                    <span className="info-value" style={{ display: 'block', fontSize: '11px', marginTop: '2px', color: 'var(--color-text-muted)', lineHeight: '1.4' }}>
+                      {game.alternativeNames.join(", ")}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {game.genres && game.genres.length > 0 && (
+                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                  {game.genres.map((g) => (
+                    <span key={g} className="metadata-genre-tag">{g}</span>
+                  ))}
+                </div>
+              )}
+            </section>
+
             {(game.igdbRating || game.criticRating) && (
               <section className="game-section ratings-card">
                 <h2 className="game-section-title">
@@ -1399,68 +1539,78 @@ function GameDetail({ game }: { game: Game }) {
               </section>
             )}
 
-            <section className="game-section">
-              <h2 className="game-section-title">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-                Info
-              </h2>
-              <div className="info-grid">
-                <div className="info-item">
-                  <span className="info-label">Platform</span>
-                  <span className="info-value">{game.platform}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Status</span>
-                  <span className="info-value">
-                    {game.installed ? "Installed" : "Not Installed"}
-                  </span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Play Time</span>
-                  <span className="info-value">{game.playTime}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Added</span>
-                  <span className="info-value">{addedDate}</span>
-                </div>
-                {game.developer && (
-                  <div className="info-item">
-                    <span className="info-label">Developer</span>
-                    <span className="info-value">{game.developer}</span>
-                  </div>
-                )}
-                {game.publisher && (
-                  <div className="info-item">
-                    <span className="info-label">Publisher</span>
-                    <span className="info-value">{game.publisher}</span>
-                  </div>
-                )}
-                {game.releaseDate && (
-                  <div className="info-item">
-                    <span className="info-label">Released</span>
-                    <span className="info-value">{game.releaseDate}</span>
-                  </div>
-                )}
-              </div>
-              {game.genres && game.genres.length > 0 && (
-                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                  {game.genres.map((g) => (
-                    <span key={g} className="metadata-genre-tag">{g}</span>
-                  ))}
-                </div>
-              )}
-            </section>
+            {/* Languages Section */}
+            {game.languageSupports && game.languageSupports.length > 0 && (
+              <section className="game-section languages-section" style={{ marginTop: 'var(--space-xl)' }}>
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    <line x1="9" y1="10" x2="15" y2="10" />
+                    <line x1="9" y1="14" x2="13" y2="14" />
+                  </svg>
+                  Supported Languages
+                </h2>
+                {(() => {
+                  const langMap: Record<string, { interface: boolean; audio: boolean; subtitles: boolean }> = {};
+                  game.languageSupports.forEach(ls => {
+                    if (!ls.language) return;
+                    if (!langMap[ls.language]) {
+                      langMap[ls.language] = { interface: false, audio: false, subtitles: false };
+                    }
+                    const type = ls.supportType ? ls.supportType.toLowerCase() : "";
+                    if (type === "interface") langMap[ls.language].interface = true;
+                    else if (type === "audio") langMap[ls.language].audio = true;
+                    else if (type === "subtitles") langMap[ls.language].subtitles = true;
+                  });
+
+                  const languagesList = Object.keys(langMap).sort();
+
+                  return (
+                    <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-secondary)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-sm)', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'rgba(255,255,255,0.02)' }}>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600' }}>Language</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Interface</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Audio</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Subtitles</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {languagesList.map(lang => (
+                            <tr key={lang} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', fontWeight: '500', color: 'var(--color-text-primary)' }}>{lang}</td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].interface ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].audio ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].subtitles ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
+
           </div>
         </div>
       )}
@@ -1806,6 +1956,23 @@ function GameDetail({ game }: { game: Game }) {
                     </div>
                   </div>
                   
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-collection">Series</label>
+                    <input id="edit-collection" className="edit-input" type="text" value={editCollection} onChange={(e) => setEditCollection(e.target.value)} placeholder="Series or Collection" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-franchise">Franchise</label>
+                    <input id="edit-franchise" className="edit-input" type="text" value={editFranchise} onChange={(e) => setEditFranchise(e.target.value)} placeholder="Franchise name" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-game-category">Game Type</label>
+                    <input id="edit-game-category" className="edit-input" type="text" value={editGameCategory} onChange={(e) => setEditGameCategory(e.target.value)} placeholder="e.g. Main Game, Expansion" />
+                  </div>
+                  <div className="edit-field">
+                    <label className="edit-label" htmlFor="edit-release-status">Release Status</label>
+                    <input id="edit-release-status" className="edit-input" type="text" value={editReleaseStatus} onChange={(e) => setEditReleaseStatus(e.target.value)} placeholder="e.g. Released, Alpha" />
+                  </div>
+
                   <div className="edit-field-row" style={{ marginTop: 'var(--space-md)' }}>
                     <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
@@ -1828,6 +1995,11 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
 
                 <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-alternative-names">Alternative Names (Comma-separated)</label>
+                  <input id="edit-alternative-names" className="edit-input" type="text" value={editAlternativeNamesText} onChange={(e) => setEditAlternativeNamesText(e.target.value)} placeholder="Witcher III, Wiedźmin 3" />
+                </div>
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
                   <label className="edit-label" htmlFor="edit-releases-list">Releases (Line-by-line: Platform | YYYY-MM-DD | Region)</label>
                   <textarea id="edit-releases-list" className="edit-input edit-textarea" value={editReleasesText} onChange={(e) => setEditReleasesText(e.target.value)} placeholder="PC | 2020-12-10 | North America&#10;PS5 | 2020-12-10 | Worldwide" rows={3} />
                 </div>
@@ -1835,6 +2007,11 @@ function GameDetail({ game }: { game: Game }) {
                 <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
                   <label className="edit-label" htmlFor="edit-igdb-reviews-json">Community Reviews (JSON format)</label>
                   <textarea id="edit-igdb-reviews-json" className="edit-input edit-textarea" value={editIgdbReviewsText} onChange={(e) => setEditIgdbReviewsText(e.target.value)} placeholder="[ { &quot;username&quot;: &quot;Player1&quot;, &quot;rating&quot;: 90, &quot;content&quot;: &quot;Amazing!&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
+                </div>
+
+                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                  <label className="edit-label" htmlFor="edit-languages-json">Supported Languages (JSON format)</label>
+                  <textarea id="edit-languages-json" className="edit-input edit-textarea" value={editLanguageSupportsText} onChange={(e) => setEditLanguageSupportsText(e.target.value)} placeholder="[ { &quot;language&quot;: &quot;English&quot;, &quot;supportType&quot;: &quot;Audio&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
                 </div>
                 
                 <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>

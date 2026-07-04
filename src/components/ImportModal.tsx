@@ -516,6 +516,33 @@ export default function ImportModal({
                                   <p>{activeDetail.storyline}</p>
                                 </div>
                               )}
+                              {activeDetail.timeToBeat && (activeDetail.timeToBeat.normally || activeDetail.timeToBeat.completely || activeDetail.timeToBeat.hastly) && (
+                                <div className="preview-hltb" style={{ marginTop: 'var(--space-md)', padding: 'var(--space-sm)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                                  <h5 style={{ margin: '0 0 var(--space-xs) 0', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>Time to Beat</h5>
+                                  <div style={{ display: 'flex', gap: 'var(--space-md)', fontSize: 'var(--font-size-xs)' }}>
+                                    {activeDetail.timeToBeat.normally && <div>Main Story: <strong>{Math.round(activeDetail.timeToBeat.normally / 3600)}h</strong></div>}
+                                    {activeDetail.timeToBeat.hastly && <div>Rushed: <strong>{Math.round(activeDetail.timeToBeat.hastly / 3600)}h</strong></div>}
+                                    {activeDetail.timeToBeat.completely && <div>Completionist: <strong>{Math.round(activeDetail.timeToBeat.completely / 3600)}h</strong></div>}
+                                  </div>
+                                </div>
+                              )}
+                              {activeDetail.igdbReviews && activeDetail.igdbReviews.length > 0 && (
+                                <div className="preview-reviews-section" style={{ marginTop: 'var(--space-md)' }}>
+                                  <h5 style={{ margin: '0 0 var(--space-xs) 0', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>Community Reviews ({activeDetail.igdbReviews.length})</h5>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: '180px', overflowY: 'auto' }}>
+                                    {activeDetail.igdbReviews.slice(0, 3).map((rev, idx) => (
+                                      <div key={idx} style={{ padding: 'var(--space-sm)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                                          <strong>{rev.username || 'Anonymous'}</strong>
+                                          {rev.rating && <span style={{ color: 'var(--color-accent)' }}>{rev.rating}/100</span>}
+                                        </div>
+                                        {rev.title && <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: '600', marginBottom: '2px' }}>{rev.title}</div>}
+                                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{rev.content}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <button
                               className="preview-unlink-btn"

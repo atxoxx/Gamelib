@@ -67,6 +67,18 @@ pub struct GameMetadataResult {
     pub releases: Option<Vec<ReleaseDateInfo>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub igdb_reviews: Option<Vec<IgdbReview>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_names: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub franchise: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language_supports: Option<Vec<LanguageSupportInfo>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -100,6 +112,13 @@ pub struct IgdbReview {
     pub content: Option<String>,
     pub rating: Option<u32>,
     pub username: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageSupportInfo {
+    pub language: String,
+    pub support_type: String,
 }
 
 // ─── Store Types (IGDB catalog browsing) ─────────────────────────────────────
@@ -441,6 +460,12 @@ async fn search_steam(game_name: &str) -> Option<GameMetadataResult> {
         similar_games: None,
         releases: None,
         igdb_reviews: None,
+        alternative_names: None,
+        collection: None,
+        franchise: None,
+        game_category: None,
+        release_status: None,
+        language_supports: None,
     })
 }
 
@@ -630,6 +655,12 @@ async fn search_launchbox(game_name: &str) -> Option<GameMetadataResult> {
         similar_games: None,
         releases: None,
         igdb_reviews: None,
+        alternative_names: None,
+        collection: None,
+        franchise: None,
+        game_category: None,
+        release_status: None,
+        language_supports: None,
     })
 }
 
@@ -1049,6 +1080,12 @@ struct IgdbGame {
     websites: Option<Vec<IgdbWebsite>>,
     similar_games: Option<Vec<IgdbSimilarGameRaw>>,
     release_dates: Option<Vec<IgdbReleaseDateRaw>>,
+    game_type: Option<u32>,
+    status: Option<u32>,
+    collections: Option<Vec<IgdbName>>,
+    franchises: Option<Vec<IgdbName>>,
+    alternative_names: Option<Vec<IgdbName>>,
+    language_supports: Option<Vec<IgdbLanguageSupport>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1118,6 +1155,12 @@ struct IgdbWebsite {
     category: Option<i32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct IgdbLanguageSupport {
+    language: Option<IgdbName>,
+    language_support_type: Option<IgdbName>,
+}
+
 fn format_unix_timestamp(ts: i64) -> String {
     let seconds_in_day = 86400;
     let days = ts / seconds_in_day;
@@ -1155,6 +1198,39 @@ fn format_unix_timestamp(ts: i64) -> String {
     format!("{:04}-{:02}-{:02}", year, month, day)
 }
 
+fn map_game_category(game_type: u32) -> String {
+    match game_type {
+        0 => "Main Game",
+        1 => "DLC / Add-on",
+        2 => "Expansion",
+        3 => "Bundle",
+        4 => "Standalone Expansion",
+        5 => "Mod",
+        6 => "Episode",
+        7 => "Season",
+        8 => "Remake",
+        9 => "Remaster",
+        10 => "Expanded Game",
+        11 => "Port",
+        12 => "Fork",
+        13 => "Pack",
+        14 => "Playable Prototype",
+        _ => "Unknown",
+    }.to_string()
+}
+
+fn map_release_status(status: u32) -> String {
+    match status {
+        0 => "Released",
+        2 => "Alpha",
+        3 => "Beta",
+        4 => "Early Access",
+        5 => "Offline",
+        6 => "Cancelled",
+        _ => "Unknown",
+    }.to_string()
+}
+
 pub async fn search_igdb(game_name: &str) -> Vec<GameMetadataResult> {
     let token = match get_twitch_token().await {
         Ok(t) => t,
@@ -1181,7 +1257,9 @@ fields name, slug, summary, storyline, first_release_date, rating, aggregated_ra
        involved_companies.developer, involved_companies.publisher, involved_companies.company.name,
        websites.url, websites.category,
        similar_games.name, similar_games.cover.url,
-       release_dates.platform.name, release_dates.human, release_dates.region;
+       release_dates.platform.name, release_dates.human, release_dates.region,
+       game_type, status, collections.name, franchises.name, alternative_names.name,
+       language_supports.language.name, language_supports.language_support_type.name;
 limit 8;"#,
         escaped_name
     );
@@ -1477,6 +1555,34 @@ limit 8;"#,
         });
 
         let igdb_reviews = reviews_by_game.get(&game.id).cloned();
+        
+        let alternative_names = game.alternative_names.as_ref()
+            .map(|list| list.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
+
+        let collection = game.collections.as_ref()
+            .and_then(|list| list.first().map(|c| c.name.clone()));
+
+        let franchise = game.franchises.as_ref()
+            .and_then(|list| {
+                if list.is_empty() { None }
+                else { Some(list.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join("; ")) }
+            });
+
+        let game_category = Some(map_game_category(game.game_type.unwrap_or(0)));
+        let release_status = Some(map_release_status(game.status.unwrap_or(0)));
+
+        let language_supports = game.language_supports.as_ref().map(|list| {
+            list.iter()
+                .filter_map(|ls| {
+                    let lang = ls.language.as_ref()?.name.clone();
+                    let support_type = ls.language_support_type.as_ref()?.name.clone();
+                    Some(LanguageSupportInfo {
+                        language: lang,
+                        support_type,
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
             
         results.push(GameMetadataResult {
             title: game.name,
@@ -1501,6 +1607,12 @@ limit 8;"#,
             similar_games,
             releases,
             igdb_reviews,
+            alternative_names,
+            collection,
+            franchise,
+            game_category,
+            release_status,
+            language_supports,
         });
     }
     
@@ -1727,7 +1839,9 @@ fields name, slug, summary, storyline, first_release_date, rating, aggregated_ra
        involved_companies.developer, involved_companies.publisher, involved_companies.company.name,
        websites.url, websites.category,
        similar_games.name, similar_games.cover.url,
-       release_dates.platform.name, release_dates.human, release_dates.region;
+       release_dates.platform.name, release_dates.human, release_dates.region,
+       game_type, status, collections.name, franchises.name, alternative_names.name,
+       language_supports.language.name, language_supports.language_support_type.name;
 limit 1;"#,
         escaped_slug
     );
@@ -2042,6 +2156,34 @@ limit 1;"#,
 
     let igdb_reviews = reviews_by_game.get(&game.id).cloned();
 
+    let alternative_names = game.alternative_names.as_ref()
+        .map(|list| list.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
+
+    let collection = game.collections.as_ref()
+        .and_then(|list| list.first().map(|c| c.name.clone()));
+
+    let franchise = game.franchises.as_ref()
+        .and_then(|list| {
+            if list.is_empty() { None }
+            else { Some(list.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join("; ")) }
+        });
+
+    let game_category = Some(map_game_category(game.game_type.unwrap_or(0)));
+    let release_status = Some(map_release_status(game.status.unwrap_or(0)));
+
+    let language_supports = game.language_supports.as_ref().map(|list| {
+        list.iter()
+            .filter_map(|ls| {
+                let lang = ls.language.as_ref()?.name.clone();
+                let support_type = ls.language_support_type.as_ref()?.name.clone();
+                Some(LanguageSupportInfo {
+                    language: lang,
+                    support_type,
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+
     Some(GameMetadataResult {
         title: game.name,
         description: game.summary,
@@ -2069,6 +2211,12 @@ limit 1;"#,
         similar_games,
         releases,
         igdb_reviews,
+        alternative_names,
+        collection,
+        franchise,
+        game_category,
+        release_status,
+        language_supports,
     })
 }
 

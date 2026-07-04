@@ -473,6 +473,36 @@ export default function StoreGameDetail() {
           </div>
 
           <div className="game-side-col">
+            <section className="game-section">
+              <h2 className="game-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                Info
+              </h2>
+              <div className="info-grid">
+                <div className="info-item"><span className="info-label">Source</span><span className="info-value">{data.sourceName}</span></div>
+                {data.developer && <div className="info-item"><span className="info-label">Developer</span><span className="info-value">{data.developer}</span></div>}
+                {data.publisher && <div className="info-item"><span className="info-label">Publisher</span><span className="info-value">{data.publisher}</span></div>}
+                {data.releaseDate && <div className="info-item"><span className="info-label">Released</span><span className="info-value">{data.releaseDate}</span></div>}
+                {data.collection && <div className="info-item"><span className="info-label">Series</span><span className="info-value">{data.collection}</span></div>}
+                {data.franchise && <div className="info-item"><span className="info-label">Franchise</span><span className="info-value">{data.franchise}</span></div>}
+                {data.gameCategory && <div className="info-item"><span className="info-label">Game Type</span><span className="info-value">{data.gameCategory}</span></div>}
+                {data.releaseStatus && <div className="info-item"><span className="info-label">Release Status</span><span className="info-value">{data.releaseStatus}</span></div>}
+                {data.alternativeNames && data.alternativeNames.length > 0 && (
+                  <div className="info-item" style={{ gridColumn: 'span 2' }}>
+                    <span className="info-label">Also Known As</span>
+                    <span className="info-value" style={{ display: 'block', fontSize: '11px', marginTop: '2px', color: 'var(--color-text-muted)', lineHeight: '1.4' }}>
+                      {data.alternativeNames.join(", ")}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {data.genres.length > 0 && (
+                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+                  {data.genres.map((g) => <span key={g} className="metadata-genre-tag">{g}</span>)}
+                </div>
+              )}
+            </section>
+
             {(data.igdbRating || data.criticRating) && (
               <section className="game-section ratings-card">
                 <h2 className="game-section-title">
@@ -614,23 +644,78 @@ export default function StoreGameDetail() {
               </section>
             )}
 
-            <section className="game-section">
-              <h2 className="game-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                Info
-              </h2>
-              <div className="info-grid">
-                <div className="info-item"><span className="info-label">Source</span><span className="info-value">{data.sourceName}</span></div>
-                {data.developer && <div className="info-item"><span className="info-label">Developer</span><span className="info-value">{data.developer}</span></div>}
-                {data.publisher && <div className="info-item"><span className="info-label">Publisher</span><span className="info-value">{data.publisher}</span></div>}
-                {data.releaseDate && <div className="info-item"><span className="info-label">Released</span><span className="info-value">{data.releaseDate}</span></div>}
-              </div>
-              {data.genres.length > 0 && (
-                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                  {data.genres.map((g) => <span key={g} className="metadata-genre-tag">{g}</span>)}
-                </div>
-              )}
-            </section>
+            {/* Languages Section */}
+            {data.languageSupports && data.languageSupports.length > 0 && (
+              <section className="game-section languages-section" style={{ marginTop: 'var(--space-xl)' }}>
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    <line x1="9" y1="10" x2="15" y2="10" />
+                    <line x1="9" y1="14" x2="13" y2="14" />
+                  </svg>
+                  Supported Languages
+                </h2>
+                {(() => {
+                  const langMap: Record<string, { interface: boolean; audio: boolean; subtitles: boolean }> = {};
+                  data.languageSupports.forEach(ls => {
+                    if (!ls.language) return;
+                    if (!langMap[ls.language]) {
+                      langMap[ls.language] = { interface: false, audio: false, subtitles: false };
+                    }
+                    const type = ls.supportType ? ls.supportType.toLowerCase() : "";
+                    if (type === "interface") langMap[ls.language].interface = true;
+                    else if (type === "audio") langMap[ls.language].audio = true;
+                    else if (type === "subtitles") langMap[ls.language].subtitles = true;
+                  });
+
+                  const languagesList = Object.keys(langMap).sort();
+
+                  return (
+                    <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-secondary)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-sm)', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'rgba(255,255,255,0.02)' }}>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600' }}>Language</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Interface</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Audio</th>
+                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Subtitles</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {languagesList.map(lang => (
+                            <tr key={lang} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', fontWeight: '500', color: 'var(--color-text-primary)' }}>{lang}</td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].interface ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].audio ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
+                                {langMap[lang].subtitles ? (
+                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </section>
+            )}
+
           </div>
         </div>
       )}

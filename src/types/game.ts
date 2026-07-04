@@ -39,6 +39,12 @@ export interface Game {
   similarGames?: SimilarGame[];
   releases?: ReleaseDateInfo[];
   igdbReviews?: IgdbReview[];
+  alternativeNames?: string[];
+  collection?: string;
+  franchise?: string;
+  gameCategory?: string;
+  releaseStatus?: string;
+  languageSupports?: LanguageSupportInfo[];
 }
 
 export interface TimeToBeat {
@@ -66,6 +72,11 @@ export interface IgdbReview {
   username?: string;
 }
 
+export interface LanguageSupportInfo {
+  language: string;
+  supportType: string;
+}
+
 /** Metadata returned from the backend scraper. */
 export interface GameMetadataResult {
   title: string;
@@ -90,6 +101,12 @@ export interface GameMetadataResult {
   similarGames?: SimilarGame[];
   releases?: ReleaseDateInfo[];
   igdbReviews?: IgdbReview[];
+  alternativeNames?: string[];
+  collection?: string;
+  franchise?: string;
+  gameCategory?: string;
+  releaseStatus?: string;
+  languageSupports?: LanguageSupportInfo[];
 }
 
 /** Image URLs from a metadata source. */
