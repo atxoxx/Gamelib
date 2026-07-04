@@ -1,0 +1,554 @@
+/* ─── Library Page: Filters, Chips, Density ─────────────────────────────
+ *
+ * Mirrors `store.css` so the Library and Store pages have a consistent
+ * filter UX. All classes are namespaced with `library-` to avoid
+ * colliding with `.store-*` selectors that share the same look.
+ *
+ * Density variants are applied to both the grid container (to widen /
+ * tighten the column minmax) and the individual card (to switch between
+ * cover-only / cover+body / cover+overlay-body layouts).
+ */
+
+/* ── Library Filter Sidebar ──────────────────────────────────────── */
+
+.library-filter-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  width: 240px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  position: sticky;
+  top: var(--space-md);
+  max-height: calc(100vh - 2 * var(--space-md));
+  overflow-y: auto;
+}
+
+.library-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.library-filter-heading {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.library-filter-search {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+  font-family: inherit;
+}
+
+.library-filter-search:focus {
+  border-color: var(--color-accent);
+}
+
+.library-filter-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+.library-filter-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-filter-radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+  transition: background 0.1s ease;
+}
+
+.library-filter-radio:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.library-filter-radio input[type="radio"] {
+  accent-color: var(--color-accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.library-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.library-filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+  transition: background 0.1s ease;
+}
+
+.library-filter-checkbox:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.library-filter-checkbox input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.library-filter-year-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.library-filter-year-input {
+  width: 70px;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  outline: none;
+  font-family: inherit;
+}
+
+.library-filter-year-input:focus {
+  border-color: var(--color-accent);
+}
+
+.library-filter-year-sep {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.library-filter-slider {
+  width: 100%;
+  accent-color: var(--color-accent);
+  margin: var(--space-xs) 0 0 0;
+}
+
+.library-filter-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.library-filter-btn {
+  flex: 1;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.library-filter-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Library Filter Chips ────────────────────────────────────────── */
+
+.library-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: center;
+  margin-bottom: var(--space-md);
+}
+
+.library-filter-count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-right: var(--space-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.library-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  line-height: 1.2;
+}
+
+.library-filter-chip button {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: var(--space-xs);
+  transition: color 0.1s ease;
+}
+
+.library-filter-chip button:hover {
+  color: var(--color-text-primary);
+}
+
+.library-filter-chip button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.library-filter-reset-all {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  margin-left: var(--space-xs);
+}
+
+.library-filter-reset-all:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+/* ── Library Page Layout: sidebar + grid ─────────────────────────── */
+
+.library-layout {
+  display: flex;
+  gap: var(--space-md);
+  align-items: flex-start;
+}
+
+.library-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Library Density Toolbar ─────────────────────────────────────── */
+
+.library-density-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+
+.library-density-toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.library-density-toggle {
+  display: inline-flex;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+.library-density-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  padding: var(--space-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  transition: all 0.15s ease;
+}
+
+.library-density-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.library-density-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+}
+
+.library-density-btn.active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.library-density-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Library Header (heading + density) ──────────────────────────── */
+
+.library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.library-header h2 {
+  margin: 0;
+}
+
+/* ── Library Empty State (filtered but no results) ───────────────── */
+
+.library-empty-filtered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl) var(--space-md);
+  text-align: center;
+  color: var(--color-text-secondary);
+  gap: var(--space-sm);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.library-empty-filtered-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.4;
+}
+
+.library-empty-filtered-title {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+}
+
+.library-empty-filtered-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  max-width: 360px;
+}
+
+.library-empty-filtered-reset {
+  margin-top: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.library-empty-filtered-reset:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* ── Library Card Density Variants ───────────────────────────────── */
+
+/*
+ * The grid column minmax changes per density:
+ *   - compact   : cover-only cards, tighter columns
+ *   - cozy      : default — current behavior preserved
+ *   - cinematic : larger columns, more whitespace, more body content
+ */
+.library-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-md);
+}
+
+.library-cards.density-compact {
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-sm);
+}
+
+.library-cards.density-cinematic {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-lg);
+  /* Center cards when a column is wider than `max-width: 280px` (e.g. on
+     ultrawide displays) so the cap leaves a balanced gap on both sides
+     instead of a dead zone on the right. */
+  justify-items: center;
+}
+
+/*
+ * Card-level width guards. Without these, hardcoded cover widths or
+ * unbreakable body text (long platform strings, long genre chains) push
+ * the grid item past its column boundary, which is the same root cause
+ * the Store cards hit in Phase 2.8e.
+ */
+.library-cards > .library-card {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.library-card.density-compact {
+  max-width: 130px;
+}
+
+.library-card.density-cinematic {
+  max-width: 280px;
+}
+
+/* Compact: cover only, hide everything below */
+.library-card.density-compact .library-card-body {
+  display: none;
+}
+
+.library-card.density-compact .library-card-cover {
+  aspect-ratio: 2 / 3;
+}
+
+/* Cinematic: enlarge cover, overlay the body on the cover with a
+   gradient. Hide the long-form body text (developer, notes) so the
+   overlay stays compact. */
+.library-card.density-cinematic .library-card-cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+}
+
+.library-card.density-cinematic .library-card-body {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: var(--space-md);
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.95) 0%,
+    rgba(0, 0, 0, 0.75) 60%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  z-index: 1;
+  /* The overlay absorbs clicks so the gradient and any text it contains
+     bubble up to the card's outer onClick (which navigates to the game
+     page). Mirrors the same rule on `.store-game-card.density-cinematic
+     .store-card-body`. Without this, the gradient blocks the card click
+     handler and the user can't navigate. */
+  pointer-events: none;
+}
+
+.library-card.density-cinematic .library-card-name {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  -webkit-line-clamp: 2;
+}
+
+.library-card.density-cinematic .library-card-meta-row {
+  font-size: var(--font-size-xs);
+}
+
+.library-card.density-cinematic .library-card-platform,
+.library-card.density-cinematic .library-card-rating {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.library-card.density-cinematic .library-card-genres {
+  font-size: var(--font-size-xs);
+  color: rgba(255, 255, 255, 0.85);
+  /* Cap to 2 genres via existing slice(0, 3) — the visual style hint: */
+}
+
+.library-card.density-cinematic .library-card-genre-tag {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* Hide long-form fields in cinematic — they don't fit an overlay */
+.library-card.density-cinematic .library-card-developer,
+.library-card.density-cinematic .library-card-notes {
+  display: none;
+}
+
+/* Make sure badges stay visible above the gradient overlay */
+.library-card.density-cinematic .library-card-running-badge,
+.library-card.density-cinematic .library-card-playtime-badge,
+.library-card.density-cinematic .library-card-status-badge {
+  z-index: 2;
+}
+
+/* Mobile: stack the sidebar above the grid */
+@media (max-width: 800px) {
+  .library-layout {
+    flex-direction: column;
+  }
+
+  .library-filter-sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+
+  .library-cards.density-cinematic {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ViewDensity } from "../../types/game";
+import type { ViewDensity } from "../types/game";
 
 interface DensityToggleProps {
   density: ViewDensity;

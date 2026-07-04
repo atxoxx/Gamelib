@@ -10,7 +10,7 @@ import StoreFilterChips from "../components/store/StoreFilterChips";
 import StoreFilterSidebar from "../components/store/StoreFilterSidebar";
 import HeroFeature from "../components/store/HeroFeature";
 import SnapRail from "../components/store/SnapRail";
-import DensityToggle from "../components/store/DensityToggle";
+import DensityToggle from "../components/DensityToggle";
 import type { StoreGameSummary, StoreCategory } from "../types/game";
 
 export default function StorePage() {
