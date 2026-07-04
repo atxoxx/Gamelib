@@ -10,6 +10,8 @@ import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type Gam
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
+import { useProgressiveImage } from "../hooks/useProgressiveImages";
+
 
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -227,6 +229,36 @@ function TimeToBeatRow({ label, targetSeconds, currentPlayTime }: { label: strin
             boxShadow: percentage >= 100 ? '0 0 6px rgba(16, 185, 129, 0.4)' : '0 0 6px rgba(99, 102, 241, 0.4)'
           }} 
         />
+      </div>
+    </div>
+  );
+}
+
+function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => void }) {
+  const [coverUrl, imgRef] = useProgressiveImage(sim.coverUrl || null);
+  return (
+    <div 
+      className="similar-game-card" 
+      onClick={onClick}
+      style={{ cursor: 'pointer' }}
+    >
+      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
+        {coverUrl ? (
+          <img 
+            ref={imgRef}
+            src={coverUrl} 
+            alt={sim.name} 
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            className="similar-game-cover"
+          />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
+        )}
+      </div>
+      <div style={{ padding: 'var(--space-sm)' }}>
+        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
+          {sim.name}
+        </h4>
       </div>
     </div>
   );
@@ -1177,30 +1209,11 @@ function GameDetail({ game }: { game: Game }) {
                 </h2>
                 <div className="similar-games-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
                   {game.similarGames.slice(0, 6).map((sim) => (
-                    <div 
+                    <SimilarGameCard 
                       key={sim.id} 
-                      className="similar-game-card" 
+                      sim={sim} 
                       onClick={() => navigate(`/store/${slugify(sim.name)}`)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
-                        {sim.coverUrl ? (
-                          <img 
-                            src={sim.coverUrl} 
-                            alt={sim.name} 
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            className="similar-game-cover"
-                          />
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
-                        )}
-                      </div>
-                      <div style={{ padding: 'var(--space-sm)' }}>
-                        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
-                          {sim.name}
-                        </h4>
-                      </div>
-                    </div>
+                    />
                   ))}
                 </div>
               </section>

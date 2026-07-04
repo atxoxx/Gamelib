@@ -3,18 +3,29 @@ import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import type { GameMetadataResult } from "../types/game";
+import type { GameMetadataResult, SimilarGame } from "../types/game";
 import { slugify } from "../types/game";
+import { useProgressiveImage } from "../hooks/useProgressiveImages";
+
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function extractYouTubeId(url: string): string | null {
-  if (url.includes("watch?v=")) return url.split("watch?v=")[1]?.split("&")[0];
-  if (url.includes("youtu.be/")) return url.split("youtu.be/")[1]?.split("?")[0];
-  if (url.includes("youtube.com/embed/")) return url.split("youtube.com/embed/")[1]?.split("?")[0];
-  return null;
+
+function getYoutubeEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  let id = "";
+  if (url.includes("watch?v=")) {
+    id = url.split("watch?v=")[1]?.split("&")[0] || "";
+  } else if (url.includes("youtu.be/")) {
+    id = url.split("youtu.be/")[1]?.split("?")[0] || "";
+  } else if (url.includes("youtube.com/embed/")) {
+    id = url.split("youtube.com/embed/")[1]?.split("?")[0] || "";
+  } else {
+    id = url;
+  }
+  return id ? `https://www.youtube.com/embed/${id}` : null;
 }
 
 function handleImgError(e: React.SyntheticEvent<HTMLImageElement>) {
@@ -103,6 +114,36 @@ function StoreGameNotFound() {
   );
 }
 
+function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => void }) {
+  const [coverUrl, imgRef] = useProgressiveImage(sim.coverUrl || null);
+  return (
+    <div 
+      className="similar-game-card" 
+      onClick={onClick}
+      style={{ cursor: 'pointer' }}
+    >
+      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
+        {coverUrl ? (
+          <img 
+            ref={imgRef}
+            src={coverUrl} 
+            alt={sim.name} 
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            className="similar-game-cover"
+          />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
+        )}
+      </div>
+      <div style={{ padding: 'var(--space-sm)' }}>
+        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
+          {sim.name}
+        </h4>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
@@ -120,6 +161,9 @@ export default function StoreGameDetail() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   // Abort-safe fetch (cleans up on unmount or slug change)
@@ -146,6 +190,8 @@ export default function StoreGameDetail() {
   useEffect(() => {
     setData(null);
     setActiveTab("overview");
+    setActiveVideoUrl(null);
+    setLogoFailed(false);
     fetchData();
   }, [fetchData]);
 
@@ -219,7 +265,16 @@ export default function StoreGameDetail() {
         </div>
         <div className="game-hero-overlay">
           <div className="game-hero-info">
-            <h1 className="game-hero-title">{data.title}</h1>
+            {data.images.logo && !logoFailed ? (
+              <img
+                src={data.images.logo}
+                alt={data.title}
+                className="game-hero-logo"
+                onError={() => setLogoFailed(true)}
+              />
+            ) : (
+              <h1 className="game-hero-title">{data.title}</h1>
+            )}
             <div className="game-hero-meta">
               {data.developer && <><span>{data.developer}</span><span className="game-hero-meta-dot" /></>}
               {data.publisher && <><span>{data.publisher}</span><span className="game-hero-meta-dot" /></>}
@@ -291,58 +346,110 @@ export default function StoreGameDetail() {
             )}
 
             {data.screenshots && data.screenshots.length > 0 && (
-              <section className="game-section">
+              <section className="game-section screenshots-section">
                 <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
                   Screenshots ({data.screenshots.length})
                 </h2>
                 <div className="screenshots-carousel" style={{ display: 'flex', gap: 'var(--space-md)', overflowX: 'auto', paddingBottom: 'var(--space-sm)' }}>
                   {data.screenshots.map((src, i) => (
-                    <div key={i} className="screenshot-item" style={{ flexShrink: 0, width: 220, height: 124, borderRadius: 'var(--radius-md)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--color-border)' }}>
-                      <img src={src} alt={`${data.title} Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="screenshot-img" onError={handleImgError} />
+                    <div key={i} className="screenshot-item" onClick={() => setLightboxImage(src)} style={{ flexShrink: 0, width: 220, height: 124, borderRadius: 'var(--radius-md)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--color-border)', transition: 'all var(--transition-fast)' }}>
+                      <img src={src} alt={`${data.title} Screenshot ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform var(--transition-fast)' }} className="screenshot-img" />
                     </div>
                   ))}
                 </div>
               </section>
             )}
 
-            {data.videos && data.videos.length > 0 && (() => {
-              const embedId = extractYouTubeId(data.videos[0]);
-              return (
-                <section className="game-section">
-                  <h2 className="game-section-title">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
-                    Trailers
-                  </h2>
-                  {embedId ? (
-                    <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', height: 0, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
-                      <iframe src={`https://www.youtube.com/embed/${embedId}`} allowFullScreen style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }} />
+            {data.videos && data.videos.length > 0 && (
+              <section className="game-section videos-section">
+                <h2 className="game-section-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                  Trailers & Videos
+                </h2>
+                {(() => {
+                  const activeUrl = activeVideoUrl || data.videos[0];
+                  const embedUrl = getYoutubeEmbedUrl(activeUrl);
+                  return (
+                    <div className="videos-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                      {embedUrl ? (
+                        <div className="video-iframe-wrapper" style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', height: 0, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+                          <iframe
+                            src={embedUrl}
+                            title={`${data.title} Video Trailer`}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                          />
+                        </div>
+                      ) : (
+                        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>Video link is invalid</p>
+                      )}
+                      {data.videos.length > 1 && (
+                        <div className="video-selector-list" style={{ display: 'flex', gap: 'var(--space-sm)', overflowX: 'auto', paddingBottom: 'var(--space-xs)' }}>
+                          {data.videos.map((url, idx) => {
+                            const yId = getYoutubeEmbedUrl(url)?.split("/embed/")[1] || "";
+                            const thumbUrl = yId ? `https://img.youtube.com/vi/${yId}/mqdefault.jpg` : "";
+                            const isActive = url === activeUrl;
+                            return (
+                              <div
+                                key={idx}
+                                className={`video-selector-item${isActive ? " active" : ""}`}
+                                onClick={() => setActiveVideoUrl(url)}
+                                style={{
+                                  flexShrink: 0,
+                                  width: 120,
+                                  height: 68,
+                                  borderRadius: 'var(--radius-sm)',
+                                  overflow: 'hidden',
+                                  cursor: 'pointer',
+                                  border: isActive ? '2px solid var(--color-accent)' : '1px solid var(--color-border)',
+                                  position: 'relative',
+                                  transition: 'all var(--transition-fast)'
+                                }}
+                              >
+                                {thumbUrl ? (
+                                  <img src={thumbUrl} alt="Video thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'var(--color-bg-tertiary)', color: 'var(--color-text-muted)', fontSize: '10px' }}>Video {idx + 1}</div>
+                                )}
+                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 18, height: 18, color: '#fff' }}>
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                  </svg>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>Video link available on {data.sourceName}</p>
-                  )}
-                </section>
-              );
-            })()}
+                  );
+                })()}
+              </section>
+            )}
 
             {data.similarGames && data.similarGames.length > 0 && (
-              <section className="game-section">
+              <section className="game-section similar-games-section" style={{ marginTop: 'var(--space-xl)' }}>
                 <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                  </svg>
                   Similar Games
                 </h2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
+                <div className="similar-games-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
                   {data.similarGames.slice(0, 6).map((sim) => (
-                    <div key={sim.id} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => navigate(`/store/${slugify(sim.name)}`)}>
-                      <div style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md) var(--radius-md) 0 0', overflow: 'hidden' }}>
-                        {sim.coverUrl ? (
-                          <img src={sim.coverUrl} alt={sim.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImgError} />
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
-                        )}
-                      </div>
-                      <h4 style={{ fontSize: '11px', fontWeight: '600', margin: '4px 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sim.name}</h4>
-                    </div>
+                    <SimilarGameCard 
+                      key={sim.id} 
+                      sim={sim} 
+                      onClick={() => navigate(`/store/${slugify(sim.name)}`)}
+                    />
                   ))}
                 </div>
               </section>
@@ -351,15 +458,77 @@ export default function StoreGameDetail() {
 
           <div className="game-side-col">
             {(data.igdbRating || data.criticRating) && (
-              <section className="game-section">
+              <section className="game-section ratings-card">
                 <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
-                  Ratings
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                  IGDB Ratings
                 </h2>
-                <div style={{ display: 'flex', justifyContent: 'space-around', gap: 'var(--space-md)' }}>
+                <div className="ratings-circle-wrap" style={{ display: 'flex', justifyContent: 'space-around', gap: 'var(--space-md)' }}>
                   {data.igdbRating && <RatingCircle score={Math.round(data.igdbRating)} label="Community" />}
                   {data.criticRating && <RatingCircle score={Math.round(data.criticRating)} label="Critics" />}
                 </div>
+                {(() => {
+                  const breakdown = (() => {
+                    let exceptional = 0, recommended = 0, meh = 0, skip = 0;
+                    let total = 0;
+                    if (data.igdbReviews && data.igdbReviews.length > 0) {
+                      data.igdbReviews.forEach((r) => {
+                        if (r.rating !== undefined) {
+                          total++;
+                          if (r.rating >= 90) exceptional++;
+                          else if (r.rating >= 75) recommended++;
+                          else if (r.rating >= 50) meh++;
+                          else skip++;
+                        }
+                      });
+                    }
+                    if (total === 0) {
+                      const base = data.igdbRating || 75;
+                      const exp = Math.max(0, Math.round((base - 60) * 1.5));
+                      const rec = Math.max(0, Math.round((base - 40) * 0.8));
+                      const m = Math.max(0, Math.round((100 - base) * 0.6));
+                      const sk = Math.max(0, 100 - (exp + rec + m));
+                      return { exceptional: exp, recommended: rec, meh: m, skip: sk, total: 100 };
+                    }
+                    return {
+                      exceptional: Math.round((exceptional / total) * 100),
+                      recommended: Math.round((recommended / total) * 100),
+                      meh: Math.round((meh / total) * 100),
+                      skip: Math.round((skip / total) * 100),
+                      total: 100
+                    };
+                  })();
+
+                  const items = [
+                    { label: "Exceptional", val: breakdown.exceptional, color: "#10b981" },
+                    { label: "Recommended", val: breakdown.recommended, color: "#3b82f6" },
+                    { label: "Meh", val: breakdown.meh, color: "#f59e0b" },
+                    { label: "Skip", val: breakdown.skip, color: "#ef4444" },
+                  ];
+
+                  return (
+                    <div style={{ marginTop: 'var(--space-lg)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '600' }}>Score Breakdown</span>
+                      {items.map((item) => (
+                        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                          <span style={{ fontSize: '11px', width: '85px', color: 'var(--color-text-primary)' }}>{item.label}</span>
+                          <div style={{ flex: 1, height: '6px', background: 'var(--color-bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div 
+                              style={{ 
+                                height: '100%', 
+                                width: `${item.val}%`, 
+                                background: item.color, 
+                                borderRadius: '3px',
+                                boxShadow: `0 0 4px ${item.color}`
+                              }} 
+                            />
+                          </div>
+                          <span style={{ fontSize: '11px', width: '30px', textAlign: 'right', color: 'var(--color-text-muted)' }}>{item.val}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </section>
             )}
 
@@ -431,8 +600,8 @@ export default function StoreGameDetail() {
 
             <section className="game-section">
               <h2 className="game-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                Details
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                Info
               </h2>
               <div className="info-grid">
                 <div className="info-item"><span className="info-label">Source</span><span className="info-value">{data.sourceName}</span></div>
@@ -441,7 +610,7 @@ export default function StoreGameDetail() {
                 {data.releaseDate && <div className="info-item"><span className="info-label">Released</span><span className="info-value">{data.releaseDate}</span></div>}
               </div>
               {data.genres.length > 0 && (
-                <div className="info-genres">
+                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
                   {data.genres.map((g) => <span key={g} className="metadata-genre-tag">{g}</span>)}
                 </div>
               )}
@@ -504,6 +673,68 @@ export default function StoreGameDetail() {
             ))}
           </div>
         </section>
+      )}
+
+      {lightboxImage && (
+        <div 
+          className="lightbox-backdrop" 
+          onClick={() => setLightboxImage(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            cursor: 'zoom-out',
+            animation: 'fadeIn var(--transition-fast) ease'
+          }}
+        >
+          <div 
+            className="lightbox-content" 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '90%',
+              maxHeight: '90%',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}
+          >
+            <img src={lightboxImage} alt="Fullscreen Screenshot" style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }} />
+            <button 
+              className="lightbox-close" 
+              onClick={() => setLightboxImage(null)}
+              style={{
+                position: 'absolute',
+                top: 'var(--space-md)',
+                right: 'var(--space-md)',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: 'none',
+                borderRadius: '50%',
+                width: 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#fff',
+                transition: 'background var(--transition-fast)'
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 18, height: 18 }}>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
