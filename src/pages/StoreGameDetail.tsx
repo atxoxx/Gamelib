@@ -6,6 +6,7 @@ import { useToast } from "../context/ToastContext";
 import type { GameMetadataResult, SimilarGame } from "../types/game";
 import { slugify } from "../types/game";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
+import WebLinksTab from "../components/WebLinksTab";
 
 
 /* ------------------------------------------------------------------ */
@@ -165,6 +166,21 @@ export default function StoreGameDetail() {
   const [logoFailed, setLogoFailed] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const mountedRef = useRef(true);
+
+  const mockGame = useMemo(() => {
+    if (!data) return null;
+    return {
+      id: String(data.title),
+      name: data.title,
+      path: "",
+      platform: data.sourceName === "Steam" ? "Steam" : "IGDB",
+      installed: false,
+      playTime: "0h",
+      addedAt: 0,
+      metadataUrl: data.sourceUrl,
+      websites: data.websites ?? [],
+    };
+  }, [data]);
 
   // Abort-safe fetch (cleans up on unmount or slug change)
   const fetchData = useCallback(() => {
@@ -652,27 +668,8 @@ export default function StoreGameDetail() {
       )}
 
       {/* ── Weblinks ───────────────────────────────────────────────────── */}
-      {activeTab === "weblinks" && (
-        <section className="game-section">
-          <h2 className="game-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-            Related Links
-          </h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)' }}>
-            {data.sourceUrl && (
-              <a href={data.sourceUrl} target="_blank" rel="noopener noreferrer" className="related-content-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-lg)', background: 'rgba(108,92,231,0.12)', border: '1px solid rgba(108,92,231,0.25)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500, transition: 'all 0.2s' }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                View on {data.sourceName}
-              </a>
-            )}
-            {data.websites && data.websites.map((url, i) => (
-              <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="related-content-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-lg)', background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500, transition: 'all 0.2s' }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                {new URL(url).hostname}
-              </a>
-            ))}
-          </div>
-        </section>
+      {activeTab === "weblinks" && mockGame && (
+        <WebLinksTab game={mockGame} visible={!lightboxImage} />
       )}
 
       {lightboxImage && (

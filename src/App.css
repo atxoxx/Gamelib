@@ -5241,7 +5241,7 @@
 /* ==============================
    Web Links — Iframe preview (X-Frame friendly)
    ============================== */
-.wl-iframe-frame {
+.wl-webview-frame {
     flex: 1;
   display: flex;
   flex-direction: column;
@@ -5259,7 +5259,7 @@
   color-scheme: light dark;
 }
 
-.wl-iframe-loader {
+.wl-webview-loader {
   position: absolute;
   inset: 0;
   display: flex;
@@ -5282,16 +5282,16 @@
   to { opacity: 1; }
 }
 
-.wl-iframe-spinner {
+.wl-webview-spinner {
   width: 28px;
   height: 28px;
   border: 2px solid var(--color-border);
   border-top-color: var(--color-accent);
   border-radius: 50%;
-  animation: wlIframeSpin 1s linear infinite;
+  animation: wlWebviewSpin 1s linear infinite;
 }
 
-@keyframes wlIframeSpin {
+@keyframes wlWebviewSpin {
   to { transform: rotate(360deg); }
 }
 

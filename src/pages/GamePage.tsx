@@ -1655,7 +1655,12 @@ function GameDetail({ game }: { game: Game }) {
 
       {activeTab === "activity" && <GameActivityTab game={game} />}
 
-      {activeTab === "weblinks" && <WebLinksTab game={game} />}
+      {activeTab === "weblinks" && (
+        <WebLinksTab
+          game={game}
+          visible={!editing && !showImageBrowser && !showIgdbMediaBrowser && !lightboxImage}
+        />
+      )}
 
       {/* Edit Modal */}
       {editing && (

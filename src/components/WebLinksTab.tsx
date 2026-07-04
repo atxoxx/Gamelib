@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import type { ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Webview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import type { Game } from "../types/game";
 
 interface WebLinksTabProps {
   game: Game;
+  visible?: boolean;
 }
 
 type FixedSourceKey =
@@ -53,13 +57,59 @@ interface SteamSectionDef {
  * surface that gracefully in the UI.
  */
 function extractSteamAppId(game: Game): string | null {
-  if (game.platform !== "Steam") return null;
   const path = game.path || "";
   const rungame = path.match(/steam:\/\/run(?:gameid)?\/(\d+)/i);
   if (rungame) return rungame[1];
   const appidExe = path.match(/[\\/](\d+)\.exe$/i);
   if (appidExe) return appidExe[1];
+
+  const urlsToCheck = [
+    ...(game.metadataUrl ? [game.metadataUrl] : []),
+    ...(game.websites ?? [])
+  ];
+  for (const u of urlsToCheck) {
+    const m = u.match(/store\.steampowered\.com\/app\/(\d+)/i);
+    if (m) return m[1];
+  }
+
+  if (game.platform === "Steam" && /^\d+$/.test(game.id)) {
+    return game.id;
+  }
   return null;
+}
+
+function getNexusModsDomain(gameName: string): string {
+  const normalized = gameName.toLowerCase().trim();
+  
+  // Custom manual mappings for extremely common games
+  if (normalized.includes("cyberpunk 2077")) return "cyberpunk2077";
+  if (normalized.includes("skyrim") && normalized.includes("special edition")) return "skyrimspecialedition";
+  if (normalized.includes("skyrim")) return "skyrim";
+  if (normalized.includes("witcher 3") || normalized.includes("witcher iii")) return "witcher3";
+  if (normalized.includes("fallout 4")) return "fallout4";
+  if (normalized.includes("fallout new vegas")) return "newvegas";
+  if (normalized.includes("fallout 3")) return "fallout3";
+  if (normalized.includes("stardew valley")) return "stardewvalley";
+  if (normalized.includes("baldurs gate 3") || normalized.includes("baldur's gate 3")) return "baldursgate3";
+  if (normalized.includes("monster hunter world")) return "monsterhunterworld";
+  if (normalized.includes("monster hunter rise")) return "monsterhunterrise";
+  if (normalized.includes("elden ring")) return "eldenring";
+  if (normalized.includes("red dead redemption 2")) return "reddeadredemption2";
+  if (normalized.includes("gta v") || normalized.includes("grand theft auto v")) return "grandtheftautov";
+  if (normalized.includes("valheim")) return "valheim";
+  if (normalized.includes("subnautica")) return "subnautica";
+  if (normalized.includes("terraria")) return "terraria";
+  if (normalized.includes("mount & blade ii") || normalized.includes("mount and blade 2")) return "mountandblade2bannerlord";
+  
+  // Default fallback: slugify without hyphens (after stripping quotes)
+  const noQuotes = normalized.replace(/['’]/g, "");
+  return noQuotes.replace(/[^a-z0-9]/g, "");
+}
+
+function getModdbSlug(gameName: string): string {
+  const normalized = gameName.toLowerCase().trim();
+  const noQuotes = normalized.replace(/['’]/g, "");
+  return noQuotes.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 // ─── URL Builders ─────────────────────────────────────────────────────────────
@@ -105,10 +155,12 @@ function buildUrl(
     return `https://www.ign.com/search?q=${enc}`;
   }
   if (source === "nexusmods") {
-    return `https://www.nexusmods.com/search/?gsearch=${enc}`;
+    const domain = getNexusModsDomain(game.name);
+    return `https://www.nexusmods.com/games/${domain}`;
   }
   if (source === "moddb") {
-    return `https://www.moddb.com/games?kw=${enc}`;
+    const slug = getModdbSlug(game.name);
+    return `https://www.moddb.com/games/${slug}`;
   }
   return "about:blank";
 }
@@ -250,7 +302,7 @@ function deriveCustomLink(url: string): { label: string; host: string } {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function WebLinksTab({ game }: WebLinksTabProps) {
+export default function WebLinksTab({ game, visible = true }: WebLinksTabProps) {
   const [activeSource, setActiveSource] = useState<string>("steam");
   const [steamSection, setSteamSection] = useState<SteamSectionKey>("store");
   /** Bumped (via Reload) to force webview recreation. */
@@ -323,26 +375,147 @@ export default function WebLinksTab({ game }: WebLinksTabProps) {
     setReloadNonce((n) => n + 1);
   }
 
-  // ─── Iframe preview state ───────────────────────────────────────────────
-  // We embed the URL in a sandboxed <iframe>. Some sites (Steam Store, IGN,
-  // NexusMods) intentionally return `X-Frame-Options: DENY` so the iframe
-  // renders blank — for those we surface a fallback panel that highlights
-  // the URL and a big "Open in browser" button. We DO NOT try to detect
-  // blank-iframe states programmatically because Chrome fires onLoad even
-  // when X-Frame blocked the load (with the body left empty).
-  //
-  // NOTE on `sandbox`: we deliberately omit `allow-same-origin`. This
-  // prevents the embed from being treated as same-origin by the browser,
-  // which is the right default for cross-site previews — but it also means
-  // cookies / local storage on the embedded origin are isolated, so a few
-  // embeddable sites (ProtonDB login, NexusMods personalized recommendations)
-  // will load without remembered-session state. Acceptable trade-off for
-  // tighter isolation.
-  const [iframeLoaded, setIframeLoaded] = useState(false);
+  // ─── Webview preview state ─────────────────────────────────────────────
+  // Native Tauri Webview overlays the placeholder container. Pages are
+  // fully interactive and bypass the X-Frame-Options restrictions that
+  // made iframe-based previews unreliable.
+  const [webviewReady, setWebviewReady] = useState(false);
 
   useEffect(() => {
-    setIframeLoaded(false);
+    setWebviewReady(false);
   }, [url, reloadNonce]);
+
+  // ─── Webview lifecycle & geometry sync ──────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [webviewInstanceState, setWebviewInstanceState] = useState<Webview | null>(null);
+
+  // Initialize and recreate webview on url/nonce change
+  useEffect(() => {
+    let active = true;
+    let webviewInst: any = null;
+
+    async function initWebview() {
+      if (steamSubDisabled || !url) {
+        // If we are showing empty state, close any existing webviews
+        try {
+          const allWebviews = await Webview.getAll();
+          for (const wv of allWebviews) {
+            if (wv.label.startsWith("weblinks-preview-")) {
+              await wv.close();
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+        return;
+      }
+
+      // Close existing webviews first to avoid label collisions
+      try {
+        const allWebviews = await Webview.getAll();
+        for (const wv of allWebviews) {
+          if (wv.label.startsWith("weblinks-preview-")) {
+            await wv.close();
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      if (!active || !containerRef.current) return;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const uniqueLabel = "weblinks-preview-" + Math.random().toString(36).substring(2, 9);
+
+      try {
+        const appWindow = getCurrentWindow();
+        const webview = new Webview(appWindow, uniqueLabel, {
+          url,
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+
+        if (!active) {
+          webview.close().catch(() => {});
+          return;
+        }
+
+        webviewInst = webview;
+        setWebviewInstanceState(webview);
+
+        // Mark as ready immediately so the HTML spinner disappears and reveals the webview
+        setWebviewReady(true);
+
+        webview.once("tauri://error", (e) => {
+          console.error("Webview creation error:", e);
+        });
+      } catch (err) {
+        console.error("Failed to create webview:", err);
+      }
+    }
+
+    initWebview();
+
+    return () => {
+      active = false;
+      setWebviewInstanceState(null);
+      if (webviewInst) {
+        webviewInst.close().catch(() => {});
+      } else {
+        Webview.getAll().then((all) => {
+          for (const wv of all) {
+            if (wv.label.startsWith("weblinks-preview-")) {
+              wv.close().catch(() => {});
+            }
+          }
+        }).catch(() => {});
+      }
+    };
+  }, [url, steamSubDisabled, reloadNonce]);
+
+  // Keep webview sized and positioned over placeholder
+  useEffect(() => {
+    if (!containerRef.current || !webviewInstanceState) return;
+
+    const handleResize = () => {
+      if (!containerRef.current || !webviewInstanceState) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      
+      webviewInstanceState.setPosition(new LogicalPosition(rect.left, rect.top))
+        .catch((e: any) => console.error("Error setting webview position:", e));
+      webviewInstanceState.setSize(new LogicalSize(rect.width, rect.height))
+        .catch((e: any) => console.error("Error setting webview size:", e));
+    };
+
+    // Trigger initial layout sync
+    handleResize();
+
+    const observer = new ResizeObserver(() => {
+      handleResize();
+    });
+
+    observer.observe(containerRef.current);
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleResize, true);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleResize, true);
+    };
+  }, [webviewInstanceState]);
+
+  // Handle visibility transitions (hiding webview when modals are open)
+  useEffect(() => {
+    if (!webviewInstanceState) return;
+    if (visible) {
+      webviewInstanceState.show().catch((e: any) => console.error("Error showing webview:", e));
+    } else {
+      webviewInstanceState.hide().catch((e: any) => console.error("Error hiding webview:", e));
+    }
+  }, [webviewInstanceState, visible]);
 
   // ─── Render ──────────────────────────────────────────────────────────────
   return (
@@ -502,38 +675,13 @@ export default function WebLinksTab({ game }: WebLinksTabProps) {
           </div>
         ) : null}
 
-        {/* Iframe preview — falls back to a clean "open in browser" panel
-            for sites that block embedding via X-Frame-Options. */}
+        {/* Native Webview container placeholder */}
         {!steamSubDisabled && (
-          <div className="wl-iframe-frame">
-            {!iframeLoaded && (
-              <div className="wl-iframe-loader" aria-hidden>
-                <div className="wl-iframe-spinner" />
+          <div ref={containerRef} className="wl-webview-frame">
+            {!webviewReady && (
+              <div className="wl-webview-loader" aria-hidden>
+                <div className="wl-webview-spinner" />
                 <span>Loading {activeSourceDef.label}…</span>
-              </div>
-            )}
-            <iframe
-              key={reloadNonce}
-              src={url}
-              title={`${activeSourceDef.label} preview for ${game.name}`}
-              className="wl-iframe"
-              sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-              referrerPolicy="no-referrer"
-              onLoad={() => setIframeLoaded(true)}
-            />
-            {iframeLoaded && (
-              <div className="wl-iframe-blocked-hint">
-                <span>
-                  If this preview is blank, the site blocks embedding.
-                </span>
-                <button
-                  className="wl-iframe-blocked-btn"
-                  type="button"
-                  onClick={handleOpenExternal}
-                >
-                  Open in browser
-                  <OpenExternalIcon />
-                </button>
               </div>
             )}
           </div>
@@ -548,10 +696,8 @@ export default function WebLinksTab({ game }: WebLinksTabProps) {
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
         <span>
-          Previews load in a sandboxed <code>&lt;iframe&gt;</code>. Some sites
-          (Steam Store, IGN, NexusMods) block embedding via{" "}
-          <code>X-Frame-Options</code> — if a tab is blank, use{" "}
-          <strong>Open in browser</strong>.
+          Previews load in a native <code>Webview</code>. Pages are fully
+          interactive and bypass iframe embedding restrictions.
         </span>
       </div>
     </div>
