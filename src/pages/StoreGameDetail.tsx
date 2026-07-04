@@ -621,7 +621,7 @@ export default function StoreGameDetail() {
                 </h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
                   {data.timeToBeat.normally && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Main Story: <strong>{Math.round(data.timeToBeat.normally / 3600)}h</strong></div>}
-                  {data.timeToBeat.hastly && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Rushed: <strong>{Math.round(data.timeToBeat.hastly / 3600)}h</strong></div>}
+                  {data.timeToBeat.hastily && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Rushed: <strong>{Math.round(data.timeToBeat.hastily / 3600)}h</strong></div>}
                   {data.timeToBeat.completely && <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>Completionist: <strong>{Math.round(data.timeToBeat.completely / 3600)}h</strong></div>}
                 </div>
               </section>

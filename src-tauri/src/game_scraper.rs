@@ -84,7 +84,11 @@ pub struct GameMetadataResult {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeToBeat {
-    pub hastly: Option<u64>,
+    /// Seconds spent rushing through the game (IGDB "hastily" field).
+    /// The legacy `hastly` typo is accepted as an alias for backward
+    /// compatibility with games.json saved before the fix.
+    #[serde(alias = "hastly")]
+    pub hastily: Option<u64>,
     pub normally: Option<u64>,
     pub completely: Option<u64>,
 }
@@ -110,7 +114,7 @@ pub struct ReleaseDateInfo {
 pub struct IgdbReview {
     pub title: Option<String>,
     pub content: Option<String>,
-    pub rating: Option<u32>,
+    pub rating: Option<f64>,
     pub username: Option<String>,
 }
 
@@ -1090,7 +1094,7 @@ struct IgdbGame {
 
 #[derive(Debug, Deserialize)]
 struct IgdbTimeToBeatRaw {
-    hastly: Option<u64>,
+    hastily: Option<u64>,
     normally: Option<u64>,
     completely: Option<u64>,
 }
@@ -1114,10 +1118,6 @@ struct IgdbPlatformRaw {
     name: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct IgdbUserRaw {
-    username: Option<String>,
-}
 
 #[derive(Debug, Deserialize)]
 struct IgdbCover {
@@ -1270,6 +1270,7 @@ limit 8;"#,
     let resp = match client.post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .body(body)
         .send()
         .await
@@ -1305,68 +1306,31 @@ limit 8;"#,
     };
 
     let game_ids: Vec<String> = igdb_games.iter().map(|g| g.id.to_string()).collect();
-    let mut reviews_by_game: std::collections::HashMap<u64, Vec<IgdbReview>> = std::collections::HashMap::new();
+    // IGDB removed the public /v4/reviews endpoint. Reviews are no longer
+    // fetched. The IgdbReview field is kept only for backward compatibility
+    // with saved library data.
     if !game_ids.is_empty() {
-        let review_body = format!(
-            "fields game, title, content, review, user_rating, rating, user.username; where game = ({}); limit 50;",
-            game_ids.join(",")
-        );
-        let resp = match client.post("https://api.igdb.com/v4/reviews")
-            .header("Client-ID", &client_id)
-            .header("Authorization", format!("Bearer {}", token))
-            .body(review_body)
-            .send()
-            .await
-        {
-            Ok(r) => Some(r),
-            Err(e) => {
-                eprintln!("IGDB reviews request error: {}", e);
-                None
-            }
-        };
-        
-        if let Some(r) = resp {
-            if r.status().is_success() {
-                if let Ok(text) = r.text().await {
-                    #[derive(Debug, Deserialize)]
-                    struct IgdbReviewInnerRaw {
-                        game: u64,
-                        title: Option<String>,
-                        content: Option<String>,
-                        review: Option<String>,
-                        user_rating: Option<u32>,
-                        rating: Option<u32>,
-                        user: Option<IgdbUserRaw>,
-                    }
-                    if let Ok(raw_reviews) = serde_json::from_str::<Vec<IgdbReviewInnerRaw>>(&text) {
-                        for rev in raw_reviews {
-                            let content_text = rev.content.or(rev.review);
-                            let final_rating = rev.rating.or(rev.user_rating);
-                            let username = rev.user.and_then(|u| u.username);
-                            
-                            let mapped = IgdbReview {
-                                title: rev.title,
-                                content: content_text,
-                                rating: final_rating,
-                                username,
-                            };
-                            reviews_by_game.entry(rev.game).or_default().push(mapped);
-                        }
-                    }
-                }
-            }
-        }
+        // NOTE: The IGDB /v4/reviews endpoint was removed from the public IGDB API
+    // (returns 404 "Endpoint not found" as of 2024+). Reviews are no longer
+    // available from IGDB. The IgdbReview field on GameMetadataResult is
+    // retained for backward compatibility with saved library data, but new
+    // fetches no longer populate it.
     }
-    
+
     let mut time_to_beat_by_game: std::collections::HashMap<u64, IgdbTimeToBeatRaw> = std::collections::HashMap::new();
     if !game_ids.is_empty() {
+        // IGDB v4/game_time_to_beats schema uses `game_id` (NOT `game`) as the
+        // game foreign key, and `hastily` (NOT `hastly`) for the rushed completion
+        // time. Both must be spelled exactly as the IGDB API requires, otherwise
+        // IGDB responds with HTTP 400 "Invalid field name".
         let ttb_body = format!(
-            "fields game, hastly, normally, completely; where game = ({}); limit 50;",
+            "fields game_id, hastily, normally, completely; where game_id = ({}); limit 50;",
             game_ids.join(",")
         );
         let resp = match client.post("https://api.igdb.com/v4/game_time_to_beats")
             .header("Client-ID", &client_id)
             .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "text/plain")
             .body(ttb_body)
             .send()
             .await
@@ -1383,20 +1347,22 @@ limit 8;"#,
                 if let Ok(text) = r.text().await {
                     #[derive(Debug, Deserialize)]
                     struct IgdbTimeToBeatRawInner {
-                        game: u64,
-                        hastly: Option<u64>,
+                        game_id: u64,
+                        hastily: Option<u64>,
                         normally: Option<u64>,
                         completely: Option<u64>,
                     }
                     if let Ok(raw_ttbs) = serde_json::from_str::<Vec<IgdbTimeToBeatRawInner>>(&text) {
                         for ttb in raw_ttbs {
                             let mapped = IgdbTimeToBeatRaw {
-                                hastly: ttb.hastly,
+                                hastily: ttb.hastily,
                                 normally: ttb.normally,
                                 completely: ttb.completely,
                             };
-                            time_to_beat_by_game.insert(ttb.game, mapped);
+                            time_to_beat_by_game.insert(ttb.game_id, mapped);
                         }
+                    } else {
+                        eprintln!("IGDB game_time_to_beats parse error for search: {}", text);
                     }
                 }
             }
@@ -1504,7 +1470,7 @@ limit 8;"#,
 
         // Map Time to Beat
         let time_to_beat = time_to_beat_by_game.get(&game.id).map(|t| TimeToBeat {
-            hastly: t.hastly,
+            hastily: t.hastily,
             normally: t.normally,
             completely: t.completely,
         });
@@ -1554,7 +1520,7 @@ limit 8;"#,
                 .collect::<Vec<_>>()
         });
 
-        let igdb_reviews = reviews_by_game.get(&game.id).cloned();
+        let igdb_reviews: Option<Vec<IgdbReview>> = None;
         
         let alternative_names = game.alternative_names.as_ref()
             .map(|list| list.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
@@ -1658,6 +1624,7 @@ pub async fn fetch_store_games(
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .body(body)
         .send()
         .await
@@ -1748,6 +1715,7 @@ pub async fn search_store_games(
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .body(body)
         .send()
         .await
@@ -1853,6 +1821,7 @@ limit 1;"#,
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .body(body)
         .send()
         .await
@@ -1889,71 +1858,33 @@ limit 1;"#,
 
     let game = igdb_games.pop()?;
 
-    // Fetch reviews for this game
-    let mut reviews_by_game: std::collections::HashMap<u64, Vec<IgdbReview>> = std::collections::HashMap::new();
-    let review_body = format!(
-        "fields game, title, content, review, user_rating, rating, user.username; where game = {}; limit 50;",
-        game.id
-    );
-    if let Ok(r) = client
-        .post("https://api.igdb.com/v4/reviews")
-        .header("Client-ID", &client_id)
-        .header("Authorization", format!("Bearer {}", token))
-        .body(review_body)
-        .send()
-        .await
-    {
-        if r.status().is_success() {
-            if let Ok(text) = r.text().await {
-                #[derive(Debug, Deserialize)]
-                struct IgdbReviewInnerRaw {
-                    game: u64,
-                    title: Option<String>,
-                    content: Option<String>,
-                    review: Option<String>,
-                    user_rating: Option<u32>,
-                    rating: Option<u32>,
-                    user: Option<IgdbUserRaw>,
-                }
-                if let Ok(raw_reviews) = serde_json::from_str::<Vec<IgdbReviewInnerRaw>>(&text) {
-                    for rev in raw_reviews {
-                        let content_text = rev.content.or(rev.review);
-                        let final_rating = rev.rating.or(rev.user_rating);
-                        let username = rev.user.and_then(|u| u.username);
-                        let mapped = IgdbReview {
-                            title: rev.title,
-                            content: content_text,
-                            rating: final_rating,
-                            username,
-                        };
-                        reviews_by_game.entry(rev.game).or_default().push(mapped);
-                    }
-                }
-            }
-        }
-    }
+    // NOTE: Reviews endpoint (/v4/reviews) was removed from the IGDB public
+    // API and returns 404. Reviews are not fetched here; the IgdbReview field
+    // is kept for backward compatibility with saved library data only.
 
     // Fetch time-to-beat for this game
     let mut time_to_beat: Option<IgdbTimeToBeatRaw> = None;
     let ttb_body = format!(
-        "fields game, hastly, normally, completely; where game = {}; limit 1;",
+        "fields game_id, hastily, normally, completely; where game_id = {}; limit 1;",
         game.id
     );
     if let Ok(r) = client
         .post("https://api.igdb.com/v4/game_time_to_beats")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
         .body(ttb_body)
         .send()
         .await
-    {
-        if r.status().is_success() {
-            if let Ok(text) = r.text().await {
+    {                if r.status().is_success() {
+                if let Ok(text) = r.text().await {
                 #[derive(Debug, Deserialize)]
-                #[allow(dead_code)]
                 struct IgdbTimeToBeatRawInner {
-                    game: u64,
-                    hastly: Option<u64>,
+                    // game_id is required by IGDB Apicalypse deserialization
+                    // but unused here (we only fetch one TTB by game.id).
+                    #[allow(dead_code)]
+                    game_id: u64,
+                    hastily: Option<u64>,
                     normally: Option<u64>,
                     completely: Option<u64>,
                 }
@@ -1962,11 +1893,13 @@ limit 1;"#,
                 {
                     if let Some(first) = raw_ttbs.into_iter().next() {
                         time_to_beat = Some(IgdbTimeToBeatRaw {
-                            hastly: first.hastly,
+                            hastily: first.hastily,
                             normally: first.normally,
                             completely: first.completely,
                         });
                     }
+                } else {
+                    eprintln!("IGDB game_time_to_beats parse error for detail: {}", text);
                 }
             }
         }
@@ -2096,7 +2029,7 @@ limit 1;"#,
     });
 
     let mapped_time_to_beat = time_to_beat.map(|t| TimeToBeat {
-        hastly: t.hastly,
+        hastily: t.hastily,
         normally: t.normally,
         completely: t.completely,
     });
@@ -2154,7 +2087,7 @@ limit 1;"#,
             .collect::<Vec<_>>()
     });
 
-    let igdb_reviews = reviews_by_game.get(&game.id).cloned();
+    let igdb_reviews: Option<Vec<IgdbReview>> = None;
 
     let alternative_names = game.alternative_names.as_ref()
         .map(|list| list.iter().map(|a| a.name.clone()).collect::<Vec<_>>());

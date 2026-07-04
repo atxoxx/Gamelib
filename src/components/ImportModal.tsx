@@ -516,12 +516,12 @@ export default function ImportModal({
                                   <p>{activeDetail.storyline}</p>
                                 </div>
                               )}
-                              {activeDetail.timeToBeat && (activeDetail.timeToBeat.normally || activeDetail.timeToBeat.completely || activeDetail.timeToBeat.hastly) && (
+                              {activeDetail.timeToBeat && (activeDetail.timeToBeat.normally || activeDetail.timeToBeat.completely || activeDetail.timeToBeat.hastily) && (
                                 <div className="preview-hltb" style={{ marginTop: 'var(--space-md)', padding: 'var(--space-sm)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
                                   <h5 style={{ margin: '0 0 var(--space-xs) 0', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>Time to Beat</h5>
                                   <div style={{ display: 'flex', gap: 'var(--space-md)', fontSize: 'var(--font-size-xs)' }}>
                                     {activeDetail.timeToBeat.normally && <div>Main Story: <strong>{Math.round(activeDetail.timeToBeat.normally / 3600)}h</strong></div>}
-                                    {activeDetail.timeToBeat.hastly && <div>Rushed: <strong>{Math.round(activeDetail.timeToBeat.hastly / 3600)}h</strong></div>}
+                                  {activeDetail.timeToBeat.hastily && <div>Rushed: <strong>{Math.round(activeDetail.timeToBeat.hastily / 3600)}h</strong></div>}
                                     {activeDetail.timeToBeat.completely && <div>Completionist: <strong>{Math.round(activeDetail.timeToBeat.completely / 3600)}h</strong></div>}
                                   </div>
                                 </div>

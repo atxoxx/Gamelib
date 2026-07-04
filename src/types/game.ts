@@ -48,7 +48,9 @@ export interface Game {
 }
 
 export interface TimeToBeat {
-  hastly?: number;
+  /** Hours spent rushing through the game (IGDB hastily field).
+   *  Note: legacy `hastly` spelling was a typo and is no longer used. */
+  hastily?: number;
   normally?: number;
   completely?: number;
 }

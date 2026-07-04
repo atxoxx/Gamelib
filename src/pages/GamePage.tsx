@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -264,6 +264,9 @@ function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => vo
   );
 }
 
+// Track which game IDs have already been auto-enriched to avoid repeat calls
+const enrichedGameIds = new Set<string>();
+
 function GameDetail({ game }: { game: Game }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -331,7 +334,7 @@ function GameDetail({ game }: { game: Game }) {
   // New IGDB fields edit states
   const [showIgdbMediaBrowser, setShowIgdbMediaBrowser] = useState(false);
   const [editTimeToBeatMain, setEditTimeToBeatMain] = useState(game.timeToBeat?.normally ? Math.round(game.timeToBeat.normally / 3600) : 0);
-  const [editTimeToBeatExtra, setEditTimeToBeatExtra] = useState(game.timeToBeat?.hastly ? Math.round(game.timeToBeat.hastly / 3600) : 0);
+  const [editTimeToBeatExtra, setEditTimeToBeatExtra] = useState(game.timeToBeat?.hastily ? Math.round(game.timeToBeat.hastily / 3600) : 0);
   const [editTimeToBeatComple, setEditTimeToBeatComple] = useState(game.timeToBeat?.completely ? Math.round(game.timeToBeat.completely / 3600) : 0);
   const [, setEditSimilarGames] = useState<SimilarGame[]>(game.similarGames || []);
   const [, setEditReleases] = useState<ReleaseDateInfo[]>(game.releases || []);
@@ -360,6 +363,45 @@ function GameDetail({ game }: { game: Game }) {
     setReviewText(game.reviewText || "");
     setIsEditingReview(false);
   }, [game.id, game.rating, game.reviewText]);
+
+  // Auto-enrich existing games that have metadata but are missing TTB/reviews
+  const enrichmentStartedRef = useRef(false);
+  useEffect(() => {
+    // Only enrich once per game per session, and only for games with a path (local imports)
+    if (enrichmentStartedRef.current) return;
+    if (enrichedGameIds.has(game.id)) return;
+    if (!game.path) return;
+    // Only trigger if the game has some metadata but is missing IGDB enrichment
+    const hasPartialMetadata = game.description || game.metadataSource;
+    // Note: igdbReviews are no longer fetched from IGDB (the /v4/reviews
+    // endpoint was removed upstream), so we only look at timeToBeat here.
+    const missingEnrichment = !game.timeToBeat;
+    if (!hasPartialMetadata || !missingEnrichment) return;
+
+    enrichmentStartedRef.current = true;
+    enrichedGameIds.add(game.id);
+
+    invoke<GameMetadataResult[]>("search_game_metadata", { gameName: game.name })
+      .then((results) => {
+        if (results.length === 0) return;
+        // Prefer the IGDB result so we pick up timeToBeat/criticRating/etc.
+        const meta = results.find(r => r.sourceName === "IGDB" && r.timeToBeat) ?? results[0];
+        // Only update the fields that are missing, don't overwrite existing data
+        updateGame(game.id, {
+          timeToBeat: meta.timeToBeat ?? undefined,
+          igdbReviews: meta.igdbReviews ?? undefined,
+          similarGames: meta.similarGames ?? undefined,
+          releases: meta.releases ?? undefined,
+          alternativeNames: meta.alternativeNames ?? undefined,
+          collection: meta.collection ?? undefined,
+          franchise: meta.franchise ?? undefined,
+          gameCategory: meta.gameCategory ?? undefined,
+          releaseStatus: meta.releaseStatus ?? undefined,
+          languageSupports: meta.languageSupports ?? undefined,
+        });
+      })
+      .catch((err) => console.error("Auto-enrichment failed:", err));
+  }, [game.id, game.path, game.description, game.metadataSource, game.timeToBeat, updateGame]);
 
   function handleLaunch() {
     launchGame(game);
@@ -396,7 +438,7 @@ function GameDetail({ game }: { game: Game }) {
     setEditWebsites(game.websites || []);
     
     setEditTimeToBeatMain(game.timeToBeat?.normally ? Math.round(game.timeToBeat.normally / 3600) : 0);
-    setEditTimeToBeatExtra(game.timeToBeat?.hastly ? Math.round(game.timeToBeat.hastly / 3600) : 0);
+    setEditTimeToBeatExtra(game.timeToBeat?.hastily ? Math.round(game.timeToBeat.hastily / 3600) : 0);
     setEditTimeToBeatComple(game.timeToBeat?.completely ? Math.round(game.timeToBeat.completely / 3600) : 0);
     setEditSimilarGames(game.similarGames || []);
     setEditReleases(game.releases || []);
@@ -548,7 +590,7 @@ function GameDetail({ game }: { game: Game }) {
       setEditWebsites(result.websites || []);
       
       setEditTimeToBeatMain(result.timeToBeat?.normally ? Math.round(result.timeToBeat.normally / 3600) : 0);
-      setEditTimeToBeatExtra(result.timeToBeat?.hastly ? Math.round(result.timeToBeat.hastly / 3600) : 0);
+      setEditTimeToBeatExtra(result.timeToBeat?.hastily ? Math.round(result.timeToBeat.hastily / 3600) : 0);
       setEditTimeToBeatComple(result.timeToBeat?.completely ? Math.round(result.timeToBeat.completely / 3600) : 0);
       setEditSimilarGames(result.similarGames || []);
       setEditReleases(result.releases || []);
@@ -807,7 +849,7 @@ function GameDetail({ game }: { game: Game }) {
       websites: editWebsites.length > 0 ? editWebsites : undefined,
       timeToBeat: {
         normally: editTimeToBeatMain > 0 ? editTimeToBeatMain * 3600 : undefined,
-        hastly: editTimeToBeatExtra > 0 ? editTimeToBeatExtra * 3600 : undefined,
+        hastily: editTimeToBeatExtra > 0 ? editTimeToBeatExtra * 3600 : undefined,
         completely: editTimeToBeatComple > 0 ? editTimeToBeatComple * 3600 : undefined,
       },
       similarGames: newSimilarGames.length > 0 ? newSimilarGames : undefined,
@@ -1482,7 +1524,7 @@ function GameDetail({ game }: { game: Game }) {
               </section>
             )}
 
-            {game.timeToBeat && (game.timeToBeat.normally || game.timeToBeat.completely || game.timeToBeat.hastly) && (
+            {game.timeToBeat && (game.timeToBeat.normally || game.timeToBeat.completely || game.timeToBeat.hastily) && (
               <section className="game-section time-to-beat-card">
                 <h2 className="game-section-title">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1506,11 +1548,11 @@ function GameDetail({ game }: { game: Game }) {
                       currentPlayTime={game.playTime} 
                     />
                   )}
-                  {game.timeToBeat.hastly !== undefined && game.timeToBeat.hastly > 0 && (
-                    <TimeToBeatRow 
-                      label="Rushed" 
-                      targetSeconds={game.timeToBeat.hastly} 
-                      currentPlayTime={game.playTime} 
+                  {game.timeToBeat.hastily !== undefined && game.timeToBeat.hastily > 0 && (
+                    <TimeToBeatRow
+                      label="Rushed"
+                      targetSeconds={game.timeToBeat.hastily}
+                      currentPlayTime={game.playTime}
                     />
                   )}
                 </div>
