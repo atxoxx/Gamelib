@@ -1767,27 +1767,27 @@ function GameDetail({ game }: { game: Game }) {
                     <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
                     <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
                   </div>
-                  <div className="edit-field-row" style={{ display: 'flex', gap: 'var(--space-md)' }}>
-                    <div className="edit-field" style={{ flex: 1 }}>
+                  <div className="edit-field-row">
+                    <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
                       <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
                     </div>
-                    <div className="edit-field" style={{ flex: 1 }}>
+                    <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
                       <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
                     </div>
                   </div>
                   
-                  <div className="edit-field-row" style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
-                    <div className="edit-field" style={{ flex: 1 }}>
+                  <div className="edit-field-row" style={{ marginTop: 'var(--space-md)' }}>
+                    <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
                       <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
                     </div>
-                    <div className="edit-field" style={{ flex: 1 }}>
+                    <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (Hours)</label>
                       <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
                     </div>
-                    <div className="edit-field" style={{ flex: 1 }}>
+                    <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (Hours)</label>
                       <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
                     </div>
@@ -1840,7 +1840,7 @@ function GameDetail({ game }: { game: Game }) {
                 <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
-                <button className="lb-browse-edit-btn" style={{ flex: 1 }} onClick={handleOpenImageBrowser} type="button">
+                <button className="lb-browse-edit-btn" onClick={handleOpenImageBrowser} type="button">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="2" y="2" width="20" height="20" rx="2" />
                     <path d="M7 2v20" />
@@ -1848,10 +1848,9 @@ function GameDetail({ game }: { game: Game }) {
                   </svg>
                   Browse LaunchBox Images
                 </button>
-                <button 
-                  className="lb-browse-edit-btn" 
-                  style={{ flex: 1, background: 'var(--color-bg-tertiary)', borderColor: 'var(--color-accent)' }} 
-                  onClick={() => setShowIgdbMediaBrowser(true)} 
+                <button
+                  className="lb-browse-edit-btn"
+                  onClick={() => setShowIgdbMediaBrowser(true)}
                   type="button"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>

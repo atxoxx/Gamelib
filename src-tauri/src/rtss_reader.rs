@@ -10,8 +10,11 @@ use std::sync::Mutex;
 #[derive(Debug, Clone)]
 pub struct RtssMetrics {
     pub fps: f64,
+    #[allow(dead_code)]
     pub stat_fps_avg: f64,
+    #[allow(dead_code)]
     pub stat_fps_min: f64,
+    #[allow(dead_code)]
     pub stat_fps_max: f64,
 }
 
@@ -36,7 +39,7 @@ unsafe fn try_open() -> Option<isize> {
     match h {
         Ok(handle) => {
             let raw = handle.0 as isize;
-            std::mem::forget(handle);
+            let _ = handle;
             if let Ok(mut cache) = CACHED_HANDLE.lock() {
                 *cache = Some(raw);
             }
@@ -144,6 +147,7 @@ pub fn read_rtss_metrics(pid: u32) -> Option<RtssMetrics> {
 }
 
 /// Release the cached RTSS shared memory handle (call on shutdown).
+#[allow(dead_code)]
 pub fn release_rtss() {
     if let Ok(mut cache) = CACHED_HANDLE.lock() {
         if let Some(handle) = cache.take() {

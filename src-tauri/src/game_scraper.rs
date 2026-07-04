@@ -1069,12 +1069,14 @@ struct IgdbImage {
 #[derive(Debug, Deserialize)]
 struct IgdbVideo {
     video_id: Option<String>,
+    #[allow(dead_code)]
     name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct IgdbWebsite {
     url: Option<String>,
+    #[allow(dead_code)]
     category: Option<i32>,
 }
 

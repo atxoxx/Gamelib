@@ -85,7 +85,7 @@ unsafe fn try_open_mahm() -> Option<isize> {
     match h {
         Ok(handle) => {
             let raw = handle.0 as isize;
-            std::mem::forget(handle);
+            let _ = handle;
             if let Ok(mut cache) = CACHED_MAHM_HANDLE.lock() {
                 *cache = Some(raw);
             }
@@ -299,6 +299,7 @@ pub fn read_mahm_metrics(gpu_idx: u32, gpu_name: Option<&str>) -> Option<MahmMet
 }
 
 /// Release cached handle
+#[allow(dead_code)]
 pub fn release_mahm() {
     if let Ok(mut cache) = CACHED_MAHM_HANDLE.lock() {
         if let Some(handle) = cache.take() {

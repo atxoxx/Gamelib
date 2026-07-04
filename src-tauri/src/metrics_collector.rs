@@ -30,8 +30,6 @@ struct MetricsSample {
     cpu_temp: u32,
     gpu_temp: u32,
     rtss_fps: Option<f64>,
-    rtss_fps_min: Option<f64>,
-    rtss_fps_max: Option<f64>,
 }
 
 /// WMI structs for deserializing performance data.
@@ -246,8 +244,6 @@ fn collect_single_sample(
         cpu_temp: cpu_temp_val.max(0.0).round() as u32,
         gpu_temp: gpu_temp_val.max(0.0).round() as u32,
         rtss_fps: fps_val,
-        rtss_fps_min: fps_val.map(|f| f * 0.85),
-        rtss_fps_max: fps_val.map(|f| f * 1.15),
     }
 }
 
