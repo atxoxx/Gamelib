@@ -9,7 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { addSessionTime } from "../types/game";
+import { addSessionTime, gameNameFromPath } from "../types/game";
 import type { Game, GameMetadataResult } from "../types/game";
 import { useToast } from "./ToastContext";
 
@@ -30,6 +30,7 @@ interface GameContextType {
   runningGameIds: string[];
   launchGame: (game: Game) => void;
   addStoreGame: (metadata: GameMetadataResult) => Promise<string>;
+  importLocalGames: (items: { path: string; metadata: GameMetadataResult | null }[]) => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | null>(null);
@@ -284,6 +285,74 @@ export function GameProvider({ children }: { children: ReactNode }) {
     return newGame.id;
   }, [games, showToast]);
 
+  const importLocalGames = useCallback(async (
+    items: { path: string; metadata: GameMetadataResult | null }[]
+  ) => {
+    const imported: Game[] = [];
+    for (const item of items) {
+      const pathNorm = item.path.toLowerCase().trim();
+      const duplicate = games.find((g) => g.path.toLowerCase().trim() === pathNorm);
+      if (duplicate) {
+        continue;
+      }
+
+      let newGame: Game;
+      if (item.metadata) {
+        const imageData = await fetchAllImages(item.metadata.images);
+        newGame = {
+          id: generateId(),
+          name: item.metadata.title,
+          path: item.path,
+          platform: "Local",
+          installed: true,
+          playTime: "0h",
+          addedAt: Date.now(),
+          coverArtUrl: imageData.coverArtUrl,
+          bannerUrl: imageData.bannerUrl,
+          logoUrl: imageData.logoUrl,
+          description: item.metadata.description ?? undefined,
+          developer: item.metadata.developer ?? undefined,
+          publisher: item.metadata.publisher ?? undefined,
+          releaseDate: item.metadata.releaseDate ?? undefined,
+          genres: item.metadata.genres.length > 0 ? item.metadata.genres : undefined,
+          storyline: item.metadata.storyline,
+          igdbRating: item.metadata.igdbRating ?? undefined,
+          criticRating: item.metadata.criticRating ?? undefined,
+          themes: item.metadata.themes ?? undefined,
+          gameModes: item.metadata.gameModes ?? undefined,
+          playerPerspectives: item.metadata.playerPerspectives ?? undefined,
+          screenshots: item.metadata.screenshots ?? undefined,
+          videos: item.metadata.videos ?? undefined,
+          websites: item.metadata.websites ?? undefined,
+          timeToBeat: item.metadata.timeToBeat ?? undefined,
+          similarGames: item.metadata.similarGames ?? undefined,
+          releases: item.metadata.releases ?? undefined,
+          igdbReviews: item.metadata.igdbReviews ?? undefined,
+          metadataSource: item.metadata.sourceName,
+          metadataUrl: item.metadata.sourceUrl,
+        };
+      } else {
+        newGame = {
+          id: generateId(),
+          name: gameNameFromPath(item.path),
+          path: item.path,
+          platform: "Local",
+          installed: true,
+          playTime: "0h",
+          addedAt: Date.now(),
+        };
+      }
+      imported.push(newGame);
+    }
+
+    if (imported.length > 0) {
+      setGames((prev) => [...prev, ...imported]);
+      showToast(`Imported ${imported.length} game${imported.length !== 1 ? "s" : ""}`, "success");
+    } else {
+      showToast("No new games were imported", "info");
+    }
+  }, [games, showToast]);
+
   return (
     <GameContext.Provider
       value={{
@@ -298,6 +367,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         runningGameIds,
         launchGame,
         addStoreGame,
+        importLocalGames,
       }}
     >
       {children}

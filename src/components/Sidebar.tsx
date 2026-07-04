@@ -4,12 +4,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import { gameNameFromPath, type Game } from "../types/game";
+import { gameNameFromPath, type Game, type GameMetadataResult } from "../types/game";
 import ImportModal, { type ExeInfo } from "./ImportModal";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { games, selectedGameId, addGame, addGames, setSelectedGameId, removeGame, runningGameIds, launchGame } =
+  const { games, selectedGameId, setSelectedGameId, removeGame, runningGameIds, launchGame, importLocalGames } =
     useGames();
   const { showToast } = useToast();
 
@@ -54,16 +54,13 @@ export default function Sidebar() {
         filters: [{ name: "Executable", extensions: ["exe"] }],
       });
       if (filePath && typeof filePath === "string") {
-        addGame({
-          id: "",
-          name: gameNameFromPath(filePath),
-          path: filePath,
-          platform: "Local",
-          installed: true,
-          playTime: "0h",
-          addedAt: Date.now(),
-        });
-        showToast(`Imported ${gameNameFromPath(filePath)}`, "success");
+        const existing = games.find((g) => g.path.toLowerCase().trim() === filePath.toLowerCase().trim());
+        if (existing) {
+          showToast(`${gameNameFromPath(filePath)} is already in your library`, "info");
+          return;
+        }
+        setScannedExes([{ path: filePath, size: 0, modifiedAt: Math.round(Date.now() / 1000) }]);
+        setShowImportModal(true);
       }
     } catch (err) {
       console.error("Failed to import exe:", err);
@@ -103,19 +100,9 @@ export default function Sidebar() {
     }
   }
 
-  function handleConfirmImport(selectedPaths: string[]) {
+  async function handleConfirmImport(imports: { path: string; metadata: GameMetadataResult | null }[]) {
     setShowImportModal(false);
-    const importedGames = selectedPaths.map((exePath) => ({
-      id: "",
-      name: gameNameFromPath(exePath),
-      path: exePath,
-      platform: "Local",
-      installed: true,
-      playTime: "0h",
-      addedAt: Date.now(),
-    }));
-    addGames(importedGames);
-    showToast(`Imported ${importedGames.length} game${importedGames.length !== 1 ? "s" : ""}`, "success");
+    await importLocalGames(imports);
   }
 
   function handleGameContextMenu(e: React.MouseEvent, game: Game) {
