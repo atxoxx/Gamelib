@@ -1,3 +1,8 @@
+/** Generate a URL-safe slug from a game name (for store navigation). */
+export function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 export interface Game {
   id: string;
   name: string;

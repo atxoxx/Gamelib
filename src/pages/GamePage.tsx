@@ -6,7 +6,7 @@ import html2canvas from "html2canvas";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, formatPlayTime, parsePlayTime } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, formatPlayTime, parsePlayTime, slugify } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
@@ -677,11 +677,19 @@ function GameDetail({ game }: { game: Game }) {
     const newGameModes = editGameModes ? editGameModes.split(",").map(s => s.trim()).filter(Boolean) : undefined;
     const newPlayerPerspectives = editPlayerPerspectives ? editPlayerPerspectives.split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
-    // Parse similar games, releases, and reviews
+    // Parse similar games — preserve existing id and coverUrl for re-ordered/renamed entries
+    const existingSims = game.similarGames || [];
     const newSimilarGames = editSimilarGamesText.split(",")
       .map(s => s.trim())
       .filter(Boolean)
-      .map((name, index) => ({ id: index, name }));
+      .map((name, index) => {
+        const existing = existingSims.find(g => g.name.toLowerCase() === name.toLowerCase());
+        return { 
+          id: existing ? existing.id : index, 
+          name, 
+          coverUrl: existing ? existing.coverUrl : undefined 
+        };
+      });
 
     const newReleases = editReleasesText.split("\n")
       .map(line => line.trim())
@@ -1172,6 +1180,8 @@ function GameDetail({ game }: { game: Game }) {
                     <div 
                       key={sim.id} 
                       className="similar-game-card" 
+                      onClick={() => navigate(`/store/${slugify(sim.name)}`)}
+                      style={{ cursor: 'pointer' }}
                     >
                       <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
                         {sim.coverUrl ? (

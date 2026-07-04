@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import type { GameMetadataResult } from "../types/game";
+import { slugify } from "../types/game";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -332,7 +333,7 @@ export default function StoreGameDetail() {
                 </h2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
                   {data.similarGames.slice(0, 6).map((sim) => (
-                    <div key={sim.id} style={{ textAlign: 'center' }}>
+                    <div key={sim.id} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => navigate(`/store/${slugify(sim.name)}`)}>
                       <div style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md) var(--radius-md) 0 0', overflow: 'hidden' }}>
                         {sim.coverUrl ? (
                           <img src={sim.coverUrl} alt={sim.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImgError} />

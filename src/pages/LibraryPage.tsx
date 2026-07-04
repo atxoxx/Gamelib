@@ -111,15 +111,35 @@ export default function LibraryPage() {
               </div>
               <div className="library-card-body">
                 <h3 className="library-card-name" title={game.name}>{game.name}</h3>
-                <span className={`library-card-platform platform-${game.platform.toLowerCase()}`}>
-                  {game.platform}
-                </span>
+                <div className="library-card-meta-row">
+                  <span className={`library-card-platform platform-${game.platform.toLowerCase()}`}>
+                    {game.platform}
+                  </span>
+                  {game.igdbRating != null && game.igdbRating > 0 && (
+                    <span className="library-card-rating" title={`IGDB Rating: ${Math.round(game.igdbRating)}%`}>
+                      <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                      {Math.round(game.igdbRating)}%
+                    </span>
+                  )}
+                </div>
+                {game.developer && (
+                  <p className="library-card-developer" title={game.developer}>{game.developer}</p>
+                )}
+                {game.genres && game.genres.length > 0 && (
+                  <div className="library-card-genres">
+                    {game.genres.slice(0, 3).map((g) => (
+                      <span key={g} className="library-card-genre-tag">{g}</span>
+                    ))}
+                  </div>
+                )}
                 {game.notes ? (
                   <p className="library-card-notes">{game.notes}</p>
                 ) : (
-                  <p className="library-card-notes library-card-notes-empty">
-                    No notes
-                  </p>
+                  game.description ? (
+                    <p className="library-card-notes">{game.description.slice(0, 80)}{game.description.length > 80 ? '...' : ''}</p>
+                  ) : (
+                    <p className="library-card-notes library-card-notes-empty">No notes</p>
+                  )
                 )}
               </div>
             </div>

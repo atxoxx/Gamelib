@@ -89,26 +89,101 @@ export function GameProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const addGame = useCallback((game: Game) => {
-    setGames((prev) => [...prev, { ...game, id: game.id || generateId() }]);
-  }, []);
-
-  const addGames = useCallback((newGames: Game[]) => {
-    setGames((prev) => [
-      ...prev,
-      ...newGames.map((g) => ({ ...g, id: g.id || generateId() })),
-    ]);
-  }, []);
-
-  const removeGame = useCallback((id: string) => {
-    setGames((prev) => prev.filter((g) => g.id !== id));
-    setSelectedGameId((current) => (current === id ? null : current));
-  }, []);
-
   const updateGame = useCallback((id: string, updates: Partial<Game>) => {
     setGames((prev) =>
       prev.map((g) => (g.id === id ? { ...g, ...updates } : g))
     );
+  }, []);
+
+  /** Download a single image to base64, falling back to the remote URL. */
+  async function downloadImageSafe(url: string | undefined | null): Promise<string | undefined> {
+    if (!url) return undefined;
+    try {
+      const dataUrl: string | null = await invoke("download_image", { url });
+      return dataUrl ?? url;
+    } catch {
+      return url;
+    }
+  }
+
+  /** Batch-download images from a metadata result: cover, hero, banner, logo. */
+  async function fetchAllImages(images: { icon?: string | null; cover?: string | null; hero?: string | null; banner?: string | null; logo?: string | null }) {
+    const [coverUrl, heroUrl, bannerUrl, logoUrl] = await Promise.all([
+      downloadImageSafe(images.cover),
+      downloadImageSafe(images.hero),
+      downloadImageSafe(images.banner),
+      downloadImageSafe(images.logo),
+    ]);
+    return {
+      coverArtUrl: coverUrl ?? undefined,
+      bannerUrl: heroUrl ?? bannerUrl ?? undefined,
+      logoUrl: logoUrl ?? undefined,
+    };
+  }
+
+  /** Auto-fetch IGDB metadata and images for a newly imported game. */
+  async function autoFetchMetadata(gameId: string, gameName: string) {
+    try {
+      const results: GameMetadataResult[] = await invoke("search_game_metadata", { gameName });
+      if (results.length === 0) return;
+      const meta = results[0];
+      const images = await fetchAllImages(meta.images);
+      updateGame(gameId, {
+        description: meta.description ?? undefined,
+        developer: meta.developer ?? undefined,
+        publisher: meta.publisher ?? undefined,
+        releaseDate: meta.releaseDate ?? undefined,
+        genres: meta.genres.length > 0 ? meta.genres : undefined,
+        coverArtUrl: images.coverArtUrl,
+        bannerUrl: images.bannerUrl,
+        logoUrl: images.logoUrl,
+        igdbRating: meta.igdbRating ?? undefined,
+        criticRating: meta.criticRating ?? undefined,
+        themes: meta.themes ?? undefined,
+        gameModes: meta.gameModes ?? undefined,
+        playerPerspectives: meta.playerPerspectives ?? undefined,
+        screenshots: meta.screenshots ?? undefined,
+        videos: meta.videos ?? undefined,
+        websites: meta.websites ?? undefined,
+        timeToBeat: meta.timeToBeat ?? undefined,
+        similarGames: meta.similarGames ?? undefined,
+        releases: meta.releases ?? undefined,
+        igdbReviews: meta.igdbReviews ?? undefined,
+        metadataSource: meta.sourceName,
+        metadataUrl: meta.sourceUrl,
+      });
+      showToast(`Fetched metadata for ${gameName} from ${meta.sourceName}`, "success");
+    } catch (err) {
+      console.error("Auto-fetch metadata failed:", err);
+    }
+  }
+
+  const addGame = useCallback((game: Game) => {
+    const id = game.id || generateId();
+    const newGame = { ...game, id };
+    setGames((prev) => [...prev, newGame]);
+
+    // Auto-fetch metadata in the background for locally imported games
+    if (game.path && !game.description) {
+      autoFetchMetadata(id, game.name);
+    }
+  }, [showToast, updateGame]);
+
+  const addGames = useCallback((newGames: Game[]) => {
+    const withIds = newGames.map((g) => ({ ...g, id: g.id || generateId() }));
+    setGames((prev) => [...prev, ...withIds]);
+
+    // Auto-fetch metadata for each imported game in the background
+    for (const game of withIds) {
+      if (game.path && !game.description) {
+        autoFetchMetadata(game.id, game.name);
+      }
+    }
+  }, [showToast, updateGame]);
+
+  const removeGame = useCallback((id: string) => {
+    setGames((prev) => prev.filter((g) => g.id !== id));
+    setSelectedGameId((current) => (current === id ? null : current));
   }, []);
 
   const getGame = useCallback(
@@ -167,31 +242,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
       return existing.id;
     }
 
-    // Download cover image to base64 for offline use
-    let coverArtUrl: string | undefined;
-    const coverUrl = metadata.images.cover;
-    if (coverUrl) {
-      try {
-        const dataUrl: string | null = await invoke("download_image", { url: coverUrl });
-        if (dataUrl) coverArtUrl = dataUrl;
-      } catch {
-        // Fall back to the remote URL if download fails
-        coverArtUrl = coverUrl;
-      }
-    }
+    // Download all images to base64 for offline use
+    const imageData = await fetchAllImages(metadata.images);
 
     const newGame: Game = {
       id: generateId(),
       name: metadata.title,
       path: "",
-      platform: "Unknown",
+      platform: "Store",
       installed: false,
       playTime: "0h",
       addedAt: Date.now(),
-      coverArtUrl,
+      coverArtUrl: imageData.coverArtUrl,
       iconUrl: undefined,
-      bannerUrl: metadata.images.hero ?? metadata.images.banner ?? undefined,
-      logoUrl: metadata.images.logo ?? undefined,
+      bannerUrl: imageData.bannerUrl,
+      logoUrl: imageData.logoUrl,
       description: metadata.description ?? undefined,
       developer: metadata.developer ?? undefined,
       publisher: metadata.publisher ?? undefined,
