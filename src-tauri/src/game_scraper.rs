@@ -1607,10 +1607,125 @@ limit 8;"#,
 /// - "popular"   → sorted by total_rating_count descending (most rated)
 /// - "top"       → sorted by rating descending (highest rated)
 /// - "all"        → sorted by total_rating_count (browse everything)
+// ─── Genre / platform name → IGDB ID lookup tables ─────────────────────
+//
+// IGDB genre and platform identifiers are stable integers. Frontend
+// filters send names (matching `StoreFilterSidebar.GENRES` / `.PLATFORMS`
+// exactly) so we don't have to mirror IGDB's IDs across the network.
+// Unknown names silently drop out — that way a typo'd facet on the
+// frontend doesn't crash the catalog browse.
+
+/// IGDB genre IDs (https://api.igdb.com/v4/genres). Names match
+/// the frontend filter sidebar verbatim.
+fn genre_name_to_id(name: &str) -> Option<u32> {
+    Some(match name {
+        "Action" => 4,
+        "Adventure" => 31,
+        "RPG" => 12,
+        "Strategy" => 15,
+        "Shooter" => 5,
+        "Simulation" => 8,
+        "Puzzle" => 9,
+        "Racing" => 10,
+        "Sports" => 14,
+        "Fighting" => 6,
+        "Platform" => 8, // IGDB's "Platformer" genre
+        "Indie" => 32,
+        "Horror" => 19,
+        "Visual Novel" => 34,
+        _ => return None,
+    })
+}
+
+/// IGDB platform IDs (https://api.igdb.com/v4/platforms). Names match
+/// the frontend filter sidebar verbatim.
+fn platform_name_to_id(name: &str) -> Option<u32> {
+    Some(match name {
+        "PC (Microsoft Windows)" => 6,
+        "PlayStation 5" => 167,
+        "PlayStation 4" => 48,
+        "Xbox Series X|S" => 169,
+        "Xbox One" => 12,
+        "Nintendo Switch" => 130,
+        _ => return None,
+    })
+}
+
+/// Map a `(year_min, year_max)` pair to IGDB `first_release_date`
+/// Unix timestamp bounds. Returns `(None, None)` when both inputs
+/// are null; otherwise missing bounds stay open (∞ in that direction).
+fn year_bounds_to_timestamps(
+    year_min: Option<i32>,
+    year_max: Option<i32>,
+) -> (Option<i64>, Option<i64>) {
+    use chrono::{NaiveDate, TimeZone, Utc};
+    let to_min = |y: i32| -> Option<i64> {
+        NaiveDate::from_ymd_opt(y, 1, 1)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| Utc.from_utc_datetime(&dt).timestamp())
+    };
+    let to_max = |y: i32| -> Option<i64> {
+        // Include the whole year by clamping to Dec 31 23:59:59.
+        NaiveDate::from_ymd_opt(y, 12, 31)
+            .and_then(|d| d.and_hms_opt(23, 59, 59))
+            .map(|dt| Utc.from_utc_datetime(&dt).timestamp())
+    };
+    (year_min.and_then(to_min), year_max.and_then(to_max))
+}
+
+/// Compose the IGDB `where` clause for the supplied category. Returns
+/// `(where_clause, sort_clause)`. Empty `where_clause` means no constraint.
+fn category_where_sort(category: &str) -> (String, String) {
+    use chrono::Utc;
+    let now = Utc::now().timestamp();
+    match category {
+        "trending" => (
+            "hypes > 0".to_string(),
+            "hypes desc".to_string(),
+        ),
+        "popular" => (
+            "total_rating_count > 5".to_string(),
+            "total_rating_count desc".to_string(),
+        ),
+        "top" => (
+            "aggregated_rating > 70".to_string(),
+            "aggregated_rating desc".to_string(),
+        ),
+        "coming_soon" => (
+            // Hype-sorted, release date in the next ~6 months.
+            format!(
+                "hypes > 0 & first_release_date > {} & first_release_date < {}",
+                now,
+                now + 60 * 60 * 24 * 30 * 6
+            ),
+            "hypes desc".to_string(),
+        ),
+        "new_releases" => (
+            // Last 30 days of releases.
+            format!(
+                "first_release_date < {} & first_release_date > {}",
+                now + 60 * 60 * 24,
+                now - 60 * 60 * 24 * 30
+            ),
+            "first_release_date desc".to_string(),
+        ),
+        _ => ("".to_string(), "total_rating_count desc".to_string()),
+    }
+}
+
+/// Fetch a page of IGDB games for a category, optionally narrowed by
+/// genre / platform / release-year / rating filters. Filters are ANDed
+/// together with the category clause; any facet set to `None` or empty
+/// contributes no constraint.
 pub async fn fetch_store_games(
     category: &str,
     offset: u32,
     limit: u32,
+    genres: Option<Vec<String>>,
+    platforms: Option<Vec<String>>,
+    year_min: Option<i32>,
+    year_max: Option<i32>,
+    rating_min: Option<f64>,
 ) -> Result<Vec<StoreGameSummary>, String> {
     let token = get_twitch_token().await?;
     let client = reqwest::Client::builder()
@@ -1621,17 +1736,84 @@ pub async fn fetch_store_games(
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
 
-    let (sort_clause, where_clause) = match category {
-        "trending" => ("sort hypes desc;", "where hypes > 0 & total_rating_count > 5;"),
-        "popular" => ("sort total_rating_count desc;", "where total_rating_count > 10;"),
-        "top" => ("sort rating desc;", "where rating >= 70 & total_rating_count > 20;"),
-        _ => ("sort total_rating_count desc;", "where total_rating_count > 0;"),
+    // Resolve the base (where, sort) tuple for the active category
+    // (curated IGDB view like `trending` or a pure `-ranked default
+    // for `all`), then AND in any optional filter facets the user
+    // supplied from the sidebar. An empty `Vec` or `None` for a
+    // facet contributes no constraint so the call degrades cleanly.
+    let (base_where, base_sort) = category_where_sort(category);
+    let mut clauses: Vec<String> = Vec::new();
+    if !base_where.is_empty() {
+        clauses.push(base_where);
+    }
+
+    if let Some(g_names) = genres {
+        let ids: Vec<u32> = g_names
+            .iter()
+            .filter_map(|n| genre_name_to_id(n))
+            .collect();
+        if !ids.is_empty() {
+            clauses.push(format!(
+                "genres = ({})",
+                ids.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
+
+    if let Some(p_names) = platforms {
+        let ids: Vec<u32> = p_names
+            .iter()
+            .filter_map(|n| platform_name_to_id(n))
+            .collect();
+        if !ids.is_empty() {
+            clauses.push(format!(
+                "platforms = ({})",
+                ids.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
+
+    // Year filter maps to Unix-timestamp bounds on
+    // `first_release_date`. We let the helper choose the precision
+    // (year start vs year end-of-day) so timezone slip is avoided.
+    let (year_min_ts, year_max_ts) =
+        year_bounds_to_timestamps(year_min, year_max);
+    if let Some(ts) = year_min_ts {
+        clauses.push(format!("first_release_date >= {}", ts));
+    }
+    if let Some(ts) = year_max_ts {
+        clauses.push(format!("first_release_date <= {}", ts));
+    }
+
+    if let Some(rating) = rating_min {
+        clauses.push(format!("rating >= {}", rating));
+    }
+
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        clauses.join(" & ")
     };
 
-    let body = format!(
-        "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; {} {} limit {}; offset {};",
-        where_clause, sort_clause, limit.min(50), offset
-    );
+    // Compose the IGDB Apicalypse body. The field list mirrors what
+    // the Store UI surfaces (cover, genres, platforms, etc.).
+    let body = if where_clause.is_empty() {
+        format!(
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; sort {}; limit {}; offset {};",
+            base_sort, limit.min(50), offset
+        )
+    } else {
+        format!(
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; where {}; sort {}; limit {}; offset {};",
+            where_clause, base_sort, limit.min(50), offset
+        )
+    };
 
     let resp = client
         .post("https://api.igdb.com/v4/games")

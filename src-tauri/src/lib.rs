@@ -306,14 +306,58 @@ fn load_store_cache(app: tauri::AppHandle) -> Result<String, String> {
     std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
 }
 
-/// Fetch a page of store games by category from IGDB (trending, popular, top, all).
+/// Save the wishlist cache to disk as JSON. Mirrors `save_store_cache`.
+/// Reads/writes `<app_data_dir>/wishlist_cache.json`; the React frontend
+/// owns the canonical state (see `src/hooks/useWishlist.ts`) and debounces
+/// writes here to coalesce rapid toggles.
+#[tauri::command]
+fn save_wishlist(app: tauri::AppHandle, data: String) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let file_path = data_dir.join("wishlist_cache.json");
+    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Load the wishlist cache from disk. Returns empty string when no
+/// wishlist has been saved yet — the frontend treats that as an
+/// empty wishlist and proceeds to write one when the user toggles a heart.
+#[tauri::command]
+fn load_wishlist(app: tauri::AppHandle) -> Result<String, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file_path = data_dir.join("wishlist_cache.json");
+    if !file_path.exists() {
+        return Ok(String::new());
+    }
+    std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+}
+
+/// Fetch a page of store games from IGDB, optionally narrowed by genre /
+/// platform / release-year / rating filters. All filter facets are optional
+/// and combine onto the IGDB `where` clause with AND semantics inside
+/// `fetch_store_games`. An empty `Vec` is treated the same as `None`.
 #[tauri::command]
 async fn fetch_store_games(
     category: String,
     offset: u32,
     limit: u32,
+    genres: Option<Vec<String>>,
+    platforms: Option<Vec<String>>,
+    year_min: Option<i32>,
+    year_max: Option<i32>,
+    rating_min: Option<f64>,
 ) -> Result<Vec<StoreGameSummary>, String> {
-    game_scraper::fetch_store_games(&category, offset, limit).await
+    game_scraper::fetch_store_games(
+        &category,
+        offset,
+        limit,
+        genres,
+        platforms,
+        year_min,
+        year_max,
+        rating_min,
+    )
+    .await
 }
 
 /// Search IGDB games live by name query.
@@ -430,7 +474,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

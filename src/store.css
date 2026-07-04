@@ -345,9 +345,25 @@
 
 .store-game-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  /* Phase 2.8: bumped min from 150px → 220px so cinematic cards
+     (which have an absolutely-positioned body overlay at the bottom of
+     the cover) get enough width to render title + genres + platforms
+     without the text overflowing into the next column. 220px is also
+     a comfortable width for cozy/compact cards. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-lg);
   align-content: start;
+}
+
+/* Phase 2.8: allow grid items to shrink below their intrinsic content
+   width. By default CSS grid items use `min-width: auto` and refuse to
+   shrink below their widest unbreakable child — for a cinematic card
+   that's the platforms line ("Xbox Series X|S · PlayStation 5 · PC …"),
+   which pushes the card past its column boundary and bleeds into the
+   next card. Setting `min-width: 0` lets the body overlay's
+   `overflow-wrap: break-word` actually wrap. */
+.store-game-grid > .store-game-card {
+  min-width: 0;
 }
 
 /* ── Store Game Card ───────────────────────────────────────────────────── */
@@ -434,6 +450,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  /* Phase 2.8d: clip any unbreakable child (e.g. long platforms
+     strings like "Xbox Series X|S · PlayStation 5 · PC (Microsoft
+     Windows)") at the card boundary so the text never bleeds into
+     the next card. `min-width: 0` lets the body shrink below its
+     intrinsic min-width inside a flex/grid item. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .store-card-name {
@@ -466,6 +489,13 @@
   font-size: 10px;
   color: var(--color-text-muted);
   margin-top: auto;
+  /* Phase 2.8d: ellipsize long platform strings instead of letting
+     them overflow the card. Combined with `.store-card-body
+     { overflow: hidden }` above, this guarantees the body never
+     bleeds into the next card. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Store Game Card Skeleton ──────────────────────────────────────────── */
@@ -634,7 +664,9 @@
   }
 
   .store-game-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    /* Mobile breakpoint: keep the cinematic card from being clipped
+       on narrow viewports while still showing multiple cards per row. */
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: var(--space-md);
   }
 

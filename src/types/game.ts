@@ -152,10 +152,62 @@ export interface LaunchBoxImageResult {
   url: string;
 }
 
+// ─── View Density ──────────────────────────────────────────────────────────────
+
+/**
+ * User-selectable card layout density in the Store page. Synced to
+ * localStorage and applied to every `StoreGameCard` instance.
+ *
+ *   - compact   : cover-only, minimal footprint
+ *   - cozy      : default; cover + small body with genres/platforms
+ *   - cinematic : larger cards with body overlaid on the cover
+ */
+export type ViewDensity = "compact" | "cozy" | "cinematic";
+
+/** localStorage key for the user's chosen density. */
+export const VIEW_DENSITY_STORAGE_KEY = "gamelib_store_density_v1";
+
+/** Default density when nothing is stored (or stored value is invalid). */
+export const DEFAULT_DENSITY: ViewDensity = "cozy";
+
+/** All valid density values, for runtime validation in the hook. */
+export const VIEW_DENSITIES: readonly ViewDensity[] = [
+  "compact",
+  "cozy",
+  "cinematic",
+] as const;
+
+// ─── Wishlist ──────────────────────────────────────────────────────────────────
+
+/**
+ * A persisted wishlist entry. We store the entire `StoreGameSummary`
+ * payload alongside `addedAt` so the wishlist rail renders instantly on
+ * next launch without re-querying IGDB.
+ */
+export interface WishlistEntry extends StoreGameSummary {
+  /** Unix timestamp (ms) when the game was added to the wishlist. */
+  addedAt: number;
+}
+
+/** Shape of `<app_data>/wishlist_cache.json` on disk. */
+export interface WishlistCache {
+  /** Keyed by IGDB slug for O(1) membership checks. */
+  entries: Record<string, WishlistEntry>;
+}
+
 // ─── Store Browsing Types ────────────────────────────────────────────────────
 
-/** Category tabs in the Store page. */
-export type StoreCategory = "trending" | "popular" | "top" | "all";
+/** Category tabs in the Store page.
+ *  `coming_soon` lists games releasing in the next ~6 months
+ *  (sorted by hype); `new_releases` lists games released in the
+ *  last ~30 days. Both are wired in `fetch_store_games` (Rust). */
+export type StoreCategory =
+  | "trending"
+  | "popular"
+  | "top"
+  | "coming_soon"
+  | "new_releases"
+  | "all";
 
 /** Lightweight game summary returned from IGDB for store browsing.
  *  Mirrors the Rust StoreGameSummary struct — field names match the

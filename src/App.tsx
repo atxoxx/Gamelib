@@ -11,9 +11,12 @@ import CommunityPage from "./pages/CommunityPage";
 import SettingsPage from "./pages/SettingsPage";
 import PluginsPage from "./pages/PluginsPage";
 import ActivityPage from "./pages/ActivityPage";
+import WishlistPage from "./pages/WishlistPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ActivityProvider } from "./context/ActivityContext";
+import { WishlistProvider } from "./context/WishlistContext";
+import { DensityProvider } from "./context/DensityContext";
 import "./App.css";
 import "./store.css";
 
@@ -44,11 +47,14 @@ function App() {
       <ToastProvider>
         <GameProvider>
         <ActivityProvider>
+        <DensityProvider>
+        <WishlistProvider>
         <Routes>
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to="/library" replace />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="library/:gameId" element={<GamePage />} />
+            <Route path="wishlist" element={<WishlistPage />} />
             <Route path="activity" element={<ActivityPage />} />
             <Route path="store" element={<StorePage />} />
             <Route path="store/:gameSlug" element={<StoreGameDetail />} />
@@ -57,6 +63,8 @@ function App() {
             <Route path="plugins" element={<PluginsPage />} />
           </Route>
         </Routes>
+        </WishlistProvider>
+        </DensityProvider>
         </ActivityProvider>
         </GameProvider>
       </ToastProvider>

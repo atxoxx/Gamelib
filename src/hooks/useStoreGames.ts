@@ -8,6 +8,36 @@ import { STORE_PAGE_SIZE } from "../types/game";
 const SEARCH_DEBOUNCE_MS = 300;
 
 /**
+ * Active filter set used to narrow the IGDB catalog browse in
+ * `fetch_store_games`. The Rust command receives these as optional
+ * arguments; an empty value means "no constraint from this facet."
+ * Genres/platforms are sent by name (mapped to IGDB IDs in the Rust
+ * scraper via static lookup tables), so the frontend doesn't need to
+ * mirror IGDB's ID space.
+ */
+export interface StoreGamesFilters {
+  /** Genre names exactly as they appear in `StoreFilterSidebar.GENRES`. */
+  genres: string[];
+  /** Platform names exactly as in `StoreFilterSidebar.PLATFORMS`. */
+  platforms: string[];
+  /** Lower bound on `first_release_date` year (e.g. 2020 → 2020-01-01 UTC). */
+  yearMin: number | null;
+  /** Upper bound on `first_release_date` year (e.g. 2024 → 2024-12-31 UTC). */
+  yearMax: number | null;
+  /** Minimum IGDB user/critic rating (0–100 inclusive). */
+  ratingMin: number | null;
+}
+
+/** Sentinel for "no filter selected from any facet". */
+export const EMPTY_STORE_FILTERS: StoreGamesFilters = {
+  genres: [],
+  platforms: [],
+  yearMin: null,
+  yearMax: null,
+  ratingMin: null,
+};
+
+/**
  * Primary data-fetching hook for the Store page.
  *
  * Orchestrates category browsing, live search, infinite-scroll pagination,
@@ -76,19 +106,32 @@ export function useStoreGames() {
 
       try {
         let results: StoreGameSummary[];
+        // Snapshot current filter state so the invoke call is consistent
+        // even if React state changes mid-flight. The Rust command treats
+        // null/empty as "unconstrained" on each facet.
+        const f = filtersRef.current;
+        const filterArgs = {
+          genres: f.genres.length > 0 ? f.genres : null,
+          platforms: f.platforms.length > 0 ? f.platforms : null,
+          yearMin: f.yearMin,
+          yearMax: f.yearMax,
+          ratingMin: f.ratingMin,
+        };
         if (query) {
-          // Live search
+          // Live search — filters not currently applied (server-side
+          // search has its own ranking; mixing them would muddy results).
           results = await invoke<StoreGameSummary[]>("search_store_games", {
             query,
             offset,
             limit: STORE_PAGE_SIZE,
           });
         } else {
-          // Category browsing
+          // Category browsing — pass full filter context.
           results = await invoke<StoreGameSummary[]>("fetch_store_games", {
             category: fetchCategory ?? "all",
             offset,
             limit: STORE_PAGE_SIZE,
+            ...filterArgs,
           });
         }
 
@@ -102,8 +145,16 @@ export function useStoreGames() {
         offsetRef.current = newList.length;
         setHasMore(results.length >= STORE_PAGE_SIZE);
 
-        // Persist to cache (only for category browsing, not search)
-        if (fetchCategory && !query) {
+        // Persist to cache (only for unfiltered category browsing).
+        //
+        // We deliberately skip the cache write when filters are active so
+        // a filtered fetch doesn't poison the unfiltered cache for the
+        // same category — otherwise the next visit with cleared filters
+        // would show the stale filtered slice from disk. Filtered
+        // results are short-lived (re-fetched on every Apply click) and
+        // aren't worth a disk round-trip.
+        const isUnfiltered = !recomputeHasFilters(filtersRef.current);
+        if (fetchCategory && !query && isUnfiltered) {
           setCategoryCache(fetchCategory, newList);
         }
       } catch (err) {
@@ -149,6 +200,43 @@ export function useStoreGames() {
     },
     [getCategoryCache, performFetch]
   );
+
+  // ── Filter state + apply/reset ───────────────────────────────────────
+  // `filtersRef` is the source of truth used by `performFetch` so we don't
+  // recreate the closure every time filters change. `hasFilters` is the
+  // React-visible re-render flag for the chips/clear button affordances.
+  const filtersRef = useRef<StoreGamesFilters>(EMPTY_STORE_FILTERS);
+  const [hasFilters, setHasFilters] = useState(false);
+
+  const recomputeHasFilters = useCallback((f: StoreGamesFilters) => {
+    return (
+      f.genres.length > 0 ||
+      f.platforms.length > 0 ||
+      f.yearMin !== null ||
+      f.yearMax !== null ||
+      f.ratingMin !== null
+    );
+  }, []);
+
+  const applyFilters = useCallback(
+    (next: StoreGamesFilters) => {
+      filtersRef.current = next;
+      setHasFilters(recomputeHasFilters(next));
+      // Kick a fresh fetch from the active category so the rail re-narrows.
+      requestIdRef.current += 1;
+      const reqId = requestIdRef.current;
+      setGames([]);
+      offsetRef.current = 0;
+      setHasMore(true);
+      setError(null);
+      performFetch(reqId, activeCategoryRef.current, "", 0, false);
+    },
+    [performFetch, recomputeHasFilters]
+  );
+
+  const resetFilters = useCallback(() => {
+    applyFilters(EMPTY_STORE_FILTERS);
+  }, [applyFilters]);
 
   // ── Initial load on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -227,5 +315,11 @@ export function useStoreGames() {
     searchQuery,
     setSearchQuery,
     isSearching,
+    /** Apply the supplied filter set and re-fetch from the active category. */
+    applyFilters,
+    /** Clear all filters and re-fetch the un-narrowed category list. */
+    resetFilters,
+    /** True when any filter facet is currently active. */
+    hasFilters,
   };
 }

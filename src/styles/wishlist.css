@@ -1,0 +1,192 @@
+/* ============================================================================
+   Wishlist Page (/wishlist)
+   - Dedicated tab between Library and Activity in TopNav.
+   - Renders the user's saved games in a StoreGameCard grid and offers
+     a friendly empty state with a "Browse the Store" CTA.
+   - Density follows the same DensityContext as the Store, so toggling
+     density in either tab updates the other automatically.
+   ============================================================================ */
+
+.wishlist-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--space-2xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  min-height: 100%;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+
+.wishlist-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.wishlist-page-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.wishlist-page-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.wishlist-page-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.wishlist-page-title {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.wishlist-page-count {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.wishlist-page-subtitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  max-width: 720px;
+  line-height: 1.55;
+}
+
+/* ── Card grid ─────────────────────────────────────────────────────────── */
+
+.wishlist-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+  align-items: start;
+}
+
+/* Cozy/compact cards inside the wishlist grid flow at their natural
+   widths thanks to `auto-fill`; cinematic cards take more space. We
+   just need a small adjustment so 260px cinematic cards don't overflow
+   the auto-fill min. */
+.wishlist-page-grid .store-game-card {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Cinematic cards in the wishlist grid keep their 3/4 aspect ratio from
+   store-discover.css; we just ensure the grid row height doesn't get
+   pinned by the body overlay. */
+.wishlist-page-grid .store-game-card.density-cinematic {
+  width: 100%;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+
+.wishlist-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-3xl) var(--space-xl);
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  max-width: 520px;
+  margin: var(--space-2xl) auto 0;
+  color: var(--color-text-secondary);
+}
+
+.wishlist-empty svg {
+  width: 56px;
+  height: 56px;
+  color: var(--color-text-muted);
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.wishlist-empty strong {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.wishlist-empty p {
+  margin: 0;
+  max-width: 380px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.wishlist-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  padding: 10px 20px;
+  background: var(--color-accent);
+  color: var(--color-text-inverse, #ffffff);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.wishlist-empty-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--color-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 92%, white);
+}
+
+.wishlist-empty-cta:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.wishlist-empty-cta svg {
+  width: 16px;
+  height: 16px;
+  opacity: 1;
+  color: currentColor;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .wishlist-empty-cta {
+    transition: none;
+  }
+  .wishlist-empty-cta:hover {
+    transform: none;
+  }
+}
