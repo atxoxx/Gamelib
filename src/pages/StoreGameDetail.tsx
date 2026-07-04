@@ -3,10 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import type { GameMetadataResult, SimilarGame } from "../types/game";
+import type { GameMetadataResult, IgdbReview, SimilarGame } from "../types/game";
 import { slugify } from "../types/game";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 import WebLinksTab from "../components/WebLinksTab";
+import ReviewsTab from "../components/ReviewsTab";
+import type { Game } from "../types/game";
 
 
 /* ------------------------------------------------------------------ */
@@ -167,18 +169,21 @@ export default function StoreGameDetail() {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  const mockGame = useMemo(() => {
+  const mockGame = useMemo((): Game | null => {
     if (!data) return null;
     return {
-      id: String(data.title),
+      id: `store-${data.title}`,
       name: data.title,
       path: "",
       platform: data.sourceName === "Steam" ? "Steam" : "IGDB",
       installed: false,
       playTime: "0h",
-      addedAt: 0,
+      addedAt: Date.now(),
       metadataUrl: data.sourceUrl,
+      metadataSource: data.sourceName,
       websites: data.websites ?? [],
+      igdbReviews: data.igdbReviews ?? undefined,
+      igdbRating: data.igdbRating ?? undefined,
     };
   }, [data]);
 
@@ -223,6 +228,14 @@ export default function StoreGameDetail() {
     const norm = data.title.toLowerCase().trim();
     return games.find((g) => g.name.toLowerCase().trim() === norm) ?? null;
   }, [data, games]);
+
+  // Callback for ReviewsTab to update our local state when it fetches reviews.
+  const handleReviewsFetched = useCallback(
+    (reviews: IgdbReview[], _source: string) => {
+      setData((prev) => (prev ? { ...prev, igdbReviews: reviews } : prev));
+    },
+    []
+  );
 
   const handleAddToLibrary = async () => {
     if (!data || adding) return;
@@ -721,35 +734,8 @@ export default function StoreGameDetail() {
       )}
 
       {/* ── Reviews ────────────────────────────────────────────────────── */}
-      {activeTab === "reviews" && (
-        <section className="game-section">
-          <div style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-md)', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-sm)' }}>
-            <button style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontWeight: '600', cursor: 'pointer', fontSize: 'var(--font-size-sm)', paddingBottom: 'var(--space-sm)', borderBottom: '2px solid var(--color-accent)' }}>
-              IGDB Reviews ({data.igdbReviews?.length ?? 0})
-            </button>
-          </div>
-          {!data.igdbReviews || data.igdbReviews.length === 0 ? (
-            <div style={{ padding: 'var(--space-xl) 0', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 48, height: 48, margin: '0 auto var(--space-md) auto', display: 'block', opacity: 0.5 }}>
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              <p>No community reviews available on IGDB yet.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-              {data.igdbReviews.map((rev, idx) => (
-                <div key={idx} style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-lg)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
-                    <span style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>{rev.username ?? 'Anonymous User'}</span>
-                    {rev.rating != null && <span style={{ background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)', color: 'var(--color-accent)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 'bold' }}>Rating: {rev.rating}/100</span>}
-                  </div>
-                  {rev.title && <h4 style={{ margin: '0 0 var(--space-xs) 0', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>{rev.title}</h4>}
-                  <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', lineHeight: '1.5', whiteSpace: 'pre-line' }}>{rev.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+      {activeTab === "reviews" && mockGame && (
+        <ReviewsTab game={mockGame} onReviewsFetched={handleReviewsFetched} />
       )}
 
       {/* ── Weblinks ───────────────────────────────────────────────────── */}

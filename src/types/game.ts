@@ -72,6 +72,30 @@ export interface IgdbReview {
   content?: string;
   rating?: number;
   username?: string;
+  /** ISO 639-1 language code (e.g. "english", "french") from the review source.
+   *  Populated by the Steam reviews API; undefined for IGDB-sourced reviews. */
+  language?: string;
+  /** Number of users who found this review helpful (Steam). */
+  votesUp?: number;
+  /** Number of users who found this review funny (Steam). */
+  votesFunny?: number;
+  /** Unix timestamp when this review was created (Steam). */
+  timestampCreated?: number;
+}
+
+export interface ReviewFetchResult {
+  reviews: IgdbReview[];
+  /** "steam" | "igdb" | "none" */
+  source: string;
+  error?: string;
+  /** Total number of reviews (from Steam query_summary). */
+  totalReviews?: number;
+  /** Cursor for fetching the next page. null when no more pages. */
+  cursor?: string | null;
+  steamReviewScore?: number;
+  steamReviewScoreDesc?: string;
+  steamTotalPositive?: number;
+  steamTotalNegative?: number;
 }
 
 export interface LanguageSupportInfo {
@@ -177,6 +201,20 @@ export function gameNameFromPath(filePath: string): string {
       .pop()
       ?.replace(/\.exe$/i, "") || "Unknown Game"
   );
+}
+
+/** Extract a Steam app id from a `steam://run/12345` path. Returns `null` if
+ *  no id can be parsed or the path doesn't look like a Steam protocol URI.
+ *  We require an explicit `steam://` prefix to avoid false positives from
+ *  local paths like `C:\…\app\12345\game.exe`. */
+export function extractSteamAppId(path: string): number | null {
+  if (!path) return null;
+  const m = path.match(/steam:\/\/run\/(\d+)/);
+  if (m && m[1]) {
+    const id = parseInt(m[1], 10);
+    return Number.isFinite(id) ? id : null;
+  }
+  return null;
 }
 
 /** Parse a play-time string like "142h" or "3h 15m" into total minutes. */

@@ -9,7 +9,7 @@ mod gpu_detector;
 mod metrics_collector;
 mod rtss_reader;
 mod mahm_reader;
-use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo};
+use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
 
@@ -332,6 +332,19 @@ async fn get_store_game_detail(slug: String) -> Option<GameMetadataResult> {
     game_scraper::get_store_game_detail(&slug).await
 }
 
+/// Fetch reviews for a game from the best available source (Steam first, IGDB fallback).
+/// Returns the reviews and a `source` string ("steam" | "igdb" | "none") so the UI
+/// can label them correctly.
+#[tauri::command]
+async fn fetch_game_reviews(
+    game_name: String,
+    steam_app_id: Option<u64>,
+    cursor: Option<String>,
+    language: Option<String>,
+) -> ReviewFetchResult {
+    game_scraper::fetch_game_reviews(&game_name, steam_app_id, cursor, language).await
+}
+
 /// Save screenshot image base64 data to the specified path.
 #[tauri::command]
 fn save_screenshot(file_path: String, base64_data: String) -> Result<(), String> {
@@ -407,7 +420,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

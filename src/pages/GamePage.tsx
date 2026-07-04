@@ -10,6 +10,7 @@ import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type Gam
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
+import ReviewsTab from "../components/ReviewsTab";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 
 
@@ -318,12 +319,6 @@ function GameDetail({ game }: { game: Game }) {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
-  // Reviews state
-  const [rating, setRating] = useState(game.rating || 0);
-  const [reviewInput, setReviewInput] = useState(game.reviewText || "");
-  const [reviewText, setReviewText] = useState(game.reviewText || "");
-  const [isEditingReview, setIsEditingReview] = useState(false);
-
   // LaunchBox Image Browser state
   const [showImageBrowser, setShowImageBrowser] = useState(false);
   const [lbImages, setLbImages] = useState<LaunchBoxImageResult[]>([]);
@@ -353,17 +348,6 @@ function GameDetail({ game }: { game: Game }) {
   const [editAlternativeNamesText, setEditAlternativeNamesText] = useState(game.alternativeNames ? game.alternativeNames.join(", ") : "");
   const [editLanguageSupportsText, setEditLanguageSupportsText] = useState(game.languageSupports ? JSON.stringify(game.languageSupports, null, 2) : "");
   
-  // Reviews sub-tab state
-  const [reviewsSubTab, setReviewsSubTab] = useState<"local" | "igdb">("local");
-
-  // Sync state when game changes
-  useEffect(() => {
-    setRating(game.rating || 0);
-    setReviewInput(game.reviewText || "");
-    setReviewText(game.reviewText || "");
-    setIsEditingReview(false);
-  }, [game.id, game.rating, game.reviewText]);
-
   // Auto-enrich existing games that have metadata but are missing TTB/reviews
   const enrichmentStartedRef = useRef(false);
   useEffect(() => {
@@ -866,28 +850,6 @@ function GameDetail({ game }: { game: Game }) {
     });
     setEditing(false);
     showToast("Game updated", "success");
-  }
-
-  function handleSaveReview() {
-    updateGame(game.id, {
-      rating: rating > 0 ? rating : undefined,
-      reviewText: reviewInput.trim() || undefined,
-    });
-    setReviewText(reviewInput.trim());
-    setIsEditingReview(false);
-    showToast("Review saved", "success");
-  }
-
-  function handleDeleteReview() {
-    updateGame(game.id, {
-      rating: undefined,
-      reviewText: undefined,
-    });
-    setRating(0);
-    setReviewText("");
-    setReviewInput("");
-    setIsEditingReview(false);
-    showToast("Review deleted", "info");
   }
 
   const displayName = editing ? editName : game.name;
@@ -1657,193 +1619,7 @@ function GameDetail({ game }: { game: Game }) {
         </div>
       )}
 
-      {activeTab === "reviews" && (
-        <div className="game-section">
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px', gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
-            <button 
-              onClick={() => setReviewsSubTab("local")} 
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: reviewsSubTab === "local" ? 'var(--color-accent)' : 'var(--color-text-muted)', 
-                fontWeight: '600', 
-                cursor: 'pointer', 
-                fontSize: 'var(--font-size-sm)',
-                paddingBottom: '8px',
-                borderBottom: reviewsSubTab === "local" ? '2px solid var(--color-accent)' : '2px solid transparent',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              Your Review
-            </button>
-            <button 
-              onClick={() => setReviewsSubTab("igdb")} 
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: reviewsSubTab === "igdb" ? 'var(--color-accent)' : 'var(--color-text-muted)', 
-                fontWeight: '600', 
-                cursor: 'pointer', 
-                fontSize: 'var(--font-size-sm)',
-                paddingBottom: '8px',
-                borderBottom: reviewsSubTab === "igdb" ? '2px solid var(--color-accent)' : '2px solid transparent',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              IGDB Reviews ({game.igdbReviews?.length || 0})
-            </button>
-          </div>
-
-          {reviewsSubTab === "local" ? (
-            <>
-              <h2 className="game-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                Player Review
-              </h2>
-
-              {(!reviewText && !rating && !isEditingReview) || isEditingReview ? (
-                <div className="review-writer">
-                  <h3>{isEditingReview ? "Edit your review" : "Rate and review this game"}</h3>
-                  <div className="review-stars-select">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        className={`star-select-btn${star <= rating ? " selected" : ""}`}
-                        onClick={() => setRating(star)}
-                        type="button"
-                      >
-                        <svg viewBox="0 0 24 24" fill="currentColor">
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                        </svg>
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    className="edit-input edit-textarea"
-                    value={reviewInput}
-                    onChange={(e) => setReviewInput(e.target.value)}
-                    placeholder="Write your review here..."
-                    rows={4}
-                  />
-                  <div className="review-writer-actions">
-                    {isEditingReview && (
-                      <button
-                        className="game-edit-btn game-edit-cancel"
-                        onClick={() => {
-                          setRating(game.rating || 0);
-                          setReviewInput(game.reviewText || "");
-                          setIsEditingReview(false);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      className="game-edit-btn game-edit-save"
-                      onClick={handleSaveReview}
-                      disabled={rating === 0 && !reviewInput.trim()}
-                    >
-                      Save Review
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="user-review-card">
-                  <div className="user-review-header">
-                    <div className="user-review-avatar">
-                      <span>ME</span>
-                    </div>
-                    <div className="user-review-meta">
-                      <div className="user-review-name">
-                        You <span className="verified-badge">Verified Player</span>
-                      </div>
-                      <div className="user-review-stars">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <svg
-                            key={star}
-                            className={`review-star-icon${star <= rating ? " active" : ""}`}
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                          >
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                          </svg>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="user-review-actions">
-                      <button
-                        className="review-action-btn"
-                        onClick={() => setIsEditingReview(true)}
-                        title="Edit Review"
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                      </button>
-                      <button
-                        className="review-action-btn review-delete"
-                        onClick={handleDeleteReview}
-                        title="Delete Review"
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  {reviewText && <p className="user-review-text">{reviewText}</p>}
-                </div>
-              )}
-            </>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-              {!game.igdbReviews || game.igdbReviews.length === 0 ? (
-                <div style={{ padding: 'var(--space-xl) 0', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 48, height: 48, margin: '0 auto var(--space-md) auto', display: 'block', opacity: 0.5 }}>
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <p>No community reviews available for this game on IGDB yet.</p>
-                </div>
-              ) : (
-                game.igdbReviews.map((rev, idx) => (
-                  <div 
-                    key={idx} 
-                    style={{ 
-                      background: 'var(--color-bg-secondary)', 
-                      border: '1px solid var(--color-border)', 
-                      borderRadius: 'var(--radius-lg)', 
-                      padding: 'var(--space-lg)' 
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-xs)' }}>
-                      <span style={{ fontWeight: '600', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
-                        {rev.username || 'Anonymous User'}
-                      </span>
-                      {rev.rating !== undefined && (
-                        <span style={{ background: 'var(--color-accent-opacity)', color: 'var(--color-accent)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: '10px', fontWeight: 'bold' }}>
-                          Rating: {rev.rating}/100
-                        </span>
-                      )}
-                    </div>
-                    {rev.title && (
-                      <h4 style={{ margin: '0 0 var(--space-xs) 0', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: '600' }}>
-                        {rev.title}
-                      </h4>
-                    )}
-                    <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', lineHeight: '1.5', whiteSpace: 'pre-line' }}>
-                      {rev.content}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {activeTab === "reviews" && <ReviewsTab game={game} />}
 
       {activeTab === "activity" && <GameActivityTab game={game} />}
 

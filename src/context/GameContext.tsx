@@ -9,8 +9,14 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { addSessionTime, gameNameFromPath } from "../types/game";
-import type { Game, GameMetadataResult } from "../types/game";
+import {
+  addSessionTime,
+  gameNameFromPath,
+  extractSteamAppId,
+  type Game,
+  type GameMetadataResult,
+  type IgdbReview,
+} from "../types/game";
 import { useToast } from "./ToastContext";
 
 interface GameExitEvent {
@@ -31,6 +37,7 @@ interface GameContextType {
   launchGame: (game: Game) => void;
   addStoreGame: (metadata: GameMetadataResult) => Promise<string>;
   importLocalGames: (items: { path: string; metadata: GameMetadataResult | null }[]) => Promise<void>;
+  fetchGameReviews: (gameId: string, gameName: string, steamAppId?: number) => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | null>(null);
@@ -123,7 +130,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }
 
   /** Auto-fetch IGDB metadata and images for a newly imported game. */
-  async function autoFetchMetadata(gameId: string, gameName: string) {
+  async function autoFetchMetadata(gameId: string, gameName: string, steamAppId?: number) {
     try {
       const results: GameMetadataResult[] = await invoke("search_game_metadata", { gameName });
       if (results.length === 0) return;
@@ -154,10 +161,38 @@ export function GameProvider({ children }: { children: ReactNode }) {
         metadataUrl: meta.sourceUrl,
       });
       showToast(`Fetched metadata for ${gameName} from ${meta.sourceName}`, "success");
+
+      // Pull reviews in the background so they're ready when the user
+      // opens the Reviews tab. We don't await this — it can run alongside
+      // image downloads.
+      fetchGameReviews(gameId, gameName, steamAppId).catch((err) =>
+        console.error("Background review fetch failed:", err)
+      );
     } catch (err) {
       console.error("Auto-fetch metadata failed:", err);
     }
   }
+
+  /** Fetch reviews for a game from the best available source (Steam first,
+   *  IGDB fallback) and persist them on the game record. Safe to call any
+   *  time — does not block the UI and never wipes existing reviews on empty
+   *  results. */
+  const fetchGameReviews = useCallback(
+    async (gameId: string, gameName: string, steamAppId?: number) => {
+      try {
+        const result = await invoke<{ reviews: IgdbReview[]; source: string; error?: string }>(
+          "fetch_game_reviews",
+          { gameName, steamAppId }
+        );
+        if (result.reviews.length > 0) {
+          updateGame(gameId, { igdbReviews: result.reviews });
+        }
+      } catch (err) {
+        console.error(`Fetch reviews failed for ${gameName}:`, err);
+      }
+    },
+    [updateGame]
+  );
 
   const addGame = useCallback((game: Game) => {
     const id = game.id || generateId();
@@ -166,7 +201,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     // Auto-fetch metadata in the background for locally imported games
     if (game.path && !game.description) {
-      autoFetchMetadata(id, game.name);
+      const steamAppId = extractSteamAppId(game.path) ?? undefined;
+      autoFetchMetadata(id, game.name, steamAppId);
     }
   }, [showToast, updateGame]);
 
@@ -177,7 +213,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // Auto-fetch metadata for each imported game in the background
     for (const game of withIds) {
       if (game.path && !game.description) {
-        autoFetchMetadata(game.id, game.name);
+        const steamAppId = extractSteamAppId(game.path) ?? undefined;
+        autoFetchMetadata(game.id, game.name, steamAppId);
       }
     }
   }, [showToast, updateGame]);
@@ -288,8 +325,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     setGames((prev) => [...prev, newGame]);
     showToast(`Added ${metadata.title} to your library`, "success");
+
+    // Kick off a background review fetch so reviews are ready when the user
+    // opens the Reviews tab. The store metadata doesn't carry a Steam app id,
+    // so the backend will look one up by name.
+    fetchGameReviews(newGame.id, newGame.name).catch((err) =>
+      console.error("Background review fetch on add failed:", err)
+    );
+
     return newGame.id;
-  }, [games, showToast]);
+  }, [games, showToast, fetchGameReviews]);
 
   const importLocalGames = useCallback(async (
     items: { path: string; metadata: GameMetadataResult | null }[]
@@ -360,10 +405,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
     if (imported.length > 0) {
       setGames((prev) => [...prev, ...imported]);
       showToast(`Imported ${imported.length} game${imported.length !== 1 ? "s" : ""}`, "success");
+
+      // Kick off background review fetches so the Reviews tab is populated
+      // when the user opens it. Each import is a potential "game added"
+      // event per the spec.
+      for (const game of imported) {
+        const steamAppId = extractSteamAppId(game.path) ?? undefined;
+        fetchGameReviews(game.id, game.name, steamAppId).catch((err) =>
+          console.error(`Background review fetch on import failed for ${game.name}:`, err)
+        );
+      }
     } else {
       showToast("No new games were imported", "info");
     }
-  }, [games, showToast]);
+  }, [games, showToast, fetchGameReviews]);
 
   return (
     <GameContext.Provider
@@ -380,6 +435,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         launchGame,
         addStoreGame,
         importLocalGames,
+        fetchGameReviews,
       }}
     >
       {children}

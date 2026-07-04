@@ -3453,6 +3453,1109 @@
 }
 
 /* ==============================
+   Reviews Tab (ReviewViewer-inspired)
+   ============================== */
+
+.rv-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  animation: importMenuIn 240ms ease;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+
+.rv-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.rv-header-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.rv-header-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.rv-header-title svg {
+  width: 22px;
+  height: 22px;
+  color: var(--color-accent);
+  filter: drop-shadow(0 0 6px var(--color-accent-glow));
+}
+
+.rv-header-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+
+.rv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.rv-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.rv-btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.rv-btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.rv-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.rv-btn-ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.rv-btn-ghost:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+.rv-btn-large {
+  padding: var(--space-md) var(--space-2xl);
+  font-size: var(--font-size-md);
+}
+
+.rv-btn-large svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ── Summary header card ────────────────────────────────────────────── */
+
+.rv-summary {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: var(--space-2xl);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)),
+    var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2xl);
+  position: relative;
+  overflow: hidden;
+}
+
+.rv-summary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 60%);
+  pointer-events: none;
+}
+
+.rv-summary-left {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+}
+
+.rv-summary-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rv-summary-score {
+  font-size: 56px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  letter-spacing: -1px;
+  text-shadow: 0 0 30px currentColor;
+}
+
+.rv-summary-score-label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+.rv-summary-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.rv-summary-source-stars {
+  color: #ffb000;
+  display: flex;
+}
+
+.rv-summary-count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.rv-summary-distribution {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  position: relative;
+}
+
+.rv-distribution-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--font-size-xs);
+}
+
+.rv-distribution-label {
+  width: 56px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-distribution-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.rv-distribution-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 600ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px currentColor;
+  min-width: 2px;
+}
+
+.rv-distribution-count {
+  width: 28px;
+  text-align: right;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+  .rv-summary {
+    grid-template-columns: 1fr;
+    gap: var(--space-lg);
+  }
+  .rv-summary-left {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .rv-summary-score {
+    font-size: 44px;
+  }
+}
+
+/* ── Refresh reviews row + spinner ──────────────────────────────────── */
+
+.rv-refresh-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: calc(-1 * var(--space-md)) 0 var(--space-md) 0;
+}
+
+.rv-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 6px 12px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.rv-refresh-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+.rv-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rv-refresh-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.rv-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: rv-spin 0.8s linear infinite;
+}
+
+@keyframes rv-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Toolbar (source tabs + filters + search) ───────────────────────── */
+
+.rv-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.rv-source-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rv-source-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.rv-source-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.rv-source-tab.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+.rv-source-tab svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.rv-filters {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.rv-select-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.rv-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 32px 8px var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  outline: none;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.rv-select:hover {
+  border-color: var(--color-border-light);
+}
+
+.rv-select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.rv-select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.rv-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+  max-width: 360px;
+  margin-left: auto;
+}
+
+.rv-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.rv-search {
+  width: 100%;
+  padding: 8px 36px 8px 36px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  outline: none;
+  transition: all var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.rv-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+.rv-search:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.rv-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.rv-search-clear:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.rv-search-clear svg {
+  width: 12px;
+  height: 12px;
+  transition: all 200ms ease;
+}
+
+.rv-star-btn:hover {
+  transform: scale(1.15);
+  background: color-mix(in srgb, #ffb000 15%, transparent);
+}
+
+.rv-star-btn.filled {
+  color: #ffb000;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, #ffb000 60%, transparent));
+}
+
+/* ── Review Card ────────────────────────────────────────────────────── */
+
+.rv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.rv-list-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.rv-list-section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--color-border), transparent);
+}
+
+/* The "Your Review" header uses the accent color so it's visually anchored
+ * to the rest of the player's card and not lost among community reviews. */
+.rv-list-section-title-you {
+  color: var(--color-accent);
+}
+
+.rv-list-section-title-you::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-accent) 50%, transparent),
+    transparent
+  );
+}
+
+.rv-list-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.rv-card {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.rv-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent, var(--color-accent));
+  opacity: 0.8;
+  transition: opacity 0.25s ease, height 0.25s ease;
+}
+
+.rv-card:hover {
+  border-color: color-mix(in srgb, var(--accent, var(--color-accent)) 30%, var(--color-border-light));
+  transform: translateY(-3px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
+}
+
+.rv-card:hover::before {
+  opacity: 1;
+  height: 5px;
+}
+
+.rv-source-you {
+  --accent: linear-gradient(90deg, var(--color-accent), #818cf8);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-accent) 8%, var(--color-surface)),
+    var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+}
+
+.rv-source-steam {
+  --accent: linear-gradient(90deg, #1b9ae0, #66c0f4);
+  background: linear-gradient(135deg, rgba(27, 154, 224, 0.03) 0%, rgba(22, 32, 45, 0.3) 100%), var(--color-surface);
+  border-color: color-mix(in srgb, #1b9ae0 20%, var(--color-border));
+}
+
+.rv-source-external {
+  --accent: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+
+.rv-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+}
+
+/* ── New single-column card header layout ──────────────────────────── */
+
+.rv-card-header-new {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+}
+
+.rv-card-header-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rv-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.rv-card-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.rv-card-submeta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  color: var(--color-text-secondary);
+}
+
+.rv-card-lang {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rv-card-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rv-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.rv-verified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.rv-verified-badge svg {
+  width: 9px;
+  height: 9px;
+}
+
+.rv-card-submeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: #ffb000;
+}
+
+.rv-card-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.rv-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.rv-source-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Badge-specific source color overrides — these use separate class names
+ * to avoid conflicting with the card-level .rv-source-you/.rv-source-steam
+ * which set accent variables and card background gradients. */
+.rv-source-badge-you {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.rv-source-badge-steam {
+  background: color-mix(in srgb, #3b82f6 15%, transparent);
+  color: #60a5fa;
+  border-color: color-mix(in srgb, #3b82f6 30%, transparent);
+}
+
+.rv-source-badge-external {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #fbbf24;
+  border-color: color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+.rv-rating-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+
+.rv-card-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.rv-card-content {
+  font-size: var(--font-size-sm);
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+  margin: 0;
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.rv-card-content.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rv-card-footer {
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
+}
+
+/* ── Reaction badges (read-only Steam data) ──────────────────────── */
+
+.rv-card-reactions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.rv-reaction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 80%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  font-family: inherit;
+}
+
+.rv-reaction-badge .rv-reaction-emoji {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.rv-reaction-badge .rv-reaction-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+}
+
+.rv-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.rv-card-action:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border);
+}
+
+.rv-card-action svg {
+  width: 12px;
+  height: 12px;
+}
+
+.rv-card-action-danger:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.rv-card-date {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ── Load More button ─────────────────────────────────────────────── */
+
+.rv-load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-md) 0;
+}
+
+.rv-load-more-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-normal);
+  white-space: nowrap;
+}
+
+/* ── Stars row ──────────────────────────────────────────────────────── */
+
+.rv-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #ffb000;
+}
+
+.rv-stars svg {
+  flex-shrink: 0;
+}
+
+/* ── Empty states ───────────────────────────────────────────────────── */
+
+.rv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-3xl) var(--space-2xl);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.rv-empty-small {
+  padding: var(--space-2xl);
+}
+
+.rv-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  margin-bottom: var(--space-xs);
+}
+
+.rv-empty-small .rv-empty-icon {
+  width: 48px;
+  height: 48px;
+}
+
+.rv-empty-icon svg {
+  width: 30px;
+  height: 30px;
+}
+
+.rv-empty-small .rv-empty-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.rv-empty-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.rv-empty-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* ── External sources section ──────────────────────────────────────── */
+
+.rv-external-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding-top: var(--space-xl);
+  border-top: 1px solid var(--color-border);
+}
+
+.rv-external-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.rv-external-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.rv-external-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rv-external-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+}
+
+.rv-external-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.rv-external-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-md);
+}
+
+.rv-external-card {
+  --accent: var(--color-accent);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  position: relative;
+  overflow: hidden;
+}
+
+.rv-external-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform var(--transition-fast);
+}
+
+.rv-external-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--color-border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--color-surface));
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.rv-external-card:hover::before {
+  transform: scaleY(1);
+}
+
+.rv-external-card-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  flex-shrink: 0;
+}
+
+.rv-external-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rv-external-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rv-external-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.rv-external-card-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rv-external-card-arrow {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.rv-external-card:hover .rv-external-card-arrow {
+  color: var(--accent);
+  transform: translateX(3px);
+}
+
+@media (max-width: 600px) {
+  .rv-list-grid {
+    gap: var(--space-md);
+  }
+  .rv-external-grid {
+    grid-template-columns: 1fr;
+  }
+  .rv-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rv-search-wrap {
+    margin-left: 0;
+    max-width: none;
+  }
+  .rv-card-header-new {
+    flex-direction: column;
+  }
+}
+
+/* ==============================
    Activity Timeline Styling
    ============================== */
 .timeline {
@@ -5835,3 +6938,142 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Recommendation Indicator (2-column card anchor) ──────────────── */
+/* The big icon on the left of each review card. Replaces the previous
+ * avatar circle. ReviewViewer uses this as the visual focal point:
+ * green thumbs-up for "Recommended", red thumbs-down for "Not
+ * Recommended", gold star + score for the user's own review. */
+
+.rv-card-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-lg);
+  align-items: flex-start;
+}
+
+.rv-recommendation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.rv-recommendation svg {
+  width: 32px;
+  height: 32px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+  transition: transform var(--transition-fast) cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.rv-card:hover .rv-recommendation-pos svg {
+  transform: rotate(-15deg) scale(1.1) !important;
+}
+
+.rv-card:hover .rv-recommendation-neg svg {
+  transform: rotate(15deg) scale(1.1) !important;
+}
+
+.rv-recommendation-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.rv-recommendation-score {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.rv-recommendation-pos {
+  color: #10b981;
+  background: color-mix(in srgb, #10b981 10%, transparent);
+  border: 1px solid color-mix(in srgb, #10b981 30%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.rv-recommendation-neg {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.rv-recommendation-you {
+  color: #ffb000;
+  background: color-mix(in srgb, #ffb000 10%, transparent);
+  border: 1px solid color-mix(in srgb, #ffb000 30%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.rv-recommendation-none {
+  color: var(--color-text-muted);
+}
+
+/* ── Steam rating pill (compact, shown next to badges) ────────────── */
+/* Steam reviews map recommended / not-recommended onto 85 / 35. We show
+ * the raw score next to the recommendation icon for transparency. */
+
+.rv-rating-pill-steam {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+
+.rv-card-name-text {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+/* Date display for fetched reviews uses reduced opacity, matching
+ * ReviewViewer's de-emphasized metadata styling. */
+.rv-card-date {
+  opacity: 0.65;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Summary sentiment line ("X% Positive / Y% Negative") ────────── */
+/* Steam recommendations are binary, so we surface the sentiment split
+ * even when the distribution bars below are too coarse to show it. */
+
+.rv-summary-sentiment {
+  display: flex;
+  gap: var(--space-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  margin-top: 4px;
+}
+
+.rv-summary-pos {
+  color: #10b981;
+}
+
+.rv-summary-neg {
+  color: #ef4444;
+}
+
+.rv-distribution-label-pos {
+  color: #10b981;
+}
+
+.rv-distribution-label-neg {
+  color: #ef4444;
+}
+
+/* ── Drop avatar-stack styles that referenced the deleted card layout ─ */
+/* (replaced by RecommendationIndicator above) */

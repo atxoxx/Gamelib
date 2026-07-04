@@ -116,6 +116,19 @@ pub struct IgdbReview {
     pub content: Option<String>,
     pub rating: Option<f64>,
     pub username: Option<String>,
+    /// ISO 639-1 language code (e.g. "english", "french") from Steam API.
+    /// None for IGDB-sourced reviews (endpoint no longer available).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Number of users who found this review helpful (Steam API).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub votes_up: Option<u32>,
+    /// Number of users who found this review funny (Steam API).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub votes_funny: Option<u32>,
+    /// Unix timestamp when this review was created (Steam API).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp_created: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2151,6 +2164,397 @@ limit 1;"#,
         release_status,
         language_supports,
     })
+}
+
+// ─── Reviews Fetcher (multi-source with fallback) ─────────────────────────────
+
+/// Result of a reviews fetch attempt. `source` is "steam" | "igdb" | "none".
+/// The frontend uses `source` to label the reviews correctly in the UI.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFetchResult {
+    pub reviews: Vec<IgdbReview>,
+    pub source: String,
+    pub error: Option<String>,
+    /// Total number of reviews returned by Steam (query_summary.total_reviews).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_reviews: Option<u64>,
+    /// Cursor for fetching the next page of reviews (Steam cursor-based pagination).
+    /// None when there are no more pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_review_score: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_review_score_desc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_total_positive: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steam_total_negative: Option<u64>,
+}
+
+/// Fetch reviews for a game from the best available source.
+///
+/// If `cursor` is provided (non-empty), fetches the next page from Steam.
+/// Otherwise starts from the beginning.
+pub async fn fetch_game_reviews(
+    game_name: &str,
+    steam_app_id: Option<u64>,
+    cursor: Option<String>,
+    language: Option<String>,
+) -> ReviewFetchResult {
+    // ── 1. Steam ──────────────────────────────────────────────────────────
+    let app_id_to_try: Option<u64> = match steam_app_id {
+        Some(id) => Some(id),
+        None => lookup_steam_app_id(game_name).await,
+    };
+
+    if let Some(app_id) = app_id_to_try {
+        match fetch_steam_reviews(app_id, &cursor.unwrap_or_default(), language.as_deref()).await {
+            Ok((reviews, total, next_cursor, summary)) if !reviews.is_empty() => {
+                return ReviewFetchResult {
+                    reviews,
+                    source: "steam".to_string(),
+                    error: None,
+                    total_reviews: Some(total),
+                    cursor: next_cursor,
+                    steam_review_score: summary.as_ref().map(|s| s.review_score),
+                    steam_review_score_desc: summary.as_ref().and_then(|s| s.review_score_desc.clone()),
+                    steam_total_positive: summary.as_ref().map(|s| s.total_positive),
+                    steam_total_negative: summary.as_ref().map(|s| s.total_negative),
+                };
+            }
+            Ok(_) => {
+                // Steam returned 0 reviews — try IGDB before giving up.
+            }
+            Err(e) => {
+                eprintln!("Steam reviews fetch failed for app {}: {}", app_id, e);
+            }
+        }
+    }
+
+    // ── 2. IGDB (best-effort) ─────────────────────────────────────────────
+    match fetch_igdb_reviews(game_name).await {
+        Ok(reviews) if !reviews.is_empty() => {
+            return ReviewFetchResult {
+                reviews,
+                source: "igdb".to_string(),
+                error: None,
+                total_reviews: None,
+                cursor: None,
+                steam_review_score: None,
+                steam_review_score_desc: None,
+                steam_total_positive: None,
+                steam_total_negative: None,
+            };
+        }
+        Ok(_) => {}
+        Err(e) => {
+            // The endpoint is known to be dead upstream; treat as expected.
+            eprintln!("IGDB reviews fetch failed: {}", e);
+        }
+    }
+
+    ReviewFetchResult {
+        reviews: Vec::new(),
+        source: "none".to_string(),
+        error: Some("No reviews available from any source".to_string()),
+        total_reviews: None,
+        cursor: None,
+        steam_review_score: None,
+        steam_review_score_desc: None,
+        steam_total_positive: None,
+        steam_total_negative: None,
+    }
+}
+
+/// Look up a Steam app id for a given game name. Returns `None` if no
+/// confident match is found. We require a token-based name match: every
+/// whitespace-separated word in the query must appear in the result name.
+/// This prevents fetching reviews for the wrong game when queries are
+/// ambiguous (e.g. "The Witcher" should not silently return reviews for
+/// "The Witcher 3" when the user actually has "The Witcher 2").
+async fn lookup_steam_app_id(game_name: &str) -> Option<u64> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .ok()?;
+
+    let url = format!(
+        "https://store.steampowered.com/api/storesearch/?term={}&l=english&cc=us",
+        url_encode(game_name)
+    );
+
+    let resp = client.get(&url).send().await.ok()?;
+    let data: SteamSearchResponse = resp.json().await.ok()?;
+
+    // Normalize: lowercase + collapse whitespace. We use this to compare
+    // query words against the result name.
+    let query_norm = game_name
+        .to_lowercase()
+        .split_whitespace()
+        .map(|s| s.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+
+    if query_norm.is_empty() {
+        return None;
+    }
+
+    data.items.into_iter().find(|item| {
+        let name_norm = item.name.to_lowercase();
+        query_norm.iter().all(|word| name_norm.contains(word.as_str()))
+    }).map(|item| item.id)
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamReviewResponse {
+    success: u32,
+    #[serde(default)]
+    query_summary: Option<SteamQuerySummary>,
+    reviews: Option<Vec<SteamReview>>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct SteamQuerySummary {
+    #[serde(default)]
+    total_reviews: u64,
+    #[serde(default)]
+    total_positive: u64,
+    #[serde(default)]
+    total_negative: u64,
+    #[serde(default)]
+    review_score: u32,
+    #[serde(default)]
+    review_score_desc: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamReview {
+    review: Option<String>,
+    voted_up: Option<bool>,
+    votes_up: Option<u32>,
+    votes_funny: Option<u32>,
+    language: Option<String>,
+    timestamp_created: Option<u64>,
+    author: Option<SteamAuthor>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamAuthor {
+    steamid: Option<String>,
+    personaname: Option<String>,
+}
+
+/// Fetch recent reviews from the Steam storefront for a given app id.
+///
+/// Uses cursor-based pagination. Returns (reviews, total_count, next_cursor, query_summary).
+/// `total_count` is the total reviews returned by query_summary.
+/// `next_cursor` is None when there are no more pages.
+async fn fetch_steam_reviews(
+    app_id: u64,
+    cursor: &str,
+    language: Option<&str>,
+) -> Result<(Vec<IgdbReview>, u64, Option<String>, Option<SteamQuerySummary>), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let cursor_param = if cursor.is_empty() || cursor == "*" {
+        "*"
+    } else {
+        cursor
+    };
+
+    // Steam cursors contain characters like '+' and '/' which must be URL-encoded
+    // so they are not corrupted or misparsed as space/slashes by the Steam server.
+    let encoded_cursor = if cursor_param == "*" {
+        "*".to_string()
+    } else {
+        url_encode(&cursor_param)
+    };
+
+    let lang_param = language.unwrap_or("all");
+    let url = format!(
+        "https://store.steampowered.com/appreviews/{}?json=1&filter=all&language={}&num_per_page=20&purchase_type=all&cursor={}",
+        app_id,
+        lang_param,
+        encoded_cursor
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Steam reviews request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Steam reviews returned HTTP {}", resp.status()));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read Steam reviews response: {}", e))?;
+
+    let data: SteamReviewResponse = serde_json::from_str(&text)
+        .map_err(|e| format!("Steam reviews parse error: {}", e))?;
+
+    if data.success != 1 {
+        return Err("Steam reviews response was not successful".to_string());
+    }
+
+    let summary = data.query_summary.clone();
+    let total_reviews = data
+        .query_summary
+        .map(|q| q.total_reviews)
+        .unwrap_or(0);
+    let next_cursor = data.cursor.filter(|c| !c.is_empty() && c != "*");
+
+    let raw_reviews = data.reviews.unwrap_or_default();
+
+    let reviews = raw_reviews
+        .into_iter()
+        .filter_map(|r| {
+            let content = r.review.filter(|s| !s.trim().is_empty())?;
+            let score = if r.voted_up.unwrap_or(false) { 85.0 } else { 35.0 };
+            let steamid = r.author.as_ref().and_then(|a| a.steamid.as_ref());
+            let display_name = r.author.as_ref()
+                .and_then(|a| a.personaname.as_ref())
+                .cloned()
+                .or_else(|| {
+                    steamid.map(|id| {
+                        let tail = id.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>();
+                        if tail.is_empty() { format!("Steam Player") }
+                        else { format!("Steam Player …{}", tail) }
+                    })
+                });
+            Some(IgdbReview {
+                title: None,
+                content: Some(content),
+                rating: Some(score),
+                language: r.language,
+                votes_up: r.votes_up,
+                votes_funny: r.votes_funny,
+                timestamp_created: r.timestamp_created,
+                username: display_name,
+            })
+        })
+        .collect();
+
+    Ok((reviews, total_reviews, next_cursor, summary))
+}
+
+/// Best-effort fetch of reviews from the IGDB `/v4/reviews` endpoint.
+///
+/// The public IGDB API has removed this endpoint (it returns 404). We still
+/// call it because the request is cheap and may be re-enabled in the future.
+async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> {
+    let token = get_twitch_token().await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    load_env_file();
+    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+
+    let escaped = game_name.replace('"', "\\\"");
+    // First, find the game id by name. We can't fetch reviews without an id.
+    let search_body = format!(
+        r#"search "{}"; fields id; limit 1;"#,
+        escaped
+    );
+
+    let search_resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(search_body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB search failed: {}", e))?;
+
+    if !search_resp.status().is_success() {
+        return Err(format!("IGDB search returned {}", search_resp.status()));
+    }
+
+    let search_text = search_resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB search response: {}", e))?;
+
+    #[derive(Debug, Deserialize)]
+    struct IgdbIdOnly {
+        id: u64,
+    }
+
+    let id_hits: Vec<IgdbIdOnly> = serde_json::from_str(&search_text)
+        .map_err(|e| format!("IGDB id parse error: {}", e))?;
+
+    let Some(first) = id_hits.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+
+    // Now query the reviews endpoint for that id. The IGDB schema for reviews:
+    //   id, game, user, title, content, rating, positive, negative, etc.
+    let reviews_body = format!(
+        r#"fields title, content, rating, user; where game = {}; limit 20;"#,
+        first.id
+    );
+
+    let resp = client
+        .post("https://api.igdb.com/v4/reviews")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(reviews_body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB reviews request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("IGDB reviews returned {}", resp.status()));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB reviews response: {}", e))?;
+
+    #[derive(Debug, Deserialize)]
+    struct IgdbReviewRaw {
+        title: Option<String>,
+        content: Option<String>,
+        rating: Option<u32>,
+        user: Option<u64>,
+    }
+
+    let raw: Vec<IgdbReviewRaw> = serde_json::from_str(&text)
+        .map_err(|e| format!("IGDB reviews parse error: {}", e))?;
+
+    let reviews = raw
+        .into_iter()
+        .map(|r| IgdbReview {
+            title: r.title,
+            content: r.content,
+            rating: r.rating.map(|v| v as f64),
+            username: r.user.map(|id| format!("User #{}", id)),
+            language: None,
+            votes_up: None,
+            votes_funny: None,
+            timestamp_created: None,
+        })
+        .collect();
+
+    Ok(reviews)
 }
 
 // ─── Utility Functions ────────────────────────────────────────────────────────
