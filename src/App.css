@@ -4037,6 +4037,24 @@
   --accent: linear-gradient(90deg, #f59e0b, #ef4444);
 }
 
+.rv-source-metacritic {
+  --accent: linear-gradient(90deg, #ffcc33, #f0c000);
+  background: linear-gradient(135deg, rgba(255, 204, 51, 0.03) 0%, rgba(40, 35, 20, 0.3) 100%), var(--color-surface);
+  border-color: color-mix(in srgb, #ffcc33 20%, var(--color-border));
+}
+
+.rv-source-opencritic {
+  --accent: linear-gradient(90deg, #ff0099, #ff66cc);
+  background: linear-gradient(135deg, rgba(255, 0, 153, 0.03) 0%, rgba(35, 20, 30, 0.3) 100%), var(--color-surface);
+  border-color: color-mix(in srgb, #ff0099 20%, var(--color-border));
+}
+
+.rv-source-rawg {
+  --accent: linear-gradient(90deg, #f43f5e, #fb7185);
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.03) 0%, rgba(35, 20, 22, 0.3) 100%), var(--color-surface);
+  border-color: color-mix(in srgb, #f43f5e 20%, var(--color-border));
+}
+
 .rv-card-header {
   display: flex;
   align-items: flex-start;
@@ -4181,6 +4199,24 @@
   background: color-mix(in srgb, #f59e0b 15%, transparent);
   color: #fbbf24;
   border-color: color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+.rv-source-badge-metacritic {
+  background: color-mix(in srgb, #ffcc33 15%, transparent);
+  color: #ffcc33;
+  border-color: color-mix(in srgb, #ffcc33 30%, transparent);
+}
+
+.rv-source-badge-opencritic {
+  background: color-mix(in srgb, #ff0099 15%, transparent);
+  color: #ff66cc;
+  border-color: color-mix(in srgb, #ff0099 30%, transparent);
+}
+
+.rv-source-badge-rawg {
+  background: color-mix(in srgb, #f43f5e 15%, transparent);
+  color: #fb7185;
+  border-color: color-mix(in srgb, #f43f5e 30%, transparent);
 }
 
 .rv-rating-pill {
@@ -7031,6 +7067,24 @@
   border-color: var(--color-border);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.3px;
+}
+
+.rv-rating-pill-metacritic {
+  background: color-mix(in srgb, #ffcc33 12%, transparent);
+  color: #ffcc33;
+  border-color: color-mix(in srgb, #ffcc33 35%, var(--color-border));
+}
+
+.rv-rating-pill-opencritic {
+  background: color-mix(in srgb, #ff0099 12%, transparent);
+  color: #ff66cc;
+  border-color: color-mix(in srgb, #ff0099 35%, var(--color-border));
+}
+
+.rv-rating-pill-rawg {
+  background: color-mix(in srgb, #f43f5e 12%, transparent);
+  color: #fb7185;
+  border-color: color-mix(in srgb, #f43f5e 35%, var(--color-border));
 }
 
 .rv-card-name-text {

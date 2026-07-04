@@ -28,6 +28,8 @@ mime_guess = "2.0.5"
 spider = { version = "2", default-features = false, features = ["sync", "ua_generator"] }
 scraper = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["clock"] }
+urlencoding = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wmi = "0.14"
 windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation"] }
