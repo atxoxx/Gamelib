@@ -9,7 +9,7 @@ import { useToast } from "../context/ToastContext";
 
 type RatingFilter = "all" | "positive" | "negative";
 type SortOrder = "featured" | "highest" | "longest";
-type SourceFilter = "all" | "steam" | "you";
+type SourceFilter = "all" | "steam" | "you" | "metacritic" | "opencritic" | "rawg";
 
 /** Supported Steam review languages (matching Steam API query codes). */
 const LANGUAGES: { code: string; label: string; flag: string }[] = [
@@ -32,7 +32,7 @@ const LANGUAGES: { code: string; label: string; flag: string }[] = [
 /** A normalized review record we render. Combines local + Steam-fetched data. */
 interface ReviewItem {
   id: string;
-  source: "you" | "steam";
+  source: "you" | "steam" | "metacritic" | "opencritic" | "rawg";
   sourceLabel: string;
   username: string;
   rating: number | null; // 0-100
@@ -188,19 +188,32 @@ function RecommendationIndicator({
 }
 
 function ReviewSourceBadge({ source, label }: { source: ReviewItem["source"]; label: string }) {
+  const iconMap: Record<string, React.ReactNode> = {
+    you: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+    ),
+    steam: (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
+      </svg>
+    ),
+    metacritic: (
+      <span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>MC</span>
+    ),
+    opencritic: (
+      <span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>OC</span>
+    ),
+    rawg: (
+      <span style={{ fontSize: "10px", fontWeight: 900, lineHeight: 1 }}>R</span>
+    ),
+  };
+
   return (
     <span className={`rv-source-badge rv-source-badge-${source}`}>
-      {source === "you" && (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
-      )}
-      {source === "steam" && (
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
-        </svg>
-      )}
+      {iconMap[source] || null}
       <span>{label}</span>
     </span>
   );
@@ -270,8 +283,8 @@ function ReviewCard({ review }: { review: ReviewItem }) {
           </div>
 
           <div className="rv-card-submeta-row">
-            {isSteam && review.rating !== null && (
-              <span className="rv-rating-pill rv-rating-pill-steam">
+            {review.rating !== null && (
+              <span className={`rv-rating-pill rv-rating-pill-${review.source}`}>
                 {Math.round(review.rating)}/100
               </span>
             )}
@@ -473,6 +486,64 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
   const autoFetchedForRef = useRef<string | null>(null);
   const fetchInFlightRef = useRef(false);
 
+  // ── External reviews state (Metacritic, OpenCritic, RAWG) ───────────
+  const externalReviewsRef = useRef<Record<string, IgdbReview[]>>({});
+  const [externalReviews, setExternalReviews] = useState<Record<string, IgdbReview[]>>({});
+  const [externalLoading, setExternalLoading] = useState<Record<string, boolean>>({});
+  const externalFetchedRef = useRef<Set<string>>(new Set());
+
+  const fetchExternalReviews = useCallback(
+    async (src: string) => {
+      if (externalFetchedRef.current.has(src)) return;
+      externalFetchedRef.current.add(src);
+      setExternalLoading((prev) => ({ ...prev, [src]: true }));
+      try {
+        const reviews = await invoke<IgdbReview[]>("fetch_external_reviews", {
+          gameName: game.name,
+          source: src,
+        });
+        externalReviewsRef.current = { ...externalReviewsRef.current, [src]: reviews };
+        setExternalReviews((prev) => ({ ...prev, [src]: reviews }));
+        if (reviews.length > 0) {
+          const labels: Record<string, string> = {
+            metacritic: "Metacritic",
+            opencritic: "OpenCritic",
+            rawg: "RAWG",
+          };
+          showToast(
+            `Fetched ${reviews.length} review${reviews.length === 1 ? "" : "s"} from ${labels[src] || src}`,
+            "success"
+          );
+        }
+      } catch (err) {
+        console.error(`Failed to fetch ${src} reviews:`, err);
+        // Remove from fetched set so user can retry by clicking the tab again
+        externalFetchedRef.current.delete(src);
+        showToast(`Could not load ${src} reviews`, "error");
+      } finally {
+        setExternalLoading((prev) => ({ ...prev, [src]: false }));
+      }
+    },
+    [game.id, game.name, showToast]
+  );
+
+  // Reset external reviews when game changes
+  useEffect(() => {
+    externalReviewsRef.current = {};
+    setExternalReviews({});
+    setExternalLoading({});
+    externalFetchedRef.current = new Set();
+  }, [game.id]);
+
+  // Auto-fetch external reviews when the source tab is selected
+  useEffect(() => {
+    if (
+      (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg")
+    ) {
+      fetchExternalReviews(sourceFilter);
+    }
+  }, [sourceFilter, game.id, fetchExternalReviews]);
+
   const fetchReviews = useCallback(
     async (force = false, cursor: string | null = null, currentLang: string = languageFilter) => {
       if (fetchInFlightRef.current) return;
@@ -608,8 +679,37 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
       });
     }
 
+    // Merge external reviews (metacritic, opencritic, rawg)
+    const externalLabels: Record<string, string> = {
+      metacritic: "Metacritic",
+      opencritic: "OpenCritic",
+      rawg: "RAWG",
+    };
+    for (const [src, label] of Object.entries(externalLabels)) {
+      const revs = externalReviews[src];
+      if (revs && revs.length > 0) {
+        revs.forEach((r: IgdbReview, idx: number) => {
+          const item: ReviewItem = {
+            id: `${src}-${idx}`,
+            source: src as ReviewItem["source"],
+            sourceLabel: label,
+            username: r.username || label,
+            rating: r.rating ?? null,
+            ratingLabel: r.rating !== undefined ? `${Math.round(r.rating)}/100` : "—",
+            title: r.title || "",
+            content: r.content || "",
+            dateAdded: r.timestampCreated ? r.timestampCreated * 1000 : undefined,
+            reviewLength: (r.content || "").length,
+            language: r.language,
+            sentiment: ratingToSentiment(r.rating ?? null),
+          };
+          items.push(item);
+        });
+      }
+    }
+
     return items;
-  }, [game.rating, game.reviewText, game.igdbReviews, game.addedAt]);
+  }, [game.rating, game.reviewText, game.igdbReviews, game.addedAt, externalReviews]);
 
   // Filtered + sorted
   const filteredReviews = useMemo(() => {
@@ -828,6 +928,8 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 You ({youCount})
               </button>
             )}
+            {/* Metacritic, OpenCritic, and RAWG subtabs are hidden for now. */}
+
           </div>
 
           <div className="rv-filters">
@@ -913,8 +1015,19 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       )}
 
-      {/* ── Review list (single column) ───────────────────────────────── */}
-      {totalAll === 0 ? (
+      {/* ── Loading state for external reviews ─────────────────────── */}
+      {(externalLoading["metacritic"] || externalLoading["opencritic"] || externalLoading["rawg"]) &&
+        (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg") ? (
+        <div className="rv-empty">
+          <div className="rv-empty-icon">
+            <span className="rv-spinner" aria-hidden="true" style={{ width: 28, height: 28, borderWidth: 3 }} />
+          </div>
+          <h3 className="rv-empty-title">Loading reviews…</h3>
+          <p className="rv-empty-subtitle">
+            Fetching reviews from {sourceFilter === "metacritic" ? "Metacritic" : sourceFilter === "opencritic" ? "OpenCritic" : "RAWG"}…
+          </p>
+        </div>
+      ) : totalAll === 0 ? (
         <div className="rv-empty">
           <div className="rv-empty-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
