@@ -17,6 +17,8 @@ import { ToastProvider } from "./context/ToastContext";
 import { ActivityProvider } from "./context/ActivityContext";
 import { WishlistProvider } from "./context/WishlistContext";
 import { DensityProvider } from "./context/DensityContext";
+import { SplashProvider } from "./context/SplashContext";
+import Splashscreen from "./components/Splashscreen";
 import "./App.css";
 import "./store.css";
 
@@ -36,37 +38,49 @@ function AppLayout() {
   );
 }
 
-function App() {
+function ThemeBootstrap() {
   useEffect(() => {
     const savedTheme = localStorage.getItem("gamelib-theme") || "dark";
     document.documentElement.setAttribute("data-theme", savedTheme);
   }, []);
+  return null;
+}
 
+function App() {
   return (
     <HashRouter>
+      <ThemeBootstrap />
       <ToastProvider>
-        <GameProvider>
-        <ActivityProvider>
-        <DensityProvider>
-        <WishlistProvider>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<Navigate to="/library" replace />} />
-            <Route path="library" element={<LibraryPage />} />
-            <Route path="library/:gameId" element={<GamePage />} />
-            <Route path="wishlist" element={<WishlistPage />} />
-            <Route path="activity" element={<ActivityPage />} />
-            <Route path="store" element={<StorePage />} />
-            <Route path="store/:gameSlug" element={<StoreGameDetail />} />
-            <Route path="community" element={<CommunityPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="plugins" element={<PluginsPage />} />
-          </Route>
-        </Routes>
-        </WishlistProvider>
-        </DensityProvider>
-        </ActivityProvider>
-        </GameProvider>
+        <SplashProvider>
+          <GameProvider>
+            <ActivityProvider>
+              <DensityProvider>
+                <WishlistProvider>
+                  <Routes>
+                    <Route element={<AppLayout />}>
+                      <Route index element={<Navigate to="/library" replace />} />
+                      <Route path="library" element={<LibraryPage />} />
+                      <Route path="library/:gameId" element={<GamePage />} />
+                      <Route path="wishlist" element={<WishlistPage />} />
+                      <Route path="activity" element={<ActivityPage />} />
+                      <Route path="store" element={<StorePage />} />
+                      <Route path="store/:gameSlug" element={<StoreGameDetail />} />
+                      <Route path="community" element={<CommunityPage />} />
+                      <Route path="settings" element={<SettingsPage />} />
+                      <Route path="plugins" element={<PluginsPage />} />
+                    </Route>
+                  </Routes>
+                </WishlistProvider>
+              </DensityProvider>
+            </ActivityProvider>
+          </GameProvider>
+          {/* Splash overlay mounted INSIDE the SplashProvider subtree so
+           *  useSplash() resolves correctly. Position is fixed with
+           *  z-index 9500 so it floats above all routes regardless of
+           *  its DOM nesting depth. Renders nothing when no launch is
+           *  in flight. */}
+          <Splashscreen />
+        </SplashProvider>
       </ToastProvider>
     </HashRouter>
   );

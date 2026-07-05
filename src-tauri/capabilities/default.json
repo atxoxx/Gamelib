@@ -1,16 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window. The launch splash is rendered in-app as a React overlay; no secondary OS-level window or inter-window IPC is used.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:webview:allow-create-webview",
-    "core:webview:allow-webview-close",
-    "core:webview:allow-set-webview-position",
-    "core:webview:allow-set-webview-size",
-    "core:webview:allow-webview-hide",
-    "core:webview:allow-webview-show",
     "opener:default",
     "dialog:default"
   ]

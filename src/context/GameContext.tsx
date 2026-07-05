@@ -18,6 +18,33 @@ import {
   type IgdbReview,
 } from "../types/game";
 import { useToast } from "./ToastContext";
+import {
+  isSplashEnabled,
+  useSplash,
+  type SplashPayload,
+} from "./SplashContext";
+import type { GameSession } from "../types/game";
+
+/**
+ * Read the most recently persisted session for a given game from
+ * localStorage. We deliberately do NOT pull from ActivityContext
+ * here — GameContext is mounted *below* SplashContext but
+ * *above* ActivityContext in the provider tree, and adding a
+ * `useActivity()` call would crash on startup. localStorage is the
+ * source of truth (ActivityContext persists every change
+ * synchronously) so we read it directly.
+ */
+function getLastPersistedSession(gameId: string): GameSession | null {
+  try {
+    const raw = localStorage.getItem("gamelib-sessions");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as GameSession[];
+    if (!Array.isArray(parsed)) return null;
+    return parsed.find((s) => s.gameId === gameId) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 interface GameExitEvent {
   gameId: string;
@@ -49,6 +76,10 @@ function generateId(): string {
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
+  // SplashProvider wraps GameProvider in App.tsx, so we can read the
+  // splash dispatcher straight from context. No cross-window IPC,
+  // no async round-trip — the splash is an in-process React overlay.
+  const splash = useSplash();
   const [games, setGames] = useState<Game[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
   const [runningGameIds, setRunningGameIds] = useState<string[]>([]);
@@ -79,10 +110,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unlisten = listen<GameExitEvent>("game-exited", (event) => {
       const { gameId, elapsedSeconds } = event.payload;
-      
+
       // Remove from running games list
       setRunningGameIds((prev) => prev.filter((id) => id !== gameId));
-      
+
       // Update session playtime
       setGames((prev) =>
         prev.map((g) =>
@@ -229,14 +260,24 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [games]
   );
 
-  const launchGame = useCallback((game: Game) => {
+  const launchGame = useCallback(async (game: Game) => {
     if (runningGameIds.includes(game.id)) {
       showToast(`${game.name} is already running`, "info");
       return;
     }
-    
+
     setRunningGameIds((prev) => [...prev, game.id]);
-    
+
+    // Show the launch splash if the user has it enabled. The setting
+    // is read fresh on every launch so a Settings toggle takes effect
+    // immediately without needing a remount.
+    const splashOn = isSplashEnabled();
+    if (splashOn) {
+      const lastSession = getLastPersistedSession(game.id);
+      const payload: SplashPayload = { game, lastSession };
+      splash.open(payload);
+    }
+
     let gpuId = null;
     let gpuName = null;
     const savedGpu = localStorage.getItem("gamelib-gpus");
@@ -253,21 +294,27 @@ export function GameProvider({ children }: { children: ReactNode }) {
         console.error("Failed to parse selected GPU from storage", e);
       }
     }
-    
-    invoke("launch_game", { 
-      gameId: game.id, 
-      gamePath: game.path,
-      gpuId,
-      gpuName
-    })
-      .then(() => {
-        showToast(`Launched ${game.name}`, "success");
-      })
-      .catch((err: string) => {
-        setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-        showToast(`Launch failed: ${err}`, "error");
+
+    try {
+      await invoke("launch_game", {
+        gameId: game.id,
+        gamePath: game.path,
+        gpuId,
+        gpuName
       });
-  }, [runningGameIds, showToast]);
+      // Flip the splash status pill from "Launching…" to "Game is
+      // launching" once the OS process is up. The splash itself
+      // schedules its fade + close when it sees this status.
+      if (splashOn) splash.updateStatus("started");
+      showToast(`Launched ${game.name}`, "success");
+    } catch (err: any) {
+      setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+      if (splashOn) {
+        splash.updateStatus("error");
+      }
+      showToast(`Launch failed: ${err}`, "error");
+    }
+  }, [runningGameIds, showToast, splash]);
 
   const addStoreGame = useCallback(async (metadata: GameMetadataResult): Promise<string> => {
     // Duplicate check — normalized name comparison

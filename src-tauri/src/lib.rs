@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};

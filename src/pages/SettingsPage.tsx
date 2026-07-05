@@ -34,6 +34,9 @@ export default function SettingsPage() {
   const [scraperProvider, setScraperProvider] = useState("steam");
   const [minimizeOnLaunch, setMinimizeOnLaunch] = useState(false);
   const [autoFetchImages, setAutoFetchImages] = useState(true);
+  // New: launch splash toggle. Defaults true for first-time installs;
+  // existing users who have never visited Settings stay opted in.
+  const [showLaunchSplash, setShowLaunchSplash] = useState(true);
 
   // Load settings on mount
   useEffect(() => {
@@ -51,6 +54,11 @@ export default function SettingsPage() {
 
     const savedAutoFetch = localStorage.getItem("gamelib-autofetch") !== "false";
     setAutoFetchImages(savedAutoFetch);
+
+    // Splash toggle defaults ON for new users; existing users are
+    // preserved (if they ever explicitly toggled it, that wins).
+    const savedShowSplash = localStorage.getItem("gamelib-show-splash");
+    setShowLaunchSplash(savedShowSplash !== "false");
   }, []);
 
   // Theme changer
@@ -84,7 +92,8 @@ export default function SettingsPage() {
   function saveGeneralSettings(
     scraper: string,
     minimize: boolean,
-    autofetch: boolean
+    autofetch: boolean,
+    splash?: boolean
   ) {
     setScraperProvider(scraper);
     localStorage.setItem("gamelib-scraper", scraper);
@@ -94,6 +103,14 @@ export default function SettingsPage() {
 
     setAutoFetchImages(autofetch);
     localStorage.setItem("gamelib-autofetch", String(autofetch));
+
+    // Splash is passed as optional so the existing checkbox handlers
+    // (scraper/minimize/autofetch) don't have to know about it. Only
+    // persist when explicitly provided.
+    if (typeof splash === "boolean") {
+      setShowLaunchSplash(splash);
+      localStorage.setItem("gamelib-show-splash", String(splash));
+    }
 
     showToast("Settings saved successfully", "success");
   }
@@ -291,11 +308,28 @@ export default function SettingsPage() {
                   saveGeneralSettings(
                     scraperProvider,
                     e.target.checked,
-                    autoFetchImages
+                    autoFetchImages,
+                    showLaunchSplash
                   )
                 }
               />
               <span>Minimize Gamelib window when launching a game</span>
+            </label>
+
+            <label className="settings-checkbox-label">
+              <input
+                type="checkbox"
+                checked={showLaunchSplash}
+                onChange={(e) =>
+                  saveGeneralSettings(
+                    scraperProvider,
+                    minimizeOnLaunch,
+                    autoFetchImages,
+                    e.target.checked
+                  )
+                }
+              />
+              <span>Show launch splash with game info and visuals</span>
             </label>
 
             <label className="settings-checkbox-label">
@@ -306,7 +340,8 @@ export default function SettingsPage() {
                   saveGeneralSettings(
                     scraperProvider,
                     minimizeOnLaunch,
-                    e.target.checked
+                    e.target.checked,
+                    showLaunchSplash
                   )
                 }
               />
