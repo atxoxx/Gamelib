@@ -202,22 +202,33 @@ fn collect_single_sample(
         }
     }
 
-    // 2. Fallback to LibreHardwareMonitor or OpenHardwareMonitor for temperatures
-    if cpu_temp_val == 0.0 || gpu_temp_val == 0.0 {
-        if let Some((lh_cpu, lh_gpu)) = get_lhm_metrics() {
-            if cpu_temp_val == 0.0 { cpu_temp_val = lh_cpu; }
-            if gpu_temp_val == 0.0 { gpu_temp_val = lh_gpu; }
-        } else if let Some((oh_cpu, oh_gpu)) = get_ohm_metrics() {
-            if cpu_temp_val == 0.0 { cpu_temp_val = oh_cpu; }
-            if gpu_temp_val == 0.0 { gpu_temp_val = oh_gpu; }
+    // 2. Fallback to LibreHardwareMonitor or OpenHardwareMonitor for temps & loads.
+    // Bypasses the buggy WMI GPUEngine physical index mismatch by using reliable LHM/OHM sensors.
+    if cpu_temp_val == 0.0 || gpu_temp_val == 0.0 || cpu_usage_val == 0.0 || gpu_usage_val == 0.0 {
+        if let Some((lh_cpu_temp, lh_gpu_temp, lh_cpu_load, lh_gpu_load)) = get_lhm_metrics() {
+            if cpu_temp_val == 0.0 { cpu_temp_val = lh_cpu_temp; }
+            if gpu_temp_val == 0.0 { gpu_temp_val = lh_gpu_temp; }
+            if cpu_usage_val == 0.0 { cpu_usage_val = lh_cpu_load; }
+            if gpu_usage_val == 0.0 { gpu_usage_val = lh_gpu_load; }
+        } else if let Some((oh_cpu_temp, oh_gpu_temp, oh_cpu_load, oh_gpu_load)) = get_ohm_metrics() {
+            if cpu_temp_val == 0.0 { cpu_temp_val = oh_cpu_temp; }
+            if gpu_temp_val == 0.0 { gpu_temp_val = oh_gpu_temp; }
+            if cpu_usage_val == 0.0 { cpu_usage_val = oh_cpu_load; }
+            if gpu_usage_val == 0.0 { gpu_usage_val = oh_gpu_load; }
         }
     }
 
-    // 3. Fallback to standard system WMI for usage & RAM if Afterburner was not used
+    // 3. Fallback to standard system WMI for any metrics that are still missing.
     if !used_mahm {
         cpu_usage_val = get_cpu_usage(wmi_con) as f32;
         gpu_usage_val = get_gpu_usage_wmi(wmi_con, gpu_idx) as f32;
         ram_usage_pct = get_ram_usage_pct(wmi_con) as f32;
+    } else {
+        // CRITICAL FIX: If MAHM was used but omitted specific metrics (e.g. no RAM exposed),
+        // fill the missing 0.0 values using WMI instead of leaving them at 0%.
+        if cpu_usage_val == 0.0 { cpu_usage_val = get_cpu_usage(wmi_con) as f32; }
+        if gpu_usage_val == 0.0 { gpu_usage_val = get_gpu_usage_wmi(wmi_con, gpu_idx) as f32; }
+        if ram_usage_pct == 0.0 { ram_usage_pct = get_ram_usage_pct(wmi_con) as f32; }
     }
 
     // 4. Fallback to smart temperature estimator if still 0 (ensures data is always present)
@@ -342,56 +353,68 @@ fn get_ram_usage_pct(wmi_con: &WMIConnection) -> u32 {
     }
 }
 
-fn get_lhm_metrics() -> Option<(f32, f32)> {
+fn get_lhm_metrics() -> Option<(f32, f32, f32, f32)> {
     let com_lib = COMLibrary::new().ok()?;
     let wmi_con = WMIConnection::with_namespace_path("ROOT\\LibreHardwareMonitor", com_lib).ok()?;
-    let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature'";
+    // Fetch both Temperature and Load sensors in a single query
+    let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature' OR SensorType = 'Load'";
     let results: Vec<WmiSensor> = wmi_con.raw_query(query).ok()?;
-    
-    let mut cpu_temp = None;
-    let mut gpu_temp = None;
-    
+
+    let mut cpu_temp = 0.0;
+    let mut gpu_temp = 0.0;
+    let mut cpu_load = 0.0;
+    let mut gpu_load = 0.0;
+
     for sensor in results {
         let name_lower = sensor.name.to_lowercase();
-        if name_lower.contains("cpu package") || (cpu_temp.is_none() && name_lower.contains("cpu core")) {
-            cpu_temp = Some(sensor.value);
-        } else if name_lower.contains("gpu core") {
-            gpu_temp = Some(sensor.value);
+        if sensor.sensor_type == "Temperature" {
+            if name_lower.contains("cpu package") || (cpu_temp == 0.0 && name_lower.contains("cpu core")) {
+                cpu_temp = sensor.value;
+            } else if name_lower.contains("gpu core") {
+                gpu_temp = sensor.value;
+            }
+        } else if sensor.sensor_type == "Load" {
+            if name_lower.contains("cpu total") || (cpu_load == 0.0 && name_lower.contains("cpu load")) {
+                cpu_load = sensor.value;
+            } else if name_lower.contains("gpu core") || name_lower.contains("gpu load") {
+                gpu_load = sensor.value;
+            }
         }
     }
-    
-    match (cpu_temp, gpu_temp) {
-        (Some(c), Some(g)) => Some((c, g)),
-        (Some(c), None) => Some((c, 0.0)),
-        (None, Some(g)) => Some((0.0, g)),
-        _ => None,
-    }
+
+    Some((cpu_temp, gpu_temp, cpu_load, gpu_load))
 }
 
-fn get_ohm_metrics() -> Option<(f32, f32)> {
+fn get_ohm_metrics() -> Option<(f32, f32, f32, f32)> {
     let com_lib = COMLibrary::new().ok()?;
     let wmi_con = WMIConnection::with_namespace_path("ROOT\\OpenHardwareMonitor", com_lib).ok()?;
-    let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature'";
+    // Fetch both Temperature and Load sensors in a single query
+    let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature' OR SensorType = 'Load'";
     let results: Vec<WmiSensor> = wmi_con.raw_query(query).ok()?;
-    
-    let mut cpu_temp = None;
-    let mut gpu_temp = None;
-    
+
+    let mut cpu_temp = 0.0;
+    let mut gpu_temp = 0.0;
+    let mut cpu_load = 0.0;
+    let mut gpu_load = 0.0;
+
     for sensor in results {
         let name_lower = sensor.name.to_lowercase();
-        if name_lower.contains("cpu package") || (cpu_temp.is_none() && name_lower.contains("cpu core")) {
-            cpu_temp = Some(sensor.value);
-        } else if name_lower.contains("gpu core") {
-            gpu_temp = Some(sensor.value);
+        if sensor.sensor_type == "Temperature" {
+            if name_lower.contains("cpu package") || (cpu_temp == 0.0 && name_lower.contains("cpu core")) {
+                cpu_temp = sensor.value;
+            } else if name_lower.contains("gpu core") {
+                gpu_temp = sensor.value;
+            }
+        } else if sensor.sensor_type == "Load" {
+            if name_lower.contains("cpu total") || (cpu_load == 0.0 && name_lower.contains("cpu load")) {
+                cpu_load = sensor.value;
+            } else if name_lower.contains("gpu core") || name_lower.contains("gpu load") {
+                gpu_load = sensor.value;
+            }
         }
     }
-    
-    match (cpu_temp, gpu_temp) {
-        (Some(c), Some(g)) => Some((c, g)),
-        (Some(c), None) => Some((c, 0.0)),
-        (None, Some(g)) => Some((0.0, g)),
-        _ => None,
-    }
+
+    Some((cpu_temp, gpu_temp, cpu_load, gpu_load))
 }
 
 /// Aggregate collected samples into the final SessionMetrics.

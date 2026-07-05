@@ -14,6 +14,8 @@ interface LineChartProps {
   formatValue?: (v: number) => string;
   legend?: boolean;
   fillOpacity?: number;
+  minY?: number;
+  maxY?: number;
 }
 
 export default function LineChart({
@@ -24,6 +26,8 @@ export default function LineChart({
   formatValue = (v) => String(v),
   legend = true,
   fillOpacity = 0.08,
+  minY,
+  maxY,
 }: LineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -34,12 +38,14 @@ export default function LineChart({
     const chartH = height - padding.top - padding.bottom;
 
     const allValues = series.flatMap((s) => s.data);
-    const maxVal = Math.max(...allValues, 1);
-    const minVal = Math.min(...allValues, 0);
+
+    // Use explicit bounds if provided, otherwise fallback to dynamic calculation
+    const maxVal = maxY !== undefined ? maxY : Math.max(...allValues, 1);
+    const minVal = minY !== undefined ? minY : Math.min(...allValues, 0);
     const range = maxVal - minVal || 1;
 
     return { padding, chartW, chartH, maxVal, minVal, range };
-  }, [series, width, height]);
+  }, [series, width, height, minY, maxY]);
 
   const { padding, chartW, chartH, minVal, range } = chart;
 

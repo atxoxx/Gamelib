@@ -548,6 +548,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     labels={timelineCharts.labels}
                     formatValue={(v) => `${Math.round(v)}%`}
                     height={200}
+                    minY={0}
+                    maxY={100}
                   />
                 </div>
 
@@ -558,6 +560,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     labels={timelineCharts.labels}
                     formatValue={(v) => `${Math.round(v)}°C`}
                     height={200}
+                    minY={0}
+                    maxY={100}
                   />
                 </div>
 
@@ -568,6 +572,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     labels={timelineCharts.labels}
                     formatValue={(v) => `${v.toFixed(1)} GB`}
                     height={200}
+                    minY={0}
+                    maxY={Number(localStorage.getItem("gamelib-total-ram") || "16")}
                   />
                 </div>
 
