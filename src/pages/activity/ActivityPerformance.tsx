@@ -244,12 +244,12 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
         { data: gpuTemp, color: "var(--color-warning)", label: "GPU Temp" },
       ],
       ram: [{
-        data: ram.map((v) => {
-          const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
-          return Math.round((totalRam * v) / 10) / 10;
-        }),
+        // Feed percentage values straight through so the Y-axis can lock to
+        // 0-100%. If a sample ever exceeds 100% the tooltip will additionally
+        // surface the plain GB value computed from the user's total RAM.
+        data: ram,
         color: "var(--color-success)",
-        label: "RAM Usage (GB)",
+        label: "RAM Usage",
       }],
       fps: [{ data: fps, color: "var(--color-brand-teal)", label: "FPS" }],
       // Averaged metrics for summary cards
@@ -570,10 +570,46 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                   <LineChart
                     series={timelineCharts.ram}
                     labels={timelineCharts.labels}
-                    formatValue={(v) => `${v.toFixed(1)} GB`}
+                    formatValue={(v) => `${Math.round(v)}%`}
+                    formatTooltipValue={(v) => {
+                      const totalRam = Number(
+                        localStorage.getItem("gamelib-total-ram") || "16"
+                      );
+                      // When the sample exceeds 100% (rare anomaly where the
+                      // reported value is greater than the user's total RAM),
+                      // surface the plain GB value under the percentage so the
+                      // user sees the real magnitude, not just "100%".
+                      if (v > 100) {
+                        const gb = (totalRam * v) / 100;
+                        return (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              flexDirection: "column",
+                              alignItems: "flex-end",
+                              lineHeight: 1.1,
+                              gap: 2,
+                            }}
+                          >
+                            <span>{`${Math.round(v)}%`}</span>
+                            <span
+                              style={{
+                                fontSize: "0.78em",
+                                opacity: 0.7,
+                                fontWeight: 500,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {`${gb.toFixed(1)} GB`}
+                            </span>
+                          </span>
+                        );
+                      }
+                      return `${Math.round(v)}%`;
+                    }}
                     height={200}
                     minY={0}
-                    maxY={Number(localStorage.getItem("gamelib-total-ram") || "16")}
+                    maxY={100}
                   />
                 </div>
 

@@ -149,6 +149,70 @@ pub fn dump_mahm_entries() -> Option<Vec<(String, String, f32)>> {
     }
 }
 
+/// Determine whether an MAHM shared-memory entry represents the system RAM
+/// sensor (as opposed to GPU memory, pagefile, swap, or commit charge).
+///
+/// Afterburner's shared memory exposes several memory-related entries
+/// — both from its native sensors and from HWiNFO / third-party plugins
+/// that Afterburner imports. The Playnite GameActivity reference
+/// (Lacro59/playnite-gameactivity-plugin) uses a similar broad match to
+/// pull the right entry across locales and imports.
+///
+// Excluded phrases: substring match (case-insensitive). An entry that
+// contains any of these is *not* considered system RAM.
+//
+// NOTE: "shared memory" is intentionally broad. In MAHM context this almost
+// always refers to GPU AWE (Address Windowing Extensions) shared memory,
+// not OS-level shared memory. This matches the Playnite plugin's policy;
+// if a future MAHM revision exposes genuine system shared memory under this
+// exact name, narrow the exclusion to a more specific phrase (e.g.
+// "shared gpu memory") rather than relaxing it globally.
+const NON_SYSTEM_RAM_HINTS: &[&str] = &[
+    "vram",
+    "video memory",
+    "gpu memory",
+    "dedicated memory",
+    "shared memory",
+    "virtual memory",
+    "pagefile",
+    "page file",
+    "swap usage",
+    "swap used",
+    "committed memory",
+    "commit charge",
+];
+
+/// Exact-name matches (case-insensitive) for system RAM entries.
+const SYSTEM_RAM_NAMES: &[&str] = &[
+    "ram usage",
+    "memory usage",
+    "memory used",
+    "used memory",
+    "used ram",
+    "physical memory used",
+    "physical memory",
+    "physical ram",
+    "system memory",
+    "system memory used",
+    "system ram",
+    "ram",
+    "memory",
+    "ram load",
+    "memory load",
+];
+
+/// True iff `name` (an MAHM sensor display name) corresponds to system RAM.
+fn matches_system_ram(name: &str) -> bool {
+    let name_lower = name.to_lowercase();
+    if name_lower.is_empty() {
+        return false;
+    }
+    if NON_SYSTEM_RAM_HINTS.iter().any(|hint| name_lower.contains(hint)) {
+        return false;
+    }
+    SYSTEM_RAM_NAMES.contains(&name_lower.as_str())
+}
+
 /// Parse MSI Afterburner Shared Memory metrics.
 ///
 /// Uses **exact sensor name matching** following the reference Playnite GameActivity plugin:
@@ -254,12 +318,7 @@ pub fn read_mahm_metrics(gpu_idx: u32, gpu_name: Option<&str>) -> Option<MahmMet
                 || name_lower == expected_gpu_temp_2_space
                 || (resolved_gpu_idx == 0 && (name_lower == "gpu temperature" || name_lower == "gpu temp"));
 
-            let is_ram = name_lower == "ram usage"
-                || name_lower == "memory usage"
-                || name_lower == "ram"
-                || name_lower == "memory"
-                || name_lower == "ram load"
-                || name_lower == "memory load";
+            let is_ram = matches_system_ram(&name);
 
             // Match using exact standard sensor names from MSI Afterburner,
             // same as the Playnite GameActivity reference plugin.
@@ -276,9 +335,16 @@ pub fn read_mahm_metrics(gpu_idx: u32, gpu_name: Option<&str>) -> Option<MahmMet
                     gpu_temp = Some(data);
                 }
             } else if is_ram {
-                ram_usage = Some(data);
-                let units = read_str_at(entry.add(ENTRY_UNITS_OFFSET), ENTRY_UNITS_SIZE);
-                ram_units = units;
+                // First matching entry wins: native Afterburner entries
+                // tend to be iterated before HWiNFO imports, so they take
+                // precedence over the noisier imported reading. Both produce
+                // valid percentages — reordering in future MAHM versions
+                // won't degrade correctness, only which source we pick.
+                if ram_usage.is_none() {
+                    ram_usage = Some(data);
+                    let units = read_str_at(entry.add(ENTRY_UNITS_OFFSET), ENTRY_UNITS_SIZE);
+                    ram_units = units;
+                }
             } else if name_lower == "framerate" || name_lower == "fps" {
                 fps = Some(data);
             }
@@ -307,5 +373,78 @@ pub fn release_mahm() {
                 let _ = CloseHandle(HANDLE(handle as *mut std::ffi::c_void));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ram_matcher_matches_afterburner_native_names() {
+        assert!(matches_system_ram("RAM usage"));
+        assert!(matches_system_ram("Memory usage"));
+        assert!(matches_system_ram("Memory"));
+        assert!(matches_system_ram("Ram load"));
+    }
+
+    #[test]
+    fn ram_matcher_matches_hwinfo_imports() {
+        // HWiNFO-imported sensors that afterburner surfaces with localized
+        // names — these were the root cause of "RAM still not detected".
+        assert!(matches_system_ram("Physical Memory Used"));
+        assert!(matches_system_ram("Used memory"));
+        assert!(matches_system_ram("Memory used"));
+        assert!(matches_system_ram("System memory"));
+        assert!(matches_system_ram("System memory used"));
+        assert!(matches_system_ram("System ram"));
+        assert!(matches_system_ram("Physical memory"));
+        assert!(matches_system_ram("Physical ram"));
+    }
+
+    #[test]
+    fn ram_matcher_excludes_vram_and_gpu_memory() {
+        assert!(!matches_system_ram("GPU memory usage"));
+        assert!(!matches_system_ram("Dedicated memory used"));
+        assert!(!matches_system_ram("VRAM usage"));
+        assert!(!matches_system_ram("Video memory"));
+        assert!(!matches_system_ram("Shared memory"));
+    }
+
+    #[test]
+    fn ram_matcher_excludes_pagefile_swap_and_commit() {
+        assert!(!matches_system_ram("Pagefile usage"));
+        assert!(!matches_system_ram("Page file usage"));
+        assert!(!matches_system_ram("Virtual memory used"));
+        assert!(!matches_system_ram("Commit charge"));
+        assert!(!matches_system_ram("Committed memory"));
+        assert!(!matches_system_ram("Swap usage"));
+    }
+
+    #[test]
+    fn ram_matcher_is_case_insensitive() {
+        assert!(matches_system_ram("ram USAGE"));
+        assert!(matches_system_ram("MEMORY usage"));
+        assert!(matches_system_ram("PhYsIcAl mEmOrY UsEd"));
+    }
+
+    #[test]
+    fn ram_matcher_empty_or_unrelated_names_return_false() {
+        assert!(!matches_system_ram(""));
+        assert!(!matches_system_ram("CPU usage"));
+        assert!(!matches_system_ram("Framerate"));
+        assert!(!matches_system_ram("GPU temperature"));
+    }
+
+    #[test]
+    fn ram_matcher_substring_exclusion_takes_precedence() {
+        // Locks in the exclusion-first contract so a future refactor that
+        // flips the order (checks SYSTEM_RAM_NAMES before NON_SYSTEM_RAM_HINTS)
+        // is caught by CI rather than silently re-accepting VRAM / pagefile.
+        assert!(!matches_system_ram("System dedicated memory used"));
+        assert!(!matches_system_ram("Physical GPU memory"));
+        assert!(!matches_system_ram("Virtual memory usage"));
+        assert!(!matches_system_ram("RAM pagefile usage"));
+        assert!(!matches_system_ram("Committed memory"));
     }
 }

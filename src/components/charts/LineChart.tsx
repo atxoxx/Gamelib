@@ -12,6 +12,13 @@ interface LineChartProps {
   width?: number;
   height?: number;
   formatValue?: (v: number) => string;
+  /**
+   * Optional rich formatter used only for the floating tooltip. Falls back to
+   * `formatValue` when omitted. Accepts a ReactNode so the tooltip can render
+   * multi-line content (e.g. percentage on the first row, raw GB on the second
+   * when a value exceeds 100%).
+   */
+  formatTooltipValue?: (v: number) => React.ReactNode;
   legend?: boolean;
   fillOpacity?: number;
   minY?: number;
@@ -24,6 +31,7 @@ export default function LineChart({
   width = 640,
   height = 260,
   formatValue = (v) => String(v),
+  formatTooltipValue,
   legend = true,
   fillOpacity = 0.08,
   minY,
@@ -313,7 +321,11 @@ export default function LineChart({
                   style={{ background: tv.color }}
                 />
                 <span className="chart-tooltip-name">{tv.label}</span>
-                <span className="chart-tooltip-val">{formatValue(tv.value)}</span>
+                <span className="chart-tooltip-val">
+                  {formatTooltipValue
+                    ? formatTooltipValue(tv.value)
+                    : formatValue(tv.value)}
+                </span>
               </div>
             ))}
           </div>

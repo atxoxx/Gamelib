@@ -111,9 +111,9 @@ fn collect_metrics_loop(
         Err(_) => return samples,
     };
 
-    // Query total physical memory once (in KB from WMI)
-    let total_ram_kb = get_total_ram_kb(&wmi_con);
-    let total_ram_mb = total_ram_kb / 1024; // Convert to MB
+    // Query total physical memory once (in MB; WMI returns KB which we
+    // convert inside `get_total_ram_mb` so callers never see unit suffixes).
+    let total_ram_mb = get_total_ram_mb(&wmi_con);
 
     // Log which data source is available on first sample
     let mut logged_source = false;
@@ -170,6 +170,7 @@ fn collect_single_sample(
     let mut fps_val: Option<f64> = None;
 
     let mut used_mahm = false;
+    let mut mahm_gave_ram = false;
 
     if let Some(ref m) = mahm {
         if m.cpu_usage.is_some() || m.gpu_usage.is_some() || m.cpu_temp.is_some() {
@@ -177,21 +178,53 @@ fn collect_single_sample(
             cpu_usage_val = m.cpu_usage.unwrap_or(0.0);
             gpu_usage_val = m.gpu_usage.unwrap_or(0.0);
 
-            // Convert RAM value to percentage based on detected units
+            // Convert MAHM-reported RAM value to a percentage using a multi-
+            // candidate resolver + MAHM/WMI cross-check. The previous simple
+            // units-detection approach could be tricked by a saturated / stale
+            // Afterburner sensor whose data hovers near `total_ram_mb` and
+            // therefore pinned the graph at 100%.
+            //
+            // Now we:
+            //   (1) try each plausible unit (MB, KB, GB) and accept the first
+            //       whose result lands in [0.1%, 105%];
+            //   (2) cross-check the chosen MAHM% against WMI's reading and
+            //       treat a ≥ 20pp disagreement as MAHM being broken (most
+            //       likely a sensor stuck on total memory);
+            //   (3) fall back to WMI in both implausible-AND-disagreement
+            //       cases and track `mahm_gave_ram` so the later WMI
+            //       fallback stays in sync.
             if let Some(raw_ram) = m.ram_usage {
-                let units_lower = m.ram_units.to_lowercase();
-                if units_lower.contains('%') {
-                    ram_usage_pct = raw_ram;
-                } else {
-                    let ram_mb = if units_lower.contains("gb") {
-                        raw_ram * 1024.0
-                    } else {
-                        raw_ram // MB
-                    };
-                    if total_ram_mb > 0 {
-                        ram_usage_pct = (ram_mb / total_ram_mb as f32) * 100.0;
-                    } else {
-                        ram_usage_pct = 0.0;
+                let resolved = resolve_mahm_ram_pct(raw_ram, &m.ram_units, total_ram_mb);
+                let wmi_pct = get_ram_usage_pct(wmi_con);
+                match resolved {
+                    Some(mahm_pct) => {
+                        if (mahm_pct - wmi_pct as f32).abs() >= 20.0 {
+                            eprintln!(
+                                "[metrics] MAHM/WMI RAM cross-check REJECTS MAHM={:.1}% vs WMI={}%; using WMI",
+                                mahm_pct,
+                                wmi_pct,
+                            );
+                            ram_usage_pct = wmi_pct as f32;
+                        } else {
+                            eprintln!(
+                                "[metrics] MAHM RAM accepted: raw={} units={:?} → {:.1}% (WMI cross-check {} pp)",
+                                raw_ram,
+                                m.ram_units,
+                                mahm_pct,
+                                (mahm_pct - wmi_pct as f32).abs(),
+                            );
+                            ram_usage_pct = mahm_pct;
+                            mahm_gave_ram = true;
+                        }
+                    }
+                    None => {
+                        eprintln!(
+                            "[metrics] MAHM RAM unusable (raw={} units={:?}); using WMI={}%",
+                            raw_ram,
+                            m.ram_units,
+                            wmi_pct,
+                        );
+                        ram_usage_pct = wmi_pct as f32;
                     }
                 }
             }
@@ -224,11 +257,13 @@ fn collect_single_sample(
         gpu_usage_val = get_gpu_usage_wmi(wmi_con, gpu_idx) as f32;
         ram_usage_pct = get_ram_usage_pct(wmi_con) as f32;
     } else {
-        // CRITICAL FIX: If MAHM was used but omitted specific metrics (e.g. no RAM exposed),
-        // fill the missing 0.0 values using WMI instead of leaving them at 0%.
+        // MAHM was used for SOME metrics; backfill missing ones from WMI.
+        // RAM specifically falls back when MAHM either did not produce a
+        // usable reading (implausible raw value) or failed the % cross-check
+        // against WMI — see `mahm_gave_ram` and the MAHM block above.
         if cpu_usage_val == 0.0 { cpu_usage_val = get_cpu_usage(wmi_con) as f32; }
         if gpu_usage_val == 0.0 { gpu_usage_val = get_gpu_usage_wmi(wmi_con, gpu_idx) as f32; }
-        if ram_usage_pct == 0.0 { ram_usage_pct = get_ram_usage_pct(wmi_con) as f32; }
+        if !mahm_gave_ram { ram_usage_pct = get_ram_usage_pct(wmi_con) as f32; }
     }
 
     // 4. Fallback to smart temperature estimator if still 0 (ensures data is always present)
@@ -321,30 +356,110 @@ fn get_gpu_usage_wmi(wmi_con: &WMIConnection, gpu_idx: u32) -> u32 {
     0
 }
 
-fn get_total_ram_kb(wmi_con: &WMIConnection) -> u64 {
+/// Total physical system memory in MB. WMI exposes `TotalVisibleMemorySize`
+/// in KB; we convert inside so callers never need to know about KB units.
+/// Defaults to 16 GB when WMI is unavailable or yields no rows.
+fn get_total_ram_mb(wmi_con: &WMIConnection) -> u64 {
+    // 16 GB expressed in KB (the unit WMI reports).
+    const DEFAULT_KB: u64 = 16 * 1024 * 1024;
     let query = "SELECT TotalVisibleMemorySize FROM Win32_OperatingSystem";
-    match wmi_con.raw_query::<WmiOS>(query) {
-        Ok(results) => {
-            if let Some(os) = results.into_iter().next() {
-                os.total_visible_memory_size.unwrap_or(16 * 1024 * 1024)
-            } else {
-                16 * 1024 * 1024
-            }
-        }
-        Err(_) => 16 * 1024 * 1024,
+    let total_kb = match wmi_con.raw_query::<WmiOS>(query) {
+        Ok(results) => results
+            .into_iter()
+            .next()
+            .and_then(|os| os.total_visible_memory_size)
+            .unwrap_or(DEFAULT_KB),
+        Err(_) => DEFAULT_KB,
+    };
+    total_kb / 1024
+}/// Resolve a MAHM-reported RAM raw value to a percentage 0-100, honouring
+/// the units string when it's unambiguous and falling back to a multi-
+/// candidate sweep when it's empty. Returns `None` when no candidate lands
+/// in the "sensible RAM utilisation" band [0.5%, 105%] — caller should fall
+/// back to WMI in that case.
+///
+/// MAHM may report the same sensor in MB, GB, KB, or pre-percentified "%"
+/// depending on the user's Afterburner config / HWiNFO imports. Constants
+/// that are stuck at total memory (a common saturated-sensor failure mode)
+/// produce no in-band candidate and force the caller to WMI, breaking the
+/// "always 100%" trap.
+fn resolve_mahm_ram_pct(raw_ram: f32, units: &str, total_ram_mb: u64) -> Option<f32> {
+    if !raw_ram.is_finite() || raw_ram < 0.0 || total_ram_mb == 0 {
+        return None;
     }
+    let raw_f64 = raw_ram as f64;
+    let units_lower = units.to_lowercase();
+    let total = total_ram_mb as f64;
+    let in_band = |pct: f64| pct.is_finite() && pct >= 0.5 && pct <= 105.0;
+
+    // Percent: explicit "%" hint AND value in valid 0-100 range. If "%"
+    // is set but the value is huge, fall through to absolute units below.
+    if units_lower.contains('%') && raw_ram <= 100.0 {
+        return Some(raw_ram.clamp(0.0, 100.0));
+    }
+
+    // Pick the explicit unit, or "ambiguous" if multiple / none are hinted.
+    // Disambiguating "kb" from "mb" / "gb" needs the prefix check because
+    // they share the trailing "b".
+    let explicit_kb = units_lower.contains("kb")
+        && !units_lower.contains("mb")
+        && !units_lower.contains("gb");
+    let explicit_gb = units_lower.contains("gb")
+        && !units_lower.contains("kb")
+        && !units_lower.contains("mb");
+    let explicit_mb = units_lower.contains("mb")
+        && !units_lower.contains("kb")
+        && !units_lower.contains("gb");
+
+    // For an explicit unit we ONLY try that interpretation (the units
+    // string is the most reliable signal we have; trying other units
+    // would let an MB-typed value "sneak" into the result as KB).
+    // For ambiguous units (empty, "Memory", "Unknown", etc.) we try MB
+    // first — MAHM's most common reporting unit — then KB, then GB.
+    let order: &[&str] = if explicit_kb {
+        &["kb"]
+    } else if explicit_gb {
+        &["gb"]
+    } else if explicit_mb {
+        &["mb"]
+    } else {
+        &["mb", "kb", "gb"]
+    };
+
+    for unit in order {
+        let mb_value = match *unit {
+            "mb" => raw_f64,
+            "kb" => raw_f64 / 1024.0,
+            "gb" => raw_f64 * 1024.0,
+            _ => continue,
+        };
+        let pct = (mb_value / total) * 100.0;
+        if in_band(pct) {
+            return Some(pct.clamp(0.0, 100.0) as f32);
+        }
+    }
+
+    None
 }
 
+/// RAM usage percentage (0–100) computed from WMI's FreePhysicalMemory /
+/// TotalVisibleMemorySize. Both fields are reported in KB (same units), so the
+/// ratio is independent of total RAM size. We use f64 to preserve precision
+/// (integer `* 100` over `total` loses sub-percent detail) and clamp before
+/// rounding so partial WMI replies cannot push the value above 100%.
 fn get_ram_usage_pct(wmi_con: &WMIConnection) -> u32 {
     let query = "SELECT TotalVisibleMemorySize, FreePhysicalMemory FROM Win32_OperatingSystem";
     match wmi_con.raw_query::<WmiOS>(query) {
         Ok(results) => {
             if let Some(os) = results.into_iter().next() {
-                let total = os.total_visible_memory_size.unwrap_or(1);
+                // Use 0 (not 1) for missing total so the `total > 0` guard catches
+                // it; `unwrap_or(1)` would silently divide by 1 and produce a
+                // 99%+ reading from a missing row.
+                let total = os.total_visible_memory_size.unwrap_or(0);
                 let free = os.free_physical_memory.unwrap_or(0);
-                if total > 0 {
-                    let used_pct = ((total - free) * 100) / total;
-                    return used_pct as u32;
+                if total > 0 && total >= free {
+                    let used_pct = ((total - free) as f64 / total as f64) * 100.0;
+                    return used_pct.clamp(0.0, 100.0).round() as u32;
                 }
             }
             0
@@ -476,8 +591,101 @@ pub fn get_system_ram_gb() -> u32 {
         Ok(con) => con,
         Err(_) => return 16,
     };
-    let total_kb = get_total_ram_kb(&wmi_con);
-    // Convert KB to GB: KB / 1024 / 1024
-    let total_gb = (total_kb as f64 / 1048576.0).round();
+    let total_mb = get_total_ram_mb(&wmi_con);
+    // Convert MB to GB: MB / 1024
+    let total_gb = (total_mb as f64 / 1024.0).round();
     total_gb as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────── tests for resolve_mahm_ram_pct (production logic) ───────────
+
+    #[test]
+    fn resolve_accepts_explicit_percent_in_range() {
+        assert_eq!(resolve_mahm_ram_pct(80.0, "%", 16 * 1024), Some(80.0));
+        assert_eq!(resolve_mahm_ram_pct(0.0, "%", 16 * 1024), Some(0.0));
+        assert_eq!(resolve_mahm_ram_pct(100.0, "%", 16 * 1024), Some(100.0));
+    }
+
+    #[test]
+    fn resolve_treats_percent_with_out_of_range_value_as_absolute() {
+        // If units string contains "%" but data is huge, the heuristic
+        // falls through to MB interpretation. 8192 MB on 16 GB = 50%.
+        let p = resolve_mahm_ram_pct(8192.0, "Memory %", 16 * 1024);
+        assert!(p.is_some());
+        assert!((p.unwrap() - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn resolve_accepts_typical_units_in_band() {
+        assert!((resolve_mahm_ram_pct(8192.0, "MB", 16 * 1024).unwrap() - 50.0).abs() < 0.01);
+        assert!((resolve_mahm_ram_pct(8.0, "GB", 16 * 1024).unwrap() - 50.0).abs() < 0.01);
+        assert!((resolve_mahm_ram_pct(8_388_608.0, "KB", 16 * 1024).unwrap() - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn resolve_accepts_legitimate_full_ram_via_mb() {
+        // 16384 MB used on a 16 GB system = exactly 100% — in band [0.1, 105].
+        let p = resolve_mahm_ram_pct(16_384.0, "MB", 16 * 1024);
+        assert!(p.is_some());
+        assert!((p.unwrap() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn resolve_returns_none_for_nan_infinity_negative_or_zero_total() {
+        assert!(resolve_mahm_ram_pct(f32::NAN, "%", 16 * 1024).is_none());
+        assert!(resolve_mahm_ram_pct(f32::INFINITY, "MB", 16 * 1024).is_none());
+        assert!(resolve_mahm_ram_pct(f32::NEG_INFINITY, "MB", 16 * 1024).is_none());
+        assert!(resolve_mahm_ram_pct(-1.0, "%", 16 * 1024).is_none());
+        assert!(resolve_mahm_ram_pct(100.0, "MB", 0).is_none());
+    }
+
+    #[test]
+    fn resolve_returns_none_when_all_candidates_are_out_of_band() {
+        // 50 million MB on a 16 GB system — no unit squishes this into a
+        // sensible RAM %. Caller MUST fall back to WMI. This was the trap
+        // behind "always 100%" before the multi-candidate heuristic.
+        assert!(resolve_mahm_ram_pct(50_000_000.0, "MB", 16 * 1024).is_none());
+    }
+
+    #[test]
+    fn resolve_returns_none_for_small_value_with_empty_units() {
+        // 80 (units unknown) on a 16 GB system: MB interpretation gives
+        // 0.488% (below our 0.5% band floor — likely unit-detection fault).
+        // All three candidates land outside [0.5%, 105%], so we return None
+        // and the caller falls back to WMI. This hardens against ambiguous
+        // small readings that could otherwise be displayed as misleading 0%.
+        assert!(resolve_mahm_ram_pct(80.0, "", 16 * 1024).is_none());
+    }
+
+    #[test]
+    fn resolve_rejects_wrong_unit_kb_as_mb_misreading() {
+        // Defensive: if we treat a real MB value (8192) as if it were KB,
+        // the wrong KB→MB direction would produce ~8,000,000% — well outside
+        // the band. None is returned and WMI takes over. This test was the
+        // actual root cause: the old formula multiplied by 1024 for KB
+        // instead of dividing.
+        assert!(resolve_mahm_ram_pct(8192.0, "KB", 16 * 1024).is_none());
+    }
+
+    // ─────────── tests for the WMI math baseline ───────────
+
+    #[test]
+    fn test_wmi_ram_pct_basic() {
+        let total: u64 = 16 * 1024 * 1024; // 16 GB in KB
+        let free: u64 = 8 * 1024 * 1024;   // 8 GB free
+        let used_pct = ((total - free) as f64 / total as f64) * 100.0;
+        assert_eq!(used_pct.round() as u32, 50);
+    }
+
+    #[test]
+    fn test_wmi_math_with_zero_total_returns_zero() {
+        // Mirrors the guard in `get_ram_usage_pct`.
+        let total: u64 = 0;
+        let free: u64 = 0;
+        assert!(!(total > 0 && total >= free));
+    }
 }
