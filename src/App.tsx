@@ -12,6 +12,7 @@ import SettingsPage from "./pages/SettingsPage";
 import PluginsPage from "./pages/PluginsPage";
 import ActivityPage from "./pages/ActivityPage";
 import WishlistPage from "./pages/WishlistPage";
+import DealsPage from "./pages/deals/DealsPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ActivityProvider } from "./context/ActivityContext";
@@ -62,6 +63,7 @@ function App() {
                       <Route path="library" element={<LibraryPage />} />
                       <Route path="library/:gameId" element={<GamePage />} />
                       <Route path="wishlist" element={<WishlistPage />} />
+                      <Route path="deals" element={<DealsPage />} />
                       <Route path="activity" element={<ActivityPage />} />
                       <Route path="store" element={<StorePage />} />
                       <Route path="store/:gameSlug" element={<StoreGameDetail />} />

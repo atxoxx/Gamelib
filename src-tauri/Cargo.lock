@@ -1402,6 +1402,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "futures",
  "mime_guess",
  "reqwest 0.12.28",
  "scraper",

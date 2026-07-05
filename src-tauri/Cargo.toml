@@ -31,6 +31,7 @@ reqwest = { version = "0.12", features = ["json"] }
 chrono = { version = "0.4", features = ["clock"] }
 urlencoding = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+futures = "0.3"
 wmi = "0.14"
 windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation"] }
 

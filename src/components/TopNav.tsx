@@ -127,10 +127,34 @@ function WishlistIcon() {
   );
 }
 
+function DealsIcon() {
+  // Tag-with-down-arrow icon: a price tag with an inward-pointing
+  // arrow, signaling "discount/deal" at a glance. Matches the inline
+  // icon style used by every other tab in this file.
+  return (
+    <svg
+      className="topnav-tab-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 7h-3a2 2 0 0 1-2-2V3" />
+      <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3" />
+      <path d="M9 7H4a2 2 0 0 0-2 2v1" />
+      <path d="M14 14l-3 3-3-3" />
+      <path d="M11 17V7" />
+    </svg>
+  );
+}
+
 const tabs: Tab[] = [
   { path: "/store", label: "Store", icon: <StoreIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
   { path: "/wishlist", label: "Wishlist", icon: <WishlistIcon /> },
+  { path: "/deals", label: "Deals", icon: <DealsIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
   { path: "/community", label: "Community", icon: <CommunityIcon /> },
   { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
