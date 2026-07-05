@@ -4,8 +4,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
+import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import { gameNameFromPath, type Game, type GameMetadataResult } from "../types/game";
 import ImportModal, { type ExeInfo } from "./ImportModal";
+import SidebarFilterPopover from "./SidebarFilterPopover";
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -13,17 +15,55 @@ export default function Sidebar() {
     useGames();
   const { showToast } = useToast();
 
-  const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  // Full filter system for the sidebar game list. Reuses the same hook
+  // the Library page uses, so search + status + genres + platforms +
+  // release year + rating all narrow the list in real time. The
+  // popover exposes everything except search (which lives in the
+  // sidebar itself).
+  const {
+    filters: filterState,
+    filteredGames,
+    availableGenres,
+    availablePlatforms,
+    setSearch,
+    setGenres,
+    setPlatforms,
+    setYearRange,
+    setRatingMin,
+    setStatus,
+    reset,
+  } = useLibraryFilters(games);
+
+  // Count of active advanced facets (everything except the always-visible
+  // search). Drives BOTH the filter button's `active` class and its badge
+  // so the two visuals stay in sync — typing in the sidebar search alone
+  // shouldn't turn the button purple with no badge to justify it. The
+  // search field itself is the visual indicator that search is active.
+  const advancedFilterCount =
+    (filterState.status !== "all" ? 1 : 0) +
+    (filterState.genres.length > 0 ? 1 : 0) +
+    (filterState.platforms.length > 0 ? 1 : 0) +
+    (filterState.yearMin != null || filterState.yearMax != null ? 1 : 0) +
+    (filterState.ratingMin != null ? 1 : 0);
+
   const [showImportMenu, setShowImportMenu] = useState(false);
+  const [showFilterPopover, setShowFilterPopover] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ game: Game; x: number; y: number } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [scannedExes, setScannedExes] = useState<ExeInfo[]>([]);
 
   const importMenuRef = useRef<HTMLDivElement>(null);
   const importBtnRef = useRef<HTMLButtonElement>(null);
+  // Ref to the filter icon button — passed to `SidebarFilterPopover` so
+  // the popover can anchor itself next to the button and so its
+  // click-outside detector doesn't treat clicks on the icon as
+  // "outside" (which would race against the parent's toggle state).
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Close import menu and context menu on outside click
+  // Close import menu and context menu on outside click. The filter
+  // popover manages its own dismissal (click anywhere outside the
+  // popover OR the anchor, plus Escape) so the sidebars listen for
+  // everything else.
   useEffect(() => {
     function handleClick() {
       setShowImportMenu(false);
@@ -34,15 +74,6 @@ export default function Sidebar() {
     }
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showImportMenu, contextMenu]);
-
-  const filters = ["All", "Installed"];
-
-  const filteredGames = games.filter((game) => {
-    const matchesSearch = game.name.toLowerCase().includes(search.toLowerCase());
-    if (!activeFilter || activeFilter === "All") return matchesSearch;
-    if (activeFilter === "Installed") return matchesSearch && game.installed;
-    return matchesSearch;
-  });
 
   async function handleImportExe() {
     setShowImportMenu(false);
@@ -136,25 +167,60 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <div className="sidebar-search">
-          <svg
-            className="sidebar-search-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="sidebar-search-row">
+          <div className="sidebar-search">
+            <svg
+              className="sidebar-search-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search games..."
+              value={filterState.search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/*
+            Filter icon button. Sits to the right of the search input at
+            the same height so the two controls feel like a unified
+            toolbar. Shows a count badge (active-facets only, not search)
+            and a glowing accent border whenever any advanced filter is
+            active, so the user can tell at a glance that the list is
+            being narrowed. Uses `aria-haspopup="dialog"` (not
+            `aria-pressed`) because it opens a modal rather than toggling
+            state.
+          */}
+          <button
+            ref={filterBtnRef}
+            className={`sidebar-filter-btn${advancedFilterCount > 0 ? " active" : ""}`}
+            aria-label="Filter games"
+            aria-haspopup="dialog"
+            aria-expanded={showFilterPopover}
+            onClick={() => setShowFilterPopover((v) => !v)}
           >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search games..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+            {advancedFilterCount > 0 && (
+              <span className="sidebar-filter-count">{advancedFilterCount}</span>
+            )}
+          </button>
         </div>
 
         <div className="sidebar-import-wrapper">
@@ -235,20 +301,6 @@ export default function Sidebar() {
             </div>
           )}
         </div>
-      </div>
-
-      <div className="sidebar-filters">
-        {filters.map((filter) => (
-          <button
-            key={filter}
-            className={`sidebar-filter-btn${activeFilter === filter ? " active" : ""}`}
-            onClick={() =>
-              setActiveFilter(activeFilter === filter ? null : filter)
-            }
-          >
-            {filter}
-          </button>
-        ))}
       </div>
 
       <hr className="sidebar-divider" />
@@ -335,6 +387,29 @@ export default function Sidebar() {
           exeInfos={scannedExes}
           onConfirm={handleConfirmImport}
           onCancel={() => setShowImportModal(false)}
+        />
+      )}
+
+      {showFilterPopover && (
+        <SidebarFilterPopover
+          anchorRef={filterBtnRef}
+          status={filterState.status}
+          selectedGenres={filterState.genres}
+          selectedPlatforms={filterState.platforms}
+          yearMin={filterState.yearMin}
+          yearMax={filterState.yearMax}
+          ratingMin={filterState.ratingMin}
+          availableGenres={availableGenres}
+          availablePlatforms={availablePlatforms}
+          totalGames={games.length}
+          filteredCount={filteredGames.length}
+          onStatusChange={setStatus}
+          onGenresChange={setGenres}
+          onPlatformsChange={setPlatforms}
+          onYearRangeChange={setYearRange}
+          onRatingMinChange={setRatingMin}
+          onReset={reset}
+          onClose={() => setShowFilterPopover(false)}
         />
       )}
     </aside>
