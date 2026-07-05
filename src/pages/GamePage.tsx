@@ -102,8 +102,50 @@ function EditImageSlot({
   );
 }
 
-function getYoutubeEmbedUrl(url: string): string | null {
+function getVideoEmbedUrl(url: string): string | null {
   if (!url) return null;
+
+  // Build a list of acceptable parent hostnames for Twitch embeds.
+  // Twitch's player rejects embeds whose `parent` doesn't match the embedding
+  // page's hostname (causing error 1000 inside the player). We pass the actual
+  // runtime hostname plus common Tauri / localhost fallbacks for robustness
+  // across Tauri dev (`http://localhost:1420`), Tauri 2 prod (`tauri://localhost`),
+  // and Tauri 1.x-style prod (`https://tauri.localhost`).
+  const buildParents = (): string => {
+    const hosts = new Set<string>(["localhost", "127.0.0.1", "tauri.localhost"]);
+    if (typeof window !== "undefined" && window.location?.hostname) {
+      hosts.add(window.location.hostname);
+    }
+    return Array.from(hosts)
+      .map((h) => `parent=${encodeURIComponent(h)}`)
+      .join("&");
+  };
+
+  // Twitch VOD: https://www.twitch.tv/videos/12345 (with optional ?t= timestamp)
+  const twitchVod = url.match(/twitch\.tv\/videos\/(\d+)/i);
+  if (twitchVod) {
+    const t = url.match(/[?&]t=([0-9hms]+)/i);
+    const time = t ? `&time=${t[1]}` : "";
+    return `https://player.twitch.tv/?video=v${twitchVod[1]}${time}&${buildParents()}&autoplay=false`;
+  }
+  // Twitch clip: https://clips.twitch.tv/SLUG or https://www.twitch.tv/CHANNEL/clip/SLUG
+  const twitchClip = url.match(/(?:clips\.twitch\.tv\/|twitch\.tv\/[^/]+\/clip\/)([A-Za-z0-9_-]+)/i);
+  if (twitchClip) {
+    return `https://clips.twitch.tv/embed?clip=${twitchClip[1]}&${buildParents()}`;
+  }
+  // Twitch live channel: https://www.twitch.tv/CHANNEL
+  const twitchChannel = url.match(/^https?:\/\/(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]+)\/?$/i);
+  if (twitchChannel) {
+    const ch = twitchChannel[1].toLowerCase();
+    const reserved = new Set([
+      "videos", "directory", "settings", "subs", "wallet", "drops",
+      "prime", "turbo", "login", "signup", "about",
+    ]);
+    if (!reserved.has(ch)) {
+      return `https://player.twitch.tv/?channel=${twitchChannel[1]}&${buildParents()}&autoplay=false`;
+    }
+  }
+  // YouTube (unchanged)
   let id = "";
   if (url.includes("watch?v=")) {
     id = url.split("watch?v=")[1]?.split("&")[0] || "";
@@ -115,6 +157,25 @@ function getYoutubeEmbedUrl(url: string): string | null {
     id = url;
   }
   return id ? `https://www.youtube.com/embed/${id}` : null;
+}
+
+function getVideoThumbnail(
+  url: string
+): { kind: "youtube"; src: string } | { kind: "twitch" } | null {
+  if (!url) return null;
+  if (/youtube\.com|youtu\.be/i.test(url)) {
+    let ytId = "";
+    if (url.includes("watch?v=")) ytId = url.split("watch?v=")[1]?.split("&")[0] || "";
+    else if (url.includes("youtu.be/")) ytId = url.split("youtu.be/")[1]?.split("?")[0] || "";
+    else if (url.includes("youtube.com/embed/")) ytId = url.split("youtube.com/embed/")[1]?.split("?")[0] || "";
+    else ytId = url;
+    if (ytId) return { kind: "youtube", src: `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` };
+  }
+  // Twitch has no public thumbnail API without auth; surface a branded placeholder.
+  if (/twitch\.tv|clips\.twitch\.tv/i.test(url)) {
+    return { kind: "twitch" };
+  }
+  return null;
 }
 
 function RatingCircle({ score, label }: { score: number; label: string }) {
@@ -1110,7 +1171,7 @@ function GameDetail({ game }: { game: Game }) {
                 </h2>
                 {(() => {
                   const activeUrl = activeVideoUrl || game.videos[0];
-                  const embedUrl = getYoutubeEmbedUrl(activeUrl);
+                  const embedUrl = getVideoEmbedUrl(activeUrl);
                   return (
                     <div className="videos-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
                       {embedUrl ? (
@@ -1130,12 +1191,7 @@ function GameDetail({ game }: { game: Game }) {
                         <div className="video-selector-list" style={{ display: 'flex', gap: 'var(--space-sm)', overflowX: 'auto', paddingBottom: 'var(--space-xs)' }}>
                           {game.videos.map((url, idx) => {
                             const isSelected = activeUrl === url;
-                            const ytId = url.includes("watch?v=") 
-                              ? url.split("watch?v=")[1]?.split("&")[0] 
-                              : url.includes("youtu.be/") 
-                                ? url.split("youtu.be/")[1]?.split("?")[0] 
-                                : "";
-                            const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` : null;
+                            const thumb = getVideoThumbnail(url);
                             return (
                               <button
                                 key={idx}
@@ -1154,13 +1210,19 @@ function GameDetail({ game }: { game: Game }) {
                                   position: 'relative'
                                 }}
                               >
-                                {thumbUrl ? (
+                                {thumb?.kind === "youtube" ? (
                                   <>
-                                    <img src={thumbUrl} alt={`Trailer ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <img src={thumb.src} alt={`Trailer ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     <div className="video-selector-play-overlay" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', opacity: isSelected ? 1 : 0.6, transition: 'opacity var(--transition-fast)' }}>
                                       <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16, color: '#fff' }}><polygon points="5 3 19 12 5 21 5 3" /></svg>
                                     </div>
                                   </>
+                                ) : thumb?.kind === "twitch" ? (
+                                  <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #9146ff 0%, #6441a5 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 18, height: 18, color: '#fff' }}>
+                                      <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.714 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z" />
+                                    </svg>
+                                  </div>
                                 ) : (
                                   <span style={{ fontSize: 10, color: 'var(--color-text-primary)' }}>Trailer {idx + 1}</span>
                                 )}
