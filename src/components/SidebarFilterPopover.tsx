@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { LibraryStatus } from "../hooks/useLibraryFilters";
+import type { LibraryStatus, LibrarySort } from "../hooks/useLibraryFilters";
+import { SORT_LABELS, SORT_OPTIONS } from "../hooks/useLibraryFilters";
 
 /** Status toggle options. Declared at module scope so the literal
  *  `LibraryStatus` type is preserved on each `value` instead of widening
@@ -46,6 +47,8 @@ interface SidebarFilterPopoverProps {
   yearMax: number | null;
   /** Minimum IGDB / critic rating (0–100, null = no minimum). */
   ratingMin: number | null;
+  /** Current sort order. */
+  sort: LibrarySort;
   /** Unique genre names present in the library, sorted alphabetically. */
   availableGenres: string[];
   /** Unique platform names present in the library, sorted alphabetically. */
@@ -59,6 +62,7 @@ interface SidebarFilterPopoverProps {
   onPlatformsChange: (p: string[]) => void;
   onYearRangeChange: (min: number | null, max: number | null) => void;
   onRatingMinChange: (r: number | null) => void;
+  onSortChange: (s: LibrarySort) => void;
   onReset: () => void;
   onClose: () => void;
 }
@@ -118,6 +122,7 @@ export default function SidebarFilterPopover({
   yearMin,
   yearMax,
   ratingMin,
+  sort,
   availableGenres,
   availablePlatforms,
   totalGames,
@@ -127,6 +132,7 @@ export default function SidebarFilterPopover({
   onPlatformsChange,
   onYearRangeChange,
   onRatingMinChange,
+  onSortChange,
   onReset,
   onClose,
 }: SidebarFilterPopoverProps) {
@@ -428,6 +434,20 @@ export default function SidebarFilterPopover({
               );
             })}
           </div>
+        </section>
+
+        {/* ── Sort: compact dropdown ── */}
+        <section className="sidebar-filter-popover-section">
+          <h4 className="sidebar-filter-popover-heading">Sort</h4>
+          <select
+            className="sidebar-filter-popover-select"
+            value={sort}
+            onChange={(e) => onSortChange(e.target.value as LibrarySort)}
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{SORT_LABELS[opt]}</option>
+            ))}
+          </select>
         </section>
 
         {/* ── Genres: wrapping toggle chips ── */}

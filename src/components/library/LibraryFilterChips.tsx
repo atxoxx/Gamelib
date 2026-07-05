@@ -1,4 +1,5 @@
 import type { LibraryFilters, LibraryStatus } from "../../hooks/useLibraryFilters";
+import type { LibrarySource } from "../../types/game";
 
 interface LibraryFilterChipsProps {
   filters: LibraryFilters;
@@ -9,6 +10,7 @@ interface LibraryFilterChipsProps {
   onRemoveYear: () => void;
   onRemoveRating: () => void;
   onRemoveStatus: () => void;
+  onRemoveSource: () => void;
   onResetAll: () => void;
 }
 
@@ -30,12 +32,20 @@ export default function LibraryFilterChips({
   onRemoveYear,
   onRemoveRating,
   onRemoveStatus,
+  onRemoveSource,
   onResetAll,
 }: LibraryFilterChipsProps) {
   const statusLabel: Record<LibraryStatus, string> = {
     all: "All",
     installed: "Installed",
     not_installed: "Not Installed",
+  };
+
+  const sourceLabel: Record<LibrarySource, string> = {
+    all: "All",
+    steam: "Steam",
+    local: "Local",
+    gog: "GOG",
   };
 
   const hasAny =
@@ -45,7 +55,8 @@ export default function LibraryFilterChips({
     filters.yearMin != null ||
     filters.yearMax != null ||
     filters.ratingMin != null ||
-    filters.status !== "all";
+    filters.status !== "all" ||
+    filters.source !== "all";
 
   if (!hasAny) return null;
 
@@ -71,6 +82,18 @@ export default function LibraryFilterChips({
         <span className="library-filter-chip">
           {statusLabel[filters.status]}
           <button type="button" onClick={onRemoveStatus} aria-label="Clear status filter">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </span>
+      )}
+
+      {filters.source !== "all" && (
+        <span className="library-filter-chip">
+          {sourceLabel[filters.source]}
+          <button type="button" onClick={onRemoveSource} aria-label="Clear source filter">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

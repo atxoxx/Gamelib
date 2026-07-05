@@ -27,7 +27,8 @@ base64 = "0.22"
 mime_guess = "2.0.5"
 spider = { version = "2", default-features = false, features = ["sync", "ua_generator"] }
 scraper = "0.22"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+aes-gcm = "0.10"
 chrono = { version = "0.4", features = ["clock"] }
 urlencoding = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

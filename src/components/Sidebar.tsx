@@ -31,6 +31,7 @@ export default function Sidebar() {
     setYearRange,
     setRatingMin,
     setStatus,
+    setSort,
     reset,
   } = useLibraryFilters(games);
 
@@ -399,6 +400,7 @@ export default function Sidebar() {
           yearMin={filterState.yearMin}
           yearMax={filterState.yearMax}
           ratingMin={filterState.ratingMin}
+          sort={filterState.sort}
           availableGenres={availableGenres}
           availablePlatforms={availablePlatforms}
           totalGames={games.length}
@@ -408,6 +410,7 @@ export default function Sidebar() {
           onPlatformsChange={setPlatforms}
           onYearRangeChange={setYearRange}
           onRatingMinChange={setRatingMin}
+          onSortChange={setSort}
           onReset={reset}
           onClose={() => setShowFilterPopover(false)}
         />

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import html2canvas from "html2canvas";
 import { useGames } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
@@ -450,6 +451,14 @@ function GameDetail({ game }: { game: Game }) {
 
   function handleLaunch() {
     launchGame(game);
+  }
+
+  function handleInstall() {
+    if (game.steamAppId) {
+      openUrl(`steam://install/${game.steamAppId}`).catch((err) =>
+        showToast(`Failed to open Steam install: ${err}`, "error")
+      );
+    }
   }
 
   function handleBack() {
@@ -1043,25 +1052,44 @@ function GameDetail({ game }: { game: Game }) {
             </div>
           </div>
           {!editing && (
-            <button
-              className={`game-launch-btn${isRunning ? " running" : ""}`}
-              onClick={handleLaunch}
-              disabled={isRunning}
-            >
-              {isRunning ? (
-                <>
-                  <span className="running-dot-pulse" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <polygon points="5 3 19 12 5 21 5 3" />
+            <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center' }}>
+              {!game.installed && game.platform === "Steam" && game.steamAppId && (
+                <button
+                  className="game-launch-btn game-install-btn"
+                  onClick={handleInstall}
+                  style={{
+                    background: 'linear-gradient(135deg, #1a9fff, #0077cc)',
+                    borderColor: '#0077cc',
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  Launch Game
-                </>
+                  Install via Steam
+                </button>
               )}
-            </button>
+              <button
+                className={`game-launch-btn${isRunning ? " running" : ""}`}
+                onClick={handleLaunch}
+                disabled={isRunning}
+              >
+                {isRunning ? (
+                  <>
+                    <span className="running-dot-pulse" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    Launch Game
+                  </>
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>

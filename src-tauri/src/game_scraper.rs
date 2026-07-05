@@ -263,25 +263,34 @@ fn base64_encode(data: &[u8]) -> String {
 /// Search for game metadata across multiple sources.
 /// Returns results ordered by relevance (best match first).
 /// Currently supports Steam and LaunchBox Games Database.
-pub async fn search_game_metadata(game_name: &str) -> Vec<GameMetadataResult> {
+pub async fn search_game_metadata(game_name: &str, skip_launchbox: bool) -> Vec<GameMetadataResult> {
     let mut results: Vec<GameMetadataResult> = Vec::new();
 
-    // Search Steam, LaunchBox, and IGDB in parallel
-    let (steam_result, launchbox_result, igdb_results) = tokio::join!(
-        search_steam(game_name),
-        search_launchbox(game_name),
-        search_igdb(game_name)
-    );
-
-    if let Some(r) = steam_result {
-        results.push(r);
+    if skip_launchbox {
+        // Steam-synced games: skip LaunchBox (wasteful scrape), use IGDB + Steam
+        let (steam_result, igdb_results) = tokio::join!(
+            search_steam(game_name),
+            search_igdb(game_name)
+        );
+        if let Some(r) = steam_result {
+            results.push(r);
+        }
+        results.extend(igdb_results);
+    } else {
+        // Local imports: search all three sources
+        let (steam_result, launchbox_result, igdb_results) = tokio::join!(
+            search_steam(game_name),
+            search_launchbox(game_name),
+            search_igdb(game_name)
+        );
+        if let Some(r) = steam_result {
+            results.push(r);
+        }
+        if let Some(r) = launchbox_result {
+            results.push(r);
+        }
+        results.extend(igdb_results);
     }
-
-    if let Some(r) = launchbox_result {
-        results.push(r);
-    }
-
-    results.extend(igdb_results);
 
     results
 }
@@ -289,11 +298,7 @@ pub async fn search_game_metadata(game_name: &str) -> Vec<GameMetadataResult> {
 /// Download an image from a URL and return it as a base64 data URL.
 /// Returns `None` if the download fails.
 pub async fn download_image_to_base64(url: &str) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; GameLib/1.0)")
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .ok()?;
+    let client = http_client();
 
     let response = client.get(url).send().await.ok()?;
     let content_type = response
@@ -381,11 +386,7 @@ pub async fn spider_extract(
 
 /// Search Steam's store for a game and return metadata.
 async fn search_steam(game_name: &str) -> Option<GameMetadataResult> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; GameLib/1.0)")
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .ok()?;
+    let client = http_client();
 
     // Step 1: Search the Steam store
     let search_url = format!(
@@ -1022,6 +1023,66 @@ struct TokenCache {
 
 static TOKEN_CACHE: OnceLock<Mutex<Option<TokenCache>>> = OnceLock::new();
 
+// Cooldown cache for token fetch failures — prevents a single credential
+// error from spamming the console on every concurrent IGDB call.
+static TOKEN_FAILURE_UNTIL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+// ── IGDB Rate Limiter ────────────────────────────────────────────────────────
+// IGDB free tier: 4 req/s, max 8 concurrent.
+// https://api-docs.igdb.com/#rate-limits
+
+static IGDB_SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+static IGDB_LAST: OnceLock<Mutex<Instant>> = OnceLock::new();
+
+/// Acquire a rate-limit slot for an IGDB API call.
+/// Enforces max 8 concurrent & 4 req/s (250 ms spacing).
+/// Hold the returned permit for the duration of the HTTP call.
+async fn igdb_acquire() -> tokio::sync::SemaphorePermit<'static> {
+    let sem = IGDB_SEM.get_or_init(|| tokio::sync::Semaphore::new(8));
+    let permit = sem.acquire().await.unwrap();
+
+    let last = IGDB_LAST.get_or_init(|| Mutex::new(Instant::now()));
+    // Cumulative scheduling: each caller reserves a future time slot
+    // 250 ms after the previous caller. This prevents multiple tasks
+    // from seeing the same old timestamp, sleeping together, and then
+    // all firing simultaneously — which would trip IGDB's server-side
+    // 4 req/s rate limit (HTTP 429).
+    let sleep_dur = {
+        let mut last_req = last.lock().unwrap();
+        let now = Instant::now();
+        let next_allowed = *last_req + Duration::from_millis(250);
+        let scheduled = if now < next_allowed { next_allowed } else { now };
+        *last_req = scheduled; // advance for the NEXT caller
+        if scheduled > now { Some(scheduled - now) } else { None }
+    }; // MutexGuard dropped before .await
+
+    if let Some(dur) = sleep_dur {
+        tokio::time::sleep(dur).await;
+    }
+
+    permit
+}
+
+
+// ── Shared HTTP client ──────────────────────────────────────────────────────
+// A single reqwest::Client reused across all functions avoids creating
+// a fresh connection pool per request, which would exhaust OS sockets
+// and TLS session tickets when 100+ concurrent calls are spawned during
+// Steam sync / batch metadata imports.
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> reqwest::Client {
+    HTTP_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (compatible; GameLib/1.0)")
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("Failed to build shared HTTP client")
+        })
+        .clone() // reqwest::Client wraps an Arc internally
+}
+
 async fn get_twitch_token() -> Result<String, String> {
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID")
@@ -1029,7 +1090,10 @@ async fn get_twitch_token() -> Result<String, String> {
     let client_secret = std::env::var("TWITCH_CLIENT_SECRET")
         .map_err(|_| "Missing TWITCH_CLIENT_SECRET environment variable. Please define it in your .env file.".to_string())?;
 
+    let failure_mutex = TOKEN_FAILURE_UNTIL.get_or_init(|| Mutex::new(None));
     let cache_mutex = TOKEN_CACHE.get_or_init(|| Mutex::new(None));
+
+    // ── Check success cache FIRST — a valid token beats cooldown ─────
     {
         let cache = cache_mutex.lock().map_err(|e| e.to_string())?;
         if let Some(ref c) = *cache {
@@ -1038,31 +1102,65 @@ async fn get_twitch_token() -> Result<String, String> {
             }
         }
     }
-    
-    let client = reqwest::Client::new();
+
+    // ── Check failure cooldown — only if no valid token is cached ────
+    {
+        let failure = failure_mutex.lock().map_err(|e| e.to_string())?;
+        if let Some(until) = *failure {
+            if Instant::now() < until {
+                return Err("Twitch token fetch skipped — cooling down after previous failure".to_string());
+            }
+        }
+    }
+
+    let client = http_client();
     let url = format!(
         "https://id.twitch.tv/oauth2/token?client_id={}&client_secret={}&grant_type=client_credentials",
         client_id, client_secret
     );
-    
+
     #[derive(Deserialize)]
     struct TokenResponse {
         access_token: String,
         expires_in: u64,
     }
-    
+
     let resp = client.post(&url)
         .send()
         .await
-        .map_err(|e| format!("Failed to send token request: {}", e))?;
-        
+        .map_err(|e| {
+            if let Ok(mut f) = failure_mutex.lock() {
+                *f = Some(Instant::now() + Duration::from_secs(30));
+            }
+            format!("Failed to send Twitch token request: {}", e)
+        })?;
+
+    // ── Check HTTP status before deserializing ───────────────────────
+    //     Must capture status BEFORE consuming the body with .text()
+    let http_status = resp.status();
+    if !http_status.is_success() {
+        let err_text = resp.text().await.unwrap_or_default();
+        if let Ok(mut f) = failure_mutex.lock() {
+            *f = Some(Instant::now() + Duration::from_secs(30));
+        }
+        return Err(format!(
+            "Twitch token request failed with HTTP {}: {}",
+            http_status, err_text
+        ));
+    }
+
     let data = resp.json::<TokenResponse>()
         .await
-        .map_err(|e| format!("Failed to parse token response: {}", e))?;
-        
+        .map_err(|e| {
+            if let Ok(mut f) = failure_mutex.lock() {
+                *f = Some(Instant::now() + Duration::from_secs(30));
+            }
+            format!("Failed to parse Twitch token response: {}", e)
+        })?;
+
     let expires_in_secs = if data.expires_in > 60 { data.expires_in - 60 } else { data.expires_in };
     let expires_at = Instant::now() + Duration::from_secs(expires_in_secs);
-    
+
     let token = data.access_token.clone();
     {
         let mut cache = cache_mutex.lock().map_err(|e| e.to_string())?;
@@ -1071,7 +1169,12 @@ async fn get_twitch_token() -> Result<String, String> {
             expires_at,
         });
     }
-    
+
+    // ── Clear failure cooldown on success ────────────────────────────
+    if let Ok(mut f) = failure_mutex.lock() {
+        *f = None;
+    }
+
     Ok(token)
 }
 
@@ -1253,13 +1356,7 @@ pub async fn search_igdb(game_name: &str) -> Vec<GameMetadataResult> {
         }
     };
     
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
+    let client = http_client();
     
     let escaped_name = game_name.replace('"', "\\\"");
     let body = format!(
@@ -1280,6 +1377,7 @@ limit 8;"#,
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
     
+    let _guard = igdb_acquire().await;
     let resp = match client.post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
         .header("Authorization", format!("Bearer {}", token))
@@ -1340,6 +1438,7 @@ limit 8;"#,
             "fields game_id, hastily, normally, completely; where game_id = ({}); limit 50;",
             game_ids.join(",")
         );
+        let _guard2 = igdb_acquire().await;
         let resp = match client.post("https://api.igdb.com/v4/game_time_to_beats")
             .header("Client-ID", &client_id)
             .header("Authorization", format!("Bearer {}", token))
@@ -1728,10 +1827,7 @@ pub async fn fetch_store_games(
     rating_min: Option<f64>,
 ) -> Result<Vec<StoreGameSummary>, String> {
     let token = get_twitch_token().await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = http_client();
 
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
@@ -1815,6 +1911,7 @@ pub async fn fetch_store_games(
         )
     };
 
+    let _guard3 = igdb_acquire().await;
     let resp = client
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
@@ -1890,10 +1987,7 @@ pub async fn search_store_games(
     limit: u32,
 ) -> Result<Vec<StoreGameSummary>, String> {
     let token = get_twitch_token().await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = http_client();
 
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
@@ -1906,6 +2000,7 @@ pub async fn search_store_games(
         offset
     );
 
+    let _guard4 = igdb_acquire().await;
     let resp = client
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
@@ -1985,13 +2080,7 @@ pub async fn get_store_game_detail(slug: &str) -> Option<GameMetadataResult> {
         }
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return None,
-    };
+    let client = http_client();
 
     let escaped_slug = slug.replace('"', "\\\"");
     let body = format!(
@@ -2012,6 +2101,7 @@ limit 1;"#,
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
 
+    let _guard5 = igdb_acquire().await;
     let resp = match client
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
@@ -2063,6 +2153,7 @@ limit 1;"#,
         "fields game_id, hastily, normally, completely; where game_id = {}; limit 1;",
         game.id
     );
+    let _guard6 = igdb_acquire().await;
     if let Ok(r) = client
         .post("https://api.igdb.com/v4/game_time_to_beats")
         .header("Client-ID", &client_id)
@@ -2457,11 +2548,7 @@ pub async fn fetch_game_reviews(
 /// ambiguous (e.g. "The Witcher" should not silently return reviews for
 /// "The Witcher 3" when the user actually has "The Witcher 2").
 async fn lookup_steam_app_id(game_name: &str) -> Option<u64> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .ok()?;
+    let client = http_client();
 
     let url = format!(
         "https://store.steampowered.com/api/storesearch/?term={}&l=english&cc=us",
@@ -2542,11 +2629,7 @@ async fn fetch_steam_reviews(
     cursor: &str,
     language: Option<&str>,
 ) -> Result<(Vec<IgdbReview>, u64, Option<String>, Option<SteamQuerySummary>), String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = http_client();
 
     let cursor_param = if cursor.is_empty() || cursor == "*" {
         "*"
@@ -2639,10 +2722,7 @@ async fn fetch_steam_reviews(
 /// call it because the request is cheap and may be re-enabled in the future.
 async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> {
     let token = get_twitch_token().await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = http_client();
 
     load_env_file();
     let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
@@ -2654,6 +2734,7 @@ async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
         escaped
     );
 
+    let _guard7 = igdb_acquire().await;
     let search_resp = client
         .post("https://api.igdb.com/v4/games")
         .header("Client-ID", &client_id)
@@ -2692,6 +2773,7 @@ async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
         first.id
     );
 
+    let _guard8 = igdb_acquire().await;
     let resp = client
         .post("https://api.igdb.com/v4/reviews")
         .header("Client-ID", &client_id)

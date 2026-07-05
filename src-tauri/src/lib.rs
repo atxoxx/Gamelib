@@ -10,6 +10,7 @@ mod metrics_collector;
 mod rtss_reader;
 mod mahm_reader;
 mod deals;
+mod steam;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
@@ -86,7 +87,30 @@ struct GameData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     release_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    steam_app_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    steam_playtime: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    steam_achievements: Option<Vec<SteamAchievementSerde>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     language_supports: Option<Vec<LanguageSupportInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    store_source: Option<String>,
+}
+
+/// Serializable Steam achievement for the GameData struct.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SteamAchievementSerde {
+    apiname: String,
+    name: String,
+    description: String,
+    achieved: bool,
+    unlocktime: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icongray: Option<String>,
 }
 
 /// Persist the game library to the app's data directory.
@@ -256,10 +280,12 @@ async fn download_image(url: String) -> Result<Option<String>, String> {
     Ok(game_scraper::download_image_to_base64(&url).await)
 }
 
-/// Search for game metadata across multiple online sources using Spider.
+/// Search for game metadata across multiple online sources.
+/// When `skip_launchbox` is true (Steam-synced games), LaunchBox is
+/// skipped — IGDB and Steam provide better metadata for known titles.
 #[tauri::command]
-async fn search_game_metadata(game_name: String) -> Vec<GameMetadataResult> {
-    game_scraper::search_game_metadata(&game_name).await
+async fn search_game_metadata(game_name: String, skip_launchbox: Option<bool>) -> Vec<GameMetadataResult> {
+    game_scraper::search_game_metadata(&game_name, skip_launchbox.unwrap_or(false)).await
 }
 
 /// Download images from URLs and return them as base64 data URLs.
@@ -475,7 +501,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

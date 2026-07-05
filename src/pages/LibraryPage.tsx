@@ -29,12 +29,15 @@ export default function LibraryPage() {
     setYearRange,
     setRatingMin,
     setStatus,
+    setSource,
+    setSort,
     removeGenre,
     removePlatform,
     removeYear,
     removeRating,
     removeStatus,
     removeSearch,
+    removeSource,
     reset,
     hasFilters,
   } = useLibraryFilters(games);
@@ -127,6 +130,7 @@ export default function LibraryPage() {
         onRemoveYear={removeYear}
         onRemoveRating={removeRating}
         onRemoveStatus={removeStatus}
+    onRemoveSource={removeSource}
         onResetAll={reset}
       />
 
@@ -139,6 +143,8 @@ export default function LibraryPage() {
           yearMax={filters.yearMax}
           ratingMin={filters.ratingMin}
           status={filters.status}
+          source={filters.source}
+          sort={filters.sort}
           availableGenres={availableGenres}
           availablePlatforms={availablePlatforms}
           onSearchChange={setSearch}
@@ -147,6 +153,8 @@ export default function LibraryPage() {
           onYearRangeChange={setYearRange}
           onRatingMinChange={setRatingMin}
           onStatusChange={setStatus}
+          onSourceChange={setSource}
+          onSortChange={setSort}
           onReset={reset}
         />
 

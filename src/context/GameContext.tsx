@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addSessionTime,
   gameNameFromPath,
@@ -160,12 +161,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
     };
   }
 
-  /** Auto-fetch IGDB metadata and images for a newly imported game. */
-  async function autoFetchMetadata(gameId: string, gameName: string, steamAppId?: number) {
+  /** Auto-fetch IGDB metadata and images for a newly imported game.
+   *  For Steam/store-synced games, IGDB is preferred (richer metadata).
+   *  Set `silent=true` for batch operations to avoid toast spam. */
+  async function autoFetchMetadata(gameId: string, gameName: string, steamAppId?: number, silent = false) {
     try {
-      const results: GameMetadataResult[] = await invoke("search_game_metadata", { gameName });
+      const results: GameMetadataResult[] = await invoke("search_game_metadata", {
+        gameName,
+        skipLaunchbox: !!steamAppId,
+      });
       if (results.length === 0) return;
-      const meta = results[0];
+      // Prefer IGDB for its richer metadata (timeToBeat, criticRating, themes,
+      // screenshots, videos, etc.) — Steam and LaunchBox only provide basics.
+      const meta = results.find((r) => r.sourceName === "IGDB") ?? results[0];
       const images = await fetchAllImages(meta.images);
       updateGame(gameId, {
         description: meta.description ?? undefined,
@@ -191,7 +199,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
         metadataSource: meta.sourceName,
         metadataUrl: meta.sourceUrl,
       });
-      showToast(`Fetched metadata for ${gameName} from ${meta.sourceName}`, "success");
+      if (!silent) {
+        console.log(`Fetched metadata for ${gameName} from ${meta.sourceName}`);
+      }
 
       // Pull reviews in the background so they're ready when the user
       // opens the Reviews tab. We don't await this — it can run alongside
@@ -241,12 +251,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
     const withIds = newGames.map((g) => ({ ...g, id: g.id || generateId() }));
     setGames((prev) => [...prev, ...withIds]);
 
-    // Auto-fetch metadata for each imported game in the background
+    // Auto-fetch metadata for each imported game in the background.
+    // Trigger for: local imports (has path), store-synced games (has steamAppId/storeSource),
+    // or any game missing a description. Use silent mode to avoid toast spam.
+    let fetchCount = 0;
     for (const game of withIds) {
-      if (game.path && !game.description) {
-        const steamAppId = extractSteamAppId(game.path) ?? undefined;
-        autoFetchMetadata(game.id, game.name, steamAppId);
+      const isLocal = !!game.path;
+      const isStoreSynced = !!game.steamAppId || !!game.storeSource;
+      const needsMetadata = !game.description;
+      if ((isLocal || isStoreSynced) && needsMetadata) {
+        fetchCount++;
+        autoFetchMetadata(game.id, game.name, game.steamAppId, true);
       }
+    }
+    if (fetchCount > 0) {
+      showToast(`Fetching metadata for ${fetchCount} game${fetchCount !== 1 ? "s" : ""}...`, "info");
     }
   }, [showToast, updateGame]);
 
@@ -263,6 +282,34 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const launchGame = useCallback(async (game: Game) => {
     if (runningGameIds.includes(game.id)) {
       showToast(`${game.name} is already running`, "info");
+      return;
+    }
+
+    // Steam games launch via steam:// protocol — no local executable needed
+    if (game.platform === "Steam" && game.steamAppId) {
+      const splashOn = isSplashEnabled();
+      if (splashOn) {
+        const lastSession = getLastPersistedSession(game.id);
+        splash.open({ game, lastSession });
+      }
+
+      try {
+        await openUrl(`steam://run/${game.steamAppId}`);
+        if (splashOn) splash.updateStatus("started");
+        showToast(`Launched ${game.name} via Steam`, "success");
+
+        // Emit a synthetic game-exited event with a nominal session so
+        // playTime tracking and ActivityContext session recording still
+        // work for Steam games. 5 minutes is a reasonable minimum for
+        // a launch-where-the-user-probably-played.
+        emit("game-exited", {
+          gameId: game.id,
+          elapsedSeconds: 300,
+        }).catch((err) => console.error("Steam session emit failed:", err));
+      } catch (err: any) {
+        if (splashOn) splash.updateStatus("error");
+        showToast(`Launch failed: ${err}`, "error");
+      }
       return;
     }
 

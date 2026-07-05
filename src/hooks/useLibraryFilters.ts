@@ -1,8 +1,29 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Game } from "../types/game";
+import type { LibrarySource } from "../types/game";
+import { parsePlayTime } from "../types/game";
 
 /** Status facets for the library filter sidebar. */
 export type LibraryStatus = "all" | "installed" | "not_installed";
+
+/** Sort order for the library grid. */
+export type LibrarySort = "alphabetical" | "date_added" | "most_played" | "rating";
+
+/** Label for each sort option (used in dropdown). */
+export const SORT_LABELS: Record<LibrarySort, string> = {
+  alphabetical: "Alphabetical (A–Z)",
+  date_added: "Date Added (Newest)",
+  most_played: "Most Played",
+  rating: "Highest Rated",
+};
+
+/** All sort options in dropdown order. */
+export const SORT_OPTIONS: readonly LibrarySort[] = [
+  "alphabetical",
+  "date_added",
+  "most_played",
+  "rating",
+];
 
 /**
  * Active filter set for the Library page. All fields are optional; an empty
@@ -25,6 +46,10 @@ export interface LibraryFilters {
   ratingMin: number | null;
   /** Installation status filter. */
   status: LibraryStatus;
+  /** Source platform filter (all | steam | local | gog). */
+  source: LibrarySource;
+  /** Sort order for the filtered list. */
+  sort: LibrarySort;
 }
 
 /** Sentinel for "no filter selected from any facet". */
@@ -36,6 +61,8 @@ export const EMPTY_LIBRARY_FILTERS: LibraryFilters = {
   yearMax: null,
   ratingMin: null,
   status: "all",
+  source: "all",
+  sort: "alphabetical",
 };
 
 /**
@@ -62,6 +89,13 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
   // Status
   if (filters.status === "installed" && !game.installed) return false;
   if (filters.status === "not_installed" && game.installed) return false;
+
+  // Source filter
+  if (filters.source !== "all") {
+    if (filters.source === "steam" && game.platform !== "Steam") return false;
+    if (filters.source === "local" && game.platform !== "Local") return false;
+    if (filters.source === "gog" && game.platform !== "GOG") return false;
+  }
 
   // Genres (OR — game must have at least one selected genre)
   if (filters.genres.length > 0) {
@@ -136,18 +170,41 @@ export function useLibraryFilters(games: Game[]) {
   }, [games]);
 
   const filteredGames = useMemo(() => {
-    if (
-      filters.search.length === 0 &&
-      filters.genres.length === 0 &&
-      filters.platforms.length === 0 &&
-      filters.yearMin == null &&
-      filters.yearMax == null &&
-      filters.ratingMin == null &&
-      filters.status === "all"
-    ) {
-      return games;
+    const hasActiveFilters =
+      filters.search.length > 0 ||
+      filters.genres.length > 0 ||
+      filters.platforms.length > 0 ||
+      filters.yearMin != null ||
+      filters.yearMax != null ||
+      filters.ratingMin != null ||
+      filters.status !== "all" ||
+      filters.source !== "all";
+
+    const narrowed = hasActiveFilters
+      ? games.filter((g) => gameMatchesFilters(g, filters))
+      : games;
+
+    // Apply sort
+    const sorted = [...narrowed];
+    switch (filters.sort) {
+      case "alphabetical":
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "date_added":
+        sorted.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+        break;
+      case "most_played":
+        sorted.sort((a, b) => parsePlayTime(b.playTime) - parsePlayTime(a.playTime));
+        break;
+      case "rating":
+        sorted.sort((a, b) => {
+          const ra = a.igdbRating ?? a.criticRating ?? 0;
+          const rb = b.igdbRating ?? b.criticRating ?? 0;
+          return rb - ra;
+        });
+        break;
     }
-    return games.filter((g) => gameMatchesFilters(g, filters));
+    return sorted;
   }, [games, filters]);
 
   const hasFilters = useMemo(() => {
@@ -157,8 +214,10 @@ export function useLibraryFilters(games: Game[]) {
       filters.platforms.length > 0 ||
       filters.yearMin != null ||
       filters.yearMax != null ||
+      filters.yearMax != null ||
       filters.ratingMin != null ||
-      filters.status !== "all"
+      filters.status !== "all" ||
+      filters.source !== "all"
     );
   }, [filters]);
 
@@ -186,6 +245,14 @@ export function useLibraryFilters(games: Game[]) {
   );
   const setStatus = useCallback(
     (s: LibraryStatus) => setFilters((f) => ({ ...f, status: s })),
+    []
+  );
+  const setSource = useCallback(
+    (s: LibrarySource) => setFilters((f) => ({ ...f, source: s })),
+    []
+  );
+  const setSort = useCallback(
+    (s: LibrarySort) => setFilters((f) => ({ ...f, sort: s })),
     []
   );
 
@@ -219,6 +286,10 @@ export function useLibraryFilters(games: Game[]) {
     () => setFilters((f) => ({ ...f, search: "" })),
     []
   );
+  const removeSource = useCallback(
+    () => setFilters((f) => ({ ...f, source: "all" })),
+    []
+  );
 
   const reset = useCallback(() => setFilters(EMPTY_LIBRARY_FILTERS), []);
 
@@ -233,12 +304,15 @@ export function useLibraryFilters(games: Game[]) {
     setYearRange,
     setRatingMin,
     setStatus,
+    setSource,
+    setSort,
     removeGenre,
     removePlatform,
     removeYear,
     removeRating,
     removeStatus,
     removeSearch,
+    removeSource,
     reset,
     hasFilters,
   };

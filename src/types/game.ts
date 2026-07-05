@@ -14,6 +14,14 @@ export interface Game {
   coverArtUrl?: string; // base64 data URL for cover art image (used in library cards)
   iconUrl?: string; // base64 data URL for small square icon (used in sidebar)
   notes?: string; // user notes about the game
+  /** Steam AppID if sourced from Steam (used for sync and store links) */
+  steamAppId?: number;
+  /** Playtime in minutes reported by Steam (used as fallback for playTime) */
+  steamPlaytime?: number;
+  /** Achievement completion data synced from Steam */
+  steamAchievements?: SteamAchievement[];
+  /** Store source for metadata; drives the GamePage store selector */
+  storeSource?: StoreSource;
   /** Fetched metadata fields */
   description?: string;
   developer?: string;
@@ -102,6 +110,34 @@ export interface LanguageSupportInfo {
   language: string;
   supportType: string;
 }
+
+/** Steam achievement data synced from Steam. */
+export interface SteamAchievement {
+  apiname: string;
+  name: string;
+  description: string;
+  achieved: boolean;
+  unlocktime: number;
+  icon?: string;
+  icongray?: string;
+}
+
+/** Supported store sources for metadata enrichment. */
+export type StoreSource = "steam" | "igdb" | "launchbox" | "manual";
+
+/** All valid store source values for runtime validation. */
+export const STORE_SOURCES: readonly StoreSource[] = [
+  "steam",
+  "igdb",
+  "launchbox",
+  "manual",
+] as const;
+
+/**
+ * Library source filter for distinguishing between different game
+ * origins (Steam sync, local imports, GOG, etc.).
+ */
+export type LibrarySource = "all" | "steam" | "local" | "gog";
 
 /** Metadata returned from the backend scraper. */
 export interface GameMetadataResult {

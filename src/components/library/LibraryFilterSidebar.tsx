@@ -1,4 +1,6 @@
-import type { LibraryStatus } from "../../hooks/useLibraryFilters";
+import type { LibraryStatus, LibrarySort } from "../../hooks/useLibraryFilters";
+import { SORT_LABELS, SORT_OPTIONS } from "../../hooks/useLibraryFilters";
+import type { LibrarySource } from "../../types/game";
 
 /** Status radio options. Declared at module scope so TypeScript infers
  *  the literal `LibraryStatus` type for each `value` (instead of widening
@@ -7,6 +9,13 @@ const STATUS_OPTIONS: readonly { value: LibraryStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "installed", label: "Installed" },
   { value: "not_installed", label: "Not Installed" },
+];
+
+const SOURCE_OPTIONS: readonly { value: LibrarySource; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "steam", label: "Steam" },
+  { value: "local", label: "Local" },
+  { value: "gog", label: "GOG" },
 ];
 
 interface LibraryFilterSidebarProps {
@@ -21,12 +30,18 @@ interface LibraryFilterSidebarProps {
   availableGenres: string[];
   /** Unique platform names present in the library, sorted alphabetically. */
   availablePlatforms: string[];
+  /** Current source filter value. */
+  source: LibrarySource;
+  /** Current sort order. */
+  sort: LibrarySort;
   onSearchChange: (q: string) => void;
   onGenresChange: (g: string[]) => void;
   onPlatformsChange: (p: string[]) => void;
   onYearRangeChange: (min: number | null, max: number | null) => void;
   onRatingMinChange: (r: number | null) => void;
   onStatusChange: (s: LibraryStatus) => void;
+  onSourceChange: (s: LibrarySource) => void;
+  onSortChange: (s: LibrarySort) => void;
   onReset: () => void;
 }
 
@@ -49,12 +64,16 @@ export default function LibraryFilterSidebar({
   status,
   availableGenres,
   availablePlatforms,
+  source,
+  sort,
   onSearchChange,
   onGenresChange,
   onPlatformsChange,
   onYearRangeChange,
   onRatingMinChange,
   onStatusChange,
+  onSourceChange,
+  onSortChange,
   onReset,
 }: LibraryFilterSidebarProps) {
   const handleGenreToggle = (genre: string) => {
@@ -102,6 +121,37 @@ export default function LibraryFilterSidebar({
             </label>
           ))}
         </div>
+      </div>
+
+      <div className="library-filter-section">
+        <h4 className="library-filter-heading">Source</h4>
+        <div className="library-filter-radio-group">
+          {SOURCE_OPTIONS.map((opt) => (
+            <label key={opt.value} className="library-filter-radio">
+              <input
+                type="radio"
+                name="library-source"
+                value={opt.value}
+                checked={source === opt.value}
+                onChange={() => onSourceChange(opt.value)}
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="library-filter-section">
+        <h4 className="library-filter-heading">Sort</h4>
+        <select
+          className="library-filter-select"
+          value={sort}
+          onChange={(e) => onSortChange(e.target.value as LibrarySort)}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt} value={opt}>{SORT_LABELS[opt]}</option>
+          ))}
+        </select>
       </div>
 
       {availableGenres.length > 0 && (
