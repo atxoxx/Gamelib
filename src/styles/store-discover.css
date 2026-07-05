@@ -47,20 +47,17 @@
   transition: filter var(--transition-fast);
 }
 
+/* Hero skeleton state. The static grey gradient is the resting base;
+   the loading motion (sweep) is handled by `.store-hero-shimmer` on
+   top, not by an animated background here, so we don't get two layers
+   of conflicting motion. */
 .store-hero-loading {
   background: linear-gradient(
     120deg,
     var(--color-bg-secondary),
-    var(--color-bg-tertiary),
+    var(--color-bg-tertiary) 60%,
     var(--color-bg-secondary)
   );
-  background-size: 200% 100%;
-  animation: store-hero-skeleton-shift 1.8s linear infinite;
-}
-
-@keyframes store-hero-skeleton-shift {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
 }
 
 .store-hero-bg {
@@ -275,14 +272,20 @@
 .store-hero-shimmer {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+  /* Explicit z-index so future JSX reordering cannot accidentally
+     place this after `.store-hero-content` and wash the shimmer
+     over the skeleton text bars. */
+  z-index: 1;
   background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--color-accent) 8%, transparent),
-    transparent
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-accent) 16%, transparent) 50%,
+    transparent 70%
   );
-  background-size: 200% 100%;
-  animation: store-hero-skeleton-shift 1.8s linear infinite;
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: store-shimmer-sweep 2.2s linear infinite;
 }
 
 .store-hero-shimmer-line {
@@ -444,26 +447,63 @@
   height: 290px;
   border-radius: var(--radius-md);
   background: linear-gradient(
-    120deg,
+    160deg,
     var(--color-bg-secondary),
-    var(--color-bg-tertiary),
+    var(--color-bg-tertiary) 60%,
     var(--color-bg-secondary)
   );
-  background-size: 200% 100%;
-  animation: store-hero-skeleton-shift 1.8s linear infinite;
+  /* `position: relative` + `overflow: hidden` are required so the
+     absolutely-positioned `.store-rail-shimmer` overlay is clipped
+     to the 165x290 skeleton card — without these it leaks out to
+     the nearest positioned ancestor (or the viewport) and paints
+     across the entire Discover row. */
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--color-border);
 }
 
 .store-rail-shimmer {
   position: absolute;
   inset: 0;
-  border-radius: var(--radius-md);
+  pointer-events: none;
   background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--color-accent) 8%, transparent),
-    transparent
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-accent) 16%, transparent) 50%,
+    transparent 70%
   );
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: store-shimmer-sweep 2s linear infinite;
+}
+
+/* Subtle stagger so the six rail skeletons feel like distinct cards
+   rather than a single synchronized mass. */
+.store-rail-card-skeleton:nth-child(2) .store-rail-shimmer {
+  animation-delay: 0.12s;
+}
+.store-rail-card-skeleton:nth-child(3) .store-rail-shimmer {
+  animation-delay: 0.24s;
+}
+.store-rail-card-skeleton:nth-child(4) .store-rail-shimmer {
+  animation-delay: 0.36s;
+}
+.store-rail-card-skeleton:nth-child(5) .store-rail-shimmer {
+  animation-delay: 0.48s;
+}
+.store-rail-card-skeleton:nth-child(6) .store-rail-shimmer {
+  animation-delay: 0.6s;
+}
+
+/* Shared shimmer sweep — a tight, slightly-diagonal accent band slides
+   off-canvas left → off-canvas right, indicating active loading.
+   Replaces the (now removed) `store-hero-skeleton-shift` slide which
+   was sweeping a 200%-wide full-bleed gradient; that pattern was
+   barely-visible at 8% opacity and competed against the skeleton's
+   own background animation, producing a busy/jittery look. */
+@keyframes store-shimmer-sweep {
+  0%   { background-position: -120% 0; }
+  100% { background-position:  220% 0; }
 }
 
 @media (max-width: 700px) {
@@ -479,9 +519,11 @@
 @media (prefers-reduced-motion: reduce) {
   .store-discover,
   .store-rail-card-snap,
-  .store-hero,
-  .store-hero-loading,
-  .store-rail-card-skeleton {
+  .store-hero-shimmer,
+  .store-rail-shimmer {
+    /* `animation: none` shorthand also clears the cascaded
+       `animation-delay` set on `.store-rail-card-skeleton:nth-child(n)
+       .store-rail-shimmer`, so users see a still, calm loading state. */
     animation: none !important;
   }
   .store-rail-track {
