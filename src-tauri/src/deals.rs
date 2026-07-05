@@ -19,16 +19,24 @@
 //!
 //! ## IsThereAnyDeal
 //!
-//! We use the official `https://api.isthereanydeal.com/deals/v2`
-//! endpoint. It requires a user-supplied API key — read from the
-//! `ITAD_API_KEY` environment variable (or the project root `.env`
-//! file). The key is free; users register an "app" at
-//! <https://isthereanydeal.com/apps/my/> to get one.
+//! ITAD's homepage at <https://isthereanydeal.com/> is server-rendered
+//! (Svelte SSR), so we can scrape the deal cards directly with
+//! `reqwest` + `scraper` — no API key required.
 //!
-//! When the key is missing, the command returns a tagged error
-//! `ITAD_API_KEY_MISSING:` so the frontend can show a one-click
-//! setup CTA instead of a generic "request failed" message.
+//! Each deal card on the page is an `<a class="deal ..." href="https://itad.link/UUID/">`
+//! block. The game title is a sibling `<a class="title ..." href="/game/{slug}/info/">`
+//! in the same wrapper. Inside the deal card:
+//!   - `<span class="cut">-90%</span>` for the discount percent
+//!   - `<span class="price">1,59</span>` for the current price (EU format, EUR)
+//!   - `<div class="shop">Steam</div>` for the store display name
+//!
+//! The `itad.link` URL is a tracking redirect; we follow it in
+//! parallel (HEAD, 5 s timeout, 8 concurrent) to resolve the direct
+//! store URL (Steam, Epic, etc.). On failure we fall back to the
+//! itad.link URL.
 
+use futures::stream::{self, StreamExt};
+use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -65,33 +73,33 @@ pub struct GamePassGame {
     pub deeplink: Option<String>,
 }
 
-// (The previous `pointer_from` helper and its `_POINTER_FROM_DOC`
-//  reference have been removed — `Map::get` chains are used
-//  inline in `itad_deal_to_item` instead.)
-
-/// A single IsThereAnyDeal row.
+/// A single IsThereAnyDeal row scraped from the homepage.
+///
+/// `deal_price` is the current price in EUR. The original price is
+/// not present in the homepage scrape, so we don't expose it.
+/// `thumbnail` and `expiration` are likewise unavailable from the
+/// homepage; the frontend uses a fallback icon for the former and
+/// hides the "ends in" badge when the latter is `None`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DealItem {
-    /// Composite deal id (store + game slug).
+    /// Composite deal id (the ITAD link UUID).
     pub id: String,
     /// Game title.
     pub game_title: String,
-    /// Store display name.
+    /// Store display name (e.g. "Steam", "Epic Game Store").
     pub store_name: String,
-    /// Direct purchase URL.
+    /// Direct store URL (resolved from the itad.link redirect).
     pub store_url: String,
-    /// Pre-discount price (USD).
-    pub normal_price: f64,
-    /// Current price (USD).
+    /// Current price in EUR.
     pub deal_price: f64,
     /// Discount percent (0-100).
     pub discount_percent: i32,
-    /// ISO 8601 expiration timestamp.
+    /// ISO 8601 expiration timestamp (always `None` from the homepage).
     pub expiration: Option<String>,
-    /// Platform name.
+    /// Platform name (always "Windows" — the homepage doesn't expose it).
     pub platform: String,
-    /// Square thumbnail (empty until we fetch the games/info endpoint).
+    /// Square thumbnail (always `None` — the homepage has no images).
     pub thumbnail: Option<String>,
 }
 
@@ -105,12 +113,47 @@ pub struct GamePassFilters {
 }
 
 /// Filters for IsThereAnyDeal. Empty/`None` fields = no filter.
+///
+/// `platform` is kept for API compatibility with the frontend but is
+/// ignored — the ITAD homepage doesn't expose per-deal platform
+/// information, so we can't filter on it. Use `store` for
+/// storefront-specific filtering.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DealsFilters {
     pub platform: Option<String>,
     pub min_discount: Option<i32>,
     pub store: Option<String>,
+}
+
+/// A single free-game giveaway (one game inside a bundle).
+///
+/// ITAD's /giveaways/ page lists bundles (e.g. "Summer Games Done
+/// Quick 2026 Bundle" from Humble Bundle). Each bundle contains N
+/// individual games. We fetch each bundle's detail page in
+/// parallel to extract the per-game data, then flatten to one
+/// `Giveaway` per game so the frontend can show a card per title.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Giveaway {
+    /// Composite id (`"{bundleId}-{gameId}"`) — unique per card.
+    pub id: String,
+    /// Individual game title.
+    pub title: String,
+    /// Parent bundle title (for context, e.g. "Humble Summer Bundle").
+    pub bundle_title: String,
+    /// Cover image URL (CDN-served, may be relative — we normalize).
+    pub image_url: Option<String>,
+    /// Storefront display name (e.g. "Humble Bundle", "Fanatical").
+    pub store_name: String,
+    /// Direct claim URL — the per-game URL when present, otherwise
+    /// the parent bundle's URL.
+    pub deal_url: String,
+    /// 18+ flag inherited from the parent bundle.
+    pub is_mature: bool,
+    /// ISO 8601 expiration timestamp (the bundle's expiry; games
+    /// inside share the bundle's expiry).
+    pub expiry: Option<String>,
 }
 
 // ─── Shared HTTP helpers ────────────────────────────────────────────────────
@@ -126,50 +169,6 @@ fn http_client() -> Result<reqwest::Client, String> {
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
-}
-
-// ─── .env loader ────────────────────────────────────────────────────────────
-
-/// Walk up the directory tree from the current working directory
-/// looking for a `.env` file. Mirrors the helper in
-/// `game_scraper::load_env_file` so both modules can pick up the
-/// same Twitch / ITAD / Steam credentials.
-fn load_env_file() {
-    let mut dir = std::env::current_dir().ok();
-    while let Some(path) = dir {
-        let env_path = path.join(".env");
-        if env_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&env_path) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    if let Some((key, val)) = line.split_once('=') {
-                        let key = key.trim();
-                        let val = val.trim().trim_matches('"').trim_matches('\'');
-                        // Don't overwrite an already-set env var —
-                        // shell-provided secrets win over the file.
-                        if std::env::var_os(key).is_none() {
-                            std::env::set_var(key, val);
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        dir = path.parent().map(|p| p.to_path_buf());
-    }
-}
-
-/// Read the ITAD API key from the environment (after loading `.env`).
-/// Returns `None` if no key is configured.
-fn itad_api_key() -> Option<String> {
-    load_env_file();
-    std::env::var("ITAD_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }
 
 // ─── GamePass: Step 1 (list of IDs) ─────────────────────────────────────────
@@ -534,126 +533,52 @@ pub async fn fetch_gamepass_catalog(
     Ok(games)
 }
 
-/// Fetch current deals from IsThereAnyDeal's official `deals/v2`
-/// API. Requires the user to set the `ITAD_API_KEY` environment
-/// variable (or `.env` entry) — get one free at
-/// <https://isthereanydeal.com/apps/my/>. When the key is missing
-/// the command returns an error string prefixed
-/// `ITAD_API_KEY_MISSING:` so the frontend can show a one-click
-/// setup CTA.
+/// Fetch current deals from IsThereAnyDeal by scraping the homepage
+/// HTML directly. No API key required.
+///
+/// Implementation:
+///   1. GET `https://isthereanydeal.com/` (server-rendered Svelte).
+///   2. Parse the deal cards (`a.deal`) with the `scraper` crate.
+///   3. Apply the user's `min_discount` and `store` filters.
+///   4. Follow each `itad.link` redirect in parallel (HEAD, 5 s
+///      timeout, 8 concurrent) to get the direct store URL.
+///
+/// On any network or parse failure we return a string error so the
+/// frontend can display a message. Empty results are not errors.
 #[tauri::command]
 pub async fn fetch_isthereanydeal_deals(
     filters: DealsFilters,
 ) -> Result<Vec<DealItem>, String> {
-    let api_key = match itad_api_key() {
-        Some(k) => k,
-        None => {
-            return Err(
-                "ITAD_API_KEY_MISSING: Set ITAD_API_KEY in your .env file \
-                 (register a free key at https://isthereanydeal.com/apps/my/)."
-                    .to_string(),
-            );
-        }
-    };
+    let client = http_client()?;
 
-    let client = match http_client() {
-        Ok(c) => c,
-        Err(e) => return Err(e),
-    };
+    // Step 1: fetch the homepage.
+    let html = fetch_itad_homepage(&client).await?;
 
-    // ITAD's deals/v2 endpoint accepts a JSON body. We start with
-    // no filters and apply user-supplied facets in-process to keep
-    // the request shape simple.
-    let body = serde_json::json!({
-        "limit": 100,
-    });
+    // Step 2: parse the deal cards out of the HTML.
+    let mut deals = parse_itad_deals(&html)?;
 
-    let resp = match client
-        .post("https://api.isthereanydeal.com/deals/v2")
-        .header("ITAD-API-Key", &api_key)
-        .header("Accept", "application/json")
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(format!("ITAD request failed: {}", e));
-        }
-    };
-
-    if resp.status().as_u16() == 429 {
-        return Err(
-            "ITAD rate limit reached (1000 requests / 5 min). Please wait a few \
-             minutes and try again."
-                .to_string(),
-        );
+    // Step 3: apply user filters BEFORE resolving redirects so we
+    // don't waste HTTP round-trips on deals we're going to drop.
+    let min_discount = filters.min_discount.unwrap_or(0);
+    let want_store = filters
+        .store
+        .as_deref()
+        .unwrap_or("all")
+        .trim()
+        .to_ascii_lowercase();
+    deals.retain(|d| d.discount_percent >= min_discount);
+    if !want_store.is_empty() && want_store != "all" {
+        deals.retain(|d| d.store_name.to_ascii_lowercase().contains(&want_store));
     }
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        // 401/403 most often mean the API key is invalid or revoked.
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(format!(
-                "ITAD_API_KEY_INVALID: ITAD returned {} (key may be wrong, \
-                 revoked, or this app is not whitelisted). Body: {}",
-                status, body
-            ));
-        }
-        return Err(format!(
-            "ITAD returned status {}: {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        ));
-    }
+    // `filters.platform` is intentionally ignored — see `DealsFilters`.
 
-    let raw: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("ITAD JSON parse error: {}", e))?;
-
-    let mut deals: Vec<DealItem> = match raw {
-        serde_json::Value::Array(arr) => arr
-            .into_iter()
-            .filter_map(|v| itad_deal_to_item(&v))
-            .collect(),
-        // Some ITAD endpoints wrap results in an object — handle both
-        // shapes defensively.
-        serde_json::Value::Object(obj) => obj
-            .values()
-            .filter_map(|v| itad_deal_to_item(v))
-            .collect(),
-        _ => Vec::new(),
-    };
-
-    // Sort highest discount first.
+    // Sort highest discount first (matches the previous behavior).
     deals.sort_by(|a, b| b.discount_percent.cmp(&a.discount_percent));
 
-    // Apply frontend filters in-process.
-    let min_discount = filters.min_discount.unwrap_or(0);
-    let want_platform = filters.platform.as_deref().unwrap_or("all").to_lowercase();
-    let want_store = filters.store.as_deref().unwrap_or("all").to_lowercase();
+    // Step 4: resolve `itad.link` redirects in parallel.
+    resolve_redirects(&client, &mut deals).await;
 
-    let filtered: Vec<DealItem> = deals
-        .into_iter()
-        .filter(|d| d.discount_percent >= min_discount)
-        .filter(|d| {
-            if want_platform == "all" {
-                true
-            } else {
-                d.platform.to_lowercase().contains(&want_platform)
-            }
-        })
-        .filter(|d| {
-            if want_store == "all" {
-                true
-            } else {
-                d.store_name.to_lowercase().contains(&want_store)
-            }
-        })
-        .collect();
-
-    Ok(filtered)
+    Ok(deals)
 }
 
 /// Open a URL in the user's default browser. We delegate to the
@@ -680,6 +605,341 @@ pub fn open_deal_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(trimmed, None::<&str>)
         .map_err(|e| format!("Failed to open URL: {}", e))
+}
+
+// ─── ITAD scraper ───────────────────────────────────────────────────────────
+
+/// ITAD homepage URL. Server-rendered (Svelte SSR) so a plain GET
+/// returns all the deal cards in the HTML — no JavaScript execution
+/// required.
+const ITAD_HOMEPAGE: &str = "https://isthereanydeal.com/";
+
+/// Maximum number of concurrent `itad.link` redirect resolutions.
+/// 8 strikes a balance between wall-clock latency and not hammering
+/// the ITAD redirector (which ultimately points at Steam / Epic /
+/// GOG / etc., so we want to be polite).
+const REDIRECT_CONCURRENCY: usize = 8;
+
+/// Per-request timeout for resolving a single `itad.link` redirect.
+/// Short enough that a slow upstream doesn't stall the whole fetch.
+const REDIRECT_TIMEOUT_SECS: u64 = 5;
+
+/// Fetch the raw HTML of the ITAD homepage.
+async fn fetch_itad_homepage(client: &reqwest::Client) -> Result<String, String> {
+    let resp = client
+        .get(ITAD_HOMEPAGE)
+        .send()
+        .await
+        .map_err(|e| format!("ITAD request failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("ITAD returned status {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("ITAD body read failed: {}", e))
+}
+
+/// Parse the ITAD homepage HTML into a list of `DealItem`s.
+///
+/// Selectors are anchored on the stable class names ITAD uses
+/// (Svelte adds a scope hash like `svelte-1lrr027`, but the base
+/// `deal`, `title`, `cut`, `price`, `shop` class names are part of
+/// the component contract and survive every rebuild).
+///
+/// Returns an empty Vec when the page is empty or the structure
+/// changes; the caller treats that as "no current deals" rather
+/// than an error. A genuine parse error (e.g. malformed HTML) is
+/// caught by the scraper crate and yields an empty Vec — ITAD
+/// redesigns would show up as "no deals" rather than a hard crash.
+fn parse_itad_deals(html: &str) -> Result<Vec<DealItem>, String> {
+    // The function body is wrapped in an inner block so we can
+    // short-circuit on the "0 deals parsed" case and emit a
+    // diagnostic log without duplicating the empty-return
+    // statement. The scraper crate never returns an `Err` for a
+    // missing selector match — it just yields an empty iterator
+    // — so the only way to detect an ITAD redesign from here is
+    // to count what we actually found.
+    let document = Html::parse_document(html);
+    let deal_sel = Selector::parse("a.deal").map_err(|e| format!("bad selector a.deal: {:?}", e))?;
+    let title_sel = Selector::parse("a.title").map_err(|e| format!("bad selector a.title: {:?}", e))?;
+    let cut_sel = Selector::parse("span.cut").map_err(|e| format!("bad selector span.cut: {:?}", e))?;
+    let price_sel = Selector::parse("span.price").map_err(|e| format!("bad selector span.price: {:?}", e))?;
+    let shop_sel = Selector::parse("div.shop").map_err(|e| format!("bad selector div.shop: {:?}", e))?;
+
+    let mut deals = Vec::new();
+    // We track whether we ever saw an `a.deal` element at all
+    // so we can distinguish "ITAD has no current deals" (legit
+    // empty) from "our scraper broke because ITAD redesigned"
+    // (silent regression). The frontend treats both as "no
+    // deals", but the latter is debuggable from stderr.
+    let mut raw_deal_count = 0usize;
+    for deal_a in document.select(&deal_sel) {
+        raw_deal_count += 1;
+        // Game title — sibling `a.title` inside the same parent.
+        // HTML forbids `<a>` inside `<a>`, so the title MUST be
+        // outside the deal `<a>`; the parent is a wrapper `<div>`
+        // containing both. `ElementRef::parent()` returns a
+        // `NodeRef<Node>` (from the `ego_tree` crate), and the
+        // `select` method only exists on `ElementRef` — so we
+        // wrap the node first. `ElementRef::wrap` yields `None`
+        // if the parent happens to be a non-element node (text,
+        // comment, etc.), which is the correct signal to skip
+        // this card.
+        let game_title = deal_a
+            .parent()
+            .and_then(ElementRef::wrap)
+            .and_then(|p| p.select(&title_sel).next())
+            .map(|t| t.text().collect::<String>())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let game_title = match game_title {
+            Some(t) => t,
+            None => continue,
+        };
+
+        // Discount % — `<span class="cut">-90%</span>`.
+        let discount_percent: i32 = deal_a
+            .select(&cut_sel)
+            .next()
+            .and_then(|e| {
+                let s: String = e.text().collect();
+                parse_discount_percent(&s)
+            })
+            .unwrap_or(0);
+        if discount_percent <= 0 {
+            // A 0% deal isn't really a deal — skip it.
+            continue;
+        }
+
+        // Current price — `<span class="price">1,59</span>` (EU
+        // number format with a comma decimal separator).
+        let deal_price: f64 = deal_a
+            .select(&price_sel)
+            .next()
+            .and_then(|e| {
+                let s: String = e.text().collect();
+                parse_price_eur(&s)
+            })
+            .unwrap_or(0.0);
+
+        // Store name — `<div class="shop"><span>Steam</span></div>`.
+        // We read the whole text content of the wrapper so we get
+        // just the store name (the wrapper also contains an inline
+        // color swatch `<span class="mark">` with no text).
+        let store_name: String = deal_a
+            .select(&shop_sel)
+            .next()
+            .map(|e| e.text().collect::<String>())
+            .map(|s| s.trim().to_string())
+            .filter(|s: &String| !s.is_empty())
+            .unwrap_or_else(|| "Unknown Store".to_string());
+
+        // Deal URL and id — pulled from the `href` of the deal `<a>`.
+        let raw_url = deal_a
+            .value()
+            .attr("href")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if raw_url.is_empty() {
+            continue;
+        }
+        // The id is the trailing UUID in the itad.link URL.
+        let id = raw_url
+            .rsplit('/')
+            .find(|s| !s.is_empty())
+            .unwrap_or(&raw_url)
+            .to_string();
+
+        deals.push(DealItem {
+            id,
+            game_title,
+            store_name,
+            store_url: raw_url,
+            deal_price,
+            discount_percent,
+            expiration: None,
+            // ITAD's homepage doesn't expose a per-deal platform
+            // list. All deals are Windows PC unless the user
+            // follows the link and inspects the destination store.
+            platform: "Windows".to_string(),
+            thumbnail: None,
+        });
+    }
+    // Sanity check: if we saw deal `<a>` elements but parsed zero
+    // of them into a DealItem, the page structure has almost
+    // certainly changed (every deal was dropped by one of the
+    // `continue` guards above). Log enough of the page to make
+    // the next redesign debuggable from stderr.
+    if raw_deal_count > 0 && deals.is_empty() {
+        let snippet: String = html
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(800)
+            .collect();
+        eprintln!(
+            "[deals] Saw {} deal <a> elements but parsed 0 — ITAD page structure may have changed. First 800 chars: {}",
+            raw_deal_count, snippet
+        );
+    }
+    Ok(deals)
+}
+
+/// Parse an ITAD discount string like `"-90%"` or `"-51 %"` into
+/// an integer percent. Returns `None` for any input that doesn't
+/// contain at least one digit — the caller treats that as "no
+/// discount" and drops the deal.
+fn parse_discount_percent(raw: &str) -> Option<i32> {
+    let digits: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+/// Parse an ITAD price string into an `f64`. Accepts both EU format
+/// (`"1,59"`, comma decimal) and US format (`"1.59"`, dot decimal) —
+/// the first separator wins. Strips currency glyphs, whitespace,
+/// and any other non-numeric noise. Returns `None` if no digits
+/// are present.
+///
+/// ITAD's homepage ships EU-format prices like `"1,59"` and
+/// `"0,00"`; the US-format tolerance is a safety net for any
+/// future ITAD locale change.
+fn parse_price_eur(raw: &str) -> Option<f64> {
+    // Keep only digits, one decimal point, and a leading minus.
+    let mut cleaned = String::with_capacity(raw.len());
+    let mut seen_dot = false;
+    for c in raw.chars() {
+        if c.is_ascii_digit() {
+            cleaned.push(c);
+        } else if (c == ',' || c == '.') && !seen_dot {
+            // Treat the FIRST separator as the decimal point,
+            // whether it's a comma (EU) or a dot (US). This makes
+            // the parser tolerant of ITAD formatting changes.
+            cleaned.push('.');
+            seen_dot = true;
+        } else if c == '-' && cleaned.is_empty() {
+            cleaned.push('-');
+        }
+    }
+    cleaned.parse().ok()
+}
+
+/// Follow each `itad.link` URL in `deals` and replace it with the
+/// final store URL (the redirect target). Runs up to
+/// `REDIRECT_CONCURRENCY` requests in parallel. Failures fall back
+/// to the original `itad.link` URL and log a warning.
+async fn resolve_redirects(client: &reqwest::Client, deals: &mut [DealItem]) {
+    // Snapshot the indices and URLs we need to resolve so the
+    // borrow checker is happy (we mutate `deals` at the end).
+    let tasks: Vec<(usize, String)> = deals
+        .iter()
+        .enumerate()
+        .map(|(i, d)| (i, d.store_url.clone()))
+        .collect();
+
+    let resolved: Vec<(usize, String)> = stream::iter(tasks)
+        .map(|(i, url)| async move {
+            let final_url = resolve_single_redirect(client, &url).await;
+            (i, final_url)
+        })
+        .buffer_unordered(REDIRECT_CONCURRENCY)
+        .collect()
+        .await;
+
+    for (i, final_url) in resolved {
+        if !final_url.is_empty() {
+            deals[i].store_url = final_url;
+        }
+    }
+}
+
+/// Follow the redirect for a single URL. Returns the final URL
+/// (post-redirect) on success; returns the original URL on any
+/// failure (timeout, non-2xx, network error).
+///
+/// We try HEAD first (cheaper — no body download). Some redirect
+/// servers return 405 for HEAD, in which case we fall back to a
+/// GET and ignore the body. This is the only practical way to
+/// resolve a tracking redirect without downloading the target
+/// page's full HTML.
+///
+/// Unlike the previous version, this does NOT short-circuit on
+/// `itad.link/` — it transparently follows redirects for any
+/// URL (itad.link, humblebundleinc.sjv.io, awin1.com, etc.). For
+/// URLs that don't redirect, reqwest returns the same URL back
+/// from `response.url()`, so the call is always safe to make.
+async fn resolve_single_redirect(client: &reqwest::Client, url: &str) -> String {
+    // Attempt 1: HEAD. Cheap, no body. ITAD's link shortener
+    // sometimes rejects HEAD with 405 — in that case reqwest
+    // surfaces an error and we move to the GET fallback.
+    let head_result = client
+        .head(url)
+        .timeout(Duration::from_secs(REDIRECT_TIMEOUT_SECS))
+        .send()
+        .await;
+    if let Ok(resp) = head_result {
+        if resp.status().is_success() || resp.status().is_redirection() {
+            return resp.url().as_str().to_string();
+        }
+    }
+    // Attempt 2: GET fallback. Downloads the body but we discard
+    // it — reqwest follows redirects by default, so `resp.url()`
+    // already reflects the final destination. The body is closed
+    // when `resp` drops at the end of this block.
+    let get_result = client
+        .get(url)
+        .timeout(Duration::from_secs(REDIRECT_TIMEOUT_SECS))
+        .send()
+        .await;
+    match get_result {
+        Ok(resp) => resp.url().as_str().to_string(),
+        Err(e) => {
+            eprintln!("[deals] Failed to resolve {}: {}", url, e);
+            url.to_string()
+        }
+    }
+}
+
+/// Follow each `giveaway.deal_url` in parallel and replace it
+/// with the final post-redirect URL. This is the giveaway-side
+/// equivalent of `resolve_redirects` (which is used for the
+/// homepage deals). Tracking redirects like
+/// `humblebundleinc.sjv.io` get resolved to the actual store
+/// URL so the "Get it free" button lands directly on the claim
+/// page rather than the affiliate/redirect page. Up to
+/// `REDIRECT_CONCURRENCY` requests run in parallel.
+async fn resolve_giveaway_redirects(client: &reqwest::Client, giveaways: &mut [Giveaway]) {
+    // Snapshot indices and URLs to resolve. We mutate the
+    // `deal_url` field in place at the end, so the borrow
+    // checker wants us to detach the URLs from the slice
+    // first.
+    let tasks: Vec<(usize, String)> = giveaways
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| !g.deal_url.is_empty())
+        .map(|(i, g)| (i, g.deal_url.clone()))
+        .collect();
+
+    let resolved: Vec<(usize, String)> = stream::iter(tasks)
+        .map(|(i, url)| async move {
+            let final_url = resolve_single_redirect(client, &url).await;
+            (i, final_url)
+        })
+        .buffer_unordered(REDIRECT_CONCURRENCY)
+        .collect()
+        .await;
+
+    for (i, final_url) in resolved {
+        if !final_url.is_empty() && final_url != giveaways[i].deal_url {
+            giveaways[i].deal_url = final_url;
+        }
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -784,13 +1044,6 @@ fn category_aliases(chip: &str) -> Vec<String> {
     }
 }
 
-// ─── ITAD JSON → DealItem mapping ───────────────────────────────────────────
-
-// No helper needed here — we use chained `Map::get` lookups (which
-// return `Option<&Value>`) throughout `itad_deal_to_item`. `Map`
-// doesn't expose a `pointer` method directly, but since the ITAD
-// schema is shallow, `get().get()` is just as clear.
-
 /// Normalize `Properties.Categories` to a flat list of category
 /// names. The v7.0 catalog has shipped three shapes — an array of
 /// plain strings (current, e.g. `["Action & adventure"]`), an
@@ -827,122 +1080,716 @@ fn extract_categories(props: Option<&DisplayProperties>) -> Vec<String> {
         _ => Vec::new(),
     }
 }
-// return `Option<&Value>`) throughout `itad_deal_to_item`. `Map`
-// doesn't expose a `pointer` method directly, but since the ITAD
-// schema is shallow, `get().get()` is just as clear.
 
-/// Convert a single ITAD `deals/v2` row into our `DealItem` shape.
-/// Returns `None` if the row is missing the fields we need to
-/// render a usable card.
-fn itad_deal_to_item(v: &serde_json::Value) -> Option<DealItem> {
-    let obj = v.as_object()?;
+// ─── Giveaways scraper ────────────────────────────────────────────────
 
-    // Title — `title` (top-level in deals/v2).
-    let game_title = obj
-        .get("title")
-        .or_else(|| obj.get("name"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())?
-        .to_string();
+/// ITAD giveaways list page. Server-rendered HTML, but the actual
+/// bundle list is embedded as a `var page = [...]` script block
+/// (SvelteKit's page-state pattern). We parse the script instead
+/// of the DOM because the data is JSON-ish and the DOM is just a
+/// hydration shell.
+const GIVEAWAYS_LIST_URL: &str = "https://isthereanydeal.com/giveaways/";
 
-    // Shop / store — nested under `deal.shop.name`.
-    let shop = obj.get("deal").and_then(|d| d.get("shop"));
-    let store_name = shop
-        .and_then(|s| s.get("name"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("Unknown Store")
-        .to_string();
+/// ITAD homepage — the only place where the individual free-game
+/// giveaways (e.g. "Nexus: The Jupiter Incident" from itch.io) are
+/// server-rendered. The /giveaways/ page itself loads those
+/// client-side, so we pull the list of links from the homepage and
+/// fetch each detail page individually.
+const HOMEPAGE_URL: &str = "https://isthereanydeal.com/";
 
-    // URLs — `urls.buy` is the direct store link. Fall back to
-    // the ITAD deal page if missing.
-    let store_url = obj
-        .get("urls")
-        .and_then(|u| u.get("buy"))
-        .or_else(|| obj.get("urls").and_then(|u| u.get("game")))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            obj.get("slug")
-                .and_then(|v| v.as_str())
-                .map(|slug| format!("https://isthereanydeal.com/game/{}/", slug))
-                .unwrap_or_default()
-        });
+/// Per-bundle detail page (e.g. `/giveaways/16359/`). Same pattern
+/// as the list page, but with per-game data including images.
+const GIVEAWAYS_DETAIL_URL_PREFIX: &str = "https://isthereanydeal.com/giveaways/";
 
-    // Prices — nested under `deal.price.amount` and
-    // `deal.regular.amount` (both numbers, USD).
-    let deal = obj.get("deal");
-    let deal_price = deal
-        .and_then(|d| d.get("price"))
-        .and_then(|p| p.get("amount"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let normal_price = deal
-        .and_then(|d| d.get("regular"))
-        .and_then(|p| p.get("amount"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(deal_price);
+/// Number of bundle detail pages to fetch in parallel. 8 is
+/// polite and fast — 15 bundles at 8-way concurrency = ~2 batches.
+const GIVEAWAYS_DETAIL_CONCURRENCY: usize = 8;
 
-    let discount_percent = deal
-        .and_then(|d| d.get("cut"))
-        .and_then(|v| v.as_i64())
-        .map(|v| v as i32)
-        .unwrap_or_else(|| {
-            if normal_price > 0.0 && deal_price > 0.0 && normal_price > deal_price {
-                (((normal_price - deal_price) / normal_price) * 100.0).round() as i32
-            } else {
-                0
-            }
-        });
+/// Timeout for the giveaways list page and the homepage. Slightly
+/// more generous than per-detail because they're single points of
+/// failure.
+const GIVEAWAYS_LIST_TIMEOUT_SECS: u64 = 10;
 
-    // A deal with 0% discount isn't worth showing as a deal.
-    if discount_percent <= 0 {
-        return None;
+/// Per-bundle detail page timeout.
+const GIVEAWAYS_DETAIL_TIMEOUT_SECS: u64 = 5;
+
+/// Fetch the current giveaways from ITAD.
+///
+/// Algorithm:
+///   1. GET the list page and extract bundle metadata from the
+///      embedded `var page = [...]` JSON.
+///   2. For each bundle, GET its detail page in parallel and
+///      extract per-game data (title, image, claim URL).
+///   3. Flatten to a single `Vec<Giveaway>` (one entry per game).
+///   4. Drop entries that have already expired.
+///   5. Sort by expiry ascending (most-soon-to-expire first).
+///
+/// On any network or parse failure we return a string error so
+/// the frontend can display a message. Individual bundle fetch
+/// failures are logged and skipped — one bad bundle doesn't
+/// fail the whole request.
+#[tauri::command]
+pub async fn fetch_giveaways() -> Result<Vec<Giveaway>, String> {
+    let client = http_client()?;
+
+    // ---- Bundles: from the /giveaways/ list page ----
+    // Server-rendered SvelteKit page with the bundle list embedded
+    // in a `var page = [...]` script block. Each bundle may
+    // contain multiple games.
+    let list_html = fetch_giveaways_list(&client).await?;
+    let bundles = parse_giveaways_list(&list_html)?;
+    let bundle_ids: std::collections::HashSet<u64> =
+        bundles.iter().map(|b| b.id).collect();
+
+    // ---- Individual giveaways: from the homepage ----
+    // The /giveaways/ page's "Giveaways" section (individual free
+    // games from stores like itch.io) is loaded client-side and
+    // never appears in the static HTML. The homepage's "Giveaways"
+    // section IS server-rendered and contains direct links to
+    // each giveaway's detail page. We extract those links, filter
+    // out any that are already bundles, and fetch the rest.
+    let individual_ids = fetch_individual_giveaway_ids(&client).await?;
+    let new_individual_ids: Vec<u64> = individual_ids
+        .into_iter()
+        .filter(|id| !bundle_ids.contains(id))
+        .collect();
+
+    // ---- Fetch all detail pages in parallel ----
+    // We process bundles and individual giveaways in two separate
+    // `stream::iter` + `buffer_unordered` passes because the two
+    // async-block types are distinct (Rust gives every `async {}`
+    // block a unique anonymous type, so we can't collect them
+    // into a single `Vec` without a `Pin<Box<dyn Future>>`
+    // shim). Two passes is simpler and just as fast — the
+    // second pass starts as soon as the first finishes its
+    // final in-flight request.
+    let bundle_futures = bundles.into_iter().map(|bundle| {
+        let client = client.clone();
+        let url = format!("{}{}/", GIVEAWAYS_DETAIL_URL_PREFIX, bundle.id);
+        let bundle_for_task = bundle.clone();
+        async move {
+            let res = fetch_giveaway_bundle(&client, &url, &bundle_for_task).await;
+            // Use the clone's id (not the outer `bundle.id`) so
+            // the capture is explicit — `bundle` itself is in
+            // scope only for the outer closure's tuple, not for
+            // this async block.
+            (bundle_for_task.id, res)
+        }
+    });
+
+    let bundle_results: Vec<(u64, Result<Vec<Giveaway>, String>)> = stream::iter(bundle_futures)
+        .buffer_unordered(GIVEAWAYS_DETAIL_CONCURRENCY)
+        .collect()
+        .await;
+
+    let individual_futures = new_individual_ids.into_iter().map(|id| {
+        let client = client.clone();
+        let url = format!("{}{}/", GIVEAWAYS_DETAIL_URL_PREFIX, id);
+        async move {
+            let res = fetch_individual_giveaway(&client, &url, id).await;
+            (id, res)
+        }
+    });
+
+    let individual_results: Vec<(u64, Result<Vec<Giveaway>, String>)> =
+        stream::iter(individual_futures)
+            .buffer_unordered(GIVEAWAYS_DETAIL_CONCURRENCY)
+            .collect()
+            .await;
+
+    // Flatten per-detail-page game lists into a single Vec.
+    let mut giveaways: Vec<Giveaway> = Vec::new();
+    for (id, result) in bundle_results
+        .into_iter()
+        .chain(individual_results.into_iter())
+    {
+        match result {
+            Ok(mut games) => giveaways.append(&mut games),
+            Err(e) => eprintln!("[deals] Giveaway detail {} fetch failed: {}", id, e),
+        }
     }
 
-    // Platforms — `deal.platforms` is an array of strings like
-    // ["windows", "mac"]. We collapse to the first one for display.
-    let platform = deal
-        .and_then(|d| d.get("platforms"))
+    // Resolve all `deal_url` tracking redirects (e.g.
+    // `humblebundleinc.sjv.io` affiliate links) to their final
+    // store URLs in parallel. The same `resolve_single_redirect`
+    // helper used for ITAD homepage deals is reused here — it
+    // works for any URL with a redirect chain.
+    resolve_giveaway_redirects(&client, &mut giveaways).await;
+
+    // Deduplicate by claim URL. If the same game surfaces in
+    // both a bundle and as an individual giveaway (rare but
+    // possible when ITAD reuses IDs), the user only needs one
+    // card.
+    let mut seen_urls: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    giveaways.retain(|g| seen_urls.insert(g.deal_url.clone()));
+
+    // Drop expired entries. `expiry == None` is treated as
+    // "no expiry set, keep it". A parse failure also fails
+    // closed (drop) — we'd rather show one fewer card than a
+    // stale one the user can't claim.
+    let now = chrono::Utc::now().timestamp();
+    giveaways.retain(|g| {
+        g.expiry
+            .as_deref()
+            .map(|iso| {
+                chrono::DateTime::parse_from_rfc3339(iso)
+                    .map(|dt| dt.timestamp() > now)
+                    .unwrap_or(false)
+            })
+            .unwrap_or(true)
+    });
+
+    // Soonest-expiring first.
+    giveaways.sort_by(|a, b| a.expiry.cmp(&b.expiry));
+
+    Ok(giveaways)
+}
+
+/// Internal summary of a single bundle, used to drive the
+/// per-bundle detail fetch. Not exposed to the frontend.
+#[derive(Debug, Clone)]
+struct BundleMeta {
+    id: u64,
+    title: String,
+    store_name: String,
+    bundle_url: String,
+    is_mature: bool,
+    expiry_ts: Option<i64>,
+}
+
+/// GET the giveaways list page and return the raw HTML.
+async fn fetch_giveaways_list(client: &reqwest::Client) -> Result<String, String> {
+    let resp = client
+        .get(GIVEAWAYS_LIST_URL)
+        .timeout(Duration::from_secs(GIVEAWAYS_LIST_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| format!("Giveaways list request failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Giveaways list returned status {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Giveaways list body read failed: {}", e))
+}
+
+/// Fetch the ITAD homepage and extract every `/giveaways/{id}/`
+/// link — these are the individual free-game giveaways. The
+/// homepage is server-rendered Svelte so the links are in the
+/// static HTML (the /giveaways/ page itself loads this section
+/// client-side, so we have to source it from elsewhere).
+async fn fetch_individual_giveaway_ids(
+    client: &reqwest::Client,
+) -> Result<Vec<u64>, String> {
+    let resp = client
+        .get(HOMEPAGE_URL)
+        .timeout(Duration::from_secs(GIVEAWAYS_LIST_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| format!("Homepage request failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Homepage returned status {}", resp.status()));
+    }
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("Homepage body read failed: {}", e))?;
+
+    // Use the `scraper` crate to find all `<a href="/giveaways/...">`
+    // anchors. The selector is anchored on the href prefix so it
+    // survives Svelte's class-hash churn.
+    let document = Html::parse_document(&html);
+    let link_sel = Selector::parse(r#"a[href^="/giveaways/"]"#)
+        .map_err(|e| format!("bad selector a[href^=/giveaways/]: {:?}", e))?;
+
+    let mut ids: Vec<u64> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for link in document.select(&link_sel) {
+        let Some(href) = link.value().attr("href") else {
+            continue;
+        };
+        // href is something like "/giveaways/16320/" or
+        // "/giveaways/16320". Strip the prefix and the trailing
+        // slash, then parse the numeric id.
+        let stripped = href
+            .trim_start_matches("/giveaways/")
+            .trim_end_matches('/');
+        let id_str = stripped.split('/').next().unwrap_or("");
+        if let Ok(id) = id_str.parse::<u64>() {
+            if id > 0 && seen.insert(id) {
+                ids.push(id);
+            }
+        }
+    }
+    Ok(ids)
+}
+
+/// GET a single bundle detail page and parse it into per-game
+/// `Giveaway` entries. The page is server-rendered HTML with a
+/// `var page = [...]` script containing the data we care about.
+async fn fetch_giveaway_bundle(
+    client: &reqwest::Client,
+    url: &str,
+    bundle: &BundleMeta,
+) -> Result<Vec<Giveaway>, String> {
+    let resp = client
+        .get(url)
+        .timeout(Duration::from_secs(GIVEAWAYS_DETAIL_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| format!("Bundle {} request failed: {}", bundle.id, e))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Bundle {} returned status {}",
+            bundle.id,
+            resp.status()
+        ));
+    }
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("Bundle {} body read failed: {}", bundle.id, e))?;
+    parse_giveaway_bundle(&html, bundle)
+}
+
+/// GET a single individual-giveaway detail page and parse it.
+/// Unlike bundles, individual giveaways (e.g. "Nexus: The Jupiter
+/// Incident" from itch.io) don't appear in the /giveaways/ list
+/// page — they live on the homepage and we only know their IDs.
+/// We pass a minimal `BundleMeta` with just the id; the rest of
+/// the metadata (title, store, url, expiry) is extracted from
+/// the detail page itself.
+async fn fetch_individual_giveaway(
+    client: &reqwest::Client,
+    url: &str,
+    id: u64,
+) -> Result<Vec<Giveaway>, String> {
+    let resp = client
+        .get(url)
+        .timeout(Duration::from_secs(GIVEAWAYS_DETAIL_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| format!("Giveaway {} request failed: {}", id, e))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Giveaway {} returned status {}",
+            id,
+            resp.status()
+        ));
+    }
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("Giveaway {} body read failed: {}", id, e))?;
+    parse_individual_giveaway(&html, id)
+}
+
+/// Find the byte index of the closing `]` for a JSON array that
+/// starts at the first `[` in `text`. Tracks string literals
+/// (with escape sequences) and nested `[]` / `{}` so we don't
+/// get confused by brackets inside a string or a nested array.
+/// Returns `None` if no matching `]` is found.
+fn find_json_array_end(text: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut started = false;
+    for (i, c) in text.char_indices() {
+        if !started {
+            if c == '[' {
+                started = true;
+                depth = 1;
+            }
+            continue;
+        }
+        if escape {
+            escape = false;
+            continue;
+        }
+        match c {
+            '\\' if in_string => escape = true,
+            '"' => in_string = !in_string,
+            '[' | '{' if !in_string => depth += 1,
+            ']' | '}' if !in_string => {
+                depth -= 1;
+                if c == ']' && depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Extract the embedded `var page = [...]` JSON literal from the
+/// HTML and parse it. SvelteKit's page state is a tuple-shaped
+/// array: `[component_name, data, refs?]` — we unwrap to the
+/// data object (index 1) and resolve any devalue-style reference
+/// indices using the lookup table at index 2.
+fn extract_page_data(html: &str) -> Result<serde_json::Value, String> {
+    let start = html
+        .find("var page = ")
+        .ok_or_else(|| "No 'var page = ' in HTML".to_string())?;
+    let after_start = start + "var page = ".len();
+    // Use bracket counting (not `rfind("];")`) so we don't
+    // match a closing bracket that's inside a string literal
+    // (e.g. a game title with `]` in it). The previous `rfind`
+    // approach was one weird game title away from a silent
+    // truncated parse.
+    let end_idx = find_json_array_end(&html[after_start..])
+        .ok_or_else(|| "No matching ']' for var page".to_string())?;
+    let json_text = &html[after_start..after_start + end_idx + 1];
+    let raw: serde_json::Value = serde_json::from_str(json_text)
+        .map_err(|e| format!("JSON parse error for var page: {}", e))?;
+
+    // SvelteKit page state shape: [name, data, refs?]
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| "var page is not a JSON array".to_string())?;
+    if arr.len() < 2 {
+        return Err("var page array too short".to_string());
+    }
+    let data = arr[1].clone();
+    // If the third element is an array, it's the devalue reference
+    // lookup table; resolve any index-based references in the data.
+    if let Some(refs) = arr.get(2).and_then(|v| v.as_array()) {
+        Ok(resolve_svelte_refs(&data, refs))
+    } else {
+        Ok(data)
+    }
+}
+
+/// Recursively walk a SvelteKit `devalue` payload and replace any
+/// integer values with the corresponding entry from the reference
+/// table. De-value uses bare integers as back-references into the
+/// lookup array (e.g. `{ "title": 4 }` means
+/// `lookup[4]` is the actual title).
+fn resolve_svelte_refs(
+    value: &serde_json::Value,
+    refs: &[serde_json::Value],
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::Number(n) => {
+            if let Some(idx) = n.as_u64() {
+                let idx = idx as usize;
+                if idx < refs.len() {
+                    return resolve_svelte_refs(&refs[idx], refs);
+                }
+            }
+            value.clone()
+        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| resolve_svelte_refs(v, refs))
+                .collect(),
+        ),
+        serde_json::Value::Object(obj) => serde_json::Value::Object(
+            obj.iter()
+                .map(|(k, v)| (k.clone(), resolve_svelte_refs(v, refs)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+/// Parse the giveaways list page into bundle metadata.
+fn parse_giveaways_list(html: &str) -> Result<Vec<BundleMeta>, String> {
+    let data = extract_page_data(html)?;
+    let bundles = data
+        .get("bundles")
         .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
+        .ok_or_else(|| "No 'bundles' array in giveaways page".to_string())?;
+
+    let mut result = Vec::new();
+    for b in bundles {
+        let id = b.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let title = b
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let store_name = b
+            .get("page")
+            .and_then(|p| p.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown Store")
+            .to_string();
+        let bundle_url = b
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let is_mature = b.get("isMature").and_then(|v| v.as_bool()).unwrap_or(false);
+        let expiry_ts = b.get("expiry").and_then(|v| v.as_i64());
+
+        if id == 0 || title.is_empty() {
+            continue;
+        }
+        result.push(BundleMeta {
+            id,
+            title,
+            store_name,
+            bundle_url,
+            is_mature,
+            expiry_ts,
+        });
+    }
+    Ok(result)
+}
+
+/// Parse a bundle detail page into per-game `Giveaway` entries.
+/// Falls back to a single bundle-level entry if the page doesn't
+/// expose a per-game array (the older or non-game bundle
+/// variants ship without one).
+fn parse_giveaway_bundle(html: &str, bundle: &BundleMeta) -> Result<Vec<Giveaway>, String> {
+    let data = extract_page_data(html)?;
+
+    // Try the most-likely field names for the per-game list.
+    // ITAD has shipped several schemas over time and we want to
+    // be tolerant of any future rename.
+    let games_opt = ["games", "items", "titles", "products", "tiers"]
+        .iter()
+        .find_map(|key| data.get(*key).and_then(|v| v.as_array()));
+
+    let expiry_str = ts_to_iso(bundle.expiry_ts);
+    let games = match games_opt {
+        Some(g) if !g.is_empty() => g,
+        _ => {
+            // No per-game data — synthesize one card for the
+            // bundle itself so the user still sees it.
+            return Ok(vec![bundle_to_giveaway(bundle, expiry_str)]);
+        }
+    };
+
+    let mut result = Vec::new();
+    for g in games {
+        let game_id = g.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let title = g
+            .get("title")
+            .or_else(|| g.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if title.is_empty() {
+            continue;
+        }
+        let image_url = extract_image_url(g);
+        // Per-game URL when present, otherwise inherit the parent
+        // bundle's tracking URL so the user can still claim the
+        // whole bundle.
+        let deal_url = ["url", "claimUrl", "redeemUrl", "link", "href"]
+            .iter()
+            .find_map(|key| g.get(*key).and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| bundle.bundle_url.clone());
+
+        result.push(Giveaway {
+            id: format!("{}-{}", bundle.id, game_id),
+            title,
+            bundle_title: bundle.title.clone(),
+            image_url,
+            store_name: bundle.store_name.clone(),
+            deal_url,
+            is_mature: bundle.is_mature,
+            expiry: expiry_str.clone(),
+        });
+    }
+
+    if result.is_empty() {
+        result.push(bundle_to_giveaway(bundle, expiry_str));
+    }
+    Ok(result)
+}
+
+/// Synthesize a single `Giveaway` from a bundle (fallback when no
+/// per-game data is available).
+fn bundle_to_giveaway(bundle: &BundleMeta, expiry: Option<String>) -> Giveaway {
+    Giveaway {
+        id: bundle.id.to_string(),
+        title: bundle.title.clone(),
+        bundle_title: bundle.title.clone(),
+        image_url: None,
+        store_name: bundle.store_name.clone(),
+        deal_url: bundle.bundle_url.clone(),
+        is_mature: bundle.is_mature,
+        expiry,
+    }
+}
+
+/// Build a `BundleMeta` from a raw `serde_json::Value` of the
+/// giveaway/bundle object. Used when we have to extract the
+/// parent metadata from a detail page (instead of the list
+/// page) — e.g. for individual giveaways sourced from the
+/// homepage.
+fn meta_from_json(v: &serde_json::Value) -> BundleMeta {
+    BundleMeta {
+        id: v.get("id").and_then(|x| x.as_u64()).unwrap_or(0),
+        title: v
+            .get("title")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        store_name: v
+            .get("page")
+            .and_then(|p| p.get("name"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("Unknown Store")
+            .to_string(),
+        bundle_url: v
+            .get("url")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        is_mature: v.get("isMature").and_then(|x| x.as_bool()).unwrap_or(false),
+        expiry_ts: v.get("expiry").and_then(|x| x.as_i64()),
+    }
+}
+
+/// Parse an individual-giveaway detail page (e.g.
+/// `/giveaways/16320/`) into a single `Giveaway`. The detail
+/// page for an individual giveaway has the same `var page = [...]`
+/// shape as a bundle, but the parent object lives under a
+/// `giveaway` key (vs. `bundle` for bundles) and there's
+/// typically no per-game array — the giveaway IS the game.
+fn parse_individual_giveaway(
+    html: &str,
+    fallback_id: u64,
+) -> Result<Vec<Giveaway>, String> {
+    let data = extract_page_data(html)?;
+
+    // Find the parent object. ITAD has shipped both "bundle" and
+    // "giveaway" keys for these pages; we try both.
+    let parent = data
+        .get("giveaway")
+        .or_else(|| data.get("bundle"))
+        .or_else(|| data.get("item"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    if parent.is_null() {
+        return Err(format!(
+            "No giveaway/bundle object in detail page for id {}",
+            fallback_id
+        ));
+    }
+
+    let meta = meta_from_json(&parent);
+    let expiry_str = ts_to_iso(meta.expiry_ts);
+
+    // Try the per-game array first (rare for individual
+    // giveaways, but possible for multi-game "giveaway bundles").
+    let games_opt = ["games", "items", "titles", "products", "tiers"]
+        .iter()
+        .find_map(|key| data.get(*key).and_then(|v| v.as_array()));
+
+    let games = match games_opt {
+        Some(g) if !g.is_empty() => g,
+        _ => {
+            // No per-game array — the parent object IS the single
+            // game. Synthesize one Giveaway from the parent's
+            // fields directly.
+            return Ok(vec![giveaway_from_parent(&parent, &meta, expiry_str)]);
+        }
+    };
+
+    // Per-game array: build one Giveaway per entry using the
+    // parent's metadata as the context.
+    let mut result = Vec::new();
+    for g in games {
+        let game_id = g.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let title = g
+            .get("title")
+            .or_else(|| g.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if title.is_empty() {
+            continue;
+        }
+        let image_url = extract_image_url(g);
+        let deal_url = ["url", "claimUrl", "redeemUrl", "link", "href"]
+            .iter()
+            .find_map(|key| g.get(*key).and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| meta.bundle_url.clone());
+
+        result.push(Giveaway {
+            id: format!("{}-{}", meta.id, game_id),
+            title,
+            bundle_title: meta.title.clone(),
+            image_url,
+            store_name: meta.store_name.clone(),
+            deal_url,
+            is_mature: meta.is_mature,
+            expiry: expiry_str.clone(),
+        });
+    }
+
+    if result.is_empty() {
+        result.push(giveaway_from_parent(&parent, &meta, expiry_str));
+    }
+    Ok(result)
+}
+
+/// Build a `Giveaway` from a giveaway/bundle parent object
+/// directly (no per-game array). Used as the fallback when the
+/// detail page only has the parent metadata.
+fn giveaway_from_parent(
+    parent: &serde_json::Value,
+    meta: &BundleMeta,
+    expiry: Option<String>,
+) -> Giveaway {
+    let title = parent
+        .get("title")
         .and_then(|v| v.as_str())
-        .map(|s| match s {
-            "windows" => "Windows".to_string(),
-            "mac" => "Mac".to_string(),
-            "linux" => "Linux".to_string(),
-            other => other.to_string(),
-        })
-        .unwrap_or_else(|| "Windows".to_string());
+        .unwrap_or(&meta.title)
+        .to_string();
+    let image_url = extract_image_url(parent);
+    Giveaway {
+        id: meta.id.to_string(),
+        title: if title.is_empty() { meta.title.clone() } else { title },
+        bundle_title: meta.title.clone(),
+        image_url,
+        store_name: meta.store_name.clone(),
+        deal_url: meta.bundle_url.clone(),
+        is_mature: meta.is_mature,
+        expiry,
+    }
+}
 
-    // Expiration — `deal.expiry` is an ISO 8601 string.
-    let expiration = deal
-        .and_then(|d| d.get("expiry"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+/// Normalize an image URL found anywhere in a game object. ITAD
+/// CDN URLs may be naked paths (`//cdn.isthereanydeal.com/...`),
+/// root-relative (`/foo.jpg`), or already absolute. We resolve
+/// to a full https URL; the frontend can append a size hint if
+/// it wants a smaller thumbnail.
+fn extract_image_url(game: &serde_json::Value) -> Option<String> {
+    let raw = ["image", "imageUrl", "thumbnail", "cover", "capsule", "headerImage"]
+        .iter()
+        .find_map(|key| game.get(*key).and_then(|v| v.as_str()))?;
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.starts_with("http://") || raw.starts_with("https://") {
+        Some(raw.to_string())
+    } else if let Some(stripped) = raw.strip_prefix("//") {
+        Some(format!("https://{}", stripped))
+    } else if let Some(stripped) = raw.strip_prefix('/') {
+        Some(format!("https://isthereanydeal.com/{}", stripped))
+    } else {
+        Some(format!("https://{}", raw))
+    }
+}
 
-    // Thumbnail — deals/v2 doesn't return one. The frontend has a
-    // fallback icon for missing thumbnails.
-    let thumbnail = None;
-
-    // ID — `id` is the deal id (composite of game + shop).
-    let id = obj
-        .get("id")
-        .or_else(|| obj.get("slug"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{}::{}", game_title, store_name));
-
-    Some(DealItem {
-        id,
-        game_title,
-        store_name,
-        store_url,
-        normal_price,
-        deal_price,
-        discount_percent,
-        expiration,
-        platform,
-        thumbnail,
-    })
+/// Convert a Unix timestamp (seconds) to an ISO 8601 string.
+/// Returns `None` for 0 or invalid timestamps.
+fn ts_to_iso(ts: Option<i64>) -> Option<String> {
+    let ts = ts?;
+    if ts <= 0 {
+        return None;
+    }
+    chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.to_rfc3339())
 }

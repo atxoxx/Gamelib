@@ -486,12 +486,6 @@
   flex-wrap: wrap;
 }
 
-.deals-deal-card-original {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  text-decoration: line-through;
-}
-
 .deals-deal-card-current {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
@@ -630,71 +624,172 @@
   opacity: 0.7;
 }
 
-.deals-empty-cta {
-  padding: var(--space-sm) var(--space-lg);
-  background: var(--color-accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-  font-family: inherit;
-}
-
-.deals-empty-cta:hover {
-  background: var(--color-accent-hover);
-}
-
-/* Setup-required state for the ITAD API key. Visually distinct from
- * a hard error — it's an actionable onboarding step, not a bug. */
-.deals-setup {
-  padding: var(--space-xl);
-  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
-  border-radius: var(--radius-lg);
-  color: var(--color-text-primary);
+/* Giveaway card */
+.deals-giveaway-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-md);
-  text-align: center;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
-.deals-setup-body {
+.deals-giveaway-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-success);
+}
+
+.deals-giveaway-card-image-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  position: relative;
+}
+
+.deals-giveaway-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-fast);
+}
+
+.deals-giveaway-card:hover .deals-giveaway-card-image {
+  transform: scale(1.04);
+}
+
+.deals-giveaway-card-image-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 32px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-success) 14%, var(--color-bg-tertiary)),
+    var(--color-bg-tertiary));
+}
+
+.deals-giveaway-card-free-badge {
+  position: absolute;
+  top: var(--space-sm);
+  left: var(--space-sm);
+  padding: 4px var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: #000;
+  background: var(--color-success);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+  letter-spacing: 0.05em;
+}
+
+.deals-giveaway-card-mature-badge {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  padding: 4px var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  background: var(--color-danger);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+}
+
+.deals-giveaway-card-body {
+  padding: var(--space-md);
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  align-items: center;
-  max-width: 520px;
+  flex: 1;
 }
 
-.deals-setup-body p {
+.deals-giveaway-card-title {
   margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.deals-setup-body code {
-  padding: 1px 6px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.92em;
+.deals-giveaway-card-bundle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.deals-giveaway-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: auto;
+}
+
+.deals-giveaway-card-store {
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
 }
 
-.deals-setup .deals-empty-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
+.deals-giveaway-card-expiry {
+  color: var(--color-warning);
+  margin-left: auto;
 }
 
-.deals-setup .deals-empty-cta svg {
+.deals-giveaway-card-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-success);
+  color: #000;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+  font-family: inherit;
+  margin-top: var(--space-xs);
+}
+
+.deals-giveaway-card-cta:hover {
+  background: color-mix(in srgb, var(--color-success) 85%, #fff 15%);
+  transform: translateY(-1px);
+}
+
+.deals-giveaway-card-cta:focus-visible {
+  outline: 2px solid var(--color-success);
+  outline-offset: 2px;
+}
+
+.deals-giveaway-card-cta svg {
   width: 14px;
   height: 14px;
+}
+
+.deals-filters-info {
+  flex: 1 1 280px;
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
 }
 
 /* Optional developer / publisher line on the GamePass card. */

@@ -34,7 +34,7 @@ export interface GamePassGame {
 
 /** A single deal row from IsThereAnyDeal. Returned by `fetch_isthereanydeal_deals`. */
 export interface DealItem {
-  /** Internal deal id (store + game). */
+  /** Internal deal id (the ITAD link UUID). */
   id: string;
   /** Game title as it appears in the deal. */
   gameTitle: string;
@@ -42,17 +42,19 @@ export interface DealItem {
   storeName: string;
   /** Direct purchase URL on the store — opened in the system browser. */
   storeUrl: string;
-  /** Pre-discount price in USD. */
-  normalPrice: number;
-  /** Current price in USD after discount. */
+  /** Current price in EUR after discount. The original price is not
+   * exposed by the ITAD homepage scrape, so there's no separate
+   * `normalPrice` field. */
   dealPrice: number;
   /** Discount percentage (0–100). */
   discountPercent: number;
-  /** ISO 8601 timestamp when the deal expires (when known). */
+  /** ISO 8601 timestamp when the deal expires. Always `null` from
+   * the homepage scrape — the frontend hides the "Ends" badge. */
   expiration?: string | null;
-  /** Platform name ("Steam", "GOG", "PC"). */
+  /** Platform name. Always "Windows" from the homepage scrape. */
   platform: string;
-  /** Square thumbnail (when available). */
+  /** Square thumbnail. Always `null` from the homepage scrape —
+   * the frontend shows the fallback icon. */
   thumbnail?: string | null;
 }
 
@@ -68,10 +70,35 @@ export interface GamePassFilters {
 
 /** Filters for `fetch_isthereanydeal_deals`. Empty/null fields mean "no filter". */
 export interface DealsFilters {
-  /** "all" or a specific platform name. */
+  /** Kept for API compatibility but ignored by the backend — the
+   * ITAD homepage doesn't expose per-deal platform info, so there's
+   * nothing to filter on. */
   platform?: string | null;
   /** Minimum discount %, 0 means no minimum. */
   minDiscount?: number | null;
   /** "all" or a specific store id. */
   store?: string | null;
+}
+
+/** A single free-game giveaway (one game inside a bundle).
+ * Returned by `fetch_giveaways`. */
+export interface Giveaway {
+  /** Composite id (`"{bundleId}-{gameId}"`). */
+  id: string;
+  /** Individual game title. */
+  title: string;
+  /** Parent bundle title (e.g. "Humble Summer Bundle") for context. */
+  bundleTitle: string;
+  /** Cover image URL. `null` when the bundle page doesn't expose
+   * an image for this game — the frontend shows a fallback icon. */
+  imageUrl?: string | null;
+  /** Storefront display name (e.g. "Humble Bundle", "Fanatical"). */
+  storeName: string;
+  /** Direct claim URL — the per-game URL when present, otherwise
+   * the parent bundle's tracking URL. */
+  dealUrl: string;
+  /** 18+ flag inherited from the parent bundle. */
+  isMature: boolean;
+  /** ISO 8601 expiration timestamp. `null` when no expiry is set. */
+  expiry?: string | null;
 }
