@@ -8,6 +8,7 @@ import { slugify } from "../types/game";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
+import DownloadButton from "../components/DownloadButton";
 import type { Game } from "../types/game";
 
 
@@ -382,14 +383,21 @@ export default function StoreGameDetail() {
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
               </svg>
               View in Library
-            </button>
-          ) : (
-            <button className="store-add-btn" onClick={handleAddToLibrary} disabled={adding}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              {adding ? "Adding..." : "Add to Library"}
-            </button>
+            </button>          ) : (
+            <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center", flexWrap: "wrap" }}>
+              <button className="store-add-btn" onClick={handleAddToLibrary} disabled={adding}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                {adding ? "Adding..." : "Add to Library"}
+              </button>
+              <DownloadButton
+                gameName={data.title}
+                variant="prominent"
+                label="Find Download"
+              />
+            </div>
           )}
         </div>
       </div>

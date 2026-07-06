@@ -20,7 +20,10 @@ import { ActivityProvider } from "./context/ActivityContext";
 import { WishlistProvider } from "./context/WishlistContext";
 import { DensityProvider } from "./context/DensityContext";
 import { SplashProvider } from "./context/SplashContext";
+import { DownloadProvider } from "./context/DownloadContext";
+import { SourceProvider } from "./context/SourceContext";
 import Splashscreen from "./components/Splashscreen";
+import DownloadProgress from "./components/DownloadProgress";
 import "./App.css";
 import "./store.css";
 
@@ -58,22 +61,30 @@ function App() {
             <ActivityProvider>
               <DensityProvider>
                 <WishlistProvider>
-                  <Routes>
-                    <Route element={<AppLayout />}>
-                      <Route index element={<Navigate to="/library" replace />} />
-                      <Route path="library" element={<LibraryPage />} />
-                      <Route path="library/:gameId" element={<GamePage />} />
-                      <Route path="wishlist" element={<WishlistPage />} />
-                      <Route path="deals" element={<DealsPage />} />
-                      <Route path="activity" element={<ActivityPage />} />
-                      <Route path="storage" element={<StoragePage />} />
-                      <Route path="store" element={<StorePage />} />
-                      <Route path="store/:gameSlug" element={<StoreGameDetail />} />
-                      <Route path="community" element={<CommunityPage />} />
-                      <Route path="settings" element={<SettingsPage />} />
-                      <Route path="plugins" element={<PluginsPage />} />
-                    </Route>
-                  </Routes>
+                  <SourceProvider>
+                    <DownloadProvider>
+                      <Routes>
+                        <Route element={<AppLayout />}>
+                          <Route index element={<Navigate to="/library" replace />} />
+                          <Route path="library" element={<LibraryPage />} />
+                          <Route path="library/:gameId" element={<GamePage />} />
+                          <Route path="wishlist" element={<WishlistPage />} />
+                          <Route path="deals" element={<DealsPage />} />
+                          <Route path="activity" element={<ActivityPage />} />
+                          <Route path="storage" element={<StoragePage />} />
+                          <Route path="store" element={<StorePage />} />
+                          <Route path="store/:gameSlug" element={<StoreGameDetail />} />
+                          <Route path="community" element={<CommunityPage />} />
+                          <Route path="settings" element={<SettingsPage />} />
+                          <Route path="plugins" element={<PluginsPage />} />
+                        </Route>
+                      </Routes>
+                      {/* Floating download-progress overlay. Mounted
+                       *  INSIDE DownloadProvider so useDownloads() works,
+                       *  OUTSIDE Routes so it floats above every page. */}
+                      <DownloadProgress />
+                    </DownloadProvider>
+                  </SourceProvider>
                 </WishlistProvider>
               </DensityProvider>
             </ActivityProvider>

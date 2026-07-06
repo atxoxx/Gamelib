@@ -35,4 +35,27 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 wmi = "0.14"
 windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation"] }
+# Torrent engine. Pure-Rust, no C++/Boost/MSVC build step on Windows.
+# Pinned to a major version (`8`) — librqbit's API moves fast and we
+# want `cargo update` to refuse silent breaking changes.
+#
+# Bumped from 7.x to 8.x because 7.0.1 has a broken dep graph:
+# `librqbit 7.0.1` → `librqbit-core 4.1.0`, but its sub-deps
+# `librqbit-dht 5.3.1` and `librqbit-peer-protocol 4.3.0` →
+# `librqbit-core 5.0.0`. Both versions land in the build and librqbit
+# 7.0.1 fails to compile (every call to `iter_filenames_and_lengths`,
+# `Magnet::from_id20`, etc. is mismatched). librqbit 8.x unified the
+# dep graph on `librqbit-core 5.x` end-to-end.
+#
+# Feature notes:
+# - `default-tls` enables rustls for HTTPS magnet/`.torrent` URL fetching.
+# - `http-api` is left OFF — we only use the in-process async API, not
+#   the embedded HTTP server. Saves the axum/serde_html_form dep tree.
+# - Upload disablement is configured at runtime via `SessionOptions`.
+#   The `disable_upload` field is a runtime toggle in 8.x.
+librqbit = { version = "8", default-features = false, features = ["default-tls"] }
+# Magnet URI parsing — extract the info-hash, trackers, and
+# exact-topic fields without rolling our own URI parser.
+url = "2"
+percent-encoding = "2"
 

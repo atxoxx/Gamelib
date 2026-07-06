@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useActiveDownloadCount } from "../context/DownloadContext";
 
 function LibraryIcon() {
   return (
@@ -183,6 +184,7 @@ const tabs: Tab[] = [
 ];
 
 export default function TopNav() {
+  const activeDownloads = useActiveDownloadCount();
   return (
     <nav className="topnav">
       <div className="topnav-left">
@@ -214,6 +216,23 @@ export default function TopNav() {
        *  the same `active` treatment as the regular tabs so the user
        *  still sees where they are. */}
       <div className="topnav-right">
+        {activeDownloads > 0 && (
+          <span
+            className="topnav-download-indicator"
+            title={`${activeDownloads} active download${activeDownloads === 1 ? "" : "s"} — see the floating progress panel`}
+            aria-label={`${activeDownloads} active downloads`}
+            role="status"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span className="topnav-download-indicator-count">
+              {activeDownloads}
+            </span>
+          </span>
+        )}
         <NavLink
           to="/settings"
           className={({ isActive }) =>

@@ -1,0 +1,407 @@
+/* ============================================================================
+ * Source Manager styles
+ *
+ * Lives in SettingsPage under a dedicated section. Three blocks:
+ *   1. Add-source form (URL + optional name + add button)
+ *   2. The list of configured sources, each a row with:
+ *        - enabled toggle
+ *        - name + url
+ *        - last-fetched timestamp + game count
+ *        - per-row actions (refresh, remove)
+ *   3. Bulk "Refresh all" button + empty state
+ * ========================================================================== */
+
+/* Container — wraps everything inside the Settings section. */
+.src-manager {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* Header row — title + bulk refresh button. */
+.src-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.src-manager-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.src-manager-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.src-manager-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+}
+
+.src-manager-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.src-manager-desc code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.src-manager-bulk {
+  display: flex;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+/* Add-source form. */
+.src-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  animation: src-form-in 0.2s ease-out;
+}
+
+@keyframes src-form-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.src-form-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.src-form-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.src-form-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.15);
+}
+
+.src-form-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.src-form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.src-form-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+.src-form-hint svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-accent);
+}
+
+.src-form-hint code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.src-form-actions {
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* Source list. */
+.src-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.src-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  gap: var(--space-md);
+}
+
+.src-item:hover {
+  border-color: var(--color-accent);
+}
+
+.src-item.disabled {
+  opacity: 0.6;
+}
+
+.src-item.refreshing {
+  border-color: var(--color-accent);
+  background: rgba(108, 92, 231, 0.05);
+}
+
+.src-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.src-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.src-item-name {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.src-item-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.src-item-status.enabled {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.src-item-status.disabled {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+.src-item-url {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, monospace);
+}
+
+.src-item-url a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.src-item-url a:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.src-item-meta {
+  display: flex;
+  gap: var(--space-md);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.src-item-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.src-item-meta svg {
+  width: 12px;
+  height: 12px;
+}
+
+.src-item-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+/* Toggle switch — standard CSS-only checkbox-as-toggle. */
+.src-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.src-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.src-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--color-bg-tertiary);
+  border-radius: 20px;
+  transition: 0.3s;
+  border: 1px solid var(--color-border);
+}
+
+.src-toggle-slider::before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.src-toggle input:checked + .src-toggle-slider {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.src-toggle input:checked + .src-toggle-slider::before {
+  background: white;
+  transform: translateX(16px);
+}
+
+.src-toggle input:disabled + .src-toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.src-action-btn {
+  padding: var(--space-xs);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.src-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.src-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.src-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.src-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.src-action-btn.spinning svg {
+  animation: src-spin 1.2s linear infinite;
+}
+
+@keyframes src-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Empty state. */
+.src-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl) var(--space-md);
+  text-align: center;
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  gap: var(--space-sm);
+}
+
+.src-empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+.src-empty-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.src-empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.5;
+  max-width: 360px;
+}
+
+.src-empty-hint code {
+  background: var(--color-bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}

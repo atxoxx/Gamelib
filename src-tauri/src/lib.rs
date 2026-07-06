@@ -1,8 +1,10 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use tokio::sync::Mutex;
 
 mod game_scraper;
 mod gpu_detector;
@@ -14,6 +16,11 @@ mod steam;
 mod epic;
 mod steam_game_watcher;
 mod size;
+// New modules for the download feature. See each module's
+// top-of-file doc comment for the design rationale.
+mod source_manager;
+mod store_checker;
+mod torrent_engine;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
@@ -714,7 +721,84 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, spawn_game_exe, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
             steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout, steam_get_session,
-            epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout])
+            epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
+            // Download-feature commands. The torrent engine manages
+            // its own global session; the source manager and store
+            // checker are passed through `tauri::State`.
+            source_manager::sources_add,
+            source_manager::sources_remove,
+            source_manager::sources_toggle,
+            source_manager::sources_list,
+            source_manager::sources_refresh,
+            source_manager::sources_refresh_all,
+            source_manager::sources_search_game,
+            store_checker::check_ownership,
+            store_checker::check_ownership_for_ids,
+            store_checker::set_steam_owned,
+            store_checker::set_epic_owned,
+            torrent_engine::torrent_add,
+            torrent_engine::torrent_pause,
+            torrent_engine::torrent_resume,
+            torrent_engine::torrent_remove,
+            torrent_engine::torrent_get_all,
+            torrent_engine::torrent_select_save_path])
+        .setup(|app| {
+            // Initialize the source manager + store checker state.
+            //
+            // The source manager uses `std::sync::Mutex` (NOT
+            // `tokio::sync::Mutex`) so the sync `setup` closure
+            // can `lock().unwrap()` it without blocking on a
+            // runtime worker. The async Tauri commands also take
+            // this type; they hold the guard across the await,
+            // which ties up one runtime worker per concurrent
+            // command — acceptable because source operations are
+            // user-driven and infrequent.
+            //
+            // The store checker keeps `tokio::sync::Mutex` since
+            // its Tauri commands are all short critical sections
+            // that benefit from the async-aware lock.
+            let app_data_dir = app.path().app_data_dir()?;
+            let source_manager = Arc::new(tokio::sync::Mutex::new(
+                source_manager::SourceManager::new(app_data_dir.clone()),
+            ));
+            {
+                // `blocking_lock` is the sync-context entry point for
+                // a tokio mutex. Setup runs before the async runtime
+                // is fully active so we can't `lock().await` here.
+                let mut mgr = source_manager.blocking_lock();
+                if let Err(e) = mgr.load_sources() {
+                    eprintln!("[gamelib] source_manager::load_sources failed: {}", e);
+                }
+            }
+            app.manage(source_manager);
+
+            let store_checker = Arc::new(Mutex::new(store_checker::StoreChecker::new()));
+            app.manage(store_checker);
+
+            // Spin the torrent engine up on the async runtime.
+            // We use `spawn` (fire-and-forget) rather than
+            // `block_on` so the `setup` closure returns
+            // immediately and the app window can appear without
+            // waiting for the torrent session to open + walk
+            // existing torrents from disk. Init failures are
+            // logged but don't block startup — the rest of the
+            // app works without the engine, and the user can
+            // retry by restarting.
+            let app_handle = app.handle().clone();
+            let app_data_dir_for_engine = app_data_dir.clone();
+            let _ = tauri::async_runtime::spawn(async move {
+                if let Err(e) = torrent_engine::initialize_engine(
+                    app_handle,
+                    app_data_dir_for_engine,
+                )
+                .await
+                {
+                    eprintln!("[gamelib] torrent_engine::initialize_engine failed: {}", e);
+                }
+            });
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

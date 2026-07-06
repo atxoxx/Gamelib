@@ -4,10 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../context/ToastContext";
 import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
+import { useSources } from "../context/SourceContext";
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
+import SourceManager from "../components/SourceManager";
 
 interface ThemeOption {
   id: string;
@@ -26,12 +28,13 @@ const themes: ThemeOption[] = [
   { id: "dracula", name: "Dracula", colors: { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" } },
 ];
 
-type SettingsTab = "appearance" | "hardware" | "integrations";
+type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads";
 
 export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames } = useGames();
+  const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
@@ -363,6 +366,18 @@ export default function SettingsPage() {
           <IntegrationsIcon /> Integrations
           {connectedIntegrations > 0 && (
             <span className="settings-nav-pill-count">{connectedIntegrations}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSettingsTab === "downloads"}
+          className={`settings-nav-pill${activeSettingsTab === "downloads" ? " active" : ""}`}
+          onClick={() => setActiveSettingsTab("downloads")}
+        >
+          <DownloadIcon /> Downloads
+          {sources.length > 0 && (
+            <span className="settings-nav-pill-count">{sources.length}</span>
           )}
         </button>
       </nav>
@@ -749,7 +764,45 @@ export default function SettingsPage() {
           </p>
         </section>
       )}
+
+      {/* Downloads — manage download sources for finding game mirrors. */}
+      {activeSettingsTab === "downloads" && (
+        <section className="settings-section">
+          <header className="settings-section-header">
+            <span className="settings-section-icon"><DownloadIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Download sources</h2>
+              <p className="settings-section-desc">
+                Add JSON-formatted source URLs to find download mirrors for
+                your games. Sources use the Hydra-compatible format with a
+                <code> name </code>and a <code> downloads </code>array. The
+                Download button on any game's page will search your enabled
+                sources.
+              </p>
+            </div>
+          </header>
+          <SourceManager />
+        </section>
+      )}
     </div>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
   );
 }
 

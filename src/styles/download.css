@@ -1,0 +1,676 @@
+/* ============================================================================
+ * Download feature styles
+ *
+ * Two surfaces:
+ *   1. The DownloadModal (centered, backdrop, max-width ~720px)
+ *   2. The DownloadProgress panel (fixed bottom-right, collapsible,
+ *      a "live activity" widget that shows every active torrent)
+ *
+ * Both share the `dl-*` class prefix so a single style sheet can
+ * serve them and so the prefix shows up in the bundle clearly as
+ * "this is the downloads subsystem". We do NOT touch the
+ * `.modal-backdrop`/`.modal` rules that ImportModal uses — those
+ * are shared and the new component should not redefine them.
+ * ========================================================================== */
+
+/* ─── Modal: search step ──────────────────────────────────────────── */
+
+.dl-modal {
+  max-width: 720px;
+  width: 90vw;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dl-search-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xl) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.dl-search-loading .spinner-small {
+  width: 18px;
+  height: 18px;
+}
+
+/* Ownership banner — sits at the top of the modal body, just below
+ * the header. Different colors for "you own it" (warning), "free
+ * to download" (info), and "checking…" (muted). */
+.dl-ownership {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  border: 1px solid var(--color-border);
+}
+
+.dl-ownership-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.dl-ownership-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-ownership-title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.dl-ownership-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.dl-ownership.owned {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.dl-ownership.owned .dl-ownership-icon {
+  color: #f59e0b;
+}
+
+.dl-ownership.checking {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+.dl-ownership.checking .dl-ownership-icon {
+  color: var(--color-text-muted);
+  animation: dl-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dl-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Results list — the matched downloads returned by sources_search_game. */
+.dl-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.dl-result-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+}
+
+.dl-result-row:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dl-result-row.selected {
+  border-color: var(--color-accent);
+  background: rgba(108, 92, 231, 0.08);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.dl-result-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-result-title {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.dl-result-meta {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.dl-result-source {
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.dl-result-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+}
+
+.dl-result-score.high {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.dl-result-actions {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.dl-result-row:hover .dl-result-actions,
+.dl-result-row.selected .dl-result-actions {
+  color: var(--color-accent);
+}
+
+.dl-result-row.selected .dl-result-actions svg polyline {
+  stroke: var(--color-accent);
+}
+
+/* Empty state inside the results list. */
+.dl-results-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl) var(--space-md);
+  text-align: center;
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  gap: var(--space-sm);
+}
+
+.dl-results-empty svg {
+  width: 36px;
+  height: 36px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+
+.dl-results-empty p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dl-results-empty-hint {
+  font-size: var(--font-size-xs) !important;
+  color: var(--color-text-muted) !important;
+}
+
+.dl-results-empty-hint code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+/* Save-path selector — shows the picked folder + a "Change" button. */
+.dl-save-path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-md);
+}
+
+.dl-save-path-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.dl-save-path-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-save-path-text.placeholder {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ─── Floating progress panel ────────────────────────────────────── */
+
+.dl-progress {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  width: 360px;
+  max-height: 480px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9000;
+  /* Slide-up entrance — small bounce. */
+  animation: dl-progress-in 0.32s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+@keyframes dl-progress-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dl-progress.collapsed {
+  max-height: none;
+  width: auto;
+  min-width: 220px;
+}
+
+.dl-progress-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dl-progress-header-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.dl-progress-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dl-progress-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--color-accent);
+  color: white;
+  border-radius: 9px;
+  margin-left: 4px;
+}
+
+.dl-progress-badge.pulse {
+  /* The badge pulses to signal "live updates coming in". */
+  animation: dl-badge-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes dl-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--color-accent); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+
+.dl-progress-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.dl-progress.collapsed .dl-progress-chevron {
+  transform: rotate(180deg);
+}
+
+.dl-progress-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.dl-progress-list:empty::before {
+  content: "No active downloads";
+  display: block;
+  text-align: center;
+  padding: var(--space-lg);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.dl-progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.dl-progress-card:hover {
+  border-color: var(--color-accent);
+}
+
+.dl-progress-card.error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.dl-progress-card.completed {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.dl-progress-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.dl-progress-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.dl-progress-card-status {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dl-progress-card-status--downloading {
+  background: rgba(108, 92, 231, 0.18);
+  color: #8b7cf6;
+}
+
+.dl-progress-card-status--fetchingMetadata {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.dl-progress-card-status--queued {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.dl-progress-card-status--paused {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.dl-progress-card-status--completed {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+}
+
+.dl-progress-card-status--error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.dl-progress-card-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.dl-progress-card-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), #818cf8);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.dl-progress-card.indeterminate .dl-progress-card-bar-fill {
+  /* When totalSize is unknown, animate a moving stripe instead of a
+   * static fill. We use a pseudo-gradient with a 30% window. */
+  width: 30% !important;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-accent) 50%,
+    transparent 100%
+  );
+  animation: dl-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes dl-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(330%); }
+}
+
+.dl-progress-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.dl-progress-card-stats {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.dl-progress-card-stat strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.dl-progress-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dl-progress-card-btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  transition: all var(--transition-fast);
+}
+
+.dl-progress-card-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.dl-progress-card-btn.danger:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.dl-progress-card-btn svg {
+  width: 10px;
+  height: 10px;
+}
+
+.dl-progress-card-error {
+  font-size: 10px;
+  color: #ef4444;
+  padding: 4px 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 3px;
+  word-break: break-word;
+}
+
+/* ============================================================================
+ * In-page DownloadButton
+ *
+ * Renders next to "Launch Game" on GamePage and "Add to Library" on
+ * StoreGameDetail. Two variants:
+ *   * default    — neutral outline, used in the GamePage hero
+ *   * prominent  — accent-tinted, used in the StoreGameDetail hero
+ *                  where it's the primary CTA
+ * ========================================================================== */
+
+.game-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 12px 22px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.game-download-btn:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+.game-download-btn:active {
+  transform: translateY(0);
+}
+
+.game-download-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Prominent variant — used in the StoreGameDetail hero as the
+ * primary CTA. Tints with the accent color so the user knows
+ * this is the main action. */
+.game-download-btn--prominent {
+  background: linear-gradient(135deg, var(--color-accent), #818cf8);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.25);
+}
+
+.game-download-btn--prominent:hover {
+  background: linear-gradient(135deg, #7c6cf0, #9089f9);
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(108, 92, 231, 0.4);
+  transform: translateY(-1px);
+}
+
+.game-download-btn--prominent:active {
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.3);
+}
+
+/* TopNav download indicator — small pill on the right side of the
+ * topnav. Only visible when there are active downloads. */
+.topnav-download-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-right: 4px;
+  border-radius: var(--radius-md);
+  background: rgba(108, 92, 231, 0.12);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid rgba(108, 92, 231, 0.25);
+  transition: all var(--transition-fast);
+  cursor: default;
+}
+
+.topnav-download-indicator svg {
+  width: 12px;
+  height: 12px;
+  animation: topnav-dl-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes topnav-dl-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.topnav-download-indicator-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 8px;
+}
