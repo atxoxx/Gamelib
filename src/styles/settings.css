@@ -1,0 +1,978 @@
+/* =============================================================================
+ * Settings page — refinements
+ *
+ * This file consolidates *every* styling concern related to the Settings
+ * page and the far-right Settings button in the topnav. It's imported
+ * near the top of App.css so the rules below order AFTER these in
+ * the cascade — that lets us safely refine the legacy `.settings-*`
+ * selectors that originally lived in App.css.
+ *
+ * Contents:
+ *   1. Far-right Settings button (active state)
+ *   2. Generic .btn utility (the Settings page references these via
+ *      `class="btn ..."` but the rules were never defined; this also
+ *      benefits any future page that wants a standard button).
+ *   3. Inline .spinner + .auth-status + .connect-prompt helpers
+ *   4. Settings page shell — header, pill sub-nav, sections
+ *   5. Theme cards (with a richer mini-app preview on top)
+ *   6. Form rows / controls / toggles
+ *   7. Integration tiles (Steam, Epic) with a danger-zone footer
+ * ========================================================================== */
+
+/* ── 1. Topnav far-right Settings button ───────────────────────────── */
+
+/* The settings gear lives on the far right of the topnav instead of in
+ * the tabs strip. When the user is on /settings we want the same visual
+ * treatment as an active tab so they can still see where they are. The
+ * class is composable with .topnav-btn so hover/transforms stay
+ * consistent with other topnav buttons. */
+.topnav-btn-settings {
+  -webkit-app-region: no-drag;
+}
+
+.topnav-btn-settings.active {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent),
+    0 0 12px var(--color-accent-glow);
+}
+
+.topnav-btn-settings.active svg {
+  filter: drop-shadow(0 0 4px var(--color-accent-glow));
+}
+
+/* ── 2. Generic .btn utility ─────────────────────────────────────── */
+
+/* Standard button used across the app (Steam / Epic actions in
+ * Settings, etc.). The Settings page references `.btn`,
+ * `.btn-primary`, `.btn-danger`, `.btn-sm` and `.btn-steam` so these
+ * styles need to exist somewhere — they were implicitly using browser
+ * defaults before this refactor. Color tokens drive the theme look. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-xs);
+  gap: var(--space-xs);
+}
+
+.btn-sm svg {
+  width: 12px;
+  height: 12px;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px var(--color-accent-glow);
+}
+
+.btn-danger {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border));
+}
+
+.btn-danger:hover {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+
+/* Steam auth button — keeps the in-house Steam dark-blue brand color
+ * instead of the accent color so users can visually separate "Steam
+ * action" from "Gamelib action". Solid gradient + Steam-blue border
+ * reads as official Steam UI at a glance. */
+.btn-steam {
+  background: linear-gradient(135deg, #1b2838, #2a475e);
+  color: #fff;
+  border-color: #2a475e;
+  box-shadow: 0 4px 14px rgba(27, 40, 56, 0.5);
+}
+
+.btn-steam:hover {
+  background: linear-gradient(135deg, #2a475e, #66c0f4);
+  border-color: #66c0f4;
+  box-shadow: 0 6px 18px rgba(102, 192, 244, 0.35);
+}
+
+.btn-steam.btn-primary {
+  background: linear-gradient(135deg, #1b2838, #2a475e);
+  border-color: #2a475e;
+}
+
+.btn-steam.btn-primary:hover {
+  background: linear-gradient(135deg, #2a475e, #66c0f4);
+  border-color: #66c0f4;
+}
+
+/* ── 3. Inline helpers (spinner, auth, connect) ───────────────────── */
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: settingsSpinnerSpin 0.7s linear infinite;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+@keyframes settingsSpinnerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.auth-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-success);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+}
+
+.auth-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 70%, transparent);
+  flex-shrink: 0;
+}
+
+.connect-prompt {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+/* ── 4. Settings page shell ───────────────────────────────────────── */
+
+.settings-container {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: var(--space-2xl) var(--space-xl) var(--space-3xl);
+  animation: importMenuIn 220ms ease;
+}
+
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  flex-wrap: wrap;
+}
+
+.settings-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-xs) 0;
+  letter-spacing: -0.4px;
+}
+
+.settings-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+  box-shadow: 0 0 14px var(--color-accent-glow);
+}
+
+.settings-title-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.settings-desc {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+  max-width: 640px;
+}
+
+/* Sub-navigation: pill segmented control */
+.settings-nav-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: var(--space-xl);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  flex-wrap: wrap;
+}
+
+.settings-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  position: relative;
+}
+
+.settings-nav-pill:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.settings-nav-pill.active {
+  color: #fff;
+  background: var(--color-accent);
+  box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+.settings-nav-pill svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.settings-nav-pill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+  border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.settings-nav-pill.active .settings-nav-pill-count {
+  background: color-mix(in srgb, #fff 30%, transparent);
+  color: #fff;
+}
+
+/* Sections inside the settings page */
+.settings-section {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-surface) 100%, transparent),
+    var(--color-bg-secondary)
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  position: relative;
+  animation: importMenuIn 240ms ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.settings-section-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-section-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-section-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-section-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: var(--space-xs) 0 0 0;
+  line-height: 1.5;
+}
+
+/* ── 5. Theme cards with a mini-app preview ───────────────────────── */
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+
+.theme-card {
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+
+.theme-card:hover {
+  border-color: var(--color-border-light);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-card.active {
+  border-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  box-shadow:
+    0 4px 14px var(--color-accent-glow),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.theme-card-preview {
+  display: flex;
+  flex-direction: column;
+  height: 96px;
+  overflow: hidden;
+  position: relative;
+}
+
+.theme-preview-bar {
+  display: flex;
+  height: 26px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.theme-preview-color {
+  flex: 1;
+}
+
+.theme-preview-mini {
+  --themePreviewBg: var(--miniBg);
+  --themePreviewText: var(--miniText);
+  --themePreviewAccent: var(--miniAccent);
+  flex: 1;
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 4px;
+  padding: 6px;
+}
+
+.theme-preview-mini-sidebar {
+  background: var(--themePreviewBg);
+  border-radius: var(--radius-sm);
+  opacity: 0.7;
+}
+
+.theme-preview-mini-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.theme-preview-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--themePreviewBg);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  height: 14px;
+}
+
+.theme-preview-mini-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--themePreviewAccent);
+  box-shadow: 0 0 4px var(--themePreviewAccent);
+  flex-shrink: 0;
+}
+
+.theme-preview-mini-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--themePreviewText);
+  opacity: 0.4;
+  border-radius: 2px;
+}
+
+.theme-preview-mini-card {
+  flex: 1;
+  background: var(--themePreviewBg);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-end;
+  padding: 4px;
+  opacity: 0.7;
+}
+
+.theme-preview-mini-accent {
+  align-self: flex-end;
+  padding: 2px 6px;
+  background: var(--themePreviewAccent);
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+.theme-card-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.theme-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.2px;
+}
+
+.theme-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+/* ── 6. Form rows / controls ─────────────────────────────────────── */
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.settings-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.settings-input-group {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+.settings-input-group .settings-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-input {
+  flex: 1;
+  padding: 10px var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  outline: none;
+  transition: all var(--transition-fast);
+  min-width: 0;
+}
+
+.settings-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  background: var(--color-bg-secondary);
+}
+
+.settings-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.settings-select {
+  padding: 10px var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 0;
+  /* Custom chevron so the select looks consistent across browsers */
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa0b0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.settings-select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  background-color: var(--color-bg-secondary);
+}
+
+.settings-select:hover {
+  border-color: var(--color-border-light);
+}
+
+.settings-btn {
+  padding: 10px var(--space-xl);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.settings-btn:hover {
+  background: var(--color-bg-active);
+  border-color: var(--color-border-light);
+}
+
+.settings-btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.settings-btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+  padding: var(--space-xs) 0;
+  line-height: 1.5;
+}
+
+.settings-checkbox-label:hover {
+  color: var(--color-text-primary);
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-toggles-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+
+
+
+
+.settings-toggles-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.settings-toggles-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.settings-helper-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-sm);
+  line-height: 1.5;
+}
+
+/* ── 7. Integration tiles (Steam / Epic) ─────────────────────────── */
+
+.integration-tile {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-surface) 100%, transparent),
+    var(--color-bg-secondary)
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--space-xl);
+}
+
+.integration-tile::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.integration-tile.steam::before {
+  background: linear-gradient(90deg, #1b9ae0, #66c0f4);
+}
+
+.integration-tile.epic::before {
+  background: linear-gradient(90deg, #2a2a2a, #6b7280);
+}
+
+.integration-tile-body-wrap {
+  padding: var(--space-xl);
+}
+
+.integration-tile-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.integration-tile-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-accent);
+  box-shadow: 0 0 14px var(--color-accent-glow);
+}
+
+.integration-tile.steam .integration-tile-icon {
+  color: #66c0f4;
+  box-shadow: 0 0 14px rgba(102, 192, 244, 0.35);
+}
+
+.integration-tile.epic .integration-tile-icon {
+  color: #e6e6e6;
+  box-shadow: 0 0 14px rgba(230, 230, 230, 0.2);
+}
+
+.integration-tile-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.integration-tile-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.integration-tile-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.integration-tile-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.integration-tile-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.integration-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.integration-badge.active {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.integration-badge.active::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--color-success);
+  flex-shrink: 0;
+}
+
+.integration-tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.integration-tile-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-top: var(--space-md);
+}
+
+.integration-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  text-decoration: none;
+  margin-left: var(--space-sm);
+  font-weight: var(--font-weight-semibold);
+  transition: color var(--transition-fast);
+}
+
+.integration-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.integration-hint {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-normal);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* Sync result banners — used inline in the integrations tile body */
+.sync-result {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  margin-top: var(--space-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.4;
+}
+
+.sync-result.success {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.sync-result.error {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.sync-result-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-sm);
+}
+
+/* Danger zone — bottom strip that visually separates destructive
+ * actions (Disconnect) from primary actions (Save / Sync). */
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xl);
+  background: color-mix(in srgb, var(--color-danger) 5%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-danger) 25%, var(--color-border));
+  flex-wrap: wrap;
+}
+
+.danger-zone-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.danger-zone-text strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Footer line at the bottom of the integrations tab */
+.integration-footer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+  font-style: italic;
+}

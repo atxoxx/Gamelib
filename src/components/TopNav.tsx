@@ -157,7 +157,6 @@ const tabs: Tab[] = [
   { path: "/deals", label: "Deals", icon: <DealsIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
   { path: "/community", label: "Community", icon: <CommunityIcon /> },
-  { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
   { path: "/plugins", label: "Plugins", icon: <PluginsIcon /> },
 ];
 
@@ -185,6 +184,24 @@ export default function TopNav() {
             </NavLink>
           ))}
         </div>
+      </div>
+
+      {/* Contextual actions live on the far right (system-style actions
+       *  like Settings, Profile). Icon-only so they don't compete
+       *  with the primary nav for attention. The gear button picks up
+       *  the same `active` treatment as the regular tabs so the user
+       *  still sees where they are. */}
+      <div className="topnav-right">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            `topnav-btn topnav-btn-settings${isActive ? " active" : ""}`
+          }
+          aria-label="Settings"
+          title="Settings"
+        >
+          <SettingsIcon />
+        </NavLink>
       </div>
     </nav>
   );

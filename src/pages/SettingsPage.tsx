@@ -11,6 +11,8 @@ import { formatPlayTime, type Game } from "../types/game";
 interface ThemeOption {
   id: string;
   name: string;
+  // `bg` / `text` / `accent` come from the actual `:root[data-theme="<id>"]`
+  // tokens so theme-card previews stay true to the live theme.
   colors: { bg: string; text: string; accent: string };
 }
 
@@ -23,14 +25,14 @@ const themes: ThemeOption[] = [
   { id: "dracula", name: "Dracula", colors: { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" } },
 ];
 
+type SettingsTab = "appearance" | "hardware" | "integrations";
+
 export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames } = useGames();
 
-  const [activeSettingsTab, setActiveSettingsTab] = useState<
-    "appearance" | "hardware" | "integrations"
-  >("appearance");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
 
   // Steam integration state
   const [steamConfig, setSteamConfig] = useState<SteamApiConfig | null>(null);
@@ -49,7 +51,6 @@ export default function SettingsPage() {
   const [epicSyncResult, setEpicSyncResult] = useState<EpicSyncResult | null>(null);
   const [isEpicLoggingIn, setIsEpicLoggingIn] = useState(false);
   const [isEpicSyncing, setIsEpicSyncing] = useState(false);
-
 
   // Theme state
   const [currentTheme, setCurrentTheme] = useState("dark");
@@ -284,198 +285,404 @@ export default function SettingsPage() {
     }
   }
 
+  // Live count of connected integrations — drives the badge on the
+  // Integrations pill in the sub-nav. Lints nicely to 0 when neither is
+  // connected and to 2 when both are.
+  const connectedIntegrations =
+    (steamConfig ? 1 : 0) + (epicAuth.isAuthenticated ? 1 : 0);
+
   return (
     <div className="settings-container">
       <header className="settings-header">
-        <h1 className="settings-title">Settings</h1>
-        <p className="settings-desc">
-          Customize your Gamelib client appearance, hardware monitoring, and third-party integrations.
-        </p>
+        <div className="settings-header-text">
+          <h1 className="settings-title">
+            <span className="settings-title-icon">
+              <SettingsGearIcon />
+            </span>
+            Settings
+          </h1>
+          <p className="settings-desc">
+            Customize Gamelib's appearance, choose which GPU to monitor
+            during gameplay, and connect external store integrations.
+          </p>
+        </div>
       </header>
 
-      <div className="settings-tabs">
-        <button className={`settings-tab ${activeSettingsTab === "appearance" ? "active" : ""}`} onClick={() => setActiveSettingsTab("appearance")}>Appearance</button>
-        <button className={`settings-tab ${activeSettingsTab === "hardware" ? "active" : ""}`} onClick={() => setActiveSettingsTab("hardware")}>Hardware</button>
-        <button className={`settings-tab ${activeSettingsTab === "integrations" ? "active" : ""}`} onClick={() => setActiveSettingsTab("integrations")}>
-          <IntegrationsIcon /> Integrations
+      {/* Pill segmented sub-nav. Replaces the older "folder tab" look.
+       *  `.settings-nav-pill-count` shows the # of connected integrations. */}
+      <nav className="settings-nav-pills" role="tablist" aria-label="Settings sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSettingsTab === "appearance"}
+          className={`settings-nav-pill${activeSettingsTab === "appearance" ? " active" : ""}`}
+          onClick={() => setActiveSettingsTab("appearance")}
+        >
+          <PaletteIcon /> Appearance
         </button>
-      </div>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSettingsTab === "hardware"}
+          className={`settings-nav-pill${activeSettingsTab === "hardware" ? " active" : ""}`}
+          onClick={() => setActiveSettingsTab("hardware")}
+        >
+          <HardwareIcon /> Hardware
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSettingsTab === "integrations"}
+          className={`settings-nav-pill${activeSettingsTab === "integrations" ? " active" : ""}`}
+          onClick={() => setActiveSettingsTab("integrations")}
+        >
+          <IntegrationsIcon /> Integrations
+          {connectedIntegrations > 0 && (
+            <span className="settings-nav-pill-count">{connectedIntegrations}</span>
+          )}
+        </button>
+      </nav>
 
       {/* Appearance */}
       {activeSettingsTab === "appearance" && (
-      <section className="settings-section">
-        <h2 className="settings-section-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
-          Appearance Themes
-        </h2>
-        <div className="theme-grid">
-          {themes.map((theme) => {
-            const isActive = currentTheme === theme.id;
-            return (
-              <div key={theme.id} className={`theme-card${isActive ? " active" : ""}`} onClick={() => handleThemeChange(theme.id)}>
-                <div className="theme-preview-bar">
-                  <div className="theme-preview-color" style={{ backgroundColor: theme.colors.bg }}/>
-                  <div className="theme-preview-color" style={{ backgroundColor: theme.colors.text }}/>
-                  <div className="theme-preview-color" style={{ backgroundColor: theme.colors.accent }}/>
+        <section className="settings-section">
+          <header className="settings-section-header">
+            <span className="settings-section-icon"><PaletteIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Appearance themes</h2>
+              <p className="settings-section-desc">
+                Pick a theme for the entire app — covers topnav, sidebar,
+                cards, and accents. Changes apply instantly.
+              </p>
+            </div>
+          </header>
+          <div className="theme-grid">
+            {themes.map((theme) => {
+              const isActive = currentTheme === theme.id;
+              return (
+                <div
+                  key={theme.id}
+                  className={`theme-card${isActive ? " active" : ""}`}
+                  onClick={() => handleThemeChange(theme.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleThemeChange(theme.id);
+                    }
+                  }}
+                  aria-pressed={isActive}
+                >
+                  {/* Theme preview: 3-color swatch on top + a tiny
+                   *  mini-app layout (sidebar/topbar/accent button)
+                   *  below so users see what the theme will look like. */}
+                  <div
+                    className="theme-card-preview"
+                    style={
+                      {
+                        "--miniBg": theme.colors.bg,
+                        "--miniText": theme.colors.text,
+                        "--miniAccent": theme.colors.accent,
+                      } as React.CSSProperties
+                    }
+                  >
+                    <div className="theme-preview-bar">
+                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.bg }} />
+                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.text }} />
+                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.accent }} />
+                    </div>
+                    <div className="theme-preview-mini">
+                      <div className="theme-preview-mini-sidebar" />
+                      <div className="theme-preview-mini-main">
+                        <div className="theme-preview-mini-row">
+                          <span className="theme-preview-mini-dot" />
+                          <span className="theme-preview-mini-bar" />
+                        </div>
+                        <div className="theme-preview-mini-card">
+                          <span className="theme-preview-mini-accent" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="theme-card-info">
+                    <span className="theme-card-name">{theme.name}</span>
+                    {isActive && <span className="theme-active-dot" aria-hidden />}
+                  </div>
                 </div>
-                <div className="theme-card-info">
-                  <span className="theme-card-name">{theme.name}</span>
-                  {isActive && <div className="theme-active-dot"/>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>)}
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Hardware */}
       {activeSettingsTab === "hardware" && (
-      <section className="settings-section">
-        <h2 className="settings-section-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg>
-          Hardware Monitoring
-        </h2>
-        <div className="settings-row">
-          <div className="settings-control">
-            <label className="settings-label">GPU Selection</label>
-            <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-xs)", marginBottom: "var(--space-sm)" }}>
-              Select a GPU to monitor during gameplay.
-            </p>
-            <div className="settings-input-group">
-              <select className="settings-select" value={selectedGpu?.id || ""} onChange={(e) => { const gpu = availableGpus.find((g) => g.id === e.target.value); setSelectedGpu(gpu || null); showToast(gpu ? `Selected ${gpu.name}` : "GPU selection cleared", "success"); }} style={{ flex: 1 }}>
-                <option value="">-- Select a GPU --</option>
-                {availableGpus.map((gpu) => (<option key={gpu.id} value={gpu.id}>{gpu.name} ({gpu.vramMb} MB)</option>))}
-              </select>
-              <button className="settings-btn" onClick={refreshGpus}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh
-              </button>
+        <section className="settings-section">
+          <header className="settings-section-header">
+            <span className="settings-section-icon"><HardwareIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Hardware monitoring</h2>
+              <p className="settings-section-desc">
+                Choose which GPU to track during gameplay so the
+                Activity page shows the right metrics.
+              </p>
+            </div>
+          </header>
+          <div className="settings-row">
+            <div className="settings-control">
+              <label className="settings-label">GPU selection</label>
+              <p className="settings-helper-lead">
+                Select a GPU to monitor during gameplay. Stats only
+                appear when a game is running.
+              </p>
+              <div className="settings-input-group">
+                <select
+                  className="settings-select"
+                  value={selectedGpu?.id || ""}
+                  onChange={(e) => {
+                    const gpu = availableGpus.find((g) => g.id === e.target.value);
+                    setSelectedGpu(gpu || null);
+                    showToast(
+                      gpu ? `Selected ${gpu.name}` : "GPU selection cleared",
+                      "success"
+                    );
+                  }}
+                  aria-label="Select GPU to monitor"
+                >
+                  <option value="">— Select a GPU —</option>
+                  {availableGpus.map((gpu) => (
+                    <option key={gpu.id} value={gpu.id}>
+                      {gpu.name} ({gpu.vramMb} MB)
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="settings-btn" onClick={refreshGpus}>
+                  <RefreshIcon /> Refresh
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>)}
+        </section>
+      )}
 
       {/* Integrations */}
       {activeSettingsTab === "integrations" && (
-      <section className="settings-section">
-        <h2 className="settings-section-title">
-          <IntegrationsIcon /> Integrations
-        </h2>
-
-        {/* ── Steam ── */}
-        <div className="integration-card">
-          <div className="integration-card-header">
-            <SteamIcon />
-            <div>
-              <h3 className="integration-card-name">Steam</h3>
-              <p className="integration-card-desc">
-                Sync your library, playtime, and achievements using a free Steam Web API key.
+        <section className="settings-section">
+          <header className="settings-section-header">
+            <span className="settings-section-icon"><IntegrationsIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Integrations</h2>
+              <p className="settings-section-desc">
+                Connect external store accounts to import your owned
+                games, playtime, and achievements into Gamelib.
               </p>
             </div>
-            {steamConfig && <span className="integration-badge active">Connected</span>}
-          </div>
+          </header>
 
-          <div className="integration-card-body">
-            <div className="settings-row">
-              <div className="settings-control">
-                <label className="settings-label">
-                  Steam Web API Key
-                  <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="integration-link">Get your free key →</a>
-                </label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  value={steamApiKey}
-                  onChange={(e) => setSteamApiKey(e.target.value)}
-                  placeholder="Your Steam Web API key"
-                />
+          {/* ── Steam ── */}
+          <div className="integration-tile steam">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><SteamIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">Steam</h3>
+                    {steamConfig && (
+                      <span className="integration-badge active">Connected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Sync your library, playtime, and achievements using
+                    a free Steam Web API key.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="settings-row">
-              <div className="settings-control">
-                <label className="settings-label">
-                  Steam ID (64-bit)
-                  <span className="integration-hint">Found in your profile URL: steamcommunity.com/profiles/&lt;ID&gt;</span>
-                </label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  value={steamId}
-                  onChange={(e) => setSteamId(e.target.value)}
-                  placeholder="76561198123456789"
-                />
-              </div>
-            </div>
-
-            <div className="integration-card-actions">
-              {!steamConfig ? (
-                <button className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
-                  <SteamIcon /> Save &amp; Connect
-                </button>
-              ) : (
-                <>
-                  <button className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
-                    <SteamIcon /> Update
-                  </button>
-                  <button className="btn btn-steam" onClick={handleSyncNow} disabled={isSyncing}>
-                    {isSyncing ? <><span className="spinner"/> Syncing...</> : "Sync Now"}
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={handleDisconnect}>Disconnect</button>
-                </>
-              )}
-            </div>
-
-            {syncResult && (
-              <div className={`sync-result ${syncResult.success ? "success" : "error"}`} style={{ marginTop: "var(--space-md)" }}>
-                {syncResult.success
-                  ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates · ${syncResult.achievementsSynced ?? 0} achievement sets`
-                  : `✗ ${syncResult.error || "Sync failed"}`}
-              </div>
-            )}
-
-            {steamConfig && (
-              <div style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
-                <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.autoSyncOnLaunch} onChange={(e) => { const u = { ...steamSettings, autoSyncOnLaunch: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Auto-sync on launch</span></label>
-                <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncPlaytime} onChange={(e) => { const u = { ...steamSettings, syncPlaytime: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync playtime</span></label>
-                <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncAchievements} onChange={(e) => { const u = { ...steamSettings, syncAchievements: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync achievements</span></label>
-                <label className="settings-checkbox-label" style={{ opacity: 0.7 }}><input type="checkbox" checked disabled /><span>IGDB metadata loads automatically when you open a game</span></label>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Epic Games ── */}
-        <div className="integration-card">
-          <div className="integration-card-header">
-            <EpicIcon />
-            <div>
-              <h3 className="integration-card-name">Epic Games</h3>
-              <p className="integration-card-desc">
-                Import your owned Epic Games Store library. Only owned, launchable games are imported.
-              </p>
-            </div>
-            {epicAuth.isAuthenticated && <span className="integration-badge active">Connected</span>}
-          </div>
-
-          <div className="integration-card-body">
-            {epicAuth.isAuthenticated ? (
-              <>
-                <div className="auth-status" style={{ marginBottom: "var(--space-md)" }}>
-                  <span>
-                    Connected{epicAuth.displayName ? ` as ${epicAuth.displayName}` : ""}
-                    {epicAuth.accountId ? ` (ID: ${epicAuth.accountId.slice(0, 8)}...)` : ""}
-                  </span>
+              <div className="integration-tile-body">
+                <div className="settings-control">
+                  <label className="settings-label">
+                    Steam Web API Key
+                    <a
+                      href="https://steamcommunity.com/dev/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="integration-link"
+                    >
+                      Get your free key →
+                    </a>
+                  </label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={steamApiKey}
+                    onChange={(e) => setSteamApiKey(e.target.value)}
+                    placeholder="Your Steam Web API key"
+                    autoComplete="off"
+                  />
                 </div>
 
-                <div className="integration-card-actions">
-                  <button className="btn btn-primary" onClick={handleEpicSync} disabled={isEpicSyncing}>
-                    {isEpicSyncing ? <><span className="spinner"/> Syncing...</> : "Sync Library"}
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={handleEpicDisconnect}>Disconnect</button>
+                <div className="settings-control">
+                  <label className="settings-label">
+                    Steam ID (64-bit)
+                    <span className="integration-hint">
+                      Found in your profile URL:
+                      steamcommunity.com/profiles/<var>ID</var>
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={steamId}
+                    onChange={(e) => setSteamId(e.target.value)}
+                    placeholder="76561198123456789"
+                    autoComplete="off"
+                  />
+                </div>
+
+                <div className="integration-tile-actions">
+                  {!steamConfig ? (
+                    <button type="button" className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
+                      <SteamIcon /> Save &amp; Connect
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
+                        <SteamIcon /> Update
+                      </button>
+                      <button type="button" className="btn btn-steam" onClick={handleSyncNow} disabled={isSyncing}>
+                        {isSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Now"}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {syncResult && (
+                  <div className={`sync-result ${syncResult.success ? "success" : "error"}`}>
+                    {syncResult.success
+                      ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates · ${syncResult.achievementsSynced ?? 0} achievement sets`
+                      : `✗ ${syncResult.error || "Sync failed"}`}
+                  </div>
+                )}
+
+                {steamConfig && (
+                  <div className="settings-toggles-group">
+                    <p className="settings-toggles-title">Sync behaviour</p>
+                    <label className="settings-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={steamSettings.autoSyncOnLaunch}
+                        onChange={(e) => {
+                          const u = { ...steamSettings, autoSyncOnLaunch: e.target.checked };
+                          setSteamSettings(u);
+                          localStorage.setItem("gamelib-steam-settings", JSON.stringify(u));
+                        }}
+                      />
+                      <span>Auto-sync on launch</span>
+                    </label>
+                    <label className="settings-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={steamSettings.syncPlaytime}
+                        onChange={(e) => {
+                          const u = { ...steamSettings, syncPlaytime: e.target.checked };
+                          setSteamSettings(u);
+                          localStorage.setItem("gamelib-steam-settings", JSON.stringify(u));
+                        }}
+                      />
+                      <span>Sync playtime</span>
+                    </label>
+                    <label className="settings-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={steamSettings.syncAchievements}
+                        onChange={(e) => {
+                          const u = { ...steamSettings, syncAchievements: e.target.checked };
+                          setSteamSettings(u);
+                          localStorage.setItem("gamelib-steam-settings", JSON.stringify(u));
+                        }}
+                      />
+                      <span>Sync achievements</span>
+                    </label>
+                    <label className="settings-checkbox-label settings-checkbox-label--disabled">
+                      <input type="checkbox" checked disabled />
+                      <span>IGDB metadata loads automatically when you open a game</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {steamConfig && (
+              <div className="danger-zone">
+                <p className="danger-zone-text">
+                  <strong>Disconnect Steam.</strong> Removes your API key
+                  and Steam ID locally — your Steam account is untouched.
+                </p>
+                <button type="button" className="btn btn-danger btn-sm" onClick={handleDisconnect}>
+                  Disconnect
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Epic Games ── */}
+          <div className="integration-tile epic">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><EpicIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">Epic Games</h3>
+                    {epicAuth.isAuthenticated && (
+                      <span className="integration-badge active">Connected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Import your owned Epic Games Store library. Only
+                    owned, launchable games are imported.
+                  </p>
+                </div>
+              </div>
+
+              <div className="integration-tile-body">
+                {epicAuth.isAuthenticated ? (
+                  <div className="auth-status">
+                    Connected
+                    {epicAuth.displayName ? ` as ${epicAuth.displayName}` : ""}
+                    {epicAuth.accountId ? ` (ID: ${epicAuth.accountId.slice(0, 8)}…)` : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    Log in with your Epic Games account to import your
+                    library. A login window will open inside the app.
+                  </p>
+                )}
+
+                <div className="integration-tile-actions">
+                  {epicAuth.isAuthenticated ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleEpicSync}
+                      disabled={isEpicSyncing}
+                    >
+                      {isEpicSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Library"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleEpicLogin}
+                      disabled={isEpicLoggingIn}
+                    >
+                      {isEpicLoggingIn ? <><span className="spinner" /> Waiting for login…</> : "Connect Epic Account"}
+                    </button>
+                  )}
                 </div>
 
                 {epicSyncResult && (
-                  <div className={`sync-result ${epicSyncResult.success ? "success" : "error"}`} style={{ marginTop: "var(--space-md)" }}>
+                  <div className={`sync-result ${epicSyncResult.success ? "success" : "error"}`}>
                     {epicSyncResult.success
                       ? `✓ Imported ${epicSyncResult.gamesImported} games · ${epicSyncResult.gamesSkipped} skipped`
                       : `✗ ${epicSyncResult.errors?.[0] || "Sync failed"}`}
@@ -483,59 +690,146 @@ export default function SettingsPage() {
                 )}
 
                 {epicAuth.lastSync && (
-                  <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-sm)" }}>
+                  <p className="sync-result-time">
                     Last sync: {new Date(epicAuth.lastSync * 1000).toLocaleString()}
                   </p>
                 )}
-              </>
-            ) : (
-              <>
-                <p className="connect-prompt" style={{ marginBottom: "var(--space-md)" }}>
-                  Log in with your Epic Games account to import your library.
-                  A login window will open inside the app.
+              </div>
+            </div>
+
+            {epicAuth.isAuthenticated && (
+              <div className="danger-zone">
+                <p className="danger-zone-text">
+                  <strong>Disconnect Epic Games.</strong> Clears local
+                  tokens — your Epic account is unaffected.
                 </p>
-                <button className="btn btn-primary" onClick={handleEpicLogin} disabled={isEpicLoggingIn}>
-                  {isEpicLoggingIn ? <><span className="spinner"/> Waiting for login...</> : "Connect Epic Account"}
+                <button type="button" className="btn btn-danger btn-sm" onClick={handleEpicDisconnect}>
+                  Disconnect
                 </button>
-                <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-sm)" }}>
-                  Authentication tokens are stored locally and never shared.
-                </p>
-              </>
+              </div>
             )}
           </div>
-        </div>
 
-        <p className="integration-footer">
-          More integrations coming soon — GOG and more.
-        </p>
-      </section>)}
+          <p className="integration-footer">
+            More integrations coming soon — GOG and more.
+          </p>
+        </section>
+      )}
     </div>
+  );
+}
+
+/* ── Inline icons ─────────────────────────────────────────────────── */
+
+function RefreshIcon() {
+  return (
+    <svg
+      className="settings-btn-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
   );
 }
 
 function SteamIcon() {
   return (
-    <svg className="icon-steam" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm-3-4c0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3-3 1.34-3 3z"/>
+    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm-3-4c0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3-3 1.34-3 3z" />
     </svg>
   );
 }
 
 function EpicIcon() {
   return (
-    <svg className="icon-steam" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-      <path d="M12 2L2 7l1.5 9L12 22l8.5-6L22 7 12 2zm0 2.5l7.5 4-1.3 7.8L12 19.5l-6.2-3.2L4.5 8.5 12 4.5z"/>
+    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+      <path d="M12 2L2 7l1.5 9L12 22l8.5-6L22 7 12 2zm0 2.5l7.5 4-1.3 7.8L12 19.5l-6.2-3.2L4.5 8.5 12 4.5z" />
     </svg>
   );
 }
 
 function IntegrationsIcon() {
   return (
-    <svg className="icon-steam" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-      <rect x="2" y="2" width="7" height="7" rx="1"/>
-      <rect x="15" y="2" width="7" height="7" rx="1"/>
-      <rect x="2" y="15" width="7" height="7" rx="1"/>
-      <rect x="15" y="15" width="7" height="7" rx="1"/>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="14"
+      height="14"
+      aria-hidden
+    >
+      <rect x="2" y="2" width="7" height="7" rx="1" />
+      <rect x="15" y="2" width="7" height="7" rx="1" />
+      <rect x="2" y="15" width="7" height="7" rx="1" />
+      <rect x="15" y="15" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function PaletteIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      <path d="M2 12h20" />
+    </svg>
+  );
+}
+
+function HardwareIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="2" width="20" height="20" rx="2" />
+      <path d="M7 2v20" />
+      <path d="M17 2v20" />
+      <path d="M2 12h20" />
+      <path d="M2 7h5" />
+      <path d="M2 17h5" />
+      <path d="M17 17h5" />
+      <path d="M17 7h5" />
+    </svg>
+  );
+}
+
+function SettingsGearIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
