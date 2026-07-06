@@ -14,6 +14,12 @@ export interface Game {
   coverArtUrl?: string; // base64 data URL for cover art image (used in library cards)
   iconUrl?: string; // base64 data URL for small square icon (used in sidebar)
   notes?: string; // user notes about the game
+  /** Total disk footprint of the game's root folder in bytes (undefined = not yet measured). */
+  sizeBytes?: number;
+  /** ISO-8601 timestamp of the last successful size detection, used for the "Last seen" staleness UI. */
+  sizeDetectedAt?: string;
+  /** The folder the size was measured against (or the user picked). Auditable from the size-edit modal. */
+  sizeRootPath?: string;
   /** Steam AppID if sourced from Steam (used for sync and store links) */
   steamAppId?: number;
   /** Epic Games Store namespace (used for sync and store links) */
@@ -334,6 +340,22 @@ export function addSessionTime(playTime: string, elapsedSeconds: number): string
   const currentMinutes = parsePlayTime(playTime);
   const sessionMinutes = Math.round(elapsedSeconds / 60);
   return formatPlayTime(currentMinutes + sessionMinutes);
+}
+
+/**
+ * Format a size in bytes as a human-readable GB string with 1 decimal.
+ *
+ * Display policy is locked from the spec: always GB / 1 decimal — even for
+ * sub-GB games (which render as `0.1 GB`). Decimal (SI) GB, not GiB — keeps
+ * the UI consistent with how Steam and the OS report folder size.
+ *
+ * `bytes <= 0` (or undefined / null) renders as `0.0 GB` so callers don't
+ * have to special-case empty rows.
+ */
+export function formatSize(bytes: number | undefined | null): string {
+  if (bytes == null || bytes <= 0) return "0.0 GB";
+  const gb = bytes / 1_000_000_000;
+  return `${gb.toFixed(1)} GB`;
 }
 
 // ─── Activity & Performance Types ──────────────────────────────────────────────

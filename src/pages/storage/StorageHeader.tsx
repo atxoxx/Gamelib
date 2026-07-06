@@ -1,0 +1,97 @@
+import { useMemo } from "react";
+import type { Game } from "../../types/game";
+import { formatSize } from "../../types/game";
+import {
+  driveBuckets,
+  platformBuckets,
+  sizeCoverage,
+  totalBytes,
+  type StorageBucket,
+} from "./utils";
+
+interface Props {
+  games: Game[];
+}
+
+/** Phase-5 Storage header — totals card + per-platform + per-drive
+ *  breakdown bars. Pure presentational: receives the unsorted games
+ *  array (the orchestrator handles sorting) and aggregates internally. */
+export function StorageHeader({ games }: Props) {
+  const total = useMemo(() => totalBytes(games), [games]);
+  const coverage = useMemo(() => sizeCoverage(games), [games]);
+  const platforms = useMemo(() => platformBuckets(games), [games]);
+  const drives = useMemo(() => driveBuckets(games), [games]);
+  const uncategorized = coverage.unsized;
+
+  return (
+    <header className="storage__header">
+      <div className="storage__header-left">
+        <h1 className="storage__title">Storage</h1>
+        <p className="storage__subtitle">
+          Disk usage across every installed game, broken down by platform and drive.
+        </p>
+      </div>
+
+      <div className="storage__header-grid">
+        {/* Totals card */}
+        <section className="storage__card storage__card--totals">
+          <span className="storage__card-label">Tracked size</span>
+          <span className="storage__card-value">{formatSize(total)}</span>
+          <span className="storage__card-meta">
+            {coverage.sized} sized game{coverage.sized === 1 ? "" : "s"}
+            {uncategorized > 0 &&
+              `  ${"·"}  ${uncategorized} missing${uncategorized === 1 ? "" : "s"}`}
+          </span>
+        </section>
+
+        <BreakdownCard title="By platform" buckets={platforms} total={total} />
+        <BreakdownCard title="By drive" buckets={drives} total={total} />
+      </div>
+    </header>
+  );
+}
+
+/** One breakdown card. Renders an empty-state row when no sized
+ *  games are bucketed into this dimension. */
+function BreakdownCard({
+  title,
+  buckets,
+  total,
+}: {
+  title: string;
+  buckets: StorageBucket[];
+  total: number;
+}) {
+  return (
+    <section className="storage__card storage__card--breakdown">
+      <span className="storage__card-label">{title}</span>
+      {buckets.length === 0 ? (
+        <span className="storage__breakdown-empty">No measurements yet.</span>
+      ) : (
+        <ul className="storage__breakdown-list">
+          {buckets.map((b) => {
+            const pct = total > 0 ? (b.bytes / total) * 100 : 0;
+            return (
+              <li
+                key={b.label}
+                className="storage__breakdown-row"
+                title={`${b.label}: ${formatSize(b.bytes)} across ${b.count} game${b.count === 1 ? "" : "s"}`}
+              >
+                <span className="storage__breakdown-label">{b.label}</span>
+                <div className="storage__breakdown-track">
+                  <div
+                    className="storage__breakdown-fill"
+                    style={{ width: `${pct.toFixed(1)}%` }}
+                  />
+                </div>
+                <span className="storage__breakdown-value">
+                  {formatSize(b.bytes)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}

@@ -7,7 +7,7 @@ import html2canvas from "html2canvas";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify, formatSize } from "../types/game";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
@@ -353,6 +353,12 @@ function GameDetail({ game }: { game: Game }) {
   const [editHero, setEditHero] = useState(game.bannerUrl || "");
   const [editLogo, setEditLogo] = useState(game.logoUrl || "");
   const [editNotes, setEditNotes] = useState(game.notes || "");
+
+  // Size (Storage tab) -- display-only here; bytes are computed by the Rust
+  // detect_game_size command (see src-tauri/src/size.rs).
+  const [editSizeBytes, setEditSizeBytes] = useState<number | undefined>(game.sizeBytes);
+  const [editSizeRootPath, setEditSizeRootPath] = useState<string | undefined>(game.sizeRootPath);
+  const [detectingSize, setDetectingSize] = useState(false);
 
   // Extended metadata edit states
   const [editDescription, setEditDescription] = useState(game.description || "");
@@ -800,10 +806,55 @@ function GameDetail({ game }: { game: Game }) {
     return lbImages.filter((i) => i.category === lbSelectedCategory);
   }
 
+  // Pick a folder, walk it, and write the resulting byte total into
+  // edit state. Reuses the Rust detect_game_size command with the
+  // chosen folder supplied as rootOverride.
+  async function openFolderAndDetectSize() {
+    if (detectingSize) return;
+    setDetectingSize(true);
+    try {
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        title: "Select game folder",
+      });
+      if (!picked || Array.isArray(picked)) return;
+      const folder = picked as string;
+      const result = await invoke<{
+        sizeBytes: number;
+        rootPath: string;
+      }>("detect_game_size", {
+        exePath: "",
+        gameName: (editName || game.name || "").trim(),
+        rootOverride: folder,
+      });
+      setEditSizeBytes(result.sizeBytes);
+      setEditSizeRootPath(result.rootPath);
+      showToast(`Detected ${(result.sizeBytes / 1e9).toFixed(2)} GB`, "success");
+    } catch (err) {
+      console.error("detect_game_size failed", err);
+      showToast(`Could not read folder size: ${err}`, "error");
+    } finally {
+      setDetectingSize(false);
+    }
+  }
+
+  function clearSize() {
+    setEditSizeBytes(undefined);
+    setEditSizeRootPath(undefined);
+  }
+
   function saveEdits() {
     const newName = editName.trim() || game.name;
     const newPlatform = editPlatform.trim() || game.platform;
     const newIcon = editIcon || undefined;
+    // Size: stamp sizeDetectedAt when a non-empty value is present,
+    // clear it whenever the user removes the size.
+    const newSizeBytes = editSizeBytes;
+    const newSizeRootPath = editSizeRootPath;
+    const newSizeDetectedAt = editSizeBytes != null
+      ? new Date().toISOString()
+      : undefined;
     const newCover = editCover || undefined;
     const newHero = editHero || undefined;
     const newLogo = editLogo || undefined;
@@ -880,6 +931,9 @@ function GameDetail({ game }: { game: Game }) {
       logoUrl: newLogo,
       notes: newNotes,
       description: newDescription,
+      sizeBytes: newSizeBytes,
+      sizeRootPath: newSizeRootPath,
+      sizeDetectedAt: newSizeDetectedAt,
       developer: newDeveloper,
       publisher: newPublisher,
       releaseDate: newReleaseDate,
@@ -1398,6 +1452,14 @@ function GameDetail({ game }: { game: Game }) {
                   <span className="info-label">Play Time</span>
                   <span className="info-value">{game.playTime}</span>
                 </div>
+                {game.sizeBytes != null && (
+                  <div className="info-item">
+                    <span className="info-label">Size</span>
+                    <span className="info-value size-clickable" onClick={() => setEditing(true)} title="Edit size">
+                      {formatSize(game.sizeBytes)}
+                    </span>
+                  </div>
+                )}
                 <div className="info-item">
                   <span className="info-label">Added</span>
                   <span className="info-value">{addedDate}</span>
@@ -1824,6 +1886,40 @@ function GameDetail({ game }: { game: Game }) {
 
               <div className="edit-form">
                 <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+                  <div className="edit-field full-width" data-storage-row>
+                    <label className="edit-label">Size</label>
+                    <div className="size-edit-row">
+                      <input
+                        className="edit-input size-readonly"
+                        type="text"
+                        readOnly
+                        value={editSizeBytes != null ? formatSize(editSizeBytes) : "Not set"}
+                        placeholder="Not set"
+                      />
+                      <button
+                        type="button"
+                        className="edit-btn edit-btn-secondary"
+                        onClick={openFolderAndDetectSize}
+                        disabled={detectingSize}
+                        title="Pick a folder and recalculate size"
+                      >
+                        {detectingSize ? "Detecting..." : "Auto-detect"}
+                      </button>
+                      <button
+                        type="button"
+                        className="edit-btn edit-btn-ghost"
+                        onClick={clearSize}
+                        disabled={editSizeBytes == null}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {editSizeRootPath && (
+                      <span className="size-edit-hint" title={editSizeRootPath}>
+                        {editSizeRootPath}
+                      </span>
+                    )}
+                  </div>
                   <div className="edit-field">
                     <label className="edit-label" htmlFor="edit-name">Name</label>
                     <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
