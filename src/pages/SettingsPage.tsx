@@ -6,7 +6,8 @@ import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
-import { formatPlayTime, type Game } from "../types/game";
+import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
+import { useSizeUnit } from "../hooks/useSizeUnit";
 
 interface ThemeOption {
   id: string;
@@ -31,6 +32,7 @@ export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames } = useGames();
+  const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
 
@@ -165,6 +167,13 @@ export default function SettingsPage() {
             storeSource: "steam" as const,
             coverArtUrl: steamCdnCover,
             bannerUrl: steamCdnHero,
+            // Size fields stamped by the Rust sync flow. `sizeDetectedAt`
+            // is left undefined when no size was measured (uninstalled
+            // game, exe resolution failed, or the disk walk errored) so
+            // the Storage tab's "Not set" pill renders correctly.
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt: entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
           });
         }
         if (newGames.length > 0) {
@@ -250,6 +259,12 @@ export default function SettingsPage() {
             epicNamespace: entry.namespace,
             epicCatalogItemId: entry.catalogItemId,
             coverArtUrl: entry.coverUrl,
+            // Size fields stamped by the Rust sync flow. See the Steam
+            // block above for the rationale on `sizeDetectedAt` being
+            // gated on `sizeBytes !== undefined`.
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt: entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
           });
         }
         if (newGames.length > 0) {
@@ -469,6 +484,42 @@ export default function SettingsPage() {
                 <button type="button" className="settings-btn" onClick={refreshGpus}>
                   <RefreshIcon /> Refresh
                 </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Storage — display unit for the Storage tab's size column.
+           *  Lives under Hardware because it controls how physical
+           *  resources are reported, not how the UI looks. */}
+          <div className="settings-row settings-row--spaced">
+            <div className="settings-control">
+              <label className="settings-label">Storage size unit</label>
+              <p className="settings-helper-lead">
+                Choose how disk sizes are displayed in the Storage tab.
+                <strong> GB</strong> is decimal (1 GB = 1,000,000,000 bytes — matches
+                Steam and the OS file-explorer).
+                <strong> GiB</strong> is binary (1 GiB = 1,073,741,824 bytes — matches
+                <code> df -h</code> and Windows Task Manager).
+              </p>
+              <div className="settings-input-group">
+                <select
+                  className="settings-select"
+                  value={sizeUnit}
+                  onChange={(e) => {
+                    const next = e.target.value as SizeUnit;
+                    setSizeUnit(next);
+                    showToast(
+                      next === "gb"
+                        ? "Storage sizes now in GB (decimal)"
+                        : "Storage sizes now in GiB (binary)",
+                      "success"
+                    );
+                  }}
+                  aria-label="Select storage size unit"
+                >
+                  <option value="gb">GB — decimal (1,000,000,000 bytes)</option>
+                  <option value="gib">GiB — binary (1,073,741,824 bytes)</option>
+                </select>
               </div>
             </div>
           </div>

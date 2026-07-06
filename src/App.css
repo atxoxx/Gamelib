@@ -30,6 +30,7 @@
   --color-warning: #ffab00;
   --color-danger: #ff5252;
   --color-info: #448aff;
+  --color-stale: #f5b76b;
 
   /* Spacing Scale */
   --space-xs: 4px;
@@ -100,6 +101,7 @@
   --color-accent: #7c3aed;
   --color-accent-hover: #6d28d9;
   --color-accent-glow: rgba(124, 58, 237, 0.15);
+  --color-stale: #b8780a;
 }
 
 /* Nord Theme Override */
@@ -3108,6 +3110,10 @@
   flex-direction: column;
   gap: var(--space-md);
 }
+.settings-row--spaced {
+  margin-top: var(--space-xl);
+}
+
 
 .settings-control {
   display: flex;
@@ -7418,5 +7424,51 @@
   .splashscreen-status-dots span {
     animation: none;
   }
+}
+
+/* ==============================
+   Size field (Info card + Edit modal) -- Phase 3
+   ============================== */
+
+/* The Size cell in the Info card: a clickable span that opens the
+ * edit modal. The dashed underline appears on hover, matching the
+ * "this is editable" affordance used elsewhere in the app. */
+.size-clickable {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.size-clickable:hover {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+/* Horizontal row inside the Size field: read-only input + buttons
+ * (Auto-detect, Clear). Wraps on narrow viewports. */
+.size-edit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* Read-only input that shows the formatted size ("12.34 GB" / "Not set"). */
+.size-readonly {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+
+/* Hint line below the input that surfaces the detected root path
+ * (truncated with ellipsis; full path is exposed via title=). */
+.size-edit-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 

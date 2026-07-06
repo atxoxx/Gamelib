@@ -223,6 +223,34 @@ export const VIEW_DENSITIES: readonly ViewDensity[] = [
   "cinematic",
 ] as const;
 
+// ─── Size Unit ──────────────────────────────────────────────────────────────
+
+/**
+ * User-selectable display unit for disk sizes on the Storage tab.
+ *
+ *   - `gb`  : decimal SI gigabytes (1 GB = 1,000,000,000 bytes).
+ *             Matches how Steam, the Windows Explorer Properties
+ *             dialog, and most modern OSes report folder size. The
+ *             locked default for backward compat.
+ *   - `gib` : binary gibibytes  (1 GiB = 1,073,741,824 bytes).
+ *             Matches how `df -h` and Task Manager (Windows 10+) report
+ *             sizes and is more accurate when summing raw byte counts.
+ *
+ * The label in the rendered string is uppercase (`"GB"` / `"GIB"`),
+ * matching the spec convention. The choice is persisted to localStorage
+ * and respected by every `formatSize()` call site across the app.
+ */
+export type SizeUnit = "gb" | "gib";
+
+/** localStorage key for the user's chosen size unit. */
+export const SIZE_UNIT_STORAGE_KEY = "gamelib_size_unit_v1";
+
+/** Default unit when nothing is stored (or stored value is invalid). */
+export const DEFAULT_SIZE_UNIT: SizeUnit = "gb";
+
+/** All valid size unit values, for runtime validation in the hook. */
+export const SIZE_UNITS: readonly SizeUnit[] = ["gb", "gib"] as const;
+
 // ─── Wishlist ──────────────────────────────────────────────────────────────────
 
 /**
@@ -343,19 +371,29 @@ export function addSessionTime(playTime: string, elapsedSeconds: number): string
 }
 
 /**
- * Format a size in bytes as a human-readable GB string with 1 decimal.
+ * Format a size in bytes as a human-readable string with 1 decimal.
  *
- * Display policy is locked from the spec: always GB / 1 decimal — even for
- * sub-GB games (which render as `0.1 GB`). Decimal (SI) GB, not GiB — keeps
- * the UI consistent with how Steam and the OS report folder size.
+ * Display policy: 1-decimal, unit-suffixed. The unit defaults to `gb`
+ * (decimal SI — 1 GB = 1,000,000,000 bytes) for backward compat with
+ * every existing call site; pass `"gib"` to render binary gibibytes
+ * (1 GiB = 1,073,741,824 bytes) when the user toggles the size-unit
+ * setting in Settings. The label is always uppercase to match the
+ * spec convention.
  *
- * `bytes <= 0` (or undefined / null) renders as `0.0 GB` so callers don't
- * have to special-case empty rows.
+ * `bytes <= 0` (or undefined / null) renders as `0.0 <UNIT>` so callers
+ * don't have to special-case empty rows.
  */
-export function formatSize(bytes: number | undefined | null): string {
-  if (bytes == null || bytes <= 0) return "0.0 GB";
-  const gb = bytes / 1_000_000_000;
-  return `${gb.toFixed(1)} GB`;
+export function formatSize(
+  bytes: number | undefined | null,
+  unit: SizeUnit = DEFAULT_SIZE_UNIT
+): string {
+  // IEC binary prefix is "GiB" (capital G, lowercase iB) — NOT "GIB".
+  // Hardcode the label so the user-facing string matches the spec
+  // convention regardless of how `unit` is cased internally.
+  const label = unit === "gib" ? "GiB" : "GB";
+  if (bytes == null || bytes <= 0) return `0.0 ${label}`;
+  const divisor = unit === "gib" ? 1_073_741_824 : 1_000_000_000;
+  return `${(bytes / divisor).toFixed(1)} ${label}`;
 }
 
 // ─── Activity & Performance Types ──────────────────────────────────────────────

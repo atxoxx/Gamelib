@@ -478,3 +478,50 @@
   line-height: 1.5;
   color: var(--text-muted, #8a93a6);
 }
+
+/* ── Bulk Recalculate bar (Phase 6) ────────────────────────────────── */
+
+.storage__bulk-recalc {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 4px;
+}
+
+.storage__bulk-recalc--running {
+  /* Same flex layout as the idle button; the running variant just
+   * swaps the primary CTA for a progress + Stop pair. */
+}
+
+.storage__bulk-progress {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-primary, #f4f5f7);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Stale path indicator (Phase 7) ───────────────────────────── */
+
+.storage__row--stale {
+  border-left: 3px solid color-mix(in srgb, var(--color-stale) 55%, transparent);
+  background: color-mix(in srgb, var(--color-stale) 4%, transparent);
+}
+
+.storage__row--stale:hover {
+  border-color: color-mix(in srgb, var(--color-stale) 70%, transparent);
+  border-left-color: color-mix(in srgb, var(--color-stale) 85%, transparent);
+}
+
+.storage__row--stale.storage__row--expanded {
+  background: color-mix(in srgb, var(--color-stale) 6%, transparent);
+}
+
+.storage__row-detected--stale {
+  color: var(--color-stale);
+  font-weight: 600;
+}
+
+.storage__card-meta-stale {
+  color: var(--color-stale);
+  font-weight: 600;
+}

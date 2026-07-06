@@ -3,10 +3,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useGames } from "../../context/GameContext";
 import { useToast } from "../../context/ToastContext";
+import { useSizeUnit } from "../../hooks/useSizeUnit";
 import { formatSize, type Game } from "../../types/game";
 
 interface Props {
   game: Game;
+  /** When true, the row's `sizeRootPath` no longer resolves on disk.
+   *  The row renders a stale indicator + a "Re-link" CTA in its
+   *  expanded panel. */
+  stale?: boolean;
+  /** Fired after the row's sizeRootPath/sizeBytes update successfully.
+   *  The StoragePage orchestrator uses this to refresh the per-row
+   *  staleness check (the new path may or may not exist yet). */
+  onSizeUpdated?: () => void;
 }
 
 interface SizeDetectionResult {
@@ -22,9 +31,10 @@ interface SizeDetectionResult {
  *  Tauri command convention from earlier work -- args are camelCase on
  *  the JS side (`exePath`, `gameName`, `rootOverride`) and map to the
  *  snake_case Rust parameters via Tauri's default rename behavior. */
-export function StorageRow({ game }: Props) {
+export function StorageRow({ game, stale = false, onSizeUpdated }: Props) {
   const { updateGame } = useGames();
   const { showToast } = useToast();
+  const { unit } = useSizeUnit();
   const [expanded, setExpanded] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const hasSize = game.sizeBytes != null && game.sizeBytes > 0;
@@ -54,8 +64,9 @@ export function StorageRow({ game }: Props) {
         sizeRootPath: result.rootPath,
         sizeDetectedAt: new Date().toISOString(),
       });
+      onSizeUpdated?.();
       showToast(
-        `Detected ${(result.sizeBytes / 1_000_000_000).toFixed(2)} GB for ${game.name}`,
+        `Detected ${formatSize(result.sizeBytes, unit)} for ${game.name}`,
         "success"
       );
     } catch (err) {
@@ -77,7 +88,7 @@ export function StorageRow({ game }: Props) {
 
   return (
     <li
-      className={`storage__row${expanded ? " storage__row--expanded" : ""}`}
+      className={`storage__row${expanded ? " storage__row--expanded" : ""}${stale ? " storage__row--stale" : ""}`}
       data-game-id={game.id}
     >
       {/* Collapsed row summary */}
@@ -107,7 +118,7 @@ export function StorageRow({ game }: Props) {
           {game.platform || "Unknown"}
         </span>
         {isSized ? (
-          <span className="storage__row-size">{formatSize(game.sizeBytes)}</span>
+          <span className="storage__row-size">{formatSize(game.sizeBytes, unit)}</span>
         ) : (
           <button
             type="button"
@@ -121,8 +132,17 @@ export function StorageRow({ game }: Props) {
             Set size
           </button>
         )}
-        <span className="storage__row-detected" title={game.sizeDetectedAt ?? ""}>
-          {formatTimestamp(game.sizeDetectedAt)}
+        <span
+          className={`storage__row-detected${stale ? " storage__row-detected--stale" : ""}`}
+          title={
+            stale
+              ? `Last seen ${formatTimestamp(game.sizeDetectedAt, true)}`
+              : game.sizeDetectedAt ?? ""
+          }
+        >
+          {stale
+            ? `Last seen: ${formatTimestamp(game.sizeDetectedAt)}`
+            : formatTimestamp(game.sizeDetectedAt)}
         </span>
         <span
           className={`storage__row-chevron${expanded ? " storage__row-chevron--open" : ""}`}
@@ -166,8 +186,13 @@ export function StorageRow({ game }: Props) {
               className="storage__btn storage__btn--primary"
               onClick={() => detect()}
               disabled={detecting}
+              title={
+                stale
+                  ? "Pick a new folder to re-link the size measurement"
+                  : undefined
+              }
             >
-              {detecting ? "Detecting..." : "Auto-detect"}
+              {detecting ? "Detecting..." : stale ? "Re-link" : "Auto-detect"}
             </button>
             {isSized && (
               <button

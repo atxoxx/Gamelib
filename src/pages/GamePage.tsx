@@ -8,6 +8,7 @@ import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
 import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify, formatSize } from "../types/game";
+import { useSizeUnit } from "../hooks/useSizeUnit";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
@@ -359,6 +360,9 @@ function GameDetail({ game }: { game: Game }) {
   const [editSizeBytes, setEditSizeBytes] = useState<number | undefined>(game.sizeBytes);
   const [editSizeRootPath, setEditSizeRootPath] = useState<string | undefined>(game.sizeRootPath);
   const [detectingSize, setDetectingSize] = useState(false);
+  // Respects the user's GB/GiB preference from Settings > Hardware; persisted
+  // across relaunches by the hook (localStorage key `gamelib_size_unit_v1`).
+  const { unit: sizeUnit } = useSizeUnit();
 
   // Extended metadata edit states
   const [editDescription, setEditDescription] = useState(game.description || "");
@@ -830,7 +834,7 @@ function GameDetail({ game }: { game: Game }) {
       });
       setEditSizeBytes(result.sizeBytes);
       setEditSizeRootPath(result.rootPath);
-      showToast(`Detected ${(result.sizeBytes / 1e9).toFixed(2)} GB`, "success");
+      showToast(`Detected ${formatSize(result.sizeBytes, sizeUnit)}`, "success");
     } catch (err) {
       console.error("detect_game_size failed", err);
       showToast(`Could not read folder size: ${err}`, "error");
@@ -1456,7 +1460,7 @@ function GameDetail({ game }: { game: Game }) {
                   <div className="info-item">
                     <span className="info-label">Size</span>
                     <span className="info-value size-clickable" onClick={() => setEditing(true)} title="Edit size">
-                      {formatSize(game.sizeBytes)}
+                      {formatSize(game.sizeBytes, sizeUnit)}
                     </span>
                   </div>
                 )}
@@ -1893,7 +1897,7 @@ function GameDetail({ game }: { game: Game }) {
                         className="edit-input size-readonly"
                         type="text"
                         readOnly
-                        value={editSizeBytes != null ? formatSize(editSizeBytes) : "Not set"}
+                        value={editSizeBytes != null ? formatSize(editSizeBytes, sizeUnit) : "Not set"}
                         placeholder="Not set"
                       />
                       <button

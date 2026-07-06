@@ -54,6 +54,14 @@ pub struct EpicGame {
     pub is_owned: bool,
     pub is_installed: bool,
     pub install_path: Option<String>,
+    /// Canonical install dir (= `InstallLocation` from the Epic
+    /// manifest), separate from `install_path` which is the full
+    /// exe path. Used by the size-measurement step in the sync loop
+    /// to walk the whole install dir instead of just the bin
+    /// subfolder the launcher executable lives in. Not serialized
+    /// to the wire (the wire format only exposes the measured
+    /// `sizeBytes` / `sizeRootPath`).
+    pub install_dir: Option<String>,
     pub launch_url: Option<String>,
     pub categories: Vec<String>,
     pub sandbox_type: Option<String>,
@@ -90,6 +98,14 @@ pub struct EpicSyncedGame {
     pub last_played: Option<u64>,
     /// Cover art URL from Epic's catalog CDN (keyImages).
     pub cover_url: Option<String>,
+    /// Total disk footprint of the install dir, measured by
+    /// `size::measure_install_size` for games that are installed
+    /// locally. `None` when the game is uninstalled or the walk errored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// Folder the size was measured against (= parent of `install_path`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_root_path: Option<String>,
 }
 
 /// Filter options for Epic games.

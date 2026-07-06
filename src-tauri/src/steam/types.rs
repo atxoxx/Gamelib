@@ -67,4 +67,15 @@ pub struct SyncedGameEntry {
     pub playtime_forever: u32,
     /// Resolved path to the main game executable (if installed locally).
     pub exe_path: Option<String>,
+    /// Total disk footprint of the install dir, measured by
+    /// `size::measure_install_size` after `resolve_main_exe` returns.
+    /// `None` when the game is uninstalled, exe resolution failed, or
+    /// the disk walk errored out (folder gone, permission denied, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// Folder the size was measured against (= parent of `exe_path`).
+    /// Auditable from the Storage tab so users can see and re-link the
+    /// root we summed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_root_path: Option<String>,
 }

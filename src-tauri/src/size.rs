@@ -85,7 +85,13 @@ pub(crate) fn walk_up_find_root(exe_path: &str, game_name: &str) -> Option<PathB
     if !start.exists() {
         return None;
     }
-    const MAX_HOPS: usize = 6;
+    // Bounded to 8 hops: covers the typical install layouts (Steam
+    // common/, Epic Games/<Title>/, GOG Galaxy/<Title>/) without
+    // walking so far up that we hit a shared ancestor across multiple
+    // games (e.g. C:\Games, /mnt/games). Bumped from 6 after a user
+    // reported a deeply-nested UE game install (~7 hops deep) not
+    // being detected.
+    const MAX_HOPS: usize = 8;
     let mut current: Option<PathBuf> = Some(start.to_path_buf());
     let mut hops: usize = 0;
     while let Some(dir) = current.take() {
@@ -106,7 +112,26 @@ pub(crate) fn walk_up_find_root(exe_path: &str, game_name: &str) -> Option<PathB
 /// Recursive byte-sum helper. Skips symlinked children (their targets are
 /// already counted via the canonical path). On per-directory `read_dir`
 /// failure, logs to stderr and returns; the partial sum is kept.
-fn walk_and_sum(dir: &Path, total: &mut u64) {
+/// Recursive byte-sum helper. Skips symlinked children (their targets are
+/// already counted via the canonical path). On per-directory `read_dir`
+/// failure, logs to stderr and returns; the partial sum is kept.
+///
+/// A `visited` set of canonicalised paths guards against any future edge
+/// case where `is_symlink()` misses a reparse point (Windows junctions,
+/// bind mounts on Linux). If we ever see a directory we've already
+/// walked, we skip it — better to under-count (rare, recoverable via
+/// the Storage tab's per-row re-measure) than to hang the UI thread.
+fn walk_and_sum(dir: &Path, total: &mut u64, visited: &mut std::collections::HashSet<PathBuf>) {
+    // Canonicalise once per directory so the cycle guard compares
+    // real paths (e.g. "C:\Games" vs "\\?\C:\Games\..\Games"). On
+    // canonicalise failure (permission denied, dangling junction) we
+    // fall back to the unresolved path so the walker still makes
+    // progress on the rest of the tree.
+    let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if !visited.insert(canonical) {
+        // Cycle — already walked this directory. Bail out.
+        return;
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => {
@@ -126,7 +151,7 @@ fn walk_and_sum(dir: &Path, total: &mut u64) {
         }
         let ftype = meta.file_type();
         if ftype.is_dir() {
-            walk_and_sum(&entry.path(), total);
+            walk_and_sum(&entry.path(), total, visited);
         } else if ftype.is_file() {
             // Using `saturating_add` instead of `+= so a maliciously huge
             // total can't overflow even on a misbehaving FS.
@@ -135,6 +160,25 @@ fn walk_and_sum(dir: &Path, total: &mut u64) {
         // Other file kinds (sockets, FIFOs, block devices on Linux) are
         // ignored — they have no meaningful file size.
     }
+}
+
+/// Measure the size of an already-resolved install dir. Thin wrapper
+/// around `sum_folder_size` that swallows the `Err` so sync flows
+/// can `and_then(...)` without writing the `if let Ok(...) = ...` ladder.
+///
+/// Returns `None` when the walk errors (folder gone, permission denied,
+/// etc.) -- never aborts the caller.
+///
+/// Callers MUST pass the canonical install dir, NOT `parent(exe)`. For
+/// Unreal / Unity / Source-engine games, the largest .exe lives in a
+/// bin subfolder (`Binaries/Win64/`, `_Data/`, `bin/`) so its parent
+/// is a strict subset of the install dir and the measurement would
+/// miss engine content, plugins, and packaged assets. Sync flows
+/// should use `steam_game_watcher::game_install_path(app_id)` (Steam)
+/// or the `InstallLocation` from the Epic manifest (Epic) to get the
+/// true root.
+pub(crate) fn measure_folder_size(folder: &Path) -> Option<SizeDetectionResult> {
+    sum_folder_size(folder).ok()
 }
 
 /// Sum the total bytes of every regular (non-symlinked) file under `root`.
@@ -146,7 +190,8 @@ pub(crate) fn sum_folder_size(root: &Path) -> Result<SizeDetectionResult, String
         return Err(format!("Not a directory: {}", root.display()));
     }
     let mut total: u64 = 0;
-    walk_and_sum(root, &mut total);
+    let mut visited: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    walk_and_sum(root, &mut total, &mut visited);
     Ok(SizeDetectionResult {
         root_path: root.to_string_lossy().to_string(),
         size_bytes: total,
@@ -244,6 +289,34 @@ mod tests {
 
         let found = walk_up_find_root(exe.to_str().unwrap(), "NotTheNameOfLayout");
         assert!(found.is_none());
+
+        std::fs::remove_dir_all(&layout).ok();
+    }
+
+    #[test]
+    fn measure_folder_size_sums_bytes() {
+        let layout = std::env::temp_dir().join(format!(
+            "gametest-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let root = layout.join("install");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(root.join("game.dat"), b"12345").unwrap(); // 5 bytes
+        std::fs::write(bin.join("game.exe"), b"abcde").unwrap();   // 5 bytes
+        // Junk file that the install dir would never contain — proves
+        // we're measuring the right folder, not the temp parent.
+        std::fs::write(layout.join("junk.bin"), b"XXXXXXXXXXXXXXXXXXXX").unwrap();
+
+        let result = measure_folder_size(&root).expect("walk should succeed");
+        assert_eq!(result.size_bytes, 10, "should sum 5 + 5 from inside `root` only");
+        assert_eq!(result.root_path, root.to_string_lossy().to_string());
+
+        // Missing folder: should return None, not Err.
+        assert!(measure_folder_size(Path::new("/definitely/does/not/exist/anywhere")).is_none());
 
         std::fs::remove_dir_all(&layout).ok();
     }

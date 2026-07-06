@@ -1,6 +1,7 @@
 import { useMemo } from "react";
-import type { Game } from "../../types/game";
+import type { Game, SizeUnit } from "../../types/game";
 import { formatSize } from "../../types/game";
+import { useSizeUnit } from "../../hooks/useSizeUnit";
 import {
   driveBuckets,
   platformBuckets,
@@ -11,12 +12,17 @@ import {
 
 interface Props {
   games: Game[];
+  /** Number of sized games whose `sizeRootPath` no longer resolves on
+   *  disk. Surfaced in the totals card meta line so the user can see
+   *  the staleness coverage at a glance. */
+  staleCount?: number;
 }
 
 /** Phase-5 Storage header — totals card + per-platform + per-drive
  *  breakdown bars. Pure presentational: receives the unsorted games
  *  array (the orchestrator handles sorting) and aggregates internally. */
-export function StorageHeader({ games }: Props) {
+export function StorageHeader({ games, staleCount = 0 }: Props) {
+  const { unit } = useSizeUnit();
   const total = useMemo(() => totalBytes(games), [games]);
   const coverage = useMemo(() => sizeCoverage(games), [games]);
   const platforms = useMemo(() => platformBuckets(games), [games]);
@@ -36,16 +42,24 @@ export function StorageHeader({ games }: Props) {
         {/* Totals card */}
         <section className="storage__card storage__card--totals">
           <span className="storage__card-label">Tracked size</span>
-          <span className="storage__card-value">{formatSize(total)}</span>
+          <span className="storage__card-value">{formatSize(total, unit)}</span>
           <span className="storage__card-meta">
             {coverage.sized} sized game{coverage.sized === 1 ? "" : "s"}
             {uncategorized > 0 &&
               `  ${"·"}  ${uncategorized} missing${uncategorized === 1 ? "" : "s"}`}
+            {staleCount > 0 && (
+              <>
+                {`  ${"·"}  `}
+                <span className="storage__card-meta-stale">
+                  {staleCount} stale
+                </span>
+              </>
+            )}
           </span>
         </section>
 
-        <BreakdownCard title="By platform" buckets={platforms} total={total} />
-        <BreakdownCard title="By drive" buckets={drives} total={total} />
+        <BreakdownCard title="By platform" buckets={platforms} total={total} unit={unit} />
+        <BreakdownCard title="By drive" buckets={drives} total={total} unit={unit} />
       </div>
     </header>
   );
@@ -57,10 +71,12 @@ function BreakdownCard({
   title,
   buckets,
   total,
+  unit,
 }: {
   title: string;
   buckets: StorageBucket[];
   total: number;
+  unit: SizeUnit;
 }) {
   return (
     <section className="storage__card storage__card--breakdown">
@@ -75,7 +91,7 @@ function BreakdownCard({
               <li
                 key={b.label}
                 className="storage__breakdown-row"
-                title={`${b.label}: ${formatSize(b.bytes)} across ${b.count} game${b.count === 1 ? "" : "s"}`}
+                title={`${b.label}: ${formatSize(b.bytes, unit)} across ${b.count} game${b.count === 1 ? "" : "s"}`}
               >
                 <span className="storage__breakdown-label">{b.label}</span>
                 <div className="storage__breakdown-track">
@@ -85,7 +101,7 @@ function BreakdownCard({
                   />
                 </div>
                 <span className="storage__breakdown-value">
-                  {formatSize(b.bytes)}
+                  {formatSize(b.bytes, unit)}
                 </span>
               </li>
             );

@@ -578,10 +578,42 @@ export function GameProvider({ children }: { children: ReactNode }) {
           console.error(`Background review fetch on import failed for ${game.name}:`, err)
         );
       }
+
+      // Auto-size every locally-imported game in the background. We
+      // delegate to the Rust `detect_game_size` Tauri command (same
+      // path the Storage tab's Auto-detect button uses); on success
+      // we patch the Game record in-place via `updateGame` so the
+      // Storage tab picks up the new size the next time it mounts.
+      //
+      // Failures are silent (per-game) so a single bad path can't
+      // poison the batch — the user can always click "Set size" /
+      // "Auto-detect" on the Storage row to retry manually.
+      for (const game of imported) {
+        if (!game.path) continue;
+        invoke<{ sizeBytes: number; rootPath: string }>("detect_game_size", {
+          exePath: game.path,
+          gameName: game.name,
+          rootOverride: null,
+        })
+          .then((result) => {
+            if (result && result.sizeBytes > 0) {
+              updateGame(game.id, {
+                sizeBytes: result.sizeBytes,
+                sizeRootPath: result.rootPath,
+                sizeDetectedAt: new Date().toISOString(),
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            // Per-game failure is non-fatal — just log so the user
+            // can debug if the Storage tab shows "Not set" later.
+            console.warn(`Auto-size on import failed for ${game.name}:`, err);
+          });
+      }
     } else {
       showToast("No new games were imported", "info");
     }
-  }, [games, showToast, fetchGameReviews]);
+  }, [games, showToast, fetchGameReviews, updateGame]);
 
   return (
     <GameContext.Provider

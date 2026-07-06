@@ -19,6 +19,12 @@ export interface EpicSyncedGame {
   lastPlayed?: number;
   /** Cover art URL from Epic's catalog CDN (keyImages). */
   coverUrl?: string;
+  /** Total disk footprint of the install dir, measured by the Rust
+   *  sync flow for installed games. `undefined` when uninstalled or
+   *  the disk walk errored. */
+  sizeBytes?: number;
+  /** Folder the size was measured against (= parent of `installPath`). */
+  sizeRootPath?: string;
 }
 
 /** Result of an Epic library sync operation. */

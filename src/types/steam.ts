@@ -50,6 +50,15 @@ export interface SyncedGameEntry {
   playtimeForever: number;
   /** Resolved path to the main game executable (if installed locally) */
   exePath?: string;
+  /** Total disk footprint of the install dir, measured by the Rust
+   *  sync flow right after `resolve_main_exe` returns. `undefined`
+   *  when the game is uninstalled, exe resolution failed, or the
+   *  disk walk errored out. */
+  sizeBytes?: number;
+  /** Folder the size was measured against (= parent of `exePath`).
+   *  Auditable from the Storage tab so users can re-link if the
+   *  default install dir is wrong. */
+  sizeRootPath?: string;
 }
 
 export interface SteamSettings {

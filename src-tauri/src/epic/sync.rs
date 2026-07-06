@@ -6,6 +6,7 @@ use tauri::AppHandle;
 
 use super::auth::refresh_tokens_if_needed;
 use super::types::{EpicAuthTokens, EpicCatalogItem, EpicFilterOptions, EpicGame, EpicGameAsset, EpicSyncResult, EpicSyncedGame};
+use crate::size;
 
 /// Sync the user's Epic Games library.
 ///
@@ -54,16 +55,33 @@ pub async fn epic_sync_library(app: AppHandle) -> Result<EpicSyncResult, String>
     // 6. Convert to synced game entries (cover_url comes from EpicGame now)
     let synced_games: Vec<EpicSyncedGame> = merged
         .iter()
-        .map(|g| EpicSyncedGame {
-            id: format!("epic-{}-{}", g.namespace, g.catalog_item_id),
-            title: g.title.clone(),
-            namespace: g.namespace.clone(),
-            catalog_item_id: g.catalog_item_id.clone(),
-            is_installed: g.is_installed,
-            install_path: g.install_path.clone(),
-            playtime_minutes: g.playtime_minutes,
-            last_played: g.last_played,
-            cover_url: g.cover_url.clone(),
+        .map(|g| {
+            // Measure the install dir for games Epic reports as installed.
+            // We use `g.install_dir` (the canonical InstallLocation from
+            // the manifest) — NOT `g.install_path` — because the
+            // LaunchExecutable for UE/Unity games points into a bin
+            // subfolder, so `parent(install_path)` would under-count
+            // engine content. Per-game failure leaves the size fields
+            // None; the sync itself is never aborted.
+            let size_info = g
+                .install_dir
+                .as_deref()
+                .filter(|_| g.is_installed)
+                .map(std::path::Path::new)
+                .and_then(size::measure_folder_size);
+            EpicSyncedGame {
+                id: format!("epic-{}-{}", g.namespace, g.catalog_item_id),
+                title: g.title.clone(),
+                namespace: g.namespace.clone(),
+                catalog_item_id: g.catalog_item_id.clone(),
+                is_installed: g.is_installed,
+                install_path: g.install_path.clone(),
+                playtime_minutes: g.playtime_minutes,
+                last_played: g.last_played,
+                cover_url: g.cover_url.clone(),
+                size_bytes: size_info.as_ref().map(|s| s.size_bytes),
+                size_root_path: size_info.as_ref().map(|s| s.root_path.clone()),
+            }
         })
         .collect();
 
@@ -383,6 +401,11 @@ fn filter_owned_games(
                 is_owned: true,
                 is_installed: false,
                 install_path: None,
+                // Library-only entries have no manifest, hence no canonical
+                // install dir. The merge step in `merge_game_data` will
+                // populate this from the matching installed-manifest entry
+                // when one is present.
+                install_dir: None,
                 launch_url: Some(format!(
                     "com.epicgames.launcher://apps/{}-{}?action=launch&silent=true",
                     asset.namespace, asset.catalog_item_id
@@ -465,6 +488,11 @@ fn parse_epic_manifest(content: &str) -> Option<EpicGame> {
         is_owned: true,
         is_installed: true,
         install_path: full_install_path,
+        // `install_path` (local var above) is the raw `InstallLocation`
+        // from the manifest, i.e. the canonical install dir. We keep it
+        // alongside the full exe path so the size-measurement step
+        // can walk the whole install dir instead of the bin subfolder.
+        install_dir: install_path,
         launch_url: Some(format!(
             "com.epicgames.launcher://apps/{}-{}?action=launch&silent=true",
             namespace, catalog_item_id
@@ -487,6 +515,10 @@ fn merge_game_data(library: Vec<EpicGame>, installed: &[EpicGame]) -> Vec<EpicGa
                 game.install_path = inst.install_path.clone();
                 game.playtime_minutes = inst.playtime_minutes.or(game.playtime_minutes);
                 game.last_played = inst.last_played.or(game.last_played);
+                // `install_dir` is only populated from the manifest (library
+                // entries never set it). Use the manifest's value when present
+                // so the size-measurement step has a root to walk.
+                game.install_dir = inst.install_dir.clone().or(game.install_dir);
             }
             game
         })
