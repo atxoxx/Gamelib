@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useToast } from "../context/ToastContext";
@@ -30,7 +29,7 @@ export default function SettingsPage() {
   const { games, addGames } = useGames();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<
-    "appearance" | "directories" | "hardware" | "system" | "integrations"
+    "appearance" | "hardware" | "integrations"
   >("appearance");
 
   // Steam integration state
@@ -54,20 +53,10 @@ export default function SettingsPage() {
 
   // Theme state
   const [currentTheme, setCurrentTheme] = useState("dark");
-  const [libraryPath, setLibraryPath] = useState("");
-  const [scraperProvider, setScraperProvider] = useState("steam");
-  const [minimizeOnLaunch, setMinimizeOnLaunch] = useState(false);
-  const [autoFetchImages, setAutoFetchImages] = useState(true);
-  const [showLaunchSplash, setShowLaunchSplash] = useState(true);
 
   useEffect(() => {
     const theme = localStorage.getItem("gamelib-theme") || "dark";
     setCurrentTheme(theme);
-    setLibraryPath(localStorage.getItem("gamelib-library-path") || "C:\\Games");
-    setScraperProvider(localStorage.getItem("gamelib-scraper") || "steam");
-    setMinimizeOnLaunch(localStorage.getItem("gamelib-minimize-launch") === "true");
-    setAutoFetchImages(localStorage.getItem("gamelib-autofetch") !== "false");
-    setShowLaunchSplash(localStorage.getItem("gamelib-show-splash") !== "false");
 
     (async () => {
       try {
@@ -107,33 +96,6 @@ export default function SettingsPage() {
     localStorage.setItem("gamelib-theme", themeId);
     document.documentElement.setAttribute("data-theme", themeId);
     showToast(`Theme changed to ${themes.find((t) => t.id === themeId)?.name}`, "success");
-  }
-
-  async function handleBrowsePath() {
-    try {
-      const folderPath = await open({ multiple: false, directory: true, title: "Select Games Library Directory" });
-      if (folderPath && typeof folderPath === "string") {
-        setLibraryPath(folderPath);
-        localStorage.setItem("gamelib-library-path", folderPath);
-        showToast("Library path updated", "success");
-      }
-    } catch {
-      showToast("Could not open file explorer", "error");
-    }
-  }
-
-  function saveGeneralSettings(scraper: string, minimize: boolean, autofetch: boolean, splash?: boolean) {
-    setScraperProvider(scraper);
-    localStorage.setItem("gamelib-scraper", scraper);
-    setMinimizeOnLaunch(minimize);
-    localStorage.setItem("gamelib-minimize-launch", String(minimize));
-    setAutoFetchImages(autofetch);
-    localStorage.setItem("gamelib-autofetch", String(autofetch));
-    if (typeof splash === "boolean") {
-      setShowLaunchSplash(splash);
-      localStorage.setItem("gamelib-show-splash", String(splash));
-    }
-    showToast("Settings saved successfully", "success");
   }
 
   async function handleSaveSteamConfig() {
@@ -327,15 +289,13 @@ export default function SettingsPage() {
       <header className="settings-header">
         <h1 className="settings-title">Settings</h1>
         <p className="settings-desc">
-          Customize your Gamelib client appearance, directories, scraper providers, and launching behavior.
+          Customize your Gamelib client appearance, hardware monitoring, and third-party integrations.
         </p>
       </header>
 
       <div className="settings-tabs">
         <button className={`settings-tab ${activeSettingsTab === "appearance" ? "active" : ""}`} onClick={() => setActiveSettingsTab("appearance")}>Appearance</button>
-        <button className={`settings-tab ${activeSettingsTab === "directories" ? "active" : ""}`} onClick={() => setActiveSettingsTab("directories")}>Directories</button>
         <button className={`settings-tab ${activeSettingsTab === "hardware" ? "active" : ""}`} onClick={() => setActiveSettingsTab("hardware")}>Hardware</button>
-        <button className={`settings-tab ${activeSettingsTab === "system" ? "active" : ""}`} onClick={() => setActiveSettingsTab("system")}>System</button>
         <button className={`settings-tab ${activeSettingsTab === "integrations" ? "active" : ""}`} onClick={() => setActiveSettingsTab("integrations")}>
           <IntegrationsIcon /> Integrations
         </button>
@@ -368,24 +328,6 @@ export default function SettingsPage() {
         </div>
       </section>)}
 
-      {/* Directories */}
-      {activeSettingsTab === "directories" && (
-      <section className="settings-section">
-        <h2 className="settings-section-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Directories
-        </h2>
-        <div className="settings-row">
-          <div className="settings-control">
-            <label className="settings-label">Default Scan Directory</label>
-            <div className="settings-input-group">
-              <input type="text" className="settings-input" value={libraryPath} onChange={(e) => { setLibraryPath(e.target.value); localStorage.setItem("gamelib-library-path", e.target.value); }} placeholder="C:\Games"/>
-              <button className="settings-btn" onClick={handleBrowsePath}>Browse...</button>
-            </div>
-          </div>
-        </div>
-      </section>)}
-
       {/* Hardware */}
       {activeSettingsTab === "hardware" && (
       <section className="settings-section">
@@ -408,31 +350,6 @@ export default function SettingsPage() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Refresh
               </button>
             </div>
-          </div>
-        </div>
-      </section>)}
-
-      {/* System */}
-      {activeSettingsTab === "system" && (
-      <section className="settings-section">
-        <h2 className="settings-section-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-          System & Metadata
-        </h2>
-        <div className="settings-row">
-          <div className="settings-control">
-            <label className="settings-label">Primary Metadata Source</label>
-            <select className="settings-select" value={scraperProvider} onChange={(e) => saveGeneralSettings(e.target.value, minimizeOnLaunch, autoFetchImages)}>
-              <option value="steam">Steam Api Scraper</option>
-              <option value="igdb">IGDB Database Scraper</option>
-              <option value="pcgamingwiki">PCGamingWiki Search</option>
-              <option value="all">Search All (Consolidated)</option>
-            </select>
-          </div>
-          <div style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
-            <label className="settings-checkbox-label"><input type="checkbox" checked={minimizeOnLaunch} onChange={(e) => saveGeneralSettings(scraperProvider, e.target.checked, autoFetchImages, showLaunchSplash)}/><span>Minimize Gamelib window when launching a game</span></label>
-            <label className="settings-checkbox-label"><input type="checkbox" checked={showLaunchSplash} onChange={(e) => saveGeneralSettings(scraperProvider, minimizeOnLaunch, autoFetchImages, e.target.checked)}/><span>Show launch splash with game info and visuals</span></label>
-            <label className="settings-checkbox-label"><input type="checkbox" checked={autoFetchImages} onChange={(e) => saveGeneralSettings(scraperProvider, minimizeOnLaunch, e.target.checked, showLaunchSplash)}/><span>Auto-download cover art and metadata when adding games</span></label>
           </div>
         </div>
       </section>)}
