@@ -361,6 +361,97 @@ export interface SessionMetrics {
   resolution: string;      // e.g. "1920x1080"
 }
 
+/**
+ * Sanity ceiling for any FPS field read from localStorage.
+ *
+ * Older builds of the RTSS reader validated `avg_fps <= 500` but NOT
+ * `max_fps`, so a single uninitialised shared-memory entry could land
+ * `maxFps ≈ u32::MAX ≈ 4.3×10⁹` in the persisted session. Once there, every
+ * reduce / aggregation consumer (ActivityPage table, GameActivity FPS chart,
+ * Splashscreen "Last Played", etc.) renders u32::MAX, and the chart Y-axis
+ * auto-spacing lays out at 858993459 / 1717986918 / 2576980777 / 3435973836 /
+ * 4294967262 — the 0x33 / 0x66 / 0x99 / 0xCC / 0xFF banding.
+ *
+ * Note the FE cap (1000) deliberately sits above the Rust per-sample cap
+ * (500): the Rust bound is on an *instantaneous* RTSS/MAHM reading
+ * (anything past a single sample's rate is the wrong field), whereas this
+ * cap is on an *aggregate* session field that legitimately contains
+ * momentary spikes higher than any single sample's instantaneous rate.
+ * Harmoning the two caps back into one would re-break the chart.
+ */
+export const SANE_MAX_FPS = 1000;
+
+/**
+ * Sanitize a `SessionMetrics` payload read from localStorage so historical
+ * FPS-poisoned data doesn't drive downstream UI into the u32::MAX bands.
+ *
+ * Rules:
+ *  1. Each FPS field (avg / min / max) is clamped to `[0, SANE_MAX_FPS]`.
+ *     Out-of-range / non-finite values are dropped to 0 (treated as
+ *     "this reading is untrustworthy").
+ *  2. If avg is sane but min/max collapsed to 0, synthesise a plausible
+ *     `min = round(avg * 0.8)`, `max = round(avg * 1.3)` so the chart
+ *     isn't a flat 0 line. Both ends are clamped to [1, SANE_MAX_FPS].
+ *  3. Restore the ordering invariant `min ≤ avg ≤ max` so downstream chart
+ *     generators (e.g. generateConsistentSeries) don't enter their
+ *     degenerate n > l fall-back path that produces a flat line.
+ *  4. Each run logs a single `console.warn` summarising which fields had
+ *     to be repaired, so a real RTSS / MAHM misread isn't silently lost.
+ */
+// Per-signature dedupe so a 200-session history doesn't spam the
+// console with identical warnings. Cleared on reload — if the bug
+// recurs after a restart the user sees the warning again.
+const warnedSignatures = new Set<string>();
+
+export function sanitizeSessionMetrics(m: SessionMetrics): SessionMetrics {
+  const fix = (v: number | null | undefined): number => {
+    if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+    if (v < 0) return 0;
+    if (v > SANE_MAX_FPS) return 0; // poisoned sentinel
+    return Math.round(v);
+  };
+
+  const originalAvg = m.avgFps;
+  const originalMin = m.minFps;
+  const originalMax = m.maxFps;
+
+  let avg = fix(originalAvg);
+  let min = fix(originalMin);
+  let max = fix(originalMax);
+
+  if (avg > 0 && (min === 0 || max === 0 || min > max)) {
+    min = Math.max(1, Math.min(SANE_MAX_FPS, Math.round(avg * 0.8)));
+    max = Math.max(1, Math.min(SANE_MAX_FPS, Math.round(avg * 1.3)));
+  }
+  // Restore min ≤ avg ≤ max in case any survive-clamp values are inverted
+  // (e.g. a legitimate session whose persisted min > max due to enum drift).
+  const lo = Math.min(min, avg, max);
+  const hi = Math.max(min, avg, max);
+  if (avg > 0 && (min !== lo || max !== hi)) {
+    min = lo;
+    max = hi;
+    avg = Math.min(Math.max(avg, min), max);
+  }
+
+  // Single-line observability for poisoned fields vs genuine zeros, so an
+  // RTSS / MAHM regression can be diagnosed from the console rather than
+  // appearing as a silent "no FPS recorded" empty chart. Deduped per
+  // signature so a 200-session history doesn't emit 200 identical warns.
+  const poisoned: string[] = [];
+  if (typeof originalAvg === "number" && Number.isFinite(originalAvg) && originalAvg > SANE_MAX_FPS) poisoned.push("avg");
+  if (typeof originalMin === "number" && Number.isFinite(originalMin) && originalMin > SANE_MAX_FPS) poisoned.push("min");
+  if (typeof originalMax === "number" && Number.isFinite(originalMax) && originalMax > SANE_MAX_FPS) poisoned.push("max");
+  if (poisoned.length > 0) {
+    const sig = poisoned.join(",");
+    if (!warnedSignatures.has(sig)) {
+      warnedSignatures.add(sig);
+      // eslint-disable-next-line no-console
+      console.warn(`[sanitizeSessionMetrics] dropped poisoned FPS field(s) [${sig}] from session(s); reconstructed min/max from avg (sane cap ${SANE_MAX_FPS}). Once-per-signature dedupe; further occurrences are silent.`);
+    }
+  }
+  return { ...m, avgFps: avg, minFps: min, maxFps: max };
+}
+
 /** GPU info returned from the system. */
 export interface GpuInfo {
   id: string;

@@ -2649,7 +2649,11 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
   }, [filteredSessions, timeframe, playtimeAgg]);
 
-  // Filter hardware sessions (those containing non-zero telemetry)
+  // Filter hardware sessions (those containing non-zero telemetry).
+  // Note: FPS-sanitized sessions whose avgFps collapsed to 0 are kept here
+  // because their CPU/GPU/RAM/temp data is still valid for the other perf
+  // charts. The empty-FPS sample is filtered at series-build time below
+  // so only the FPS chart sees the gap, not CPU/GPU/RAM.
   const sessionsWithHw = useMemo(() => {
     return filteredSessions.filter((s) => s.metrics && s.metrics.avgCpuUsage > 0);
   }, [filteredSessions]);
@@ -2659,12 +2663,29 @@ export function GameActivityTab({ game }: { game: Game }) {
     return sessionsWithHw.some((s) => s.metrics && (s.metrics.avgCpuTemp > 0 || s.metrics.avgGpuTemp > 0));
   }, [sessionsWithHw]);
 
-  // Aggregate averages and max values for mini hardware cards
+  // Aggregate averages and max values for mini hardware cards.
+  //
+  // Historical session data here is already sanitized by
+  // ActivityContext on localStorage load (see sanitizeSessionMetrics in
+  // src/types/game.ts) so the fps fields land in [0, SANE_MAX_FPS] and
+  // min<=avg<=max. Defensive clamps below are harmless if a future Rust
+  // build slips a poisoned value past the context layer.
+
   const hwAverages = useMemo(() => {
     if (sessionsWithHw.length === 0) return null;
     const len = sessionsWithHw.length;
-    const avgFps = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.metrics!.avgFps, 0) / len);
-    const maxFps = sessionsWithHw.reduce((max, s) => Math.max(max, s.metrics!.maxFps), 0);
+    // Match the centralised sanitizeSessionMetrics semantics: poisoned
+    // values (anything > 1000 FPS) collapse to 0 so the chart emits the
+    // honest "no FPS data" All-zero series instead of silently capping
+    // a bogus reading at 1000. Defence-in-depth only — in healthy code
+    // paths ActivityContext already pre-sanitises, so this just makes
+    // clampFps's behaviour identical to the global helper.
+    const clampFps = (v: number) => {
+      if (!Number.isFinite(v) || v < 0 || v > 1000) return 0;
+      return Math.round(v);
+    };
+    const avgFps = Math.round(sessionsWithHw.reduce((sum, s) => sum + clampFps(s.metrics!.avgFps), 0) / len);
+    const maxFps = sessionsWithHw.reduce((max, s) => Math.max(max, clampFps(s.metrics!.maxFps)), 0);
     const avgCpu = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.metrics!.avgCpuUsage, 0) / len);
     const maxCpu = sessionsWithHw.reduce((max, s) => Math.max(max, s.metrics!.avgCpuUsage), 0);
     const avgGpu = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.metrics!.avgGpuUsage, 0) / len);
@@ -2720,12 +2741,19 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
 
     const seedStr = selectedSess ? selectedSess.id : "all-average";
-    
+
     // Generate mathematically consistent curves that strictly match the session's actual metrics (0 GPU load stays 0%)
     const cpu = generateConsistentSeries(targetMetrics.avgCpuUsage, Math.max(0, targetMetrics.avgCpuUsage - 15), Math.min(100, targetMetrics.avgCpuUsage + 20), N, seedStr + "-cpu");
     const gpu = generateConsistentSeries(targetMetrics.avgGpuUsage, Math.max(0, targetMetrics.avgGpuUsage - 10), Math.min(100, targetMetrics.avgGpuUsage + 15), N, seedStr + "-gpu");
     const ram = generateConsistentSeries(targetMetrics.avgRamUsage, Math.max(0, targetMetrics.avgRamUsage - 5), Math.min(100, targetMetrics.avgRamUsage + 5), N, seedStr + "-ram");
-    const fps = generateConsistentSeries(targetMetrics.avgFps, targetMetrics.minFps, targetMetrics.maxFps, N, seedStr + "-fps");
+    // FPS: when avgFps is 0 (no real RTSS/MAHM samples survived sanitisation,
+    // e.g. legacy session with poisoned FPS fields that all dropped to 0)
+    // emit an all-zero series so the FPS chart renders an honest "no FPS data"
+    // flat line instead of interpolating an artificial num. > 1000 cap that
+    // would break again.
+    const fps = targetMetrics.avgFps > 0
+      ? generateConsistentSeries(targetMetrics.avgFps, targetMetrics.minFps, targetMetrics.maxFps, N, seedStr + "-fps")
+      : new Array(N).fill(0);
     
     let cpuTemp: number[] = [];
     let gpuTemp: number[] = [];
@@ -3100,6 +3128,14 @@ export function GameActivityTab({ game }: { game: Game }) {
                           ]}
                           labels={perfTimelineData.labels}
                           height={180}
+                          // Fixed 0-100 % scale so 30% always reads as
+                          // 30% of the chart's vertical extent, instead
+                          // of being stretched to fit just this session's
+                          // data range. Without these the axis collapses
+                          // to e.g. 0-30% and a slow session visually
+                          // looks identical to a maxed-out one.
+                          minY={0}
+                          maxY={100}
                           formatValue={(v) => `${Math.round(v)}%`}
                         />
                       </ChartSection>
@@ -3123,6 +3159,13 @@ export function GameActivityTab({ game }: { game: Game }) {
                           series={[{ data: perfTimelineData.ram, color: "#2ecc71", label: "RAM" }]}
                           labels={perfTimelineData.labels}
                           height={180}
+                          // Same rationale as CPU & GPU Load above —
+                          // RAM is reported as a percentage of system
+                          // memory so it must share the 0-100 axis or
+                          // the curve position has no meaning across
+                          // sessions.
+                          minY={0}
+                          maxY={100}
                           formatValue={(v) => `${v}%`}
                         />
                       </ChartSection>
@@ -3132,6 +3175,14 @@ export function GameActivityTab({ game }: { game: Game }) {
                           series={[{ data: perfTimelineData.fps, color: "#16b195", label: "FPS" }]}
                           labels={perfTimelineData.labels}
                           height={180}
+                          // minY=0 so FPS never renders negative even if a
+                          // session slips through with a tiny negative
+                          // value (e.g. uninitialised sensor). maxY stays
+                          // dynamic — the input data is already sanitised
+                          // to <= 1000 FPS upstream, so the chart can't
+                          // reach the legacy u32::MAX auto-scale that
+                          // produced the 0x33/0x66/0x99/0xCC/0xFF banding.
+                          minY={0}
                           formatValue={(v) => `${Math.round(v)} FPS`}
                         />
                       </ChartSection>

@@ -29,7 +29,7 @@ export default function LineChart({
   series,
   labels,
   width = 640,
-  height = 260,
+  height = 280,
   formatValue = (v) => String(v),
   formatTooltipValue,
   legend = true,
@@ -41,7 +41,13 @@ export default function LineChart({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   const chart = useMemo(() => {
-    const padding = { top: 16, right: 20, bottom: 28, left: 44 };
+    // Padding tuned for the new default height (280px): a touch more room at
+    // the top/bottom gives the area-fill and X-axis labels breathing space,
+    // and a slightly wider left gutter keeps 4-digit Y-axis labels (e.g.
+    // "100 %") from clipping. Right gutter stays slim — the floating
+    // tooltip can render past the chart bounds when it would otherwise
+    // overflow the right edge.
+    const padding = { top: 20, right: 20, bottom: 32, left: 48 };
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
@@ -54,6 +60,15 @@ export default function LineChart({
 
     return { padding, chartW, chartH, maxVal, minVal, range };
   }, [series, width, height, minY, maxY]);
+
+  // Label stepping: when there are more than ~12 x-axis labels we sample
+  // them down so they don't overlap. Every Nth label + always render the
+  // first and last so the viewer can orient themselves. Empty strings in
+  // between preserve the original index→position mapping for hover coords.
+  const labelStep = useMemo(() => {
+    const maxLabels = 12;
+    return Math.max(1, Math.ceil(labels.length / maxLabels));
+  }, [labels.length]);
 
   const { padding, chartW, chartH, minVal, range } = chart;
 
@@ -253,11 +268,18 @@ export default function LineChart({
         {labels.map((label, i) => {
           const x = padding.left + (i / Math.max(labels.length - 1, 1)) * chartW;
           const isActive = hoverIndex === i;
+          // Show every Nth label so dense series don't overlap. The first
+          // and last labels are always rendered for orientation.
+          const showLabel =
+            i === 0 ||
+            i === labels.length - 1 ||
+            i % labelStep === 0;
+          if (!showLabel) return null;
           return (
             <text
               key={`label-${i}`}
               x={x}
-              y={padding.top + chartH + 18}
+              y={padding.top + chartH + 20}
               textAnchor="middle"
               fill={isActive ? "var(--color-text-primary)" : "var(--color-text-muted)"}
               fontSize={isActive ? "11" : "10"}

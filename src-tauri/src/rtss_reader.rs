@@ -109,12 +109,26 @@ pub fn read_rtss_metrics(pid: u32) -> Option<RtssMetrics> {
             let entry_pid = *(entry as *const u32);
 
             if entry_pid == pid {
+                // Try multiple (min, avg, max) offset triplets — RTSS layout
+                // shifts across builds (7.3.x vs newer), and corroupt /
+                // uninitialised offsets can otherwise return enormous values
+                // (e.g. 30,000+ "FPS" caused by reading the wrong field as
+                // u32 / 100). The validation below rejects them.
                 let offsets: &[(usize, usize, usize)] = &[
-                    (0x1BC, 0x1C0, 0x1C4), // RTSS 7.3.x
-                    (0x1E0, 0x1E4, 0x1E8), // alternative
+                    (0x1BC, 0x1C0, 0x1C4), // RTSS 7.3.x — current primary
+                    (0x1C0, 0x1C4, 0x1C8), // adjacent variant
+                    (0x1E0, 0x1E4, 0x1E8), // alternative layout
                 ];
 
                 for &(off_min, off_avg, off_max) in offsets {
+                    // Bounds-check before dereferencing each triplet:
+                    // app_arr_offset + i * app_entry_size + off_max must
+                    // remain within the shared memory window so we don't
+                    // segfault on out-of-range layouts.
+                    if entry_offset + off_max + 4 > 0x20000 {
+                        continue;
+                    }
+
                     let min_raw = *(entry.add(off_min) as *const u32);
                     let avg_raw = *(entry.add(off_avg) as *const u32);
                     let max_raw = *(entry.add(off_max) as *const u32);
@@ -123,8 +137,28 @@ pub fn read_rtss_metrics(pid: u32) -> Option<RtssMetrics> {
                     let avg_fps = avg_raw as f64 / 100.0;
                     let max_fps = max_raw as f64 / 100.0;
 
-                    if avg_fps > 0.0
-                        && avg_fps < 1000.0
+                    // Tightened validation:
+                    //  - All three values must be > 0 (rejects uninitialised
+                    //    / zero-filled entries that would otherwise read as
+                    //    "0 FPS but valid" and diverge from WMI MAHM).
+                    //  - 500 FPS upper bound on **every** value, including
+                    //    max. Without the max bound, a triple like
+                    //    (min=1, avg=10, max=u32::MAX/100) passes the
+                    //    existing checks (avg <= 500 and min <= avg <= max)
+                    //    and let a poisoned max ride through into the
+                    //    session metrics. The persisted maxFps = u32::MAX then
+                    //    blows up the GameActivity FPS chart's Y-axis (it
+                    //    auto-scales to it and renders gridlines like
+                    //    858993459, 1717986918, 2576980777, 3435973836,
+                    //    4294967262 — the 0x33/0x66/0x99/0xCC/0xFF pattern).
+                    //  - min <= avg <= max — preserves the monotonic invariant
+                    //    of an FPS min/avg/max trio.
+                    if min_fps > 0.0
+                        && avg_fps > 0.0
+                        && max_fps > 0.0
+                        && avg_fps <= 500.0
+                        && min_fps <= 500.0
+                        && max_fps <= 500.0
                         && min_fps <= avg_fps
                         && avg_fps <= max_fps
                     {

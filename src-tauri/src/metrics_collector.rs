@@ -609,23 +609,28 @@ fn aggregate_metrics(samples: &[MetricsSample]) -> Option<SessionMetrics> {
     // Prefer real RTSS/Afterburner FPS over estimated FPS
     let rtss_samples: Vec<_> = samples.iter().filter_map(|s| s.rtss_fps).collect();
 
+    // FPS policy:
+    //  - When ≥2 real RTSS/MAHM samples exist we use them directly. These
+    //    are real measured FPS values straight from the game's overlay, so
+    //    the only validation is the bound check in `read_rtss_metrics` /
+    //    MAHM reader.
+    //  - When fewer than 2 real samples exist we used to derive an FPS
+    //    estimate from average GPU utilisation. This produced visibly wrong
+    //    numbers (e.g. a low-load RPG showed 200+ FPS because of the
+    //    `90 + (gpu - 90)*5` multiplier on the high-GPU branch), which made
+    //    historical session stats confusing. Without a measured FPS source
+    //    there's nothing meaningful to report, so we emit zeros and let
+    //    the frontend surface "no FPS data" instead.
     let (avg_fps, min_fps, max_fps) = if rtss_samples.len() >= 2 {
         let avg = rtss_samples.iter().sum::<f64>() / rtss_samples.len() as f64;
         let min = rtss_samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = rtss_samples.iter().cloned().fold(0.0f64, f64::max);
         (avg.round() as u32, min.round() as u32, max.round() as u32)
     } else {
-        // Fall back to GPU-utilization-based FPS estimation
-        let estimated_fps = if avg_gpu > 90.0 {
-            90 + ((avg_gpu - 90.0) * 5.0) as u32
-        } else if avg_gpu > 50.0 {
-            40 + ((avg_gpu - 50.0) * 1.25) as u32
-        } else {
-            20 + (avg_gpu * 0.6) as u32
-        };
-        let min = (estimated_fps as f64 * 0.6) as u32;
-        let max = (estimated_fps as f64 * 1.5) as u32;
-        (estimated_fps, min.max(1), max)
+        // No real FPS samples — return zeros rather than synthesising a
+        // manufactured value from GPU/load heuristics. The UI renders
+        // "—" for zero FPS, which is honest about the data we don't have.
+        (0, 0, 0)
     };
 
     Some(SessionMetrics {

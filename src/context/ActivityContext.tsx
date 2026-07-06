@@ -16,6 +16,7 @@ import {
   type ActivityStats,
   type GpuInfo,
   type Game,
+  sanitizeSessionMetrics,
 } from "../types/game";
 
 interface GameExitEvent {
@@ -54,12 +55,22 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    // Load persisted sessions (no mock seeding — real data only)
+    // Load persisted sessions (no mock seeding — real data only).
+    // Each session's metrics are sanitized on read so legacy data with
+    // poisoned FPS fields (maxFps = u32::MAX from older RTSS builds whose
+    // validation only checked avg_fps, not max_fps) doesn't drive every
+    // downstream consumer — ActivityPage table, GameActivity FPS chart,
+    // Splashscreen "Last Played", etc. — into the 0x33/0x66/0x99/0xCC/0xFF
+    // banding. Sanitize in-memory only; localStorage isn't rewritten so a
+    // user-driven migration can decide later whether to re-persist.
     const saved = localStorage.getItem("gamelib-sessions");
     if (saved) {
       try {
         const parsed: GameSession[] = JSON.parse(saved);
-        setSessions(parsed);
+        const cleaned = parsed.map((s) =>
+          s.metrics ? { ...s, metrics: sanitizeSessionMetrics(s.metrics) } : s
+        );
+        setSessions(cleaned);
       } catch {
         // Corrupted data — start fresh
       }
@@ -127,13 +138,17 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
 
   const recordSession = useCallback(
     (gameId: string, gameName: string, durationMin: number, metrics?: SessionMetrics) => {
+      // Defence-in-depth: any future Rust regression that sends a poisoned
+      // SessionMetrics (e.g. maxFps = u32::MAX before the RTSS reader
+      // tightened its bounds) is sanitised at the write point so persisted
+      // localStorage stays clean for the next mount.
       const newSession: GameSession = {
         id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         gameId,
         gameName,
         date: new Date().toISOString(),
         durationMin,
-        metrics,
+        metrics: metrics ? sanitizeSessionMetrics(metrics) : undefined,
       };
       setSessions((prev) => {
         const updated = [newSession, ...prev];
