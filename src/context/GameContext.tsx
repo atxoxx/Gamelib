@@ -57,7 +57,7 @@ interface GameContextType {
   selectedGameId: string | null;
   setSelectedGameId: (id: string | null) => void;
   addGame: (game: Game) => void;
-  addGames: (games: Game[]) => void;
+  addGames: (games: Game[], doFetchMetadata?: boolean) => void;
   removeGame: (id: string) => void;
   updateGame: (id: string, updates: Partial<Game>) => void;
   getGame: (id: string) => Game | undefined;
@@ -247,26 +247,76 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
   }, [showToast, updateGame]);
 
-  const addGames = useCallback((newGames: Game[]) => {
+  const addGames = useCallback((newGames: Game[], doFetchMetadata = true) => {
     const withIds = newGames.map((g) => ({ ...g, id: g.id || generateId() }));
     setGames((prev) => [...prev, ...withIds]);
 
-    // Auto-fetch metadata for each imported game in the background.
+    // Auto-fetch metadata for each imported game.
     // Trigger for: local imports (has path), store-synced games (has steamAppId/storeSource),
     // or any game missing a description. Use silent mode to avoid toast spam.
-    let fetchCount = 0;
-    for (const game of withIds) {
+    if (!doFetchMetadata) return;
+
+    const needsMetadata = withIds.filter((game) => {
       const isLocal = !!game.path;
       const isStoreSynced = !!game.steamAppId || !!game.storeSource;
-      const needsMetadata = !game.description;
-      if ((isLocal || isStoreSynced) && needsMetadata) {
-        fetchCount++;
-        autoFetchMetadata(game.id, game.name, game.steamAppId, true);
+      return (isLocal || isStoreSynced) && !game.description;
+    });
+
+    if (needsMetadata.length === 0) return;
+
+    showToast(
+      `Fetching metadata for ${needsMetadata.length} game${needsMetadata.length !== 1 ? "s" : ""}...`,
+      "info"
+    );
+
+    // ── Sequential IGDB queue ───────────────────────────────────────────────
+    // IGDB free tier: 4 req/s, max 8 concurrent.
+    // https://api-docs.igdb.com/#rate-limits
+    //
+    // autoFetchMetadata internally invokes `search_game_metadata` which makes
+    // 2 IGDB HTTP calls per game (search + time-to-beats). Rust's igdb_acquire
+    // already enforces a 250 ms minimum spacing between IGDB calls as a
+    // backstop, but firing ALL the per-game invokes in parallel was bursting
+    // dozens of calls within the first second and tripping HTTP 429s.
+    //
+    // Awaiting one fetch before starting the next reduces us to a single
+    // game in flight at any moment. With ~500 ms per game (network +
+    // 2 IGDB calls × 250 ms spacing) we sit comfortably below 4 req/s.
+    //
+    // GameContextProvider wraps the entire app, so the queue keeps running
+    // even if the user navigates away from the Settings tab mid-sync.
+    //
+    // NOTE: per-game success tracking (IGDB returned data vs. zero results)
+    // is intentionally approximate — autoFetchMetadata swallows its own errors
+    // and returns void on empty results, so we count iterations completed.
+    // For exact per-game success counts, autoFetchMetadata would need to
+    // return a boolean; tracked as a follow-up.
+    let processed = 0;
+    const queue = (async () => {
+      for (const game of needsMetadata) {
+        // autoFetchMetadata is `silent=true` so it never throws and never
+        // toasts per-game; awaiting it serially is what enforces the 1-at-a-
+        // time constraint the user requested.
+        await autoFetchMetadata(game.id, game.name, game.steamAppId, true);
+        processed++;
       }
-    }
-    if (fetchCount > 0) {
-      showToast(`Fetching metadata for ${fetchCount} game${fetchCount !== 1 ? "s" : ""}...`, "info");
-    }
+    })();
+
+    // Resolve the "fetching..." toast with a completion message once the
+    // queue drains — critical for 500-game libraries where the sync may
+    // take several minutes and the user needs confirmation it's done.
+    void queue.finally(() => {
+      const noun = processed !== 1 ? "games" : "game";
+      const total = needsMetadata.length;
+      if (processed < total) {
+        showToast(
+          `Fetched IGDB metadata for ${processed}/${total} ${noun} (some returned no results)`,
+          "info"
+        );
+      } else {
+        showToast(`Fetched IGDB metadata for ${processed} ${noun}`, "success");
+      }
+    });
   }, [showToast, updateGame]);
 
   const removeGame = useCallback((id: string) => {

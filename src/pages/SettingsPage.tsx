@@ -41,6 +41,7 @@ export default function SettingsPage() {
     autoSyncOnLaunch: true,
     syncPlaytime: true,
     syncAchievements: true,
+    autoFetchMetadata: true,
   });
 
   // Theme state
@@ -166,7 +167,7 @@ export default function SettingsPage() {
           });
         }
         if (newGames.length > 0) {
-          addGames(newGames);
+          addGames(newGames, steamSettings.autoFetchMetadata);
           showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (${newGames.length} new)`, "success");
         } else {
           showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (all already in library)`, "success");
@@ -393,6 +394,7 @@ export default function SettingsPage() {
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.autoSyncOnLaunch} onChange={(e) => { const u = { ...steamSettings, autoSyncOnLaunch: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Auto-sync on launch</span></label>
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncPlaytime} onChange={(e) => { const u = { ...steamSettings, syncPlaytime: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync playtime</span></label>
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncAchievements} onChange={(e) => { const u = { ...steamSettings, syncAchievements: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync achievements</span></label>
+                <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.autoFetchMetadata} onChange={(e) => { const u = { ...steamSettings, autoFetchMetadata: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Auto-fetch IGDB metadata (sequential, ~250ms/game)</span></label>
               </div>
             )}
           </div>

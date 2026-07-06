@@ -40,6 +40,17 @@ export interface SteamSettings {
   autoSyncOnLaunch: boolean;
   syncPlaytime: boolean;
   syncAchievements: boolean;
+  /**
+   * Auto-fetch IGDB metadata for each newly synced game that lacks a
+   * description. When true, SettingsPage passes a flag to GameContext.addGames
+   * which runs the fetches SEQUENTIALLY (one game at a time) to stay under
+   * IGDB's 4 req/s free-tier cap. The existing backend `igdb_acquire`
+   * rate-limiter is the last line of defense.
+   *
+   * For a 500-game library this can take several minutes; users on slow
+   * connections or who only care about launching may opt out.
+   */
+  autoFetchMetadata: boolean;
 }
 
 /** localStorage key for Steam settings */
