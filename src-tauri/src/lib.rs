@@ -726,6 +726,7 @@ pub fn run() {
             // its own global session; the source manager and store
             // checker are passed through `tauri::State`.
             source_manager::sources_add,
+            source_manager::add_source_via_webview,
             source_manager::sources_remove,
             source_manager::sources_toggle,
             source_manager::sources_list,

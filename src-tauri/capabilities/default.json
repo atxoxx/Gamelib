@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window. Webview permissions are used by the WebLinks tab to render fully interactive previews in a native Tauri Webview overlay.",
-  "windows": ["main"],
+  "description": "Capability for the main window. Webview permissions are used by the WebLinks tab to render fully interactive previews in a native Tauri Webview overlay. The `source-fetcher-*` windows are the Cloudflare pass-through windows created by `add_source_via_webview`; they need `core:event:allow-emit` to send the captured JSON + cancel signal back to Rust via Tauri events.",
+  "windows": ["main", "source-fetcher-*"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -12,10 +12,12 @@
     },
     "dialog:default",
     "core:webview:allow-create-webview",
+    "core:webview:allow-create-webview-window",
     "core:webview:allow-webview-close",
     "core:webview:allow-set-webview-position",
     "core:webview:allow-set-webview-size",
     "core:webview:allow-webview-hide",
-    "core:webview:allow-webview-show"
+    "core:webview:allow-webview-show",
+    "core:event:allow-emit"
   ]
 }

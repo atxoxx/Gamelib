@@ -28,13 +28,15 @@
 //! OUTSIDE the lock (see `refresh_source`) so concurrent reads
 //! (searches) aren't blocked while a fetch is in flight.
 
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
 
 // ─── JSON schema (Hydra-compatible) ─────────────────────────────────────────
 
@@ -205,6 +207,69 @@ impl SourceManager {
         // or the JSON is malformed, we surface the error and the
         // user gets nothing.
         let data = self.fetch_source(&trimmed).await?;
+        self.commit_source(trimmed, name, data)
+    }
+
+    /// Add a new source from a pre-fetched JSON text payload.
+    ///
+    /// Used by the Settings "Add Source" flow when the upstream URL
+    /// is Cloudflare-protected and the user has to manually click
+    /// through a JS challenge inside an in-app Webview. The webview
+    /// reads the rendered JSON (typically wrapped in a `<pre>` tag)
+    /// and passes the text here, skipping the `reqwest` fetch entirely.
+    ///
+    /// The same URL/duplicate validation as `add_source` is applied,
+    /// and the parsed `GameSource` payload is persisted by the same
+    /// `commit_source` helper — both paths share the cache + metadata
+    /// write so a source added either way behaves identically.
+    pub async fn add_source_from_json(
+        &mut self,
+        url: String,
+        name: String,
+        json_text: String,
+    ) -> Result<SourceLink, String> {
+        let trimmed = url.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("Source URL is empty".to_string());
+        }
+        if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+            return Err("Source URL must start with http:// or https://".to_string());
+        }
+        if self.sources.iter().any(|s| s.url == trimmed) {
+            return Err("This source URL has already been added".to_string());
+        }
+        // Trim defensive whitespace — the webview extraction path
+        // may pick up trailing newlines or BOM markers depending on
+        // how the source server formatted the response.
+        let trimmed_json = json_text.trim();
+        if trimmed_json.is_empty() {
+            return Err("Captured JSON is empty".to_string());
+        }
+        let data: GameSource = serde_json::from_str(trimmed_json)
+            .map_err(|e| format!("Source JSON parse failed: {}", e))?;
+        // Note: we intentionally don't reject empty `downloads`
+        // arrays — an empty source is valid Hydra JSON, and the
+        // HTTP-fetch path (`add_source`) accepts it the same way.
+        // Keeping the two paths symmetrical avoids "the same JSON
+        // works when fetched but not when captured" surprises.
+        self.commit_source(trimmed, name, data)
+    }
+
+    /// Persist a fully-parsed `GameSource`. Shared by `add_source`
+    /// (HTTP-fetched) and `add_source_from_json` (Webview-captured)
+    /// so both flows produce identical `SourceLink` records and
+    /// populate the in-memory cache the same way.
+    ///
+    /// Assumes the caller has already validated the URL and
+    /// confirmed there's no duplicate — those are URL-shape checks
+    /// that don't depend on the body, so they're hoisted to each
+    /// entry point for clearer error messages.
+    fn commit_source(
+        &mut self,
+        url: String,
+        name: String,
+        data: GameSource,
+    ) -> Result<SourceLink, String> {
         let now_nanos = unix_now_nanos();
         let now_seconds = unix_now();
         // `src_{nanos}_{counter}` gives uniqueness even for
@@ -214,13 +279,13 @@ impl SourceManager {
         let counter = SOURCE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
         let id = format!("src_{}_{}", now_nanos, counter);
         let display_name = if name.trim().is_empty() {
-            derive_name_from_url(&trimmed)
+            derive_name_from_url(&url)
         } else {
             name.trim().to_string()
         };
         let source = SourceLink {
             id: id.clone(),
-            url: trimmed,
+            url,
             name: display_name,
             enabled: true,
             last_fetched: Some(now_seconds),
@@ -444,6 +509,14 @@ impl SourceManager {
 /// 128-bit unique-enough id without pulling in the `uuid` crate.
 static SOURCE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Per-process counter for source-fetcher WebviewWindow labels.
+/// Combined with `process::id()` this gives a label that's unique
+/// across the process lifetime even if two `add_source_via_webview`
+/// commands run concurrently (or back-to-back within the same
+/// nanosecond, which the previous `nanos + pid` scheme could
+/// collide on with low-resolution clocks).
+static SOURCE_FETCHER_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -507,6 +580,444 @@ fn score_match(query_tokens: &[String], raw_query: &str, title: &str) -> f32 {
     (token_score * 0.8 + substring_bonus).min(1.0)
 }
 
+// ─── Webview-based source capture ──────────────────────────────────────────
+//
+// `add_source_via_webview` exists for the (very common) case where the
+// upstream source URL is gated by a Cloudflare "are you human?"
+// interstitial: the Rust `reqwest` client can't run the JS challenge
+// and never gets a `cf_clearance` cookie, so the HTTP-fetch path
+// returns the CF HTML instead of the JSON.
+//
+// We open the URL in a Tauri WebviewWindow, inject a small floating
+// "Capture JSON" + "Cancel" overlay via `initialization_script`,
+// and wait for the user to click Capture after clearing the CF
+// challenge (with the in-Webview cookie jar).
+//
+// Communication uses `on_navigation` interception (same pattern as
+// `steam/auth.rs`) with a custom `gamelib-source://` URL scheme.
+//
+// To work around WebView2's ~2 MB top-frame navigation URL limit,
+// large payloads are split into chunks by the JS and sent as
+// sequential navigations:
+//   * `gamelib-source://chunk/<index>/<total>/<data>` — one chunk
+//   * `gamelib-source://cancel` — user clicked Cancel
+//   * Window close / 5-min timeout — implicit cancel
+//
+// The Rust side collects chunks in a `ChunkState` shared via
+// `Arc<Mutex<>>`. When all chunks arrive, they're joined and
+// sent through the channel as a single signal.
+//
+// URL-safe base64 (`-`/`_` instead of `+`/`/`, no `=` padding)
+// avoids WebView2 URL normalization corrupting the payload.
+//
+// Why not Tauri events (`window.__TAURI__.event.emit`)? The IPC
+// bridge (`window.__TAURI_INTERNALS__`) is reliably injected into
+// the main window via `withGlobalTauri`, but in
+// `WebviewWindowBuilder` webviews loading external URLs, the
+// bridge is not available — the async `emit()` silently fails
+// with an unhandled Promise rejection.
+//
+// Chrome-mimicking user agent is mandatory: Cloudflare detects
+// WebView2's default UA on Windows and serves a blank page. We
+// re-use the same UA string `steam/auth.rs` uses for Steam login.
+
+/// JavaScript injected into every page of the source-fetcher
+/// Webview. Adds a floating "Capture JSON" + "Cancel" overlay that
+/// stays on top of the page (including Cloudflare interstitials).
+///
+/// Runs at document_start. We poll for `document.body` because CF
+/// can wipe + replace the DOM multiple times, defeating a one-shot
+/// `DOMContentLoaded` listener. The `MutationObserver` fallback
+/// re-attaches the overlay if a page wipe removes it. The id
+/// check (`gamelib-source-fetcher`) makes the injection idempotent
+/// so we never end up with two overlays on a re-injected page.
+///
+/// `buildUI` returns the assembled overlay with its `showStatus`
+/// helper closed over the status element — that scoping is
+/// important because the overlay can be torn down and rebuilt by
+/// the MutationObserver re-injection, and each rebuild needs its
+/// own status element.
+pub const SOURCE_FETCHER_INIT_SCRIPT: &str = r#"
+(function() {
+    if (window.__gamelibSourceFetcherInjected) return;
+    window.__gamelibSourceFetcherInjected = true;
+
+    // URL-safe base64: replaces +/ with -_ and strips = padding
+    // so WebView2 URL normalisation doesn't corrupt the payload.
+    function toBase64Url(str) {
+        var utf8 = unescape(encodeURIComponent(str));
+        var base64 = btoa(utf8);
+        return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+
+    function buildUI() {
+        var host = document.createElement('div');
+        host.id = 'gamelib-source-fetcher';
+        host.style.cssText = [
+            'position: fixed',
+            'top: 16px',
+            'right: 16px',
+            'z-index: 2147483647',
+            'display: flex',
+            'flex-direction: column',
+            'gap: 8px',
+            'min-width: 160px',
+            'font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            'user-select: none'
+        ].join(';');
+
+        var captureBtn = document.createElement('button');
+        captureBtn.type = 'button';
+        captureBtn.textContent = 'Capture JSON';
+        captureBtn.style.cssText = [
+            'padding: 10px 16px',
+            'background: #1f6feb',
+            'color: #fff',
+            'border: 0',
+            'border-radius: 6px',
+            'font: inherit',
+            'cursor: pointer',
+            'box-shadow: 0 4px 12px rgba(0,0,0,0.25)'
+        ].join(';');
+
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = [
+            'padding: 8px 14px',
+            'background: #6e7681',
+            'color: #fff',
+            'border: 0',
+            'border-radius: 6px',
+            'font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            'cursor: pointer',
+            'box-shadow: 0 4px 12px rgba(0,0,0,0.25)'
+        ].join(';');
+
+        var status = document.createElement('div');
+        status.id = 'gsf-status';
+        status.style.cssText = [
+            'display: none',
+            'padding: 8px 10px',
+            'border-radius: 6px',
+            'background: rgba(239, 68, 68, 0.12)',
+            'color: #ef4444',
+            'font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            'word-break: break-word'
+        ].join(';');
+
+        host.appendChild(captureBtn);
+        host.appendChild(cancelBtn);
+        host.appendChild(status);
+
+        function showStatus(msg, kind) {
+            status.textContent = msg;
+            status.style.display = 'block';
+            status.style.color = kind === 'error' ? '#ef4444' : '#1f6feb';
+            status.style.background = kind === 'error'
+                ? 'rgba(239, 68, 68, 0.12)'
+                : 'rgba(31, 111, 235, 0.12)';
+        }
+
+        captureBtn.onclick = function() {
+            // Guard against interleaved captures: if the
+            // MutationObserver rebuilds the overlay mid-capture
+            // (e.g. after a CF page wipe), the new button would
+            // be re-enabled. Prevent a second capture from
+            // firing while the first one's setTimeout chain is
+            // still in flight.
+            if (window.__gamelibCapturing) return;
+            window.__gamelibCapturing = true;
+            captureBtn.disabled = true;
+            var prevText = captureBtn.textContent;
+            captureBtn.textContent = 'Capturing…';
+            try {
+                var pre = document.querySelector('pre');
+                var text = pre
+                    ? (pre.textContent || pre.innerText || '')
+                    : ((document.body && (document.body.innerText || document.body.textContent)) || '');
+                var b64 = toBase64Url(text);
+                // Split large payloads into ≤1.5 MB chunks to
+                // stay under WebView2's ~2 MB top-frame
+                // navigation URL limit. The Rust side collects
+                // chunks via `on_navigation` and reassembles
+                // them when all chunks have arrived.
+                var MAX_CHUNK = 1500000;
+                var chunks = [];
+                for (var i = 0; i < b64.length; i += MAX_CHUNK) {
+                    chunks.push(b64.slice(i, i + MAX_CHUNK));
+                }
+                var total = chunks.length;
+                // Fire chunk navigations sequentially via
+                // setTimeout. Each navigation is intercepted +
+                // blocked by Rust's `on_navigation`, so the
+                // page stays intact and JS timers continue to
+                // fire.
+                for (var c = 0; c < total; c++) {
+                    (function(idx) {
+                        setTimeout(function() {
+                            location.href =
+                                'gamelib-source://chunk/'
+                                + idx + '/' + total + '/'
+                                + chunks[idx];
+                        }, idx * 100);
+                    })(c);
+                }
+            } catch (err) {
+                captureBtn.textContent = prevText;
+                captureBtn.disabled = false;
+                window.__gamelibCapturing = false;
+                showStatus('Capture failed: ' + err, 'error');
+            }
+        };
+
+        cancelBtn.onclick = function() {
+            location.href = 'gamelib-source://cancel';
+        };
+
+        return host;
+    }
+
+    function inject() {
+        if (!document.body) return false;
+        if (document.getElementById('gamelib-source-fetcher')) return true;
+        document.body.appendChild(buildUI());
+        return true;
+    }
+
+    // First attempt: try immediately in case `document.body` is
+    // already there (e.g. injected on a re-navigation).
+    if (inject()) return;
+
+    // Poll for `document.body` appearing. CF interstitials replace
+    // the body on the challenge result, so we also re-inject via
+    // a MutationObserver in case the user navigates past CF while
+    // our poll is mid-cycle.
+    var attempts = 0;
+    var poll = setInterval(function() {
+        attempts += 1;
+        if (inject() || attempts > 120) { // ~60s
+            clearInterval(poll);
+        }
+    }, 500);
+
+    // Belt-and-suspenders: if a page wipe removes the overlay,
+    // re-inject on the next DOM mutation. Cheap (we early-return
+    // if our element still exists).
+    try {
+        new MutationObserver(function() {
+            if (!document.getElementById('gamelib-source-fetcher')) {
+                inject();
+            }
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    } catch (_) { /* observer unavailable on very old WebView2 builds */ }
+})();
+"#;
+
+/// Chrome-mimicking UA — see `steam/auth.rs` for the rationale.
+/// We re-declare it here (rather than reaching into the steam
+/// module) to keep the source fetcher self-contained.
+pub const SOURCE_FETCHER_USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/// Decode a URL-safe base64 string (RFC 4648 §5) back to the
+/// original UTF-8 text. Reverses the JS `toBase64Url()` transform:
+/// `-` → `+`, `_` → `/`, re-add padding, then base64-decode.
+fn decode_base64url(base64url: &str) -> Result<String, String> {
+    let standard = base64url.replace('-', "+").replace('_', "/");
+    let padded = match standard.len() % 4 {
+        2 => standard + "==",
+        3 => standard + "=",
+        _ => standard,
+    };
+    let bytes = general_purpose::STANDARD
+        .decode(&padded)
+        .map_err(|e| format!("Base64 decode failed: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode failed: {e}"))
+}
+
+/// Per-call state for chunked base64url reassembly.
+/// Shared between the `on_navigation` callback (which collects
+/// chunks from sequential navigations) and `on_window_event`
+/// (which needs to co-exist with the same `Arc<Mutex<>>`).
+///
+/// `total` is set once by the first-arriving chunk and treated
+/// as authoritative thereafter — subsequent chunks with a
+/// different total are ignored to guard against malformed or
+/// interleaved payloads.
+#[derive(Default)]
+struct ChunkState {
+    chunks: Vec<String>,
+    received: usize,
+    total: Option<usize>,
+}
+
+/// Open the given source URL in a Cloudflare pass-through Webview,
+/// wait for the user to click "Capture JSON", parse the resulting
+/// JSON, and persist a new source — same `commit_source` path used
+/// by the regular HTTP fetch. Returns the new `SourceLink`.
+///
+/// Large payloads are split into chunks by the injected JS and
+/// reassembled here before decoding.
+#[tauri::command]
+pub async fn add_source_via_webview(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<tokio::sync::Mutex<SourceManager>>>,
+    url: String,
+    name: String,
+) -> Result<SourceLink, String> {
+    use std::time::Duration;
+    use url::Url;
+
+    // Pre-validate the URL the same way the fetch path does, so
+    // the user gets a useful error before a new window opens.
+    let trimmed_url = url.trim().to_string();
+    if trimmed_url.is_empty() {
+        return Err("Source URL is empty".to_string());
+    }
+    if !trimmed_url.starts_with("http://") && !trimmed_url.starts_with("https://") {
+        return Err("Source URL must start with http:// or https://".to_string());
+    }
+    let parsed_url: Url = trimmed_url
+        .parse()
+        .map_err(|e| format!("Invalid URL: {e}"))?;
+
+    // Unique per-call window label. The init script no longer
+    // bakes in the label (we switched from per-call event names
+    // to the fixed `gamelib-source://` scheme), but the label
+    // is still needed for Tauri's window management.
+    let label = format!(
+        "source-fetcher-{}-{}",
+        std::process::id(),
+        SOURCE_FETCHER_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
+    );
+
+    // Channel for navigation callbacks. Pattern matches
+    // `steam/auth.rs`: `on_navigation` sends a signal through
+    // a `std::sync::mpsc` channel, and we `spawn_blocking` +
+    // `recv_timeout` to wait in an async-safe way.
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let tx_nav = tx.clone();
+    let rx = Arc::new(Mutex::new(rx));
+
+    // Shared chunk collector — the `on_navigation` callback
+    // stores each arriving chunk, and when `received == total`
+    // it sends the joined base64url through the channel.
+    let chunks_state = Arc::new(Mutex::new(ChunkState::default()));
+    let chunks_nav = Arc::clone(&chunks_state);
+
+    let webview = WebviewWindowBuilder::new(
+        &app,
+        &label,
+        WebviewUrl::External(parsed_url),
+    )
+    .title("Add Source — Cloudflare Pass-Through")
+    .inner_size(960.0, 720.0)
+    .min_inner_size(640.0, 480.0)
+    .resizable(true)
+    .user_agent(SOURCE_FETCHER_USER_AGENT)
+    .initialization_script(SOURCE_FETCHER_INIT_SCRIPT)
+    .on_navigation(move |url| {
+        let url_str = url.as_str();
+        // `gamelib-source://chunk/<index>/<total>/<data>` — one
+        // chunk of a (possibly large) base64url payload. Split
+        // by the JS to stay under the ~2 MB URL limit.
+        if url_str.starts_with("gamelib-source://chunk/") {
+            let rest = &url_str["gamelib-source://chunk/".len()..];
+            let parts: Vec<&str> = rest.splitn(3, '/').collect();
+            if parts.len() == 3 {
+                if let (Ok(idx), Ok(total)) =
+                    (parts[0].parse::<usize>(), parts[1].parse::<usize>())
+                {
+                    if total == 0 {
+                        return false; // malformed chunk
+                    }
+                    let mut state = chunks_nav.lock().unwrap();
+                    // Lock total on first chunk; ignore later
+                    // chunks with a different total (defense
+                    // against interleaved captures or malformed
+                    // sequential navigations).
+                    if let Some(existing) = state.total {
+                        if existing != total {
+                            return false;
+                        }
+                    } else {
+                        state.total = Some(total);
+                    }
+                    if state.chunks.len() < total {
+                        state.chunks.resize(total, String::new());
+                    }
+                    if idx < total {
+                        if state.chunks[idx].is_empty() {
+                            state.received += 1;
+                        }
+                        state.chunks[idx] = parts[2].to_string();
+                    }
+                    if state.received == total {
+                        let combined =
+                            state.chunks.join("");
+                        let _ = tx_nav.send(combined);
+                    }
+                }
+            }
+            return false; // Block the navigation
+        }
+        // `gamelib-source://cancel` — user clicked Cancel.
+        if url_str.starts_with("gamelib-source://cancel") {
+            let _ = tx_nav.send("__CANCEL__".to_string());
+            return false;
+        }
+        true // Allow all other navigations
+    })
+    .build()
+    .map_err(|e| format!("Failed to open source page: {e}"))?;
+
+    // Send a cancel signal when the user closes the webview (X button)
+    // so the Rust function returns immediately instead of waiting for
+    // the 5-minute timeout. `Sender` is `Send` (not `Sync`), so we
+    // clone and move the clone into the closure.
+    let tx_close = tx.clone();
+    webview.on_window_event(move |event| {
+        if matches!(
+            event,
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+        ) {
+            let _ = tx_close.send("__CANCEL__".to_string());
+        }
+    });
+
+    // Wait for a signal (capture or cancel) with a 5-minute
+    // timeout. Window close is covered implicitly: when the
+    // user closes the window, the navigation callback never
+    // fires and `recv_timeout` eventually returns `Err`.
+    let signal = {
+        let rx = Arc::clone(&rx);
+        tokio::task::spawn_blocking(move || {
+            rx.lock().unwrap().recv_timeout(Duration::from_secs(300))
+        })
+        .await
+        .map_err(|e| format!("Join error: {e}"))?
+    };
+
+    // Close the webview — we have the data (or a cancel/timeout).
+    let _ = webview.close();
+
+    match signal {
+        Ok(s) if s == "__CANCEL__" => Err("Cancelled".to_string()),
+        Ok(base64url) => {
+            let json_text = decode_base64url(&base64url)?;
+            state
+                .lock()
+                .await
+                .add_source_from_json(trimmed_url, name, json_text)
+                .await
+        }
+        Err(_timeout) => {
+            Err("Source capture timed out after 5 minutes".to_string())
+        }
+    }
+}
+
 // ─── Tauri commands ─────────────────────────────────────────────────────────
 //
 // State is `Arc<tokio::sync::Mutex<SourceManager>>`. The Tauri command
@@ -540,6 +1051,8 @@ pub async fn sources_add(
     state.lock().await.add_source(url, name).await
 }
 
+/// Remove a source by id. Idempotent — returns Ok(()) if the
+/// id isn't found, so the frontend can be optimistic.
 #[tauri::command]
 pub async fn sources_remove(
     state: tauri::State<'_, Arc<tokio::sync::Mutex<SourceManager>>>,
