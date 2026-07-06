@@ -57,7 +57,7 @@ interface GameContextType {
   selectedGameId: string | null;
   setSelectedGameId: (id: string | null) => void;
   addGame: (game: Game) => void;
-  addGames: (games: Game[], doFetchMetadata?: boolean) => void;
+  addGames: (games: Game[]) => void;
   removeGame: (id: string) => void;
   updateGame: (id: string, updates: Partial<Game>) => void;
   getGame: (id: string) => Game | undefined;
@@ -66,9 +66,19 @@ interface GameContextType {
   addStoreGame: (metadata: GameMetadataResult) => Promise<string>;
   importLocalGames: (items: { path: string; metadata: GameMetadataResult | null }[]) => Promise<void>;
   fetchGameReviews: (gameId: string, gameName: string, steamAppId?: number) => Promise<void>;
+  /**
+   * On-demand IGDB metadata enrichment. Called by GamePage on mount when
+   * a game lacks a description (e.g. freshly Steam-synced, or imported
+   * without metadata). Single IGDB call per invocation — well under the
+   * 4 req/s cap. Safe to call multiple times; the function silently skips
+   * games IGDB doesn't recognise.
+   */
+  enrichGameMetadata: (gameId: string, gameName: string, steamAppId?: number) => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | null>(null);
+
+export const NO_IGDB_MATCH_SOURCE = "Steam (no IGDB match)";
 
 let nextId = 1;
 function generateId(): string {
@@ -161,58 +171,92 @@ export function GameProvider({ children }: { children: ReactNode }) {
     };
   }
 
-  /** Auto-fetch IGDB metadata and images for a newly imported game.
-   *  For Steam/store-synced games, IGDB is preferred (richer metadata).
-   *  Set `silent=true` for batch operations to avoid toast spam. */
-  async function autoFetchMetadata(gameId: string, gameName: string, steamAppId?: number, silent = false) {
+  /** On-demand IGDB metadata enrichment. Called by GamePage on mount when
+   *  the game lacks a description (or when the user clicks Fetch Metadata
+   *  in the edit panel). Replaces the old `addGame`/`addGames` auto-fetch
+   *  fan-out which was wasteful for 500+ game libraries.
+   *
+   *  SUCCESS/FAILURE SEMANTICS:
+   *  * Single IGDB `game` call + (when matches found) one `game_time_to_beats`
+   *    call. Rust `igdb_acquire()` enforces 250 ms spacing between IGDB calls.
+   *  * Never throws — silently skips games IGDB doesn't recognise.
+   *  * Never overwrites a non-empty Game field with an empty IGDB result.
+   */
+  // Keep a ref to the latest games array so the enrichGameMetadata callback
+  // identity stays stable across any game mutation. Otherwise the dep on
+  // `games` would re-create this callback on every keystroke or insert,
+  // forcing the GamePage effect to re-run (subsequent guard still prevents
+  // redundant IGDB calls, but the closure churn was wasted CPU).
+  const gamesRef = useRef(games);
+  gamesRef.current = games;
+
+  const enrichGameMetadata = useCallback(async (gameId: string, gameName: string, steamAppId?: number) => {
     try {
       const results: GameMetadataResult[] = await invoke("search_game_metadata", {
         gameName,
         skipLaunchbox: !!steamAppId,
       });
-      if (results.length === 0) return;
+      // Find the current game record to merge intelligently (don't
+      // overwrite non-empty existing fields with empty IGDB results).
+      const current = gamesRef.current.find((g) => g.id === gameId);
+      if (!current) return;
+      if (results.length === 0) {
+        // No IGDB match. Mark the game as a Steam-sourced record so a
+        // subsequent visit doesn't try to enrich it again — the GamePage
+        // effect uses this sentinel via metadataSource.
+        updateGame(gameId, {
+          metadataSource: current.metadataSource ?? NO_IGDB_MATCH_SOURCE,
+        });
+        return;
+      }
       // Prefer IGDB for its richer metadata (timeToBeat, criticRating, themes,
       // screenshots, videos, etc.) — Steam and LaunchBox only provide basics.
       const meta = results.find((r) => r.sourceName === "IGDB") ?? results[0];
       const images = await fetchAllImages(meta.images);
+      // Merge with sentinel "only set if currently empty" for textual fields
+      // so a user-edited description isn't clobbered by an IGDB re-fetch.
+      const setIfEmpty = <K extends keyof Game>(key: K, value: Game[K] | undefined): Game[K] | undefined => {
+        // Treat only null/undefined as "unset". An empty string (e.g. user
+        // explicitly clearing the description) is preserved and not overwritten
+        // by an IGDB value on subsequent visits.
+        if (current[key] === undefined || current[key] === null) return value;
+        return current[key];
+      };
       updateGame(gameId, {
-        description: meta.description ?? undefined,
-        developer: meta.developer ?? undefined,
-        publisher: meta.publisher ?? undefined,
-        releaseDate: meta.releaseDate ?? undefined,
-        genres: meta.genres.length > 0 ? meta.genres : undefined,
-        coverArtUrl: images.coverArtUrl,
-        bannerUrl: images.bannerUrl,
-        logoUrl: images.logoUrl,
-        igdbRating: meta.igdbRating ?? undefined,
-        criticRating: meta.criticRating ?? undefined,
-        themes: meta.themes ?? undefined,
-        gameModes: meta.gameModes ?? undefined,
-        playerPerspectives: meta.playerPerspectives ?? undefined,
-        screenshots: meta.screenshots ?? undefined,
-        videos: meta.videos ?? undefined,
-        websites: meta.websites ?? undefined,
-        timeToBeat: meta.timeToBeat ?? undefined,
-        similarGames: meta.similarGames ?? undefined,
-        releases: meta.releases ?? undefined,
-        igdbReviews: meta.igdbReviews ?? undefined,
+        description: setIfEmpty("description", meta.description ?? undefined),
+        developer: setIfEmpty("developer", meta.developer ?? undefined),
+        publisher: setIfEmpty("publisher", meta.publisher ?? undefined),
+        releaseDate: setIfEmpty("releaseDate", meta.releaseDate ?? undefined),
+        genres: current.genres && current.genres.length > 0 ? current.genres : (meta.genres.length > 0 ? meta.genres : undefined),
+        // For images, prefer the IGDB cover/hero over orphaned Steam CDN URLs
+        // when IGDB returned one — otherwise keep whatever's already there.
+        coverArtUrl: images.coverArtUrl ?? current.coverArtUrl,
+        bannerUrl: images.bannerUrl ?? current.bannerUrl,
+        logoUrl: images.logoUrl ?? current.logoUrl,
+        igdbRating: current.igdbRating ?? meta.igdbRating ?? undefined,
+        criticRating: current.criticRating ?? meta.criticRating ?? undefined,
+        themes: current.themes ?? meta.themes ?? undefined,
+        gameModes: current.gameModes ?? meta.gameModes ?? undefined,
+        playerPerspectives: current.playerPerspectives ?? meta.playerPerspectives ?? undefined,
+        screenshots: current.screenshots ?? meta.screenshots ?? undefined,
+        videos: current.videos ?? meta.videos ?? undefined,
+        websites: current.websites ?? meta.websites ?? undefined,
+        timeToBeat: current.timeToBeat ?? meta.timeToBeat ?? undefined,
+        similarGames: current.similarGames ?? meta.similarGames ?? undefined,
+        releases: current.releases ?? meta.releases ?? undefined,
+        igdbReviews: current.igdbReviews ?? meta.igdbReviews ?? undefined,
         metadataSource: meta.sourceName,
         metadataUrl: meta.sourceUrl,
       });
-      if (!silent) {
-        console.log(`Fetched metadata for ${gameName} from ${meta.sourceName}`);
-      }
+      console.log(`Enriched ${gameName} via ${meta.sourceName}`);
 
-      // Pull reviews in the background so they're ready when the user
-      // opens the Reviews tab. We don't await this — it can run alongside
-      // image downloads.
-      fetchGameReviews(gameId, gameName, steamAppId).catch((err) =>
-        console.error("Background review fetch failed:", err)
-      );
+      // Background review load happens lazily via ReviewsTab on first open,
+      // so we don't need to seed it here. This also avoids TDZ ordering
+      // issues with fetchGameReviews's useCallback declaration below.
     } catch (err) {
-      console.error("Auto-fetch metadata failed:", err);
+      console.error("enrichGameMetadata failed:", err);
     }
-  }
+  }, [updateGame]);
 
   /** Fetch reviews for a game from the best available source (Steam first,
    *  IGDB fallback) and persist them on the game record. Safe to call any
@@ -237,87 +281,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   const addGame = useCallback((game: Game) => {
     const id = game.id || generateId();
-    const newGame = { ...game, id };
-    setGames((prev) => [...prev, newGame]);
+    setGames((prev) => [...prev, { ...game, id }]);
+    // IGDB metadata is now lazy: GamePage calls enrichGameMetadata on mount
+    // for any game that lacks a description. This avoids the wasteful fan-out
+    // that used to trigger hundreds of IGDB calls during Steam sync.
+  }, []);
 
-    // Auto-fetch metadata in the background for locally imported games
-    if (game.path && !game.description) {
-      const steamAppId = extractSteamAppId(game.path) ?? undefined;
-      autoFetchMetadata(id, game.name, steamAppId);
-    }
-  }, [showToast, updateGame]);
-
-  const addGames = useCallback((newGames: Game[], doFetchMetadata = true) => {
+  const addGames = useCallback((newGames: Game[]) => {
     const withIds = newGames.map((g) => ({ ...g, id: g.id || generateId() }));
     setGames((prev) => [...prev, ...withIds]);
-
-    // Auto-fetch metadata for each imported game.
-    // Trigger for: local imports (has path), store-synced games (has steamAppId/storeSource),
-    // or any game missing a description. Use silent mode to avoid toast spam.
-    if (!doFetchMetadata) return;
-
-    const needsMetadata = withIds.filter((game) => {
-      const isLocal = !!game.path;
-      const isStoreSynced = !!game.steamAppId || !!game.storeSource;
-      return (isLocal || isStoreSynced) && !game.description;
-    });
-
-    if (needsMetadata.length === 0) return;
-
-    showToast(
-      `Fetching metadata for ${needsMetadata.length} game${needsMetadata.length !== 1 ? "s" : ""}...`,
-      "info"
-    );
-
-    // ── Sequential IGDB queue ───────────────────────────────────────────────
-    // IGDB free tier: 4 req/s, max 8 concurrent.
-    // https://api-docs.igdb.com/#rate-limits
-    //
-    // autoFetchMetadata internally invokes `search_game_metadata` which makes
-    // 2 IGDB HTTP calls per game (search + time-to-beats). Rust's igdb_acquire
-    // already enforces a 250 ms minimum spacing between IGDB calls as a
-    // backstop, but firing ALL the per-game invokes in parallel was bursting
-    // dozens of calls within the first second and tripping HTTP 429s.
-    //
-    // Awaiting one fetch before starting the next reduces us to a single
-    // game in flight at any moment. With ~500 ms per game (network +
-    // 2 IGDB calls × 250 ms spacing) we sit comfortably below 4 req/s.
-    //
-    // GameContextProvider wraps the entire app, so the queue keeps running
-    // even if the user navigates away from the Settings tab mid-sync.
-    //
-    // NOTE: per-game success tracking (IGDB returned data vs. zero results)
-    // is intentionally approximate — autoFetchMetadata swallows its own errors
-    // and returns void on empty results, so we count iterations completed.
-    // For exact per-game success counts, autoFetchMetadata would need to
-    // return a boolean; tracked as a follow-up.
-    let processed = 0;
-    const queue = (async () => {
-      for (const game of needsMetadata) {
-        // autoFetchMetadata is `silent=true` so it never throws and never
-        // toasts per-game; awaiting it serially is what enforces the 1-at-a-
-        // time constraint the user requested.
-        await autoFetchMetadata(game.id, game.name, game.steamAppId, true);
-        processed++;
-      }
-    })();
-
-    // Resolve the "fetching..." toast with a completion message once the
-    // queue drains — critical for 500-game libraries where the sync may
-    // take several minutes and the user needs confirmation it's done.
-    void queue.finally(() => {
-      const noun = processed !== 1 ? "games" : "game";
-      const total = needsMetadata.length;
-      if (processed < total) {
-        showToast(
-          `Fetched IGDB metadata for ${processed}/${total} ${noun} (some returned no results)`,
-          "info"
-        );
-      } else {
-        showToast(`Fetched IGDB metadata for ${processed} ${noun}`, "success");
-      }
-    });
-  }, [showToast, updateGame]);
+    // IGDB metadata is now lazy: GamePage calls enrichGameMetadata on mount
+    // for any game that lacks a description. This avoids the wasteful fan-out
+    // that triggered hundreds of IGDB calls during Steam sync even in
+    // sequential mode. For a 500-game Steam library, this saves ~4 minutes
+    // of background fetching; users only see IGDB work for games they
+    // actually open.
+  }, []);
 
   const removeGame = useCallback((id: string) => {
     setGames((prev) => prev.filter((g) => g.id !== id));
@@ -555,7 +534,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       // event per the spec.
       for (const game of imported) {
         const steamAppId = extractSteamAppId(game.path) ?? undefined;
-        fetchGameReviews(game.id, game.name, steamAppId).catch((err) =>
+        fetchGameReviews(game.id, game.name, steamAppId).catch((err: unknown) =>
           console.error(`Background review fetch on import failed for ${game.name}:`, err)
         );
       }
@@ -580,6 +559,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         addStoreGame,
         importLocalGames,
         fetchGameReviews,
+        enrichGameMetadata,
       }}
     >
       {children}

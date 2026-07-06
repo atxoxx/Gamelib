@@ -41,7 +41,6 @@ export default function SettingsPage() {
     autoSyncOnLaunch: true,
     syncPlaytime: true,
     syncAchievements: true,
-    autoFetchMetadata: true,
   });
 
   // Theme state
@@ -153,6 +152,14 @@ export default function SettingsPage() {
         const newGames: Game[] = [];
         for (const entry of result.syncedGames ?? []) {
           if (existingAppIds.has(entry.appid)) continue;
+          // Steam sync is lightweight: we embed Steam CDN image URLs
+          // (no API call, no rate limits, near-instant). Detailed IGDB
+          // metadata (description, ratings, time-to-beat, etc.) is
+          // fetched lazily when the user opens a game's GamePage —
+          // matching the Store browsing pattern. See
+          // `enrichGameMetadata` in GameContext for the on-demand fetch.
+          const steamCdnCover = `https://cdn.akamai.steamstatic.com/steam/apps/${entry.appid}/library_600x900_2x.jpg`;
+          const steamCdnHero  = `https://cdn.akamai.steamstatic.com/steam/apps/${entry.appid}/library_hero.jpg`;
           newGames.push({
             id: `steam-${entry.appid}`,
             name: entry.name,
@@ -164,10 +171,12 @@ export default function SettingsPage() {
             steamAppId: entry.appid,
             steamPlaytime: entry.playtimeForever,
             storeSource: "steam" as const,
+            coverArtUrl: steamCdnCover,
+            bannerUrl: steamCdnHero,
           });
         }
         if (newGames.length > 0) {
-          addGames(newGames, steamSettings.autoFetchMetadata);
+          addGames(newGames);
           showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (${newGames.length} new)`, "success");
         } else {
           showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (all already in library)`, "success");
@@ -394,7 +403,7 @@ export default function SettingsPage() {
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.autoSyncOnLaunch} onChange={(e) => { const u = { ...steamSettings, autoSyncOnLaunch: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Auto-sync on launch</span></label>
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncPlaytime} onChange={(e) => { const u = { ...steamSettings, syncPlaytime: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync playtime</span></label>
                 <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.syncAchievements} onChange={(e) => { const u = { ...steamSettings, syncAchievements: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Sync achievements</span></label>
-                <label className="settings-checkbox-label"><input type="checkbox" checked={steamSettings.autoFetchMetadata} onChange={(e) => { const u = { ...steamSettings, autoFetchMetadata: e.target.checked }; setSteamSettings(u); localStorage.setItem("gamelib-steam-settings", JSON.stringify(u)); }}/><span>Auto-fetch IGDB metadata (sequential, ~250ms/game)</span></label>
+                <label className="settings-checkbox-label" style={{ opacity: 0.7 }}><input type="checkbox" checked disabled /><span>IGDB metadata loads automatically when you open a game</span></label>
               </div>
             )}
           </div>

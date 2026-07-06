@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import html2canvas from "html2canvas";
-import { useGames } from "../context/GameContext";
+import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
 import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify } from "../types/game";
@@ -333,7 +333,7 @@ const enrichedGameIds = new Set<string>();
 function GameDetail({ game }: { game: Game }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { updateGame, removeGame, runningGameIds, launchGame } = useGames();
+  const { updateGame, removeGame, runningGameIds, launchGame, enrichGameMetadata } = useGames();
   const isRunning = runningGameIds.includes(game.id);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -410,44 +410,36 @@ function GameDetail({ game }: { game: Game }) {
   const [editAlternativeNamesText, setEditAlternativeNamesText] = useState(game.alternativeNames ? game.alternativeNames.join(", ") : "");
   const [editLanguageSupportsText, setEditLanguageSupportsText] = useState(game.languageSupports ? JSON.stringify(game.languageSupports, null, 2) : "");
   
-  // Auto-enrich existing games that have metadata but are missing TTB/reviews
+    // Lazily enrich game metadata on mount. Steam-synced games arrive with only
+  // a Steam CDN cover image (no IGDB data), so we trigger the full IGDB
+  // enrichment the first time the user opens such a game's GamePage. Also
+  // covers legacy games that still depend on the previous enrichment path.
+  //
+  // enrichedGameIds (module-scoped, declared above GameDetail) prevents
+  // repeat fetches across repeated navigations within the same SPA session.
+  // The per-mount  guards within a single lifecycle.
+  // Sentinel  records a previous
+  // failed IGDB lookup so we don't re-attempt on every GamePage visit.
   const enrichmentStartedRef = useRef(false);
   useEffect(() => {
-    // Only enrich once per game per session, and only for games with a path (local imports)
     if (enrichmentStartedRef.current) return;
     if (enrichedGameIds.has(game.id)) return;
-    if (!game.path) return;
-    // Only trigger if the game has some metadata but is missing IGDB enrichment
-    const hasPartialMetadata = game.description || game.metadataSource;
-    // Note: igdbReviews are no longer fetched from IGDB (the /v4/reviews
-    // endpoint was removed upstream), so we only look at timeToBeat here.
-    const missingEnrichment = !game.timeToBeat;
-    if (!hasPartialMetadata || !missingEnrichment) return;
+    if (game.metadataSource === NO_IGDB_MATCH_SOURCE) return;
+    if (!game.name) return;
+    const hasDescription = !!game.description;
+    const missingTTB = !game.timeToBeat;
+    if (hasDescription && !missingTTB) return;
 
     enrichmentStartedRef.current = true;
     enrichedGameIds.add(game.id);
-
-    invoke<GameMetadataResult[]>("search_game_metadata", { gameName: game.name })
-      .then((results) => {
-        if (results.length === 0) return;
-        // Prefer the IGDB result so we pick up timeToBeat/criticRating/etc.
-        const meta = results.find(r => r.sourceName === "IGDB" && r.timeToBeat) ?? results[0];
-        // Only update the fields that are missing, don't overwrite existing data
-        updateGame(game.id, {
-          timeToBeat: meta.timeToBeat ?? undefined,
-          igdbReviews: meta.igdbReviews ?? undefined,
-          similarGames: meta.similarGames ?? undefined,
-          releases: meta.releases ?? undefined,
-          alternativeNames: meta.alternativeNames ?? undefined,
-          collection: meta.collection ?? undefined,
-          franchise: meta.franchise ?? undefined,
-          gameCategory: meta.gameCategory ?? undefined,
-          releaseStatus: meta.releaseStatus ?? undefined,
-          languageSupports: meta.languageSupports ?? undefined,
-        });
-      })
-      .catch((err) => console.error("Auto-enrichment failed:", err));
-  }, [game.id, game.path, game.description, game.metadataSource, game.timeToBeat, updateGame]);
+    // enrichGameMetadata is wrapped in silent useCallback; the only
+    // user-visible signal it ran is the description/covers/grades
+    // appearing in the JSX. A loading pill is a nice-to-have
+    // follow-up.
+    enrichGameMetadata(game.id, game.name, game.steamAppId).catch(
+      (err) => console.error("Auto-enrichment failed:", err)
+    );
+  }, [game.id, game.name, game.steamAppId, game.description, game.timeToBeat, game.metadataSource, enrichGameMetadata]);
 
   function handleLaunch() {
     launchGame(game);
@@ -1017,6 +1009,21 @@ function GameDetail({ game }: { game: Game }) {
               src={game.bannerUrl || displayCover}
               alt={game.name}
               className="game-cover-img"
+              onError={(e) => {
+                const img = e.currentTarget;
+                // Steam-synced games use library_hero.jpg, but pre-2017
+                // titles only ship header.jpg. If the hero 404s, swap to
+                // header.jpg; if that also fails, fall back to the cover.
+                if (img.dataset.fallback !== "header" && game.steamAppId && img.src.includes("library_hero")) {
+                  img.dataset.fallback = "header";
+                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.steamAppId}/header.jpg`;
+                } else if (displayCover && img.src !== displayCover) {
+                  img.dataset.fallback = "cover";
+                  img.src = displayCover;
+                } else {
+                  img.style.display = "none";
+                }
+              }}
             />
           ) : (
             <svg
