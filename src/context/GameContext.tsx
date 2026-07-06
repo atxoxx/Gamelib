@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, emit } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addSessionTime,
@@ -314,48 +314,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Steam games launch via steam:// protocol — no local executable needed
-    if (game.platform === "Steam" && game.steamAppId) {
-      const splashOn = isSplashEnabled();
-      if (splashOn) {
-        const lastSession = getLastPersistedSession(game.id);
-        splash.open({ game, lastSession });
-      }
-
-      try {
-        await openUrl(`steam://run/${game.steamAppId}`);
-        if (splashOn) splash.updateStatus("started");
-        showToast(`Launched ${game.name} via Steam`, "success");
-
-        // Emit a synthetic game-exited event with a nominal session so
-        // playTime tracking and ActivityContext session recording still
-        // work for Steam games. 5 minutes is a reasonable minimum for
-        // a launch-where-the-user-probably-played.
-        emit("game-exited", {
-          gameId: game.id,
-          elapsedSeconds: 300,
-        }).catch((err) => console.error("Steam session emit failed:", err));
-      } catch (err: any) {
-        if (splashOn) splash.updateStatus("error");
-        showToast(`Launch failed: ${err}`, "error");
-      }
-      return;
-    }
-
-    setRunningGameIds((prev) => [...prev, game.id]);
-
-    // Show the launch splash if the user has it enabled. The setting
-    // is read fresh on every launch so a Settings toggle takes effect
-    // immediately without needing a remount.
-    const splashOn = isSplashEnabled();
-    if (splashOn) {
-      const lastSession = getLastPersistedSession(game.id);
-      const payload: SplashPayload = { game, lastSession };
-      splash.open(payload);
-    }
-
-    let gpuId = null;
-    let gpuName = null;
+    // Resolve the selected GPU ONCE up front — both the Steam watcher
+    // and the local-game launcher need to pass it to the Rust metrics
+    // collector so performance monitoring picks up the right device.
+    let gpuId: string | null = null;
+    let gpuName: string | null = null;
     const savedGpu = localStorage.getItem("gamelib-gpus");
     const savedGpuId = localStorage.getItem("gamelib-selected-gpu");
     if (savedGpu && savedGpuId) {
@@ -370,6 +333,56 @@ export function GameProvider({ children }: { children: ReactNode }) {
         console.error("Failed to parse selected GPU from storage", e);
       }
     }
+
+    // Show the launch splash if the user has it enabled. The setting
+    // is read fresh on every launch so a Settings toggle takes effect
+    // immediately without needing a remount.
+    const splashOn = isSplashEnabled();
+    if (splashOn) {
+      const lastSession = getLastPersistedSession(game.id);
+      const payload: SplashPayload = { game, lastSession };
+      splash.open(payload);
+    }
+
+    // Steam games launch via steam:// protocol — no local executable
+    // handle, so we delegate lifetime tracking to the Rust watcher.
+    // It polls for the running game process via WMI, collects real
+    // metrics, and emits the same `game-exited` event the Local/Store
+    // launch path uses — so playTime deltas and ActivityContext
+    // sessions work the same way for Steam titles.
+    if (game.platform === "Steam" && game.steamAppId) {
+      setRunningGameIds((prev) => [...prev, game.id]);
+
+      try {
+        await openUrl(`steam://run/${game.steamAppId}`);
+        if (splashOn) splash.updateStatus("started");
+        showToast(`Launched ${game.name} via Steam`, "success");
+
+        // Replaces the previous hardcoded 300 s placeholder emit —
+        // the watcher emits game-exited with real elapsedSeconds +
+        // SessionMetrics once the game's process actually closes.
+        invoke<void>("watch_steam_game", {
+          gameId: game.id,
+          steamAppId: game.steamAppId,
+          gpuId,
+          gpuName,
+        }).catch((err: unknown) => {
+          // Watcher failed to start (Steam install dir missing,
+          // WMI unavailable, etc.). Clear running state so the play
+          // button re-enables, and surface the error.
+          console.error(`Steam session watch failed: ${err}`);
+          setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+          showToast(`Steam session tracking unavailable: ${err}`, "error");
+        });
+      } catch (err: any) {
+        setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+        if (splashOn) splash.updateStatus("error");
+        showToast(`Launch failed: ${err}`, "error");
+      }
+      return;
+    }
+
+    setRunningGameIds((prev) => [...prev, game.id]);
 
     try {
       await invoke("launch_game", {

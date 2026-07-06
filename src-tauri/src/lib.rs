@@ -11,6 +11,7 @@ mod rtss_reader;
 mod mahm_reader;
 mod deals;
 mod steam;
+mod steam_game_watcher;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
@@ -211,6 +212,133 @@ fn launch_game(
     });
 
     Ok(format!("Launched: {}", game_path))
+}
+
+/// Watch a Steam-launched game for its actual lifetime.
+///
+/// `openUrl("steam://run/<appid>")` returns as soon as Steam dispatches
+/// the protocol — there's no child handle, no PID, no waitable
+/// notification. This command reattaches the same monitoring pipeline
+/// that `launch_game` uses for local executables:
+///
+/// 1. Resolve the game's install dir via `libraryfolders.vdf` +
+///    `appmanifest_<appid>.acf` (see `steam_game_watcher`).
+/// 2. Phase 1: poll `Win32_Process` every 2 s for up to 60 s, waiting
+///    for the game's executable to spawn. If it never appears
+///    (Steam launch failed, user cancelled, etc.) we emit a fallback
+///    `game-exited` so the frontend updates playTime / activity
+///    consistently with how Local games behave on a no-op launch.
+/// 3. Phase 2: poll every 5 s waiting for the process to disappear.
+///    When it does, stop metrics and emit `game-exited` with real
+///    elapsed seconds + aggregated SessionMetrics — same payload
+///    shape as `launch_game`, so both listeners (GameContext and
+///    ActivityContext) react without code changes.
+///
+/// `game_pid` is recomputed on every poll: we hand RTSS the dominant
+/// (highest-memory) PID matching the install dir so FPS hooks line up
+/// with the actual game render thread once it's running.
+#[tauri::command]
+fn watch_steam_game(
+    app: tauri::AppHandle,
+    game_id: String,
+    steam_app_id: u32,
+    gpu_id: Option<String>,
+    gpu_name: Option<String>,
+) -> Result<(), String> {
+    let install_dir = steam_game_watcher::game_install_path(steam_app_id).ok_or_else(|| {
+        format!(
+            "Steam app manifest not found for appid {} — is the game installed locally?",
+            steam_app_id
+        )
+    })?;
+
+    let start = Instant::now();
+    let app_handle_for_thread = app.clone();
+    let install_path = install_dir.clone();
+
+    std::thread::spawn(move || {
+        // Phase 1 — wait for the game process to appear (≤ 60 s).
+        //
+        // Steam's protocol handler hands off to steam.exe, which then
+        // launches the game; 60 s comfortably covers installations on
+        // slow disks or games that show a splash first.
+        const STARTUP_GRACE_SECS: u64 = 60;
+        const STARTUP_POLL_SECS: u64 = 2;
+        let mut elapsed_secs: u64 = 0;
+        let mut saw_process = false;
+        let mut last_pid: Option<u32> = None;
+
+        while elapsed_secs < STARTUP_GRACE_SECS {
+            let matched = steam_game_watcher::is_game_process_running(&install_path);
+            if matched.running {
+                saw_process = true;
+                last_pid = matched.dominant_pid;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(STARTUP_POLL_SECS));
+            elapsed_secs += STARTUP_POLL_SECS;
+        }
+
+        // If the game process never spawned, exit with a short fallback
+        // session (≥ 60 s raw → still filtered by ActivityContext since
+        // `durationMin = Math.round(60/60) = 1`, but provides a real
+        // playTime delta of 1 minute on the Game record). We deliberately
+        // avoid hardcoding 300 s here like the previous hack — the
+        // recorded time should reflect what actually happened.
+        if !saw_process {
+            let elapsed = start.elapsed().as_secs();
+            let _ = app_handle_for_thread.emit(
+                "game-exited",
+                GameExitPayload {
+                    game_id,
+                    elapsed_seconds: elapsed,
+                    metrics: None,
+                },
+            );
+            return;
+        }
+
+        // Start metrics collection once the game is up, using the
+        // dominant PID we discovered — matches what `launch_game` does
+        // and lets RTSS read FPS for the actual game process.
+        let pid = last_pid.unwrap_or(0);
+        let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(
+            5, pid, gpu_id, gpu_name,
+        );
+
+        // Phase 2 — wait for the game to exit.
+        //
+        // Poll every 5 s (matches the metrics interval so each poll =
+        // one new sample). No max time bound — some users idle games
+        // for days and we don't want to silently cut activity off.
+        // (The `metrics_collector` captures the PID once at start, so
+        //  RTSS FPS hooks stick to the original process even if an
+        //  anti-cheat layer relaunches the EXE — acceptable since
+        //  RTSS survives across the same Steam big-picture session.)
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let matched = steam_game_watcher::is_game_process_running(&install_path);
+            if !matched.running {
+                break;
+            }
+        }
+
+        let _ = stop_tx.send(());
+        let elapsed = start.elapsed().as_secs();
+        let metrics =
+            result_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(None);
+
+        let _ = app_handle_for_thread.emit(
+            "game-exited",
+            GameExitPayload {
+                game_id,
+                elapsed_seconds: elapsed,
+                metrics,
+            },
+        );
+    });
+
+    Ok(())
 }
 
 /// Read an image file from disk and return it as a base64 data URL.
@@ -501,7 +629,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
