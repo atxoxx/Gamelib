@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../context/ToastContext";
 import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
-import type { SteamApiConfig, SteamSyncResult, SteamSettings } from "../types/steam";
+import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import { formatPlayTime, type Game } from "../types/game";
 
@@ -35,9 +35,8 @@ export default function SettingsPage() {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
 
   // Steam integration state
-  const [steamConfig, setSteamConfig] = useState<SteamApiConfig | null>(null);
-  const [steamApiKey, setSteamApiKey] = useState("");
-  const [steamId, setSteamId] = useState("");
+  const [steamAuth, setSteamAuth] = useState<SteamAuthState>({ isAuthenticated: false });
+  const [isSteamLoggingIn, setIsSteamLoggingIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SteamSyncResult | null>(null);
   const [steamSettings, setSteamSettings] = useState<SteamSettings>({
@@ -61,13 +60,19 @@ export default function SettingsPage() {
 
     (async () => {
       try {
-        const cfg: SteamApiConfig | null = await invoke("steam_load_config");
-        if (cfg) {
-          setSteamConfig(cfg);
-          setSteamApiKey(cfg.apiKey);
-          setSteamId(cfg.steamId);
+        const session: SteamSession | null = await invoke("steam_get_session");
+        if (session) {
+          setSteamAuth({ isAuthenticated: true, session });
+          const saved = localStorage.getItem("gamelib-steam-sync-info");
+          if (saved) {
+            try {
+              const info = JSON.parse(saved);
+              setSteamAuth((prev) => ({ ...prev, lastSync: info.lastSync }));
+            } catch { /* ignore */ }
+          }
+
         }
-      } catch { /* no config yet */ }
+      } catch { /* no session yet */ }
     })();
 
     (async () => {
@@ -99,32 +104,38 @@ export default function SettingsPage() {
     showToast(`Theme changed to ${themes.find((t) => t.id === themeId)?.name}`, "success");
   }
 
-  async function handleSaveSteamConfig() {
-    if (!steamApiKey.trim() || !steamId.trim()) {
-      showToast("Both API key and Steam ID are required", "error");
-      return;
-    }
-    if (!/^\d{17}$/.test(steamId.trim())) {
-      showToast("Steam ID must be a 17-digit number", "error");
-      return;
-    }
-    const config: SteamApiConfig = { apiKey: steamApiKey.trim(), steamId: steamId.trim() };
+  async function handleSteamLogin() {
+    setIsSteamLoggingIn(true);
     try {
-      await invoke("steam_save_config", { config });
-      setSteamConfig(config);
-      showToast("Steam configuration saved", "success");
+      showToast("A login window will open — log in to Steam there", "info");
+      const resultJson: string = await invoke("steam_start_login");
+
+      // Finish login — persists session to disk
+      const session: SteamSession = await invoke("steam_finish_login", { sessionData: resultJson });
+      setSteamAuth({ isAuthenticated: true, session });
+
+      localStorage.setItem("gamelib-steam-sync-info", JSON.stringify({
+        displayName: session.displayName,
+      }));
+      showToast(`Connected to Steam${session.displayName ? ` as ${session.displayName}` : ""}`, "success");
+
+      // Auto-sync after login — token-based API call, no manual data passing
+      await handleSyncNow(session);
     } catch (err) {
-      showToast(`Failed to save: ${err}`, "error");
+      showToast(`Steam connection failed: ${err}`, "error");
+    } finally {
+      setIsSteamLoggingIn(false);
     }
   }
 
-  async function handleSyncNow() {
-    if (!steamConfig) return;
+  async function handleSyncNow(session?: SteamSession) {
+    const s = session ?? steamAuth.session;
+    if (!s) return;
     setIsSyncing(true);
     setSyncResult(null);
     try {
       const result: SteamSyncResult = await invoke("steam_sync_games", {
-        config: steamConfig,
+        session: s,
         includePlaytime: steamSettings.syncPlaytime,
         includeAchievements: steamSettings.syncAchievements,
       });
@@ -132,7 +143,6 @@ export default function SettingsPage() {
       if (result.success) {
         const g = result.gamesSynced ?? 0;
         const p = result.playtimeUpdated ?? 0;
-        const a = result.achievementsSynced ?? 0;
 
         // Persist synced games to the library, skipping duplicates by Steam AppID
         const existingAppIds = new Set(games.map((gm) => gm.steamAppId).filter(Boolean));
@@ -159,9 +169,9 @@ export default function SettingsPage() {
         }
         if (newGames.length > 0) {
           addGames(newGames);
-          showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (${newGames.length} new)`, "success");
+          showToast(`Synced ${g} games · ${p} playtime updates (${newGames.length} new)`, "success");
         } else {
-          showToast(`Synced ${g} games · ${p} playtime · ${a} achievements (all already in library)`, "success");
+          showToast(`Synced ${g} games · ${p} playtime updates (all already in library)`, "success");
         }
       }
     } catch (err) {
@@ -173,14 +183,13 @@ export default function SettingsPage() {
   }
 
   async function handleDisconnect() {
-    if (!confirm("Remove your Steam configuration?")) return;
+    if (!confirm("Remove your Steam connection?")) return;
     try {
-      await invoke("steam_clear_config");
-      setSteamConfig(null);
-      setSteamApiKey("");
-      setSteamId("");
+      await invoke("steam_logout");
+      setSteamAuth({ isAuthenticated: false });
       setSyncResult(null);
-      showToast("Steam configuration removed", "info");
+      localStorage.removeItem("gamelib-steam-sync-info");
+      showToast("Steam disconnected", "info");
     } catch (err) {
       showToast(`Failed: ${err}`, "error");
     }
@@ -289,7 +298,7 @@ export default function SettingsPage() {
   // Integrations pill in the sub-nav. Lints nicely to 0 when neither is
   // connected and to 2 when both are.
   const connectedIntegrations =
-    (steamConfig ? 1 : 0) + (epicAuth.isAuthenticated ? 1 : 0);
+    (steamAuth.isAuthenticated ? 1 : 0) + (epicAuth.isAuthenticated ? 1 : 0);
 
   return (
     <div className="settings-container">
@@ -488,84 +497,66 @@ export default function SettingsPage() {
                 <div className="integration-tile-info">
                   <div className="integration-tile-name-row">
                     <h3 className="integration-tile-name">Steam</h3>
-                    {steamConfig && (
+                    {steamAuth.isAuthenticated && (
                       <span className="integration-badge active">Connected</span>
                     )}
                   </div>
                   <p className="integration-tile-desc">
-                    Sync your library, playtime, and achievements using
-                    a free Steam Web API key.
+                    Import your Steam library, playtime, and
+                    achievements with one-click WebView login.
                   </p>
                 </div>
               </div>
 
               <div className="integration-tile-body">
-                <div className="settings-control">
-                  <label className="settings-label">
-                    Steam Web API Key
-                    <a
-                      href="https://steamcommunity.com/dev/apikey"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="integration-link"
-                    >
-                      Get your free key →
-                    </a>
-                  </label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={steamApiKey}
-                    onChange={(e) => setSteamApiKey(e.target.value)}
-                    placeholder="Your Steam Web API key"
-                    autoComplete="off"
-                  />
-                </div>
+                {steamAuth.isAuthenticated ? (
+                  <div className="auth-status">
+                    Connected
+                    {steamAuth.session?.displayName ? ` as ${steamAuth.session.displayName}` : ""}
+                    {steamAuth.session?.steamId ? ` (ID: ${steamAuth.session.steamId.slice(0, 8)}…)` : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    Log in with your Steam account to import your
+                    library. A login window will open inside the app.
+                  </p>
+                )}
 
-                <div className="settings-control">
-                  <label className="settings-label">
-                    Steam ID (64-bit)
-                    <span className="integration-hint">
-                      Found in your profile URL:
-                      steamcommunity.com/profiles/<var>ID</var>
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={steamId}
-                    onChange={(e) => setSteamId(e.target.value)}
-                    placeholder="76561198123456789"
-                    autoComplete="off"
-                  />
-                </div>
+                <p className="auth-note">
+                  Your session data stays local — no API key needed.
+                </p>
 
                 <div className="integration-tile-actions">
-                  {!steamConfig ? (
-                    <button type="button" className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
-                      <SteamIcon /> Save &amp; Connect
+                  {steamAuth.isAuthenticated ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-steam"
+                      onClick={() => handleSyncNow()}
+                      disabled={isSyncing}
+                    >
+                      {isSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Library"}
                     </button>
                   ) : (
-                    <>
-                      <button type="button" className="btn btn-primary btn-steam" onClick={handleSaveSteamConfig}>
-                        <SteamIcon /> Update
-                      </button>
-                      <button type="button" className="btn btn-steam" onClick={handleSyncNow} disabled={isSyncing}>
-                        {isSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Now"}
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-steam"
+                      onClick={handleSteamLogin}
+                      disabled={isSteamLoggingIn}
+                    >
+                      {isSteamLoggingIn ? <><span className="spinner" /> Waiting for login…</> : "Connect Steam Account"}
+                    </button>
                   )}
                 </div>
 
                 {syncResult && (
                   <div className={`sync-result ${syncResult.success ? "success" : "error"}`}>
                     {syncResult.success
-                      ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates · ${syncResult.achievementsSynced ?? 0} achievement sets`
+                      ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates`
                       : `✗ ${syncResult.error || "Sync failed"}`}
                   </div>
                 )}
 
-                {steamConfig && (
+                {steamAuth.isAuthenticated && (
                   <div className="settings-toggles-group">
                     <p className="settings-toggles-title">Sync behaviour</p>
                     <label className="settings-checkbox-label">
@@ -592,17 +583,9 @@ export default function SettingsPage() {
                       />
                       <span>Sync playtime</span>
                     </label>
-                    <label className="settings-checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={steamSettings.syncAchievements}
-                        onChange={(e) => {
-                          const u = { ...steamSettings, syncAchievements: e.target.checked };
-                          setSteamSettings(u);
-                          localStorage.setItem("gamelib-steam-settings", JSON.stringify(u));
-                        }}
-                      />
-                      <span>Sync achievements</span>
+                    <label className="settings-checkbox-label settings-checkbox-label--disabled">
+                      <input type="checkbox" disabled />
+                      <span>Achievements sync not available with WebView login</span>
                     </label>
                     <label className="settings-checkbox-label settings-checkbox-label--disabled">
                       <input type="checkbox" checked disabled />
@@ -613,11 +596,11 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {steamConfig && (
+            {steamAuth.isAuthenticated && (
               <div className="danger-zone">
                 <p className="danger-zone-text">
-                  <strong>Disconnect Steam.</strong> Removes your API key
-                  and Steam ID locally — your Steam account is untouched.
+                  <strong>Disconnect Steam.</strong> Clears your local
+                  session — your Steam account is untouched.
                 </p>
                 <button type="button" className="btn btn-danger btn-sm" onClick={handleDisconnect}>
                   Disconnect

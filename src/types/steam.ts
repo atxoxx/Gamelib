@@ -1,8 +1,22 @@
-export interface SteamApiConfig {
-  /** Steam Web API key from https://steamcommunity.com/dev/apikey */
-  apiKey: string;
-  /** 64-bit Steam ID (e.g. 76561198123456789) */
+export interface SteamSession {
+  /** 64-bit Steam ID extracted from the store page HTML */
   steamId: string;
+  /** Web API access token extracted from the store page HTML.
+   *  Passed as `access_token` to Steam Web API calls. */
+  webApiToken: string;
+  /** Display name from profile (if available) */
+  displayName?: string;
+}
+
+export interface SteamLoginResult {
+  session: SteamSession;
+}
+
+/** Auth state for the Settings UI. */
+export interface SteamAuthState {
+  isAuthenticated: boolean;
+  session?: SteamSession;
+  lastSync?: number;
 }
 
 export interface SteamGame {
@@ -43,12 +57,7 @@ export interface SteamSettings {
   syncPlaytime: boolean;
   syncAchievements: boolean;
   /**
-   * DEPRECATED (kept for backward-compat reads of older localStorage blobs):
-   * previously this gated a sequential IGDB metadata pass during Steam sync,
-   * but that approach was wasteful for 500+ game libraries. We now run
-   * Steam sync lightweight (Steam CDN image URLs only, no IGDB calls) and
-   * lazily enrich metadata when the user opens a game's GamePage. Defaults
-   * to `true` here only so legacy settings JSON parses without errors.
+   * DEPRECATED (kept for backward-compat reads of older localStorage blobs).
    */
   autoFetchMetadata?: boolean;
 }

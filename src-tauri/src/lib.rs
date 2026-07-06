@@ -18,6 +18,11 @@ use gpu_detector::GpuInfo;
 use metrics_collector::SessionMetrics;
 use epic::auth::{epic_start_login, epic_finish_login, epic_is_authenticated, epic_logout};
 use epic::sync::{epic_sync_library, epic_get_filters};
+use steam::auth::{
+    steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout,
+    steam_get_session, steam_save_config, steam_load_config, steam_clear_config,
+};
+use steam::sync::steam_sync_games;
 
 /// Serializable game data matching the frontend Game type.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -693,7 +698,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, spawn_game_exe, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, spawn_game_exe, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
+            steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
