@@ -46,6 +46,7 @@ export default function LibraryFilterChips({
     steam: "Steam",
     local: "Local",
     gog: "GOG",
+    epic: "Epic",
   };
 
   const hasAny =

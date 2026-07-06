@@ -95,6 +95,7 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
     if (filters.source === "steam" && game.platform !== "Steam") return false;
     if (filters.source === "local" && game.platform !== "Local") return false;
     if (filters.source === "gog" && game.platform !== "GOG") return false;
+    if (filters.source === "epic" && game.platform !== "Epic") return false;
   }
 
   // Genres (OR — game must have at least one selected genre)

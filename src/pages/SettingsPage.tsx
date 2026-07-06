@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+
 import { useToast } from "../context/ToastContext";
 import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
 import type { SteamApiConfig, SteamSyncResult, SteamSettings } from "../types/steam";
+import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import { formatPlayTime, type Game } from "../types/game";
 
 interface ThemeOption {
@@ -43,6 +45,13 @@ export default function SettingsPage() {
     syncAchievements: true,
   });
 
+  // Epic integration state
+  const [epicAuth, setEpicAuth] = useState<EpicAuthState>({ isAuthenticated: false });
+  const [epicSyncResult, setEpicSyncResult] = useState<EpicSyncResult | null>(null);
+  const [isEpicLoggingIn, setIsEpicLoggingIn] = useState(false);
+  const [isEpicSyncing, setIsEpicSyncing] = useState(false);
+
+
   // Theme state
   const [currentTheme, setCurrentTheme] = useState("dark");
   const [libraryPath, setLibraryPath] = useState("");
@@ -69,6 +78,22 @@ export default function SettingsPage() {
           setSteamId(cfg.steamId);
         }
       } catch { /* no config yet */ }
+    })();
+
+    (async () => {
+      try {
+        const authenticated: boolean = await invoke("epic_is_authenticated");
+        setEpicAuth({ isAuthenticated: authenticated });
+        if (authenticated) {
+          const saved = localStorage.getItem("gamelib-epic-sync-info");
+          if (saved) {
+            try {
+              const info = JSON.parse(saved);
+              setEpicAuth((prev) => ({ ...prev, ...info }));
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* not authenticated */ }
     })();
 
     try {
@@ -152,12 +177,6 @@ export default function SettingsPage() {
         const newGames: Game[] = [];
         for (const entry of result.syncedGames ?? []) {
           if (existingAppIds.has(entry.appid)) continue;
-          // Steam sync is lightweight: we embed Steam CDN image URLs
-          // (no API call, no rate limits, near-instant). Detailed IGDB
-          // metadata (description, ratings, time-to-beat, etc.) is
-          // fetched lazily when the user opens a game's GamePage —
-          // matching the Store browsing pattern. See
-          // `enrichGameMetadata` in GameContext for the on-demand fetch.
           const steamCdnCover = `https://cdn.akamai.steamstatic.com/steam/apps/${entry.appid}/library_600x900_2x.jpg`;
           const steamCdnHero  = `https://cdn.akamai.steamstatic.com/steam/apps/${entry.appid}/library_hero.jpg`;
           newGames.push({
@@ -199,6 +218,105 @@ export default function SettingsPage() {
       setSteamId("");
       setSyncResult(null);
       showToast("Steam configuration removed", "info");
+    } catch (err) {
+      showToast(`Failed: ${err}`, "error");
+    }
+  }
+
+  // ── Epic handlers ──────────────────────────────────────────────────
+
+  async function handleEpicLogin() {
+    setIsEpicLoggingIn(true);
+    try {
+      // epic_start_login now does everything:
+      // binds port 80 → opens WebView → waits for login redirect → returns auth code
+      showToast("A login window will open — log in to Epic Games there", "info");
+      const authCode: string = await invoke("epic_start_login");
+
+      // Exchange code for tokens
+      const tokens = await invoke<{ accountId: string; displayName?: string }>("epic_finish_login", { authCode });
+      setEpicAuth({
+        isAuthenticated: true,
+        accountId: tokens.accountId,
+        displayName: tokens.displayName,
+      });
+      localStorage.setItem("gamelib-epic-sync-info", JSON.stringify(tokens));
+      showToast(`Connected to Epic Games${tokens.displayName ? ` as ${tokens.displayName}` : ""}`, "success");
+      // Auto-sync after login
+      await handleEpicSync();
+    } catch (err) {
+      showToast(`Epic connection failed: ${err}`, "error");
+    } finally {
+      setIsEpicLoggingIn(false);
+    }
+  }
+
+  async function handleEpicSync() {
+    setIsEpicSyncing(true);
+    setEpicSyncResult(null);
+    try {
+      const result: EpicSyncResult = await invoke("epic_sync_library");
+      setEpicSyncResult(result);
+      if (result.success) {
+        // Persist synced games to the library
+        const existingEpicIds = new Set(
+          games
+            .filter((gm) => gm.epicNamespace && gm.epicCatalogItemId)
+            .map((gm) => `${gm.epicNamespace}-${gm.epicCatalogItemId}`)
+        );
+        const newGames: Game[] = [];
+        for (const entry of result.syncedGames ?? []) {
+          if (existingEpicIds.has(`${entry.namespace}-${entry.catalogItemId}`)) continue;
+          newGames.push({
+            id: entry.id,
+            name: entry.title,
+            path: entry.installPath ?? "",
+            platform: "Epic",
+            installed: entry.isInstalled,
+            playTime: formatPlayTime(entry.playtimeMinutes ?? 0),
+            addedAt: Date.now(),
+            epicNamespace: entry.namespace,
+            epicCatalogItemId: entry.catalogItemId,
+            coverArtUrl: entry.coverUrl,
+          });
+        }
+        if (newGames.length > 0) {
+          addGames(newGames);
+          showToast(`Synced ${result.gamesImported} Epic games · ${newGames.length} new`, "success");
+        } else {
+          showToast(`Synced ${result.gamesImported} Epic games (all already in library)`, "success");
+        }
+        // Persist sync info
+        setEpicAuth((prev) => ({ ...prev, lastSync: result.lastSync }));
+        localStorage.setItem("gamelib-epic-sync-info", JSON.stringify({
+          accountId: epicAuth.accountId,
+          displayName: epicAuth.displayName,
+          lastSync: result.lastSync,
+        }));
+      }
+    } catch (err) {
+      setEpicSyncResult({
+        success: false,
+        gamesImported: 0,
+        gamesSkipped: 0,
+        errors: [String(err)],
+        lastSync: 0,
+        syncedGames: [],
+      });
+      showToast(`Epic sync failed: ${err}`, "error");
+    } finally {
+      setIsEpicSyncing(false);
+    }
+  }
+
+  async function handleEpicDisconnect() {
+    if (!confirm("Remove your Epic Games connection?")) return;
+    try {
+      await invoke("epic_logout");
+      setEpicAuth({ isAuthenticated: false });
+      setEpicSyncResult(null);
+      localStorage.removeItem("gamelib-epic-sync-info");
+      showToast("Epic Games disconnected", "info");
     } catch (err) {
       showToast(`Failed: ${err}`, "error");
     }
@@ -409,8 +527,69 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* ── Epic Games ── */}
+        <div className="integration-card">
+          <div className="integration-card-header">
+            <EpicIcon />
+            <div>
+              <h3 className="integration-card-name">Epic Games</h3>
+              <p className="integration-card-desc">
+                Import your owned Epic Games Store library. Only owned, launchable games are imported.
+              </p>
+            </div>
+            {epicAuth.isAuthenticated && <span className="integration-badge active">Connected</span>}
+          </div>
+
+          <div className="integration-card-body">
+            {epicAuth.isAuthenticated ? (
+              <>
+                <div className="auth-status" style={{ marginBottom: "var(--space-md)" }}>
+                  <span>
+                    Connected{epicAuth.displayName ? ` as ${epicAuth.displayName}` : ""}
+                    {epicAuth.accountId ? ` (ID: ${epicAuth.accountId.slice(0, 8)}...)` : ""}
+                  </span>
+                </div>
+
+                <div className="integration-card-actions">
+                  <button className="btn btn-primary" onClick={handleEpicSync} disabled={isEpicSyncing}>
+                    {isEpicSyncing ? <><span className="spinner"/> Syncing...</> : "Sync Library"}
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={handleEpicDisconnect}>Disconnect</button>
+                </div>
+
+                {epicSyncResult && (
+                  <div className={`sync-result ${epicSyncResult.success ? "success" : "error"}`} style={{ marginTop: "var(--space-md)" }}>
+                    {epicSyncResult.success
+                      ? `✓ Imported ${epicSyncResult.gamesImported} games · ${epicSyncResult.gamesSkipped} skipped`
+                      : `✗ ${epicSyncResult.errors?.[0] || "Sync failed"}`}
+                  </div>
+                )}
+
+                {epicAuth.lastSync && (
+                  <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-sm)" }}>
+                    Last sync: {new Date(epicAuth.lastSync * 1000).toLocaleString()}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="connect-prompt" style={{ marginBottom: "var(--space-md)" }}>
+                  Log in with your Epic Games account to import your library.
+                  A login window will open inside the app.
+                </p>
+                <button className="btn btn-primary" onClick={handleEpicLogin} disabled={isEpicLoggingIn}>
+                  {isEpicLoggingIn ? <><span className="spinner"/> Waiting for login...</> : "Connect Epic Account"}
+                </button>
+                <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-sm)" }}>
+                  Authentication tokens are stored locally and never shared.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
         <p className="integration-footer">
-          More integrations coming soon — GOG, Epic Games, and more.
+          More integrations coming soon — GOG and more.
         </p>
       </section>)}
     </div>
@@ -421,6 +600,14 @@ function SteamIcon() {
   return (
     <svg className="icon-steam" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm-3-4c0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3-3 1.34-3 3z"/>
+    </svg>
+  );
+}
+
+function EpicIcon() {
+  return (
+    <svg className="icon-steam" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+      <path d="M12 2L2 7l1.5 9L12 22l8.5-6L22 7 12 2zm0 2.5l7.5 4-1.3 7.8L12 19.5l-6.2-3.2L4.5 8.5 12 4.5z"/>
     </svg>
   );
 }

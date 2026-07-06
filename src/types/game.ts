@@ -16,6 +16,10 @@ export interface Game {
   notes?: string; // user notes about the game
   /** Steam AppID if sourced from Steam (used for sync and store links) */
   steamAppId?: number;
+  /** Epic Games Store namespace (used for sync and store links) */
+  epicNamespace?: string;
+  /** Epic Games Store catalog item ID */
+  epicCatalogItemId?: string;
   /** Playtime in minutes reported by Steam (used as fallback for playTime) */
   steamPlaytime?: number;
   /** Achievement completion data synced from Steam */
@@ -137,7 +141,7 @@ export const STORE_SOURCES: readonly StoreSource[] = [
  * Library source filter for distinguishing between different game
  * origins (Steam sync, local imports, GOG, etc.).
  */
-export type LibrarySource = "all" | "steam" | "local" | "gog";
+export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic";
 
 /** Metadata returned from the backend scraper. */
 export interface GameMetadataResult {
