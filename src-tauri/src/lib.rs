@@ -325,8 +325,24 @@ fn watch_steam_game(
 
         let _ = stop_tx.send(());
         let elapsed = start.elapsed().as_secs();
-        let metrics =
-            result_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(None);
+        let metrics = match result_rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(m) => {
+                if m.is_none() {
+                    eprintln!(
+                        "[watch_steam_game] metrics thread returned None for game {} (appid={}, elapsed={}s)",
+                        game_id, steam_app_id, elapsed
+                    );
+                }
+                m
+            }
+            Err(_) => {
+                eprintln!(
+                    "[watch_steam_game] timeout (10s) waiting for metrics thread for game {} (appid={}, elapsed={}s)",
+                    game_id, steam_app_id, elapsed
+                );
+                None
+            }
+        };
 
         let _ = app_handle_for_thread.emit(
             "game-exited",
@@ -624,12 +640,52 @@ fn debug_mahm_entries() -> Vec<(String, String, f32)> {
     mahm_reader::dump_mahm_entries().unwrap_or_default()
 }
 
+/// Resolve the main game executable for a Steam AppID.
+///
+/// Uses the appmanifest to find the install directory, then scans for the
+/// largest non-utility .exe file. Returns `None` if the game isn't installed
+/// locally or no suitable executable is found.
+///
+/// Callable on-demand from the frontend (e.g., GamePage "Detect EXE" button)
+/// in addition to the bulk resolution that happens during `steam_sync_games`.
+#[tauri::command]
+fn resolve_steam_exe(steam_app_id: u32) -> Option<String> {
+    steam::sync::resolve_main_exe(steam_app_id)
+}
+
+/// Spawn a game executable and return immediately (fire-and-forget).
+///
+/// Unlike `launch_game`, this does NOT wait for the child process or
+/// collect metrics — it simply starts the process and returns its PID.
+/// Designed for Steam games where `watch_steam_game` handles the full
+/// lifecycle via WMI polling (process detection → metrics → exit).
+///
+/// `std::process::Child` does not kill on drop, so the spawned process
+/// outlives this function regardless of whether the handle is stored.
+#[tauri::command]
+fn spawn_game_exe(game_path: String) -> Result<u32, String> {
+    let path = Path::new(&game_path);
+    if !path.exists() {
+        return Err(format!("Game executable not found: {}", game_path));
+    }
+    let cwd = path.parent().unwrap_or_else(|| Path::new("."));
+    let child = Command::new(path)
+        .current_dir(cwd)
+        .spawn()
+        .map_err(|e| format!("Failed to launch game: {}", e))?;
+    let pid = child.id();
+    // Fire-and-forget: the child lives independently. Rust's Child
+    // does NOT kill on drop (unlike e.g. Python's Popen), so we can
+    // safely discard the handle here.
+    Ok(pid)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games])
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, spawn_game_exe, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam::auth::steam_save_config, steam::auth::steam_load_config, steam::auth::steam_clear_config, steam::sync::steam_sync_games])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

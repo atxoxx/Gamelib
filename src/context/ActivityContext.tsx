@@ -120,23 +120,6 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     selectedGpuRef.current = selectedGpu;
   }, [selectedGpu]);
 
-  // ─── Listen for game-exited events to automatically record sessions ──────
-  useEffect(() => {
-    const unlisten = listen<GameExitEvent>("game-exited", (event) => {
-      const { gameId, elapsedSeconds, metrics } = event.payload;
-      const game = games.find((g) => g.id === gameId);
-      if (!game) return;
-
-      const durationMin = Math.round(elapsedSeconds / 60);
-      if (durationMin < 1) return; // Ignore sessions shorter than 1 minute
-
-      recordSession(gameId, game.name, durationMin, metrics);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [games]);
-
   // Persist sessions
   const persistSessions = useCallback((s: GameSession[]) => {
     localStorage.setItem("gamelib-sessions", JSON.stringify(s));
@@ -160,6 +143,37 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     },
     [persistSessions]
   );
+
+  // ─── Refs for the game-exited listener ──────────────────────────────────
+  // The Tauri event listener subscribes once on mount. Using refs ensures
+  // the callback always reads the latest `games` array and `recordSession`
+  // without tearing down / re-subscribing on every state change. This
+  // eliminates the race condition where events were lost in the gap between
+  // unsubscribe and re-subscribe — critical for Steam games whose watcher
+  // thread runs for the entire play session (potentially hours).
+  const gamesRef = useRef<Game[]>(games);
+  useEffect(() => { gamesRef.current = games; }, [games]);
+
+  const recordSessionRef = useRef(recordSession);
+  useEffect(() => { recordSessionRef.current = recordSession; }, [recordSession]);
+
+  // ─── Listen for game-exited events to automatically record sessions ──────
+  useEffect(() => {
+    const unlisten = listen<GameExitEvent>("game-exited", (event) => {
+      const { gameId, elapsedSeconds, metrics } = event.payload;
+      const game = gamesRef.current.find((g) => g.id === gameId);
+      if (!game) return;
+
+      const durationMin = Math.round(elapsedSeconds / 60);
+      if (durationMin < 1) return; // Ignore sessions shorter than 1 minute
+
+      recordSessionRef.current(gameId, game.name, durationMin, metrics);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Subscribe once — refs keep values fresh
 
   const deleteSession = useCallback(
     (sessionId: string) => {

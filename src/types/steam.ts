@@ -34,6 +34,8 @@ export interface SyncedGameEntry {
   appid: number;
   name: string;
   playtimeForever: number;
+  /** Resolved path to the main game executable (if installed locally) */
+  exePath?: string;
 }
 
 export interface SteamSettings {

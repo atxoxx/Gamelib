@@ -76,9 +76,24 @@ pub fn start_metrics_collection(
     let (result_tx, result_rx) = mpsc::channel::<Option<SessionMetrics>>();
 
     std::thread::spawn(move || {
-        let samples = collect_metrics_loop(interval_secs, stop_rx, game_pid, gpu_id, gpu_name);
-        let metrics = aggregate_metrics(&samples);
-        let _ = result_tx.send(metrics);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let samples = collect_metrics_loop(interval_secs, stop_rx, game_pid, gpu_id, gpu_name);
+            aggregate_metrics(&samples)
+        }));
+        match result {
+            Ok(metrics) => { let _ = result_tx.send(metrics); }
+            Err(e) => {
+                let msg = if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = e.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "unknown panic".to_string()
+                };
+                eprintln!("[metrics] PANIC in metrics collection thread (target PID={}): {}", game_pid, msg);
+                let _ = result_tx.send(None);
+            }
+        }
     });
 
     (stop_tx, result_rx)
@@ -102,13 +117,33 @@ fn collect_metrics_loop(
         .unwrap_or(0);
 
     // Initialize COM on this thread for WMI queries
+    // CoInitializeSecurity may only be called once per process.
+    // The first call (e.g. during app start in get_system_ram_gb)
+    // permanently registers security settings, so every subsequent
+    // COMLibrary::new() on a fresh background thread fails with
+    // RPC_E_TOO_LATE and silently returns empty samples — which
+    // makes aggregate_metrics return None and the GameExitPayload
+    // comes out with metrics: None. Fall back to without_security
+    // so background threads can still query WMI counters.
     let com_lib = match COMLibrary::new() {
         Ok(lib) => lib,
-        Err(_) => return samples,
+        Err(e) => {
+            eprintln!("[metrics] COMLibrary::new() failed: {:?}, trying without_security()", e);
+            match COMLibrary::without_security() {
+                Ok(lib) => lib,
+                Err(e2) => {
+                    eprintln!("[metrics] COMLibrary::without_security() also failed: {:?} — no WMI samples", e2);
+                    return samples;
+                }
+            }
+        }
     };
     let wmi_con = match WMIConnection::new(com_lib) {
         Ok(con) => con,
-        Err(_) => return samples,
+        Err(e) => {
+            eprintln!("[metrics] WMIConnection::new() failed: {:?} — no WMI samples", e);
+            return samples;
+        }
     };
 
     // Query total physical memory once (in MB; WMI returns KB which we
@@ -469,7 +504,11 @@ fn get_ram_usage_pct(wmi_con: &WMIConnection) -> u32 {
 }
 
 fn get_lhm_metrics() -> Option<(f32, f32, f32, f32)> {
-    let com_lib = COMLibrary::new().ok()?;
+    // See collect_metrics_loop for why we try without_security as a
+    // fallback — once security is set, COMLibrary::new() can fail.
+    let com_lib = COMLibrary::new()
+        .or_else(|_| COMLibrary::without_security())
+        .ok()?;
     let wmi_con = WMIConnection::with_namespace_path("ROOT\\LibreHardwareMonitor", com_lib).ok()?;
     // Fetch both Temperature and Load sensors in a single query
     let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature' OR SensorType = 'Load'";
@@ -501,7 +540,11 @@ fn get_lhm_metrics() -> Option<(f32, f32, f32, f32)> {
 }
 
 fn get_ohm_metrics() -> Option<(f32, f32, f32, f32)> {
-    let com_lib = COMLibrary::new().ok()?;
+    // See collect_metrics_loop for why we try without_security as a
+    // fallback — once security is set, COMLibrary::new() can fail.
+    let com_lib = COMLibrary::new()
+        .or_else(|_| COMLibrary::without_security())
+        .ok()?;
     let wmi_con = WMIConnection::with_namespace_path("ROOT\\OpenHardwareMonitor", com_lib).ok()?;
     // Fetch both Temperature and Load sensors in a single query
     let query = "SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature' OR SensorType = 'Load'";
@@ -533,9 +576,26 @@ fn get_ohm_metrics() -> Option<(f32, f32, f32, f32)> {
 }
 
 /// Aggregate collected samples into the final SessionMetrics.
+///
+/// Never returns `None` — when no real samples are available (COM/WMI
+/// unavailable on the background thread) we return zeroed metrics so
+/// the frontend still shows the performance section rather than the
+/// "No performance data recorded" dead-end. This makes it obvious that
+/// metrics collection was attempted but the data source wasn't available,
+/// rather than silently hiding the entire section.
 fn aggregate_metrics(samples: &[MetricsSample]) -> Option<SessionMetrics> {
     if samples.is_empty() {
-        return None;
+        return Some(SessionMetrics {
+            avg_fps: 0,
+            avg_cpu_usage: 0,
+            avg_gpu_usage: 0,
+            avg_ram_usage: 0,
+            avg_cpu_temp: 0,
+            avg_gpu_temp: 0,
+            min_fps: 0,
+            max_fps: 0,
+            resolution: "unknown".to_string(),
+        });
     }
 
     let count = samples.len() as f64;

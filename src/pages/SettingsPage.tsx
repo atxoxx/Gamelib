@@ -163,9 +163,9 @@ export default function SettingsPage() {
           newGames.push({
             id: `steam-${entry.appid}`,
             name: entry.name,
-            path: "",
+            path: entry.exePath ?? "",
             platform: "Steam",
-            installed: installedSet.has(entry.appid),
+            installed: installedSet.has(entry.appid) || !!entry.exePath,
             playTime: formatPlayTime(entry.playtimeForever),
             addedAt: Date.now(),
             steamAppId: entry.appid,

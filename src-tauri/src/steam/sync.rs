@@ -1,9 +1,11 @@
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::types::{SteamApiConfig, SteamGame, SteamSyncResult, SyncedGameEntry};
+use crate::steam_game_watcher;
 
 /// Sync games from Steam using a Web API key.
 ///
@@ -23,6 +25,7 @@ pub async fn steam_sync_games(
 
     // Detect which Steam games are installed on disk
     let installed_appids = detect_installed_steam_appids();
+    let installed_set: HashSet<u32> = installed_appids.iter().copied().collect();
 
     let synced = owned_games.len() as u32;
     let mut playtime_updated: u32 = 0;
@@ -36,10 +39,22 @@ pub async fn steam_sync_games(
         if include_achievements && steam_game.has_community_visible_stats {
             achievements_synced += 1;
         }
+
+        // Resolve the main game executable for installed games.
+        // This lets the frontend launch the exe directly (reliable PID-based
+        // metrics) instead of going through the fragile steam:// protocol
+        // + WMI polling pipeline.
+        let exe_path = if installed_set.contains(&steam_game.appid) {
+            resolve_main_exe(steam_game.appid)
+        } else {
+            None
+        };
+
         synced_games.push(SyncedGameEntry {
             appid: steam_game.appid,
             name: steam_game.name.clone(),
             playtime_forever: steam_game.playtime_forever,
+            exe_path,
         });
     }
 
@@ -192,5 +207,87 @@ pub fn format_playtime_minutes(minutes: u32) -> String {
         format!("{}h {}m", hours, mins)
     } else {
         format!("{}m", mins)
+    }
+}
+
+/// Resolve the main game executable for a Steam AppID.
+///
+/// Uses `steam_game_watcher::game_install_path` to find the install
+/// directory, then scans it for .exe files and picks the largest one
+/// (by file size) that isn't a known utility/helper. This is the same
+/// heuristic `scan_folder_for_exes` uses in `lib.rs`.
+///
+/// Exposed as a public function so `lib.rs` can also wrap it as a
+/// standalone Tauri command for on-demand resolution.
+pub fn resolve_main_exe(app_id: u32) -> Option<String> {
+    let install_dir = steam_game_watcher::game_install_path(app_id)?;
+    if !install_dir.exists() {
+        return None;
+    }
+    scan_for_largest_exe(&install_dir)
+}
+
+/// Non-game executables to skip during scanning.
+const SKIP_KEYWORDS: &[&str] = &[
+    "redist", "autorun", "helper", "unin", "crash", "setup", "install",
+    "plugin", "manual", "readme", "register", "7za", "dotnet", "vcredist",
+    "dxsetup", "directx", "ue4prereq", "ue4-prereq",
+    "launcher", // Steam games often have a tiny launcher.exe alongside the real game exe
+];
+
+/// Scan a directory recursively for .exe files and return the path of the
+/// largest one that isn't a known utility. The largest exe in a game's
+/// install dir is almost always the main game binary — launchers, helpers,
+/// and redistributables are orders of magnitude smaller.
+fn scan_for_largest_exe(dir: &Path) -> Option<String> {
+    let mut best_path: Option<PathBuf> = None;
+    let mut best_size: u64 = 0;
+    scan_exe_dir(dir, &mut best_path, &mut best_size, 0);
+    best_path.map(|p| p.to_string_lossy().to_string())
+}
+
+/// Recursive helper — walks at most 4 levels deep (Steam games rarely nest
+/// deeper; avoids traversing enormous mod directories).
+fn scan_exe_dir(dir: &Path, best: &mut Option<PathBuf>, best_size: &mut u64, depth: u32) {
+    if depth > 4 {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                // Skip hidden dirs, underscored dirs, and common non-game subdirs
+                if name.starts_with('.') || name.starts_with('_')
+                    || name.eq_ignore_ascii_case("redist")
+                    || name.eq_ignore_ascii_case("redistributables")
+                    || name.eq_ignore_ascii_case("__installer")
+                    || name.eq_ignore_ascii_case("support")
+                {
+                    continue;
+                }
+            }
+            scan_exe_dir(&path, best, best_size, depth + 1);
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if !ext.eq_ignore_ascii_case("exe") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                let lower = stem.to_lowercase();
+                if SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+                    continue;
+                }
+            }
+            if let Ok(meta) = entry.metadata() {
+                let size = meta.len();
+                if size > *best_size {
+                    *best_size = size;
+                    *best = Some(path);
+                }
+            }
+        }
     }
 }

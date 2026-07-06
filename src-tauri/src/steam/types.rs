@@ -43,4 +43,8 @@ pub struct SyncedGameEntry {
     pub appid: u32,
     pub name: String,
     pub playtime_forever: u32,
+    /// Resolved path to the main game executable (if installed locally).
+    /// Detected by scanning the Steam install directory for the largest
+    /// non-utility .exe file.
+    pub exe_path: Option<String>,
 }

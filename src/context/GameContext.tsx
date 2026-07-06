@@ -344,32 +344,59 @@ export function GameProvider({ children }: { children: ReactNode }) {
       splash.open(payload);
     }
 
-    // Steam games launch via steam:// protocol — no local executable
-    // handle, so we delegate lifetime tracking to the Rust watcher.
-    // It polls for the running game process via WMI, collects real
-    // metrics, and emits the same `game-exited` event the Local/Store
-    // launch path uses — so playTime deltas and ActivityContext
-    // sessions work the same way for Steam titles.
+    // ── Steam games ────────────────────────────────────────────────────
+    // Two launch strategies depending on whether we know the exe path:
+    //
+    // A) **Exe path known** (detected during sync or manually set):
+    //    Spawn the exe directly via `spawn_game_exe` (fire-and-forget),
+    //    then delegate lifetime tracking to `watch_steam_game`. This
+    //    gives us a real child PID for the initial process while WMI
+    //    handles launcher → game hand-offs, DRM re-parenting, and
+    //    anti-cheat relaunches — same reliable monitoring as the
+    //    `steam://` protocol but with direct exe launch.
+    //
+    // B) **No exe path** (game not installed locally, or exe detection
+    //    failed): Fall back to `steam://run/<appid>` + `watch_steam_game`.
     if (game.platform === "Steam" && game.steamAppId) {
       setRunningGameIds((prev) => [...prev, game.id]);
 
+      // Strategy A: direct exe launch (reliable metrics via WMI)
+      if (game.path && game.path.trim() !== "") {
+        try {
+          await invoke<number>("spawn_game_exe", { gamePath: game.path });
+          if (splashOn) splash.updateStatus("started");
+          showToast(`Launched ${game.name}`, "success");
+
+          invoke<void>("watch_steam_game", {
+            gameId: game.id,
+            steamAppId: game.steamAppId,
+            gpuId,
+            gpuName,
+          }).catch((err: unknown) => {
+            console.error(`Steam session watch failed: ${err}`);
+            setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+            showToast(`Steam session tracking unavailable: ${err}`, "error");
+          });
+        } catch (err: any) {
+          setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
+          if (splashOn) splash.updateStatus("error");
+          showToast(`Launch failed: ${err}`, "error");
+        }
+        return;
+      }
+
+      // Strategy B: steam:// protocol fallback (no local exe)
       try {
         await openUrl(`steam://run/${game.steamAppId}`);
         if (splashOn) splash.updateStatus("started");
         showToast(`Launched ${game.name} via Steam`, "success");
 
-        // Replaces the previous hardcoded 300 s placeholder emit —
-        // the watcher emits game-exited with real elapsedSeconds +
-        // SessionMetrics once the game's process actually closes.
         invoke<void>("watch_steam_game", {
           gameId: game.id,
           steamAppId: game.steamAppId,
           gpuId,
           gpuName,
         }).catch((err: unknown) => {
-          // Watcher failed to start (Steam install dir missing,
-          // WMI unavailable, etc.). Clear running state so the play
-          // button re-enables, and surface the error.
           console.error(`Steam session watch failed: ${err}`);
           setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
           showToast(`Steam session tracking unavailable: ${err}`, "error");

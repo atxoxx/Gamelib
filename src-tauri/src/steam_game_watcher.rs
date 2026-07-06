@@ -258,9 +258,21 @@ pub fn is_game_process_running(install_dir: &Path) -> ProcessMatch {
     // Trim trailing separator for prefix matching.
     let needle = needle.trim_end_matches('\\').trim_end_matches('/').to_string();
 
+    // See metrics_collector::collect_metrics_loop: CoInitializeSecurity
+    // is process-wide, so once it has been claimed (e.g. by
+    // get_system_ram_gb during app start) every subsequent
+    // COMLibrary::new() on a different thread fails. We poll WMI
+    // from a background thread inside watch_steam_game, so without
+    // the without_security() fallback every poll returns
+    // ProcessMatch::default() { running: false } and Phase 1
+    // times out, even for a real running game. Fall back so the
+    // detection actually works.
     let com_lib = match COMLibrary::new() {
         Ok(lib) => lib,
-        Err(_) => return ProcessMatch::default(),
+        Err(_) => match COMLibrary::without_security() {
+            Ok(lib) => lib,
+            Err(_) => return ProcessMatch::default(),
+        },
     };
     let wmi_con = match WMIConnection::new(com_lib) {
         Ok(con) => con,
