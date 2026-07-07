@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { useGames } from "../context/GameContext";
+import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import { gameNameFromPath, type Game, type GameMetadataResult } from "../types/game";
@@ -333,41 +333,14 @@ export default function Sidebar() {
           </div>
         ) : (
           filteredGames.map((game) => (
-            <div
+            <SidebarGameItem
               key={game.id}
-              className={`sidebar-game-item${selectedGameId === game.id ? " active" : ""}`}
+              game={game}
+              isSelected={selectedGameId === game.id}
+              isRunning={runningGameIds.includes(game.id)}
               onClick={() => handleGameClick(game)}
               onContextMenu={(e) => handleGameContextMenu(e, game)}
-            >
-              <div className="sidebar-game-icon">
-                {game.iconUrl ? (
-                  <img src={game.iconUrl} alt={game.name} />
-                ) : game.coverArtUrl ? (
-                  <img src={game.coverArtUrl} alt={game.name} />
-                ) : (
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    opacity={0.3}
-                  >
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                )}
-              </div>
-              <div className="sidebar-game-info">
-                <div className="sidebar-game-name">{game.name}</div>
-                <div className="sidebar-game-meta">
-                  {game.platform} · {game.playTime}
-                </div>
-              </div>
-              <div
-                className={`sidebar-game-status ${runningGameIds.includes(game.id) ? "running" : game.installed ? "installed" : "not-installed"}`}
-              />
-            </div>
+            />
           ))
         )}
       </div>
@@ -478,6 +451,143 @@ function ContextMenu({
         </svg>
         Remove from Library
       </button>
+    </div>
+  );
+}
+
+/**
+ * Single row in the sidebar's game list. Mirrors the auto-fetch
+ * pattern from `LibraryGameCard`: an IntersectionObserver attached to
+ * the row's outer `<div>` triggers `enrichGameMetadata` the moment the
+ * row scrolls into view AND the game lacks a cover asset, so side-panel
+ * games no longer need the user to open the Game detail page before
+ * their artwork appears. The cover `<img>` wears the same Steam-CDN
+ * `onError` fallback chain as the library card so older / modded
+ * titles with no IGDB cover still gracefully degrade to `header.jpg`
+ * before clearing `coverArtUrl` to trigger a re-arm and an IGDB /
+ * LaunchBox re-scrape via the observer.
+ *
+ * Why the ref is on the OUTER `<div className="sidebar-game-item">`
+ * rather than the inner `sidebar-game-icon`: attaching the observer to
+ * the larger row rectangle means the trigger fires as soon as the row
+ * is anywhere near the viewport — the 300 px rootMargin gives a generous
+ * head-start — instead of waiting for the small 36 × 36 icon to enter
+ * the viewport, which would otherwise miss rows whose icon is just
+ * out-of-frame while the title is still readable.
+ */
+function SidebarGameItem({
+  game,
+  isSelected,
+  isRunning,
+  onClick,
+  onContextMenu,
+}: {
+  game: Game;
+  isSelected: boolean;
+  isRunning: boolean;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
+  const { updateGame, enrichGameMetadata } = useGames();
+  const coverRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-enrich criteria — short-circuits the observer setup so we
+  // don't spam IGDB for games we already know are unmatched.
+  const canAutoFetchCover =
+    !game.coverArtUrl &&
+    game.metadataSource !== NO_IGDB_MATCH_SOURCE &&
+    !!game.name;
+
+  // Set up the IntersectionObserver. Disconnect on first intersect —
+  // the session dedupe in `enrichGameMetadata` makes repeat calls
+  // no-ops, and the effect re-arms whenever `canAutoFetchCover` flips
+  // (e.g. user manually cleared the cover via the edit modal and the
+  // row scrolls back into view), so the loop is self-healing.
+  useEffect(() => {
+    if (!canAutoFetchCover || !coverRef.current) return;
+    const node = coverRef.current;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer.disconnect();
+        enrichGameMetadata(game.id, game.name, game.steamAppId).catch(
+          (err) =>
+            console.warn(
+              `Sidebar auto-cover fetch failed for ${game.name}:`,
+              err
+            )
+        );
+      },
+      { rootMargin: "300px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [canAutoFetchCover, game.id, game.name, game.steamAppId, enrichGameMetadata]);
+
+  return (
+    <div
+      ref={coverRef}
+      className={`sidebar-game-item${isSelected ? " active" : ""}`}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+    >
+      <div className="sidebar-game-icon">
+        {game.iconUrl ? (
+          <img src={game.iconUrl} alt={game.name} />
+        ) : game.coverArtUrl ? (
+          <img
+            src={game.coverArtUrl}
+            alt={game.name}
+            onError={(e) => {
+              const img = e.currentTarget;
+              // Steam-CDN fallback chain. Walks to progressively
+              // simpler URLs on each onError, then clears
+              // `coverArtUrl` once the chain is exhausted —
+              // clearing re-renders the placeholder AND flips
+              // `canAutoFetchCover` back to `true`, so the
+              // observer above re-arms and scrapes IGDB /
+              // LaunchBox for a real cover on the next
+              // intersection.
+              const appId = game.steamAppId;
+              if (appId) {
+                if (img.src.includes("library_600x900_2x")) {
+                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`;
+                  return;
+                }
+                if (img.src.includes("library_600x900")) {
+                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+                  return;
+                }
+              }
+              console.warn(
+                `Sidebar cover image failed for ${game.name}, falling back to placeholder`
+              );
+              updateGame(game.id, { coverArtUrl: undefined });
+            }}
+          />
+        ) : (
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            opacity={0.3}
+          >
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        )}
+      </div>
+      <div className="sidebar-game-info">
+        <div className="sidebar-game-name">{game.name}</div>
+        <div className="sidebar-game-meta">
+          {game.platform} · {game.playTime}
+        </div>
+      </div>
+      <div
+        className={`sidebar-game-status ${isRunning ? "running" : game.installed ? "installed" : "not-installed"}`}
+      />
     </div>
   );
 }

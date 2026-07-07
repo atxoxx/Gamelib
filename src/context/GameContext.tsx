@@ -85,6 +85,47 @@ function generateId(): string {
   return `game-${Date.now()}-${nextId++}`;
 }
 
+// Session-scoped attempt counter `Map` for `enrichGameMetadata`. Multiple
+// entry points (LibraryPage IntersectionObserver, GamePage on-mount, batch
+// imports, etc.) all converge on this single function.
+//
+// A counter (not just a Set) does two jobs at once:
+//
+//  1. **Dedupe**: prevents the same gameId being enriched repeatedly by
+//     multiple observers in the same window — the first attempt goes
+//     through, subsequent ones see the count > 0 and the top-of-function
+//     guard short-circuits them.
+//
+//  2. **Retry cap**: if Rust persistently fails to download the cover
+//     AND the URL it falls back to also 404s in the browser, the
+//     library card's `onError` chain clears `coverArtUrl`, the
+//     IntersectionObserver re-arms on the next render, and we would
+//     otherwise loop indefinitely between Rust call → onError →
+//     re-arm → Rust call. Capping at MAX_ENRICH_ATTEMPTS prevents
+//     that: after the cap, observer-fired calls bail at the guard,
+//     but they are cheap (no Rust round-trip) so the UI stays
+//     responsive.
+//
+// Persisted fields on the Game record are written on the first
+// successful attempt; a no-op on subsequent calls is correct, not
+// lossy. Module scope keeps the counter alive across library ↔
+// detail-page navigation rather than resetting on every GameProvider
+// remount.
+const MAX_ENRICH_ATTEMPTS = 2;
+const enrichAttemptsThisSession = new Map<string, number>();
+
+/**
+ * True iff `u` is a base64 data URL — i.e. an image we successfully
+ * downloaded to disk. Used by the unpoison block in `enrichGameMetadata`
+ * to decide whether a retry is necessary when cover art eventually
+ * fails to load.
+ *
+ * Hoisted to module scope so the helper isn't reallocated on every
+ * enrichment call (it's a pure predicate with no closure deps).
+ */
+const isFrontendUsableImage = (u: string | undefined): boolean =>
+  !!u && u.startsWith("data:");
+
 export function GameProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
   // SplashProvider wraps GameProvider in App.tsx, so we can read the
@@ -191,6 +232,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
   gamesRef.current = games;
 
   const enrichGameMetadata = useCallback(async (gameId: string, gameName: string, steamAppId?: number) => {
+    // Dedupe + retry cap (see MAX_ENRICH_ATTEMPTS comment above). Both
+    // the LibraryPage observer and the GamePage on-mount effect settle
+    // on this single counter, so multiple fires for the same gameId in
+    // a single session collapse into one round-trip (when Rust
+    // succeeds) or at most `MAX_ENRICH_ATTEMPTS` round-trips (when
+    // Rust keeps failing — the cap protects against an infinite
+    // Rust-call loop on permanently broken upstream URLs).
+    const previousAttempts = enrichAttemptsThisSession.get(gameId) ?? 0;
+    if (previousAttempts >= MAX_ENRICH_ATTEMPTS) return;
+    enrichAttemptsThisSession.set(gameId, previousAttempts + 1);
+
     try {
       const results: GameMetadataResult[] = await invoke("search_game_metadata", {
         gameName,
@@ -207,12 +259,41 @@ export function GameProvider({ children }: { children: ReactNode }) {
         updateGame(gameId, {
           metadataSource: current.metadataSource ?? NO_IGDB_MATCH_SOURCE,
         });
+        // DEFINITIVE FAILURE: the search returned nothing rather than
+        // timing out or 404-ing. Drop the attempt counter so a future
+        // MANUAL user-initiated retry (e.g. clearing the coverArtUrl in
+        // the GamePage edit modal) gets a fresh budget instead of
+        // inheriting a burned slot. Future AUTO-fetches are gated by
+        // the metadataSource sentinel above, so they won't fire
+        // regardless of the counter.
+        enrichAttemptsThisSession.delete(gameId);
         return;
       }
       // Prefer IGDB for its richer metadata (timeToBeat, criticRating, themes,
       // screenshots, videos, etc.) — Steam and LaunchBox only provide basics.
       const meta = results.find((r) => r.sourceName === "IGDB") ?? results[0];
-      const images = await fetchAllImages(meta.images);
+
+      // IMAGE-LEVEL FALLBACK across sources: many older / modded /
+      // niche titles (e.g. ARMA 2 Private Military Company, Arma Gold,
+      // mods without IGDB entries) have NO IGDB cover — but a perfectly
+      // valid Steam library_600x900.jpg or LaunchBox box front. Without
+      // this cross-source image fallback those games would render as the
+      // placeholder text card forever, since the IGDB-only `meta`
+      // selection above drops the Steam/LaunchBox image URLs on the floor.
+      // Textual metadata still prizes IGDB above other sources.
+      const pickImage = (key: "cover" | "hero" | "banner" | "logo"): string | null => {
+        if (meta.images[key]) return meta.images[key];
+        for (const r of results) {
+          if (r.images[key]) return r.images[key];
+        }
+        return null;
+      };
+      const images = await fetchAllImages({
+        cover: pickImage("cover"),
+        hero: pickImage("hero"),
+        banner: pickImage("banner"),
+        logo: pickImage("logo"),
+      });
       // Merge with sentinel "only set if currently empty" for textual fields
       // so a user-edited description isn't clobbered by an IGDB re-fetch.
       const setIfEmpty = <K extends keyof Game>(key: K, value: Game[K] | undefined): Game[K] | undefined => {
@@ -248,6 +329,31 @@ export function GameProvider({ children }: { children: ReactNode }) {
         metadataSource: meta.sourceName,
         metadataUrl: meta.sourceUrl,
       });
+      // Defensive REWARD: when an attempt produced a usable image OR
+      // the game already had a working cover from a previous fetch,
+      // reset the attempt counter so a future user-initiated clear +
+      // re-fire (via the LibraryPage observer being re-armed by an
+      // onError-clear, or the user manually editing coverArtUrl to
+      // undefined) gets a FRESH attempt budget. Otherwise leave the
+      // count alone — the counter we incremented at the top of this
+      // function records the attempt just made, and the top-of-function
+      // guard will start rejecting after MAX_ENRICH_ATTEMPTS is reached.
+      //
+      // A frontend-usable cover is a base64 data URL downloaded via
+      // Rust. `downloadImageSafe()` falls back to returning the original
+      // REMOTE URL on Rust failure, which is technically a truthy string
+      // but not a working image — when the browser then 404s on it and
+      // the Steam-CDN onError chain on the library card exhausts every
+      // fallback and clears `coverArtUrl`, the LibraryPage observer
+      // re-arms but our cap protects against an infinite Rust-call loop.
+      if (
+        isFrontendUsableImage(images.coverArtUrl) ||
+        isFrontendUsableImage(images.bannerUrl) ||
+        isFrontendUsableImage(images.logoUrl) ||
+        !!current.coverArtUrl
+      ) {
+        enrichAttemptsThisSession.delete(gameId);
+      }
       console.log(`Enriched ${gameName} via ${meta.sourceName}`);
 
       // Background review load happens lazily via ReviewsTab on first open,
@@ -255,6 +361,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       // issues with fetchGameReviews's useCallback declaration below.
     } catch (err) {
       console.error("enrichGameMetadata failed:", err);
+      // Same rationale as the no-results branch — the Rust / IGDB /
+      // LaunchBox call didn't even resolve. Reset the attempt counter
+      // so a transient network blip or IPC failure doesn't burn one of
+      // the user's two retries.
+      enrichAttemptsThisSession.delete(gameId);
     }
   }, [updateGame]);
 

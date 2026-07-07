@@ -330,8 +330,11 @@ function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => vo
   );
 }
 
-// Track which game IDs have already been auto-enriched to avoid repeat calls
-const enrichedGameIds = new Set<string>();
+// Track which game IDs have already been auto-enriched in this GameDetail
+// mount to avoid repeat calls when enrichment-triggered state updates
+// re-fire the useEffect below. Cross-mount dedupe is handled by the
+// session-scoped `enrichedThisSession` Set inside GameContext — no need
+// for a parallel module-scoped Set here anymore.
 
 function GameDetail({ game }: { game: Game }) {
   const navigate = useNavigate();
@@ -435,7 +438,6 @@ function GameDetail({ game }: { game: Game }) {
   const enrichmentStartedRef = useRef(false);
   useEffect(() => {
     if (enrichmentStartedRef.current) return;
-    if (enrichedGameIds.has(game.id)) return;
     if (game.metadataSource === NO_IGDB_MATCH_SOURCE) return;
     if (!game.name) return;
     const hasDescription = !!game.description;
@@ -443,7 +445,6 @@ function GameDetail({ game }: { game: Game }) {
     if (hasDescription && !missingTTB) return;
 
     enrichmentStartedRef.current = true;
-    enrichedGameIds.add(game.id);
     // enrichGameMetadata is wrapped in silent useCallback; the only
     // user-visible signal it ran is the description/covers/grades
     // appearing in the JSX. A loading pill is a nice-to-have
