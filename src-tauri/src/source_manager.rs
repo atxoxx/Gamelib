@@ -6,37 +6,40 @@
 //! `downloads` array, where each entry has `title`, `fileSize`, and
 //! `uris` (an array of magnet: / .torrent URLs).
 //!
-//! We deliberately do NOT try to validate that a source URL is
-//! "trustworthy" — the user adds the URL, the user is responsible
-//! for it. We do cap source size on fetch (1 MB) to keep a malicious
-//! URL from streaming the entire disk through `reqwest`.
+//! Instead of fetching source JSON directly or opening an in-app
+//! Webview, we delegate to the **Hydra API** — a community service
+//! that crawls, validates, and serves download-source data. Adding
+//! a source POSTs the URL to Hydra's `/download-sources` endpoint;
+//! refreshing calls `/download-sources/sync`. Both are unauthenticated.
 //!
 //! ## Persistence
 //!
-//! Source metadata (id, url, name, enabled, last_fetched, game_count)
-//! is persisted to `<app_data_dir>/sources.json` after every mutation.
-//! We persist ONLY the metadata — the parsed `GameSource` payload
-//! (which can be megabytes) is held in memory and re-fetched on
-//! app start, since a stale in-memory cache is much worse than a
-//! 5-second wait for a refresh.
+//! Source metadata (id, url, name, enabled, last_fetched, game_count,
+//! hydra_source_id) is persisted to `<app_data_dir>/sources.json` after
+//! every mutation. The full download payload is persisted on disk as
+//! `<app_data_dir>/sources_cache/{source_id}.json` and re-loaded on
+//! startup so sources work offline after the first Hydra fetch.
 //!
 //! ## Concurrency
 //!
-//! The struct sits behind a `Mutex` in Tauri state. All methods take
-//! `&mut self`, so callers `lock().await` for the duration of the
-//! operation. Refreshes that hit the network do their HTTP work
-//! OUTSIDE the lock (see `refresh_source`) so concurrent reads
-//! (searches) aren't blocked while a fetch is in flight.
+//! The struct sits behind a `tokio::sync::Mutex` in Tauri state. All
+//! methods take `&mut self`, so callers `lock().await` for the duration
+//! of the operation. Network calls to the Hydra API happen inside the
+//! lock — acceptable because source operations are user-driven and
+//! infrequent.
 
-use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+/// Production Hydra API base URL.
+const HYDRA_API_BASE: &str = "https://hydra-api-us-east-1.losbroxas.org";
 
 // ─── JSON schema (Hydra-compatible) ─────────────────────────────────────────
 
@@ -44,17 +47,18 @@ use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
 ///
 /// Field aliases: the Hydra format uses `fileSize` and `uploadDate`
 /// (camelCase) but some other schemas (Hydra forks, hand-rolled
-// lists) use `filesize` or `file_size`. We accept any of the three so
-// a pasted URL from a non-canonical source still works.
+/// lists) use `filesize` or `file_size`. We accept any of the three so
+/// a pasted URL from a non-canonical source still works.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceDownload {
     pub title: String,
-    #[serde(alias = "filesize", alias = "file_size")]
+    #[serde(default, alias = "filesize", alias = "file_size")]
     pub file_size: String,
     /// Magnet links, .torrent URLs, or both. Treated as opaque URIs
     /// by this module — torrent_engine validates the scheme before
     /// handing off.
+    #[serde(default)]
     pub uris: Vec<String>,
     #[serde(default, alias = "uploaddate", alias = "upload_date")]
     pub upload_date: Option<String>,
@@ -73,6 +77,36 @@ pub struct GameSource {
     pub downloads: Vec<SourceDownload>,
 }
 
+// ─── Hydra API types ────────────────────────────────────────────────────────
+
+/// Request body for `POST /download-sources`.
+#[derive(Debug, Serialize)]
+struct AddDownloadSourceRequest {
+    url: String,
+}
+
+/// Request body for `POST /download-sources/sync`.
+#[derive(Debug, Serialize)]
+struct SyncDownloadSourcesRequest {
+    ids: Vec<String>,
+}
+
+/// Response from `POST /download-sources` and entries in the
+/// `POST /download-sources/sync` response array.
+/// The Hydra API returns catalog metadata only — the actual `downloads`
+/// array must be fetched directly from the source URL.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+struct HydraDownloadSourceResponse {
+    id: String,
+    url: String,
+    name: String,
+    fingerprint: String,
+    download_count: usize,
+    status: String,
+}
+
 // ─── User-facing records ────────────────────────────────────────────────────
 
 /// Metadata for a single source the user has added. Persisted to
@@ -81,6 +115,11 @@ pub struct GameSource {
 #[serde(rename_all = "camelCase")]
 pub struct SourceLink {
     pub id: String,
+    /// ID assigned by the Hydra API — used as the key for subsequent
+    /// sync/refresh calls. Empty string for legacy sources added
+    /// before the Hydra API migration.
+    #[serde(default)]
+    pub hydra_source_id: String,
     pub url: String,
     pub name: String,
     pub enabled: bool,
@@ -92,12 +131,15 @@ pub struct SourceLink {
     pub game_count: usize,
 }
 
-/// One cached source. Held in memory only (not persisted) so a
-/// restart re-fetches and re-validates.
+/// One cached source. Persisted to `<app_data_dir>/sources_cache/{source_id}.json`
+/// so the downloads list survives a restart.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedSource {
     pub source_id: String,
+    /// ID assigned by the Hydra API. Empty string if not yet registered.
+    #[serde(default)]
+    pub hydra_source_id: String,
     pub data: GameSource,
     /// Unix seconds of when this was fetched.
     pub fetched_at: u64,
@@ -128,51 +170,89 @@ pub struct MatchedDownload {
 pub struct SourceManager {
     /// Disk-backed metadata list.
     sources: Vec<SourceLink>,
-    /// In-memory cache. Keyed by `SourceLink.id`.
+    /// In-memory cache. Hydrated from disk on startup; kept in sync
+    /// with disk after every add/refresh.
     cache: HashMap<String, CachedSource>,
     /// Where `sources.json` is written. Set at construction so the
     /// Tauri command layer doesn't need to re-resolve it.
     sources_file: PathBuf,
-    /// Shared HTTP client. Reused across refreshes so connection
-    /// pools survive between requests.
+    /// Where per-source download cache files live.
+    cache_dir: PathBuf,
+    /// Shared HTTP client. Used for Hydra API calls.
     client: reqwest::Client,
 }
 
 impl SourceManager {
     pub fn new(cache_dir: PathBuf) -> Self {
+        let sources_cache = cache_dir.join("sources_cache");
         Self {
             sources: Vec::new(),
             cache: HashMap::new(),
             sources_file: cache_dir.join("sources.json"),
+            cache_dir: sources_cache,
             client: reqwest::Client::builder()
-                .user_agent("Gamelib/1.0 (+source-manager)")
+                .user_agent("Gamelib/1.0 (+hydra-api)")
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .expect("HTTP client build is infallible with these settings"),
         }
     }
 
-    /// Load sources from disk. Called once at startup. Missing file
-    /// is not an error — it just means the user has no sources yet.
+    /// Load sources + cached downloads from disk. Called once at
+    /// startup. Missing files are not errors — they just mean the
+    /// user has no sources yet.
     pub fn load_sources(&mut self) -> Result<(), String> {
-        if !self.sources_file.exists() {
-            return Ok(());
+        // ── Metadata ──────────────────────────────────────────────
+        if self.sources_file.exists() {
+            let data = fs::read_to_string(&self.sources_file)
+                .map_err(|e| format!("Failed to read sources.json: {}", e))?;
+            if !data.trim().is_empty() {
+                self.sources = serde_json::from_str(&data)
+                    .map_err(|e| format!("Failed to parse sources.json: {}", e))?;
+            }
         }
-        let data = fs::read_to_string(&self.sources_file)
-            .map_err(|e| format!("Failed to read sources.json: {}", e))?;
-        // Empty file (e.g. a crashed previous write left it zero
-        // bytes) parses as an empty Vec rather than erroring.
-        if data.trim().is_empty() {
-            return Ok(());
+
+        // ── Cache ─────────────────────────────────────────────────
+        if self.cache_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&self.cache_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "json") {
+                        match fs::read_to_string(&path) {
+                            Ok(data) => {
+                                if data.trim().is_empty() {
+                                    continue;
+                                }
+                                match serde_json::from_str::<CachedSource>(&data) {
+                                    Ok(cached) => {
+                                        self.cache
+                                            .insert(cached.source_id.clone(), cached);
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "[source_manager] failed to parse cache file {:?}: {}",
+                                            path, e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[source_manager] failed to read cache file {:?}: {}",
+                                    path, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
-        self.sources = serde_json::from_str(&data)
-            .map_err(|e| format!("Failed to parse sources.json: {}", e))?;
+
         Ok(())
     }
 
     /// Persist current source metadata to disk. Called after every
-    /// mutation (add / remove / toggle). The cache is intentionally
-    /// not persisted.
+    /// mutation (add / remove / toggle / refresh).
     fn save_sources(&self) -> Result<(), String> {
         if let Some(parent) = self.sources_file.parent() {
             fs::create_dir_all(parent)
@@ -185,48 +265,251 @@ impl SourceManager {
         Ok(())
     }
 
-    /// Add a new source. The URL is validated by attempting a
-    /// fetch — we don't add a source we couldn't reach.
-    pub async fn add_source(&mut self, url: String, name: String) -> Result<SourceLink, String> {
-        let trimmed = url.trim().to_string();
-        if trimmed.is_empty() {
-            return Err("Source URL is empty".to_string());
-        }
-        // Reject obviously non-HTTP(S) URLs early so a typo'd
-        // `file://` doesn't make it past validation.
-        if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
-            return Err("Source URL must start with http:// or https://".to_string());
-        }
-        // Duplicate-URL check. Same URL twice is almost certainly
-        // a mistake, and we use URL as the join key when looking
-        // for the matching source on subsequent fetches.
-        if self.sources.iter().any(|s| s.url == trimmed) {
-            return Err("This source URL has already been added".to_string());
-        }
-        // Fetch + parse before persisting. If the URL is unreachable
-        // or the JSON is malformed, we surface the error and the
-        // user gets nothing.
-        let data = self.fetch_source(&trimmed).await?;
-        self.commit_source(trimmed, name, data)
+    /// Save a single cached source to disk.
+    fn save_cache_for_source(&self, cached: &CachedSource) -> Result<(), String> {
+        fs::create_dir_all(&self.cache_dir)
+            .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+        let file_path = self.cache_dir.join(format!("{}.json", cached.source_id));
+        let data = serde_json::to_string_pretty(cached)
+            .map_err(|e| format!("Failed to serialize cache: {}", e))?;
+        fs::write(&file_path, data)
+            .map_err(|e| format!("Failed to write cache file: {}", e))?;
+        Ok(())
     }
 
-    /// Add a new source from a pre-fetched JSON text payload.
+    /// Delete a cached source file from disk.
+    fn remove_cache_for_source(&self, source_id: &str) {
+        let file_path = self.cache_dir.join(format!("{}.json", source_id));
+        if file_path.exists() {
+            let _ = fs::remove_file(&file_path);
+        }
+    }
+
+    // ── Hydra API helpers ──────────────────────────────────────────────
+
+    /// POST to Hydra `/download-sources` to register a URL and get
+    /// back catalog metadata (id, name, fingerprint, downloadCount).
+    /// The actual download entries must be fetched separately from
+    /// the source URL via `fetch_source_json`.
+    async fn hydra_add_source(
+        &self,
+        url: &str,
+    ) -> Result<HydraDownloadSourceResponse, String> {
+        let endpoint = format!("{}/download-sources", HYDRA_API_BASE);
+        let response = self
+            .client
+            .post(&endpoint)
+            .json(&AddDownloadSourceRequest {
+                url: url.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|e| format!("Hydra API unreachable: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Hydra API returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            ));
+        }
+
+        response
+            .json::<HydraDownloadSourceResponse>()
+            .await
+            .map_err(|e| format!("Failed to parse Hydra API response: {}", e))
+    }
+
+    /// GET the source JSON directly from the source URL and parse it
+    /// as a `GameSource`. This is the source-of-truth for the actual
+    /// download entries (title, fileSize, uris). May fail if the URL
+    /// is behind Cloudflare or otherwise unreachable.
+    async fn fetch_source_json(&self, url: &str) -> Result<GameSource, String> {
+        let response = self
+            .client
+            .get(url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            )
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch source JSON: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("HTTP {} from source URL", status.as_u16()));
+        }
+
+        // Check content-type to detect Cloudflare HTML challenges.
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if content_type.contains("text/html") {
+            return Err("Source URL returned HTML (likely Cloudflare challenge)".to_string());
+        }
+
+        // No size cap — source JSON files can be several MB for
+        // large catalogs (e.g. 3+ MB). Streaming the full body is
+        // safe because serde_json validates it incrementally.
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| format!("Body read failed: {}", e))?;
+        serde_json::from_slice::<GameSource>(&bytes)
+            .map_err(|e| format!("Source JSON parse failed: {}", e))
+    }
+
+    /// POST to Hydra `/download-sources/sync` to refresh one or more
+    /// sources. Returns the array of updated source data.
     ///
-    /// Used by the Settings "Add Source" flow when the upstream URL
-    /// is Cloudflare-protected and the user has to manually click
-    /// through a JS challenge inside an in-app Webview. The webview
-    /// reads the rendered JSON (typically wrapped in a `<pre>` tag)
-    /// and passes the text here, skipping the `reqwest` fetch entirely.
+    /// Tolerates 404 (source not in Hydra catalog) and returns an
+    /// empty Vec rather than erroring — the caller can fall back to
+    /// fetching the source JSON directly from its URL.
+    async fn hydra_sync_sources(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<HydraDownloadSourceResponse>, String> {
+        let endpoint = format!("{}/download-sources/sync", HYDRA_API_BASE);
+        let response = self
+            .client
+            .post(&endpoint)
+            .json(&SyncDownloadSourcesRequest {
+                ids: ids.to_vec(),
+            })
+            .send()
+            .await
+            .map_err(|e| format!("Hydra API unreachable: {}", e))?;
+
+        let status = response.status();
+        // 404 means none of the submitted IDs are in Hydra's catalog
+        // — not a fatal error, just no results.
+        if status.as_u16() == 404 {
+            return Ok(Vec::new());
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Hydra API returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            ));
+        }
+
+        response
+            .json::<Vec<HydraDownloadSourceResponse>>()
+            .await
+            .map_err(|e| format!("Failed to parse Hydra sync response: {}", e))
+    }
+
+    /// Ensure a source has a Hydra ID. If `hydra_source_id` is empty,
+    /// register the URL with Hydra and save the returned ID. Returns
+    /// the (possibly newly obtained) Hydra source ID.
+    async fn ensure_hydra_id(&mut self, local_source_id: &str) -> Result<String, String> {
+        // Find the source index in self.sources (not just the ref)
+        // so we can mutate in place.
+        let idx = self
+            .sources
+            .iter()
+            .position(|s| s.id == local_source_id)
+            .ok_or_else(|| format!("Source not found: {}", local_source_id))?;
+
+        if !self.sources[idx].hydra_source_id.is_empty() {
+            return Ok(self.sources[idx].hydra_source_id.clone());
+        }
+
+        // Register with Hydra.
+        let url = self.sources[idx].url.clone();
+        let hydra_resp = self.hydra_add_source(&url).await?;
+
+        // Update the source's hydra_source_id.
+        self.sources[idx].hydra_source_id = hydra_resp.id;
+        self.save_sources()?;
+
+        Ok(self.sources[idx].hydra_source_id.clone())
+    }
+
+    /// Persist the cached download data + update in-memory state for a
+    /// source. Shared by `cache_hydra_response` and the direct-fetch
+    /// fallback paths in `refresh_source` / `refresh_all`.
     ///
-    /// The same URL/duplicate validation as `add_source` is applied,
-    /// and the parsed `GameSource` payload is persisted by the same
-    /// `commit_source` helper — both paths share the cache + metadata
-    /// write so a source added either way behaves identically.
-    pub async fn add_source_from_json(
+    /// `fallback_count` is used when the fetched `game_source.downloads`
+    /// is empty — typically `hydra_resp.download_count` (for Cloudflare-
+    /// protected sources where direct fetch failed) or 0 (pure direct fetch).
+    fn commit_cached_source(
+        &mut self,
+        local_source_id: &str,
+        hydra_source_id: String,
+        game_source: GameSource,
+        fetched_at: u64,
+        fallback_count: usize,
+    ) -> usize {
+        let game_count = if game_source.downloads.is_empty() && fallback_count > 0 {
+            fallback_count
+        } else {
+            game_source.downloads.len()
+        };
+        let cached = CachedSource {
+            source_id: local_source_id.to_string(),
+            hydra_source_id,
+            data: game_source,
+            fetched_at,
+        };
+
+        if let Err(e) = self.save_cache_for_source(&cached) {
+            eprintln!(
+                "[source_manager] failed to save cache for {}: {}",
+                local_source_id, e
+            );
+        }
+        self.cache
+            .insert(local_source_id.to_string(), cached);
+
+        if let Some(s) = self.sources.iter_mut().find(|s| s.id == local_source_id) {
+            s.last_fetched = Some(fetched_at);
+            s.game_count = game_count;
+        }
+
+        game_count
+    }
+
+    /// Cache the download data for a source using Hydra metadata.
+    /// Accepts an `Option<GameSource>` from the (possibly failed)
+    /// direct source-URL fetch. When `None`, defaults to an empty
+    /// downloads list.
+    fn cache_hydra_response(
+        &mut self,
+        local_source_id: &str,
+        hydra_resp: &HydraDownloadSourceResponse,
+        game_source_opt: Option<GameSource>,
+        fetched_at: u64,
+    ) {
+        let game_source = game_source_opt.unwrap_or_else(|| GameSource {
+            name: hydra_resp.name.clone(),
+            downloads: Vec::new(),
+        });
+        self.commit_cached_source(
+            local_source_id,
+            hydra_resp.id.clone(),
+            game_source,
+            fetched_at,
+            hydra_resp.download_count,
+        );
+    }
+
+    // ── Public API ───────────────────────────────────────────────────────
+
+    /// Add a new source via the Hydra API. POSTs the URL to
+    /// `/download-sources`, persists the returned data, and returns
+    /// the new `SourceLink`.
+    pub async fn add_source(
         &mut self,
         url: String,
         name: String,
-        json_text: String,
     ) -> Result<SourceLink, String> {
         let trimmed = url.trim().to_string();
         if trimmed.is_empty() {
@@ -238,69 +521,71 @@ impl SourceManager {
         if self.sources.iter().any(|s| s.url == trimmed) {
             return Err("This source URL has already been added".to_string());
         }
-        // Trim defensive whitespace — the webview extraction path
-        // may pick up trailing newlines or BOM markers depending on
-        // how the source server formatted the response.
-        let trimmed_json = json_text.trim();
-        if trimmed_json.is_empty() {
-            return Err("Captured JSON is empty".to_string());
-        }
-        let data: GameSource = serde_json::from_str(trimmed_json)
-            .map_err(|e| format!("Source JSON parse failed: {}", e))?;
-        // Note: we intentionally don't reject empty `downloads`
-        // arrays — an empty source is valid Hydra JSON, and the
-        // HTTP-fetch path (`add_source`) accepts it the same way.
-        // Keeping the two paths symmetrical avoids "the same JSON
-        // works when fetched but not when captured" surprises.
-        self.commit_source(trimmed, name, data)
-    }
 
-    /// Persist a fully-parsed `GameSource`. Shared by `add_source`
-    /// (HTTP-fetched) and `add_source_from_json` (Webview-captured)
-    /// so both flows produce identical `SourceLink` records and
-    /// populate the in-memory cache the same way.
-    ///
-    /// Assumes the caller has already validated the URL and
-    /// confirmed there's no duplicate — those are URL-shape checks
-    /// that don't depend on the body, so they're hoisted to each
-    /// entry point for clearer error messages.
-    fn commit_source(
-        &mut self,
-        url: String,
-        name: String,
-        data: GameSource,
-    ) -> Result<SourceLink, String> {
+        // 1. Register with Hydra API to get catalog metadata.
+        let hydra_resp = self.hydra_add_source(&trimmed).await?;
+
+        // 2. Fetch the full source JSON from the URL for the actual
+        //    downloads array. Cloudflare-protected sources may fail
+        //    here — we still save the source; the fallback_count in
+        //    commit_cached_source keeps the Hydra download_count.
+        let game_source = match self.fetch_source_json(&hydra_resp.url).await {
+            Ok(src) => src,
+            Err(e) => {
+                eprintln!(
+                    "[source_manager] Warning: fetch_source_json failed for {}: {}",
+                    hydra_resp.url, e
+                );
+                GameSource {
+                    name: hydra_resp.name.clone(),
+                    downloads: Vec::new(),
+                }
+            }
+        };
+
+        // Build local metadata.
         let now_nanos = unix_now_nanos();
         let now_seconds = unix_now();
-        // `src_{nanos}_{counter}` gives uniqueness even for
-        // back-to-back `add_source` calls that land in the same
-        // nanosecond. The counter is monotonic across the process
-        // lifetime so two parallel Tauri commands can't collide.
         let counter = SOURCE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let id = format!("src_{}_{}", now_nanos, counter);
+        let local_id = format!("src_{}_{}", now_nanos, counter);
+
         let display_name = if name.trim().is_empty() {
-            derive_name_from_url(&url)
+            derive_name_from_url(&trimmed)
         } else {
             name.trim().to_string()
         };
+
         let source = SourceLink {
-            id: id.clone(),
-            url,
+            id: local_id.clone(),
+            hydra_source_id: hydra_resp.id.clone(),
+            url: trimmed.clone(),
+            name: display_name.clone(),
+            enabled: true,
+            last_fetched: Some(now_seconds),
+            game_count: 0, // populated by commit_cached_source below
+        };
+        self.sources.push(source);
+
+        // Cache the downloads + update game_count + persist.
+        let game_count = self.commit_cached_source(
+            &local_id,
+            hydra_resp.id.clone(),
+            game_source,
+            now_seconds,
+            hydra_resp.download_count,
+        );
+        self.save_sources()?;
+
+        let source = SourceLink {
+            id: local_id,
+            hydra_source_id: hydra_resp.id,
+            url: trimmed,
             name: display_name,
             enabled: true,
             last_fetched: Some(now_seconds),
-            game_count: data.downloads.len(),
+            game_count,
         };
-        self.cache.insert(
-            id.clone(),
-            CachedSource {
-                source_id: id.clone(),
-                data,
-                fetched_at: now_seconds,
-            },
-        );
-        self.sources.push(source.clone());
-        self.save_sources()?;
+
         Ok(source)
     }
 
@@ -309,6 +594,7 @@ impl SourceManager {
     pub fn remove_source(&mut self, id: &str) -> Result<(), String> {
         self.sources.retain(|s| s.id != id);
         self.cache.remove(id);
+        self.remove_cache_for_source(id);
         self.save_sources()
     }
 
@@ -324,112 +610,162 @@ impl SourceManager {
         }
     }
 
-    /// Fetch the JSON at `url` and parse it as a `GameSource`.
-    /// Network failures, HTTP errors, and JSON parse errors all
-    /// surface as a `String` error.
-    pub async fn fetch_source(&self, url: &str) -> Result<GameSource, String> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("Network error: {}", e))?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("HTTP {} from source", status.as_u16()));
-        }
-        // Cap the body so a malicious URL can't stream forever.
-        const MAX_BYTES: u64 = 1_048_576; // 1 MiB
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("Body read failed: {}", e))?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(format!(
-                "Source is too large ({} bytes > {} byte cap)",
-                bytes.len(),
-                MAX_BYTES
-            ));
-        }
-        serde_json::from_slice::<GameSource>(&bytes)
-            .map_err(|e| format!("Source JSON parse failed: {}", e))
-    }
-
-    /// Re-fetch the JSON for one source and refresh the in-memory
-    /// cache + the persisted metadata. The HTTP work happens AFTER
-    /// the lock is released (see the Tauri command wrapper) so
-    /// concurrent reads aren't blocked.
+    /// Refresh a single source. Tries Hydra sync first; if that
+    /// returns nothing (404, unknown ID), falls back to re-fetching
+    /// the source JSON directly from the source URL.
+    /// Legacy sources without a Hydra ID are auto-registered first.
     pub async fn refresh_source(&mut self, id: &str) -> Result<(), String> {
-        let url = self
-            .sources
-            .iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| format!("Source not found: {}", id))?
-            .url
-            .clone();
-        let data = self.fetch_source(&url).await?;
         let now = unix_now();
-        self.cache.insert(
-            id.to_string(),
-            CachedSource {
-                source_id: id.to_string(),
-                data,
-                fetched_at: now,
-            },
-        );
-        if let Some(s) = self.sources.iter_mut().find(|s| s.id == id) {
-            s.last_fetched = Some(now);
-            s.game_count = self.cache[id].data.downloads.len();
+
+        // Try Hydra sync if we have (or can get) a Hydra ID.
+        let hydra_sync_result = async {
+            let hydra_id = self.ensure_hydra_id(id).await?;
+            self.hydra_sync_sources(&[hydra_id]).await
         }
+        .await;
+
+        match hydra_sync_result {
+            Ok(results) if !results.is_empty() => {
+                // Hydra returned fresh metadata — use it + re-fetch JSON.
+                let hydra_resp = &results[0];
+                let game_source_opt = self
+                    .fetch_source_json(&hydra_resp.url)
+                    .await
+                    .ok();
+                self.cache_hydra_response(id, hydra_resp, game_source_opt, now);
+            }
+            _ => {
+                // Hydra sync failed or returned nothing. Fall back to
+                // fetching the source JSON directly from the URL.
+                let source = self
+                    .sources
+                    .iter()
+                    .find(|s| s.id == id)
+                    .ok_or_else(|| format!("Source not found: {}", id))?;
+                let url = source.url.clone();
+                let hydra_id = source.hydra_source_id.clone();
+
+                match self.fetch_source_json(&url).await {
+                    Ok(game_source) => {
+                        self.commit_cached_source(id, hydra_id, game_source, now, 0);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[source_manager] refresh {} failed (Hydra sync + direct fetch both failed): {}",
+                            id, e
+                        );
+                        return Err(format!("Refresh failed: {}", e));
+                    }
+                }
+            }
+        }
+
         self.save_sources()
     }
 
-    /// Refresh every enabled source. Per-source failures are
-    /// logged and skipped so one broken source doesn't fail the
-    /// batch. Returns `Err(joined_failures)` when every refresh
-    /// from the snapshot failed; returns `Ok(())` when at least
-    /// one succeeded (partial success is still considered
-    /// success — the cached version is still usable for the
-    /// sources that worked).
-    ///
-    /// Concurrency: the count of "what we attempted" is
-    /// snapshotted into `snapshot_len` *before* the loop runs.
-    /// The previous implementation re-counted
-    /// `self.sources.iter().filter(|s| s.enabled).count()` after
-    /// the loop, which was a TOCTOU race: a `toggle_source` or
-    /// `remove_source` arriving between the loop and the count
-    /// would change the denominator and make the
-    /// "did everything fail?" comparison nondeterministic. With
-    /// `&mut self` held throughout, no concurrent mutation can
-    /// happen, but using the snapshot is still the correct
-    /// semantic — it compares against what we actually
-    /// attempted, not what `self` looks like after the fact.
+    /// Refresh every enabled source. Tries Hydra bulk sync first;
+    /// any sources not covered by Hydra are refreshed individually
+    /// via direct source-URL fetch.
     pub async fn refresh_all(&mut self) -> Result<(), String> {
-        let ids: Vec<String> = self
+        let enabled: Vec<(String, String, String)> = self
             .sources
             .iter()
             .filter(|s| s.enabled)
-            .map(|s| s.id.clone())
+            .map(|s| (s.id.clone(), s.url.clone(), s.hydra_source_id.clone()))
             .collect();
-        let snapshot_len = ids.len();
-        if snapshot_len == 0 {
+
+        if enabled.is_empty() {
             return Ok(());
         }
-        let mut failures: Vec<String> = Vec::new();
-        for id in ids {
-            if let Err(e) = self.refresh_source(&id).await {
-                eprintln!("[source_manager] refresh {} failed: {}", id, e);
-                failures.push(e);
+
+        let now = unix_now();
+        let mut refreshed = 0usize;
+        let mut hydrated = HashSet::new();
+
+        // 1. Ensure all enabled sources have a Hydra ID.
+        let mut hydra_ids: Vec<String> = Vec::with_capacity(enabled.len());
+        for (local_id, _, _) in &enabled {
+            match self.ensure_hydra_id(local_id).await {
+                Ok(hid) => {
+                    if !hid.is_empty() {
+                        hydra_ids.push(hid);
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[source_manager] failed to get Hydra ID for {}: {}",
+                        local_id, e
+                    );
+                }
             }
         }
-        // Strict semantics: fail the whole call only if EVERY
-        // refresh from the snapshot failed. A single source
-        // returning a network error shouldn't fail the user's
-        // "refresh all" intent.
-        if failures.len() == snapshot_len {
-            return Err(failures.join("; "));
+
+        // 2. Bulk sync with Hydra.
+        if !hydra_ids.is_empty() {
+            if let Ok(results) = self.hydra_sync_sources(&hydra_ids).await {
+                let hydra_to_local: HashMap<String, String> = self
+                    .sources
+                    .iter()
+                    .map(|s| (s.hydra_source_id.clone(), s.id.clone()))
+                    .collect();
+
+                for hydra_resp in &results {
+                    if let Some(local_id) = hydra_to_local.get(&hydra_resp.id) {
+                        let game_source_opt =
+                            self.fetch_source_json(&hydra_resp.url).await.ok();
+                        self.cache_hydra_response(
+                            local_id,
+                            hydra_resp,
+                            game_source_opt,
+                            now,
+                        );
+                        hydrated.insert(local_id.clone());
+                        refreshed += 1;
+                    }
+                }
+            } else {
+                eprintln!(
+                    "[source_manager] Hydra bulk sync failed; falling back to individual refreshes"
+                );
+            }
         }
-        Ok(())
+
+        // 3. Refresh any sources not covered by Hydra sync via
+        //    direct source-URL fetch.
+        for (local_id, url, _) in &enabled {
+            if hydrated.contains(local_id) {
+                continue;
+            }
+            match self.fetch_source_json(url).await {
+                Ok(game_source) => {
+                    let hydra_id = self
+                        .sources
+                        .iter()
+                        .find(|s| &s.id == local_id)
+                        .map(|s| s.hydra_source_id.clone())
+                        .unwrap_or_default();
+                    self.commit_cached_source(local_id, hydra_id, game_source, now, 0);
+                    refreshed += 1;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[source_manager] refresh {} failed: {}",
+                        local_id, e
+                    );
+                }
+            }
+        }
+
+        self.save_sources()?;
+
+        if refreshed == 0 && !enabled.is_empty() {
+            Err(format!(
+                "Failed to refresh any of {} enabled source(s)",
+                enabled.len()
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     /// Get a snapshot of the current source list (metadata only,
@@ -509,14 +845,6 @@ impl SourceManager {
 /// 128-bit unique-enough id without pulling in the `uuid` crate.
 static SOURCE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Per-process counter for source-fetcher WebviewWindow labels.
-/// Combined with `process::id()` this gives a label that's unique
-/// across the process lifetime even if two `add_source_via_webview`
-/// commands run concurrently (or back-to-back within the same
-/// nanosecond, which the previous `nanos + pid` scheme could
-/// collide on with low-resolution clocks).
-static SOURCE_FETCHER_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -546,7 +874,12 @@ fn derive_name_from_url(url: &str) -> String {
         .next()
         .unwrap_or("Source")
         .to_string();
-    let stem = path.trim_end_matches(".json").replace(['-', '_'], " ");
+    // Guard against empty path segments (e.g. trailing slash URLs).
+    let stem = if path.is_empty() {
+        "Source".to_string()
+    } else {
+        path.trim_end_matches(".json").replace(['-', '_'], " ")
+    };
     // Title-case the first letter of each word.
     stem.split_whitespace()
         .map(|w| {
@@ -580,444 +913,6 @@ fn score_match(query_tokens: &[String], raw_query: &str, title: &str) -> f32 {
     (token_score * 0.8 + substring_bonus).min(1.0)
 }
 
-// ─── Webview-based source capture ──────────────────────────────────────────
-//
-// `add_source_via_webview` exists for the (very common) case where the
-// upstream source URL is gated by a Cloudflare "are you human?"
-// interstitial: the Rust `reqwest` client can't run the JS challenge
-// and never gets a `cf_clearance` cookie, so the HTTP-fetch path
-// returns the CF HTML instead of the JSON.
-//
-// We open the URL in a Tauri WebviewWindow, inject a small floating
-// "Capture JSON" + "Cancel" overlay via `initialization_script`,
-// and wait for the user to click Capture after clearing the CF
-// challenge (with the in-Webview cookie jar).
-//
-// Communication uses `on_navigation` interception (same pattern as
-// `steam/auth.rs`) with a custom `gamelib-source://` URL scheme.
-//
-// To work around WebView2's ~2 MB top-frame navigation URL limit,
-// large payloads are split into chunks by the JS and sent as
-// sequential navigations:
-//   * `gamelib-source://chunk/<index>/<total>/<data>` — one chunk
-//   * `gamelib-source://cancel` — user clicked Cancel
-//   * Window close / 5-min timeout — implicit cancel
-//
-// The Rust side collects chunks in a `ChunkState` shared via
-// `Arc<Mutex<>>`. When all chunks arrive, they're joined and
-// sent through the channel as a single signal.
-//
-// URL-safe base64 (`-`/`_` instead of `+`/`/`, no `=` padding)
-// avoids WebView2 URL normalization corrupting the payload.
-//
-// Why not Tauri events (`window.__TAURI__.event.emit`)? The IPC
-// bridge (`window.__TAURI_INTERNALS__`) is reliably injected into
-// the main window via `withGlobalTauri`, but in
-// `WebviewWindowBuilder` webviews loading external URLs, the
-// bridge is not available — the async `emit()` silently fails
-// with an unhandled Promise rejection.
-//
-// Chrome-mimicking user agent is mandatory: Cloudflare detects
-// WebView2's default UA on Windows and serves a blank page. We
-// re-use the same UA string `steam/auth.rs` uses for Steam login.
-
-/// JavaScript injected into every page of the source-fetcher
-/// Webview. Adds a floating "Capture JSON" + "Cancel" overlay that
-/// stays on top of the page (including Cloudflare interstitials).
-///
-/// Runs at document_start. We poll for `document.body` because CF
-/// can wipe + replace the DOM multiple times, defeating a one-shot
-/// `DOMContentLoaded` listener. The `MutationObserver` fallback
-/// re-attaches the overlay if a page wipe removes it. The id
-/// check (`gamelib-source-fetcher`) makes the injection idempotent
-/// so we never end up with two overlays on a re-injected page.
-///
-/// `buildUI` returns the assembled overlay with its `showStatus`
-/// helper closed over the status element — that scoping is
-/// important because the overlay can be torn down and rebuilt by
-/// the MutationObserver re-injection, and each rebuild needs its
-/// own status element.
-pub const SOURCE_FETCHER_INIT_SCRIPT: &str = r#"
-(function() {
-    if (window.__gamelibSourceFetcherInjected) return;
-    window.__gamelibSourceFetcherInjected = true;
-
-    // URL-safe base64: replaces +/ with -_ and strips = padding
-    // so WebView2 URL normalisation doesn't corrupt the payload.
-    function toBase64Url(str) {
-        var utf8 = unescape(encodeURIComponent(str));
-        var base64 = btoa(utf8);
-        return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-    }
-
-    function buildUI() {
-        var host = document.createElement('div');
-        host.id = 'gamelib-source-fetcher';
-        host.style.cssText = [
-            'position: fixed',
-            'top: 16px',
-            'right: 16px',
-            'z-index: 2147483647',
-            'display: flex',
-            'flex-direction: column',
-            'gap: 8px',
-            'min-width: 160px',
-            'font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            'user-select: none'
-        ].join(';');
-
-        var captureBtn = document.createElement('button');
-        captureBtn.type = 'button';
-        captureBtn.textContent = 'Capture JSON';
-        captureBtn.style.cssText = [
-            'padding: 10px 16px',
-            'background: #1f6feb',
-            'color: #fff',
-            'border: 0',
-            'border-radius: 6px',
-            'font: inherit',
-            'cursor: pointer',
-            'box-shadow: 0 4px 12px rgba(0,0,0,0.25)'
-        ].join(';');
-
-        var cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.style.cssText = [
-            'padding: 8px 14px',
-            'background: #6e7681',
-            'color: #fff',
-            'border: 0',
-            'border-radius: 6px',
-            'font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            'cursor: pointer',
-            'box-shadow: 0 4px 12px rgba(0,0,0,0.25)'
-        ].join(';');
-
-        var status = document.createElement('div');
-        status.id = 'gsf-status';
-        status.style.cssText = [
-            'display: none',
-            'padding: 8px 10px',
-            'border-radius: 6px',
-            'background: rgba(239, 68, 68, 0.12)',
-            'color: #ef4444',
-            'font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-            'word-break: break-word'
-        ].join(';');
-
-        host.appendChild(captureBtn);
-        host.appendChild(cancelBtn);
-        host.appendChild(status);
-
-        function showStatus(msg, kind) {
-            status.textContent = msg;
-            status.style.display = 'block';
-            status.style.color = kind === 'error' ? '#ef4444' : '#1f6feb';
-            status.style.background = kind === 'error'
-                ? 'rgba(239, 68, 68, 0.12)'
-                : 'rgba(31, 111, 235, 0.12)';
-        }
-
-        captureBtn.onclick = function() {
-            // Guard against interleaved captures: if the
-            // MutationObserver rebuilds the overlay mid-capture
-            // (e.g. after a CF page wipe), the new button would
-            // be re-enabled. Prevent a second capture from
-            // firing while the first one's setTimeout chain is
-            // still in flight.
-            if (window.__gamelibCapturing) return;
-            window.__gamelibCapturing = true;
-            captureBtn.disabled = true;
-            var prevText = captureBtn.textContent;
-            captureBtn.textContent = 'Capturing…';
-            try {
-                var pre = document.querySelector('pre');
-                var text = pre
-                    ? (pre.textContent || pre.innerText || '')
-                    : ((document.body && (document.body.innerText || document.body.textContent)) || '');
-                var b64 = toBase64Url(text);
-                // Split large payloads into ≤1.5 MB chunks to
-                // stay under WebView2's ~2 MB top-frame
-                // navigation URL limit. The Rust side collects
-                // chunks via `on_navigation` and reassembles
-                // them when all chunks have arrived.
-                var MAX_CHUNK = 1500000;
-                var chunks = [];
-                for (var i = 0; i < b64.length; i += MAX_CHUNK) {
-                    chunks.push(b64.slice(i, i + MAX_CHUNK));
-                }
-                var total = chunks.length;
-                // Fire chunk navigations sequentially via
-                // setTimeout. Each navigation is intercepted +
-                // blocked by Rust's `on_navigation`, so the
-                // page stays intact and JS timers continue to
-                // fire.
-                for (var c = 0; c < total; c++) {
-                    (function(idx) {
-                        setTimeout(function() {
-                            location.href =
-                                'gamelib-source://chunk/'
-                                + idx + '/' + total + '/'
-                                + chunks[idx];
-                        }, idx * 100);
-                    })(c);
-                }
-            } catch (err) {
-                captureBtn.textContent = prevText;
-                captureBtn.disabled = false;
-                window.__gamelibCapturing = false;
-                showStatus('Capture failed: ' + err, 'error');
-            }
-        };
-
-        cancelBtn.onclick = function() {
-            location.href = 'gamelib-source://cancel';
-        };
-
-        return host;
-    }
-
-    function inject() {
-        if (!document.body) return false;
-        if (document.getElementById('gamelib-source-fetcher')) return true;
-        document.body.appendChild(buildUI());
-        return true;
-    }
-
-    // First attempt: try immediately in case `document.body` is
-    // already there (e.g. injected on a re-navigation).
-    if (inject()) return;
-
-    // Poll for `document.body` appearing. CF interstitials replace
-    // the body on the challenge result, so we also re-inject via
-    // a MutationObserver in case the user navigates past CF while
-    // our poll is mid-cycle.
-    var attempts = 0;
-    var poll = setInterval(function() {
-        attempts += 1;
-        if (inject() || attempts > 120) { // ~60s
-            clearInterval(poll);
-        }
-    }, 500);
-
-    // Belt-and-suspenders: if a page wipe removes the overlay,
-    // re-inject on the next DOM mutation. Cheap (we early-return
-    // if our element still exists).
-    try {
-        new MutationObserver(function() {
-            if (!document.getElementById('gamelib-source-fetcher')) {
-                inject();
-            }
-        }).observe(document.documentElement, { childList: true, subtree: true });
-    } catch (_) { /* observer unavailable on very old WebView2 builds */ }
-})();
-"#;
-
-/// Chrome-mimicking UA — see `steam/auth.rs` for the rationale.
-/// We re-declare it here (rather than reaching into the steam
-/// module) to keep the source fetcher self-contained.
-pub const SOURCE_FETCHER_USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-
-/// Decode a URL-safe base64 string (RFC 4648 §5) back to the
-/// original UTF-8 text. Reverses the JS `toBase64Url()` transform:
-/// `-` → `+`, `_` → `/`, re-add padding, then base64-decode.
-fn decode_base64url(base64url: &str) -> Result<String, String> {
-    let standard = base64url.replace('-', "+").replace('_', "/");
-    let padded = match standard.len() % 4 {
-        2 => standard + "==",
-        3 => standard + "=",
-        _ => standard,
-    };
-    let bytes = general_purpose::STANDARD
-        .decode(&padded)
-        .map_err(|e| format!("Base64 decode failed: {e}"))?;
-    String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode failed: {e}"))
-}
-
-/// Per-call state for chunked base64url reassembly.
-/// Shared between the `on_navigation` callback (which collects
-/// chunks from sequential navigations) and `on_window_event`
-/// (which needs to co-exist with the same `Arc<Mutex<>>`).
-///
-/// `total` is set once by the first-arriving chunk and treated
-/// as authoritative thereafter — subsequent chunks with a
-/// different total are ignored to guard against malformed or
-/// interleaved payloads.
-#[derive(Default)]
-struct ChunkState {
-    chunks: Vec<String>,
-    received: usize,
-    total: Option<usize>,
-}
-
-/// Open the given source URL in a Cloudflare pass-through Webview,
-/// wait for the user to click "Capture JSON", parse the resulting
-/// JSON, and persist a new source — same `commit_source` path used
-/// by the regular HTTP fetch. Returns the new `SourceLink`.
-///
-/// Large payloads are split into chunks by the injected JS and
-/// reassembled here before decoding.
-#[tauri::command]
-pub async fn add_source_via_webview(
-    app: AppHandle,
-    state: tauri::State<'_, Arc<tokio::sync::Mutex<SourceManager>>>,
-    url: String,
-    name: String,
-) -> Result<SourceLink, String> {
-    use std::time::Duration;
-    use url::Url;
-
-    // Pre-validate the URL the same way the fetch path does, so
-    // the user gets a useful error before a new window opens.
-    let trimmed_url = url.trim().to_string();
-    if trimmed_url.is_empty() {
-        return Err("Source URL is empty".to_string());
-    }
-    if !trimmed_url.starts_with("http://") && !trimmed_url.starts_with("https://") {
-        return Err("Source URL must start with http:// or https://".to_string());
-    }
-    let parsed_url: Url = trimmed_url
-        .parse()
-        .map_err(|e| format!("Invalid URL: {e}"))?;
-
-    // Unique per-call window label. The init script no longer
-    // bakes in the label (we switched from per-call event names
-    // to the fixed `gamelib-source://` scheme), but the label
-    // is still needed for Tauri's window management.
-    let label = format!(
-        "source-fetcher-{}-{}",
-        std::process::id(),
-        SOURCE_FETCHER_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
-    );
-
-    // Channel for navigation callbacks. Pattern matches
-    // `steam/auth.rs`: `on_navigation` sends a signal through
-    // a `std::sync::mpsc` channel, and we `spawn_blocking` +
-    // `recv_timeout` to wait in an async-safe way.
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    let tx_nav = tx.clone();
-    let rx = Arc::new(Mutex::new(rx));
-
-    // Shared chunk collector — the `on_navigation` callback
-    // stores each arriving chunk, and when `received == total`
-    // it sends the joined base64url through the channel.
-    let chunks_state = Arc::new(Mutex::new(ChunkState::default()));
-    let chunks_nav = Arc::clone(&chunks_state);
-
-    let webview = WebviewWindowBuilder::new(
-        &app,
-        &label,
-        WebviewUrl::External(parsed_url),
-    )
-    .title("Add Source — Cloudflare Pass-Through")
-    .inner_size(960.0, 720.0)
-    .min_inner_size(640.0, 480.0)
-    .resizable(true)
-    .user_agent(SOURCE_FETCHER_USER_AGENT)
-    .initialization_script(SOURCE_FETCHER_INIT_SCRIPT)
-    .on_navigation(move |url| {
-        let url_str = url.as_str();
-        // `gamelib-source://chunk/<index>/<total>/<data>` — one
-        // chunk of a (possibly large) base64url payload. Split
-        // by the JS to stay under the ~2 MB URL limit.
-        if url_str.starts_with("gamelib-source://chunk/") {
-            let rest = &url_str["gamelib-source://chunk/".len()..];
-            let parts: Vec<&str> = rest.splitn(3, '/').collect();
-            if parts.len() == 3 {
-                if let (Ok(idx), Ok(total)) =
-                    (parts[0].parse::<usize>(), parts[1].parse::<usize>())
-                {
-                    if total == 0 {
-                        return false; // malformed chunk
-                    }
-                    let mut state = chunks_nav.lock().unwrap();
-                    // Lock total on first chunk; ignore later
-                    // chunks with a different total (defense
-                    // against interleaved captures or malformed
-                    // sequential navigations).
-                    if let Some(existing) = state.total {
-                        if existing != total {
-                            return false;
-                        }
-                    } else {
-                        state.total = Some(total);
-                    }
-                    if state.chunks.len() < total {
-                        state.chunks.resize(total, String::new());
-                    }
-                    if idx < total {
-                        if state.chunks[idx].is_empty() {
-                            state.received += 1;
-                        }
-                        state.chunks[idx] = parts[2].to_string();
-                    }
-                    if state.received == total {
-                        let combined =
-                            state.chunks.join("");
-                        let _ = tx_nav.send(combined);
-                    }
-                }
-            }
-            return false; // Block the navigation
-        }
-        // `gamelib-source://cancel` — user clicked Cancel.
-        if url_str.starts_with("gamelib-source://cancel") {
-            let _ = tx_nav.send("__CANCEL__".to_string());
-            return false;
-        }
-        true // Allow all other navigations
-    })
-    .build()
-    .map_err(|e| format!("Failed to open source page: {e}"))?;
-
-    // Send a cancel signal when the user closes the webview (X button)
-    // so the Rust function returns immediately instead of waiting for
-    // the 5-minute timeout. `Sender` is `Send` (not `Sync`), so we
-    // clone and move the clone into the closure.
-    let tx_close = tx.clone();
-    webview.on_window_event(move |event| {
-        if matches!(
-            event,
-            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
-        ) {
-            let _ = tx_close.send("__CANCEL__".to_string());
-        }
-    });
-
-    // Wait for a signal (capture or cancel) with a 5-minute
-    // timeout. Window close is covered implicitly: when the
-    // user closes the window, the navigation callback never
-    // fires and `recv_timeout` eventually returns `Err`.
-    let signal = {
-        let rx = Arc::clone(&rx);
-        tokio::task::spawn_blocking(move || {
-            rx.lock().unwrap().recv_timeout(Duration::from_secs(300))
-        })
-        .await
-        .map_err(|e| format!("Join error: {e}"))?
-    };
-
-    // Close the webview — we have the data (or a cancel/timeout).
-    let _ = webview.close();
-
-    match signal {
-        Ok(s) if s == "__CANCEL__" => Err("Cancelled".to_string()),
-        Ok(base64url) => {
-            let json_text = decode_base64url(&base64url)?;
-            state
-                .lock()
-                .await
-                .add_source_from_json(trimmed_url, name, json_text)
-                .await
-        }
-        Err(_timeout) => {
-            Err("Source capture timed out after 5 minutes".to_string())
-        }
-    }
-}
-
 // ─── Tauri commands ─────────────────────────────────────────────────────────
 //
 // State is `Arc<tokio::sync::Mutex<SourceManager>>`. The Tauri command
@@ -1026,21 +921,11 @@ pub async fn add_source_via_webview(
 // `std::sync::Mutex` here produced non-Send futures because the guard
 // isn't designed to be held across an await point.
 //
-// The sync `setup` closure in `lib.rs` needs to call `load_sources`
-// without an async runtime, so it uses `tokio::sync::Mutex::blocking_lock()`
-// — that method is explicitly designed for sync-context access to a
-// tokio mutex and blocks the current thread for the duration of the
-// lock (acceptable because setup runs before the runtime is fully
-// active).
-//
-// The lock IS held across the HTTP `await` in `add_source`,
+// The lock IS held across the Hydra API `await` in `add_source`,
 // `refresh_source`, and `refresh_all` — that ties up one tokio worker
 // per concurrent source command. Source commands are user-driven
 // (add / remove / refresh) and never overlap heavily, so the trade is
-// acceptable. If contention becomes a problem, the right fix is to
-// release the guard before the HTTP work (refactor each async method
-// into a "fetch" + a "commit" pair, with the fetch owning the shared
-// `reqwest::Client` via `Arc`).
+// acceptable.
 
 #[tauri::command]
 pub async fn sources_add(

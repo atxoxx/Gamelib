@@ -775,9 +775,9 @@ export default function SettingsPage() {
               <p className="settings-section-desc">
                 Add JSON-formatted source URLs to find download mirrors for
                 your games. Sources use the Hydra-compatible format with a
-                <code> name </code>and a <code> downloads </code>array. The
-                Download button on any game's page will search your enabled
-                sources.
+                <code> name </code>and a <code> downloads </code>array and
+                are registered with the Hydra API. The Download button on
+                any game's page will search your enabled sources.
               </p>
             </div>
           </header>

@@ -30,7 +30,7 @@ function formatRelative(unixSeconds: number | null): string {
 export default function SourceManager() {
   const {
     sources,
-    addSourceViaWebview,
+    addSource,
     removeSource,
     toggleSource,
     refreshSource,
@@ -41,11 +41,7 @@ export default function SourceManager() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
-  // `adding` is true while the Rust `add_source_via_webview`
-  // command is in flight — i.e. a separate Tauri window is open
-  // waiting for the user to click "Capture JSON" (or Cancel).
-  // The form stays disabled until the command resolves so the
-  // user can't fire two parallel webview flows at once.
+  // `adding` is true while the Hydra API call is in flight.
   const [adding, setAdding] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   // Track which row is currently refreshing so we can show the
@@ -64,32 +60,23 @@ export default function SourceManager() {
       showToast("Source URL must start with http:// or https://", "error");
       return;
     }
-    // The Rust command opens a Cloudflare pass-through Webview
-    // window, waits for the user to capture the JSON, parses +
-    // persists, then returns. We keep the form disabled for the
-    // whole flow so a second click can't open a second window.
+    // The Rust command POSTs the URL to the Hydra API
+    // `/download-sources` endpoint, which fetches + parses the
+    // source JSON and returns the full download data. We disable
+    // the form while the API call is in flight.
     setAdding(true);
     try {
-      await addSourceViaWebview(url, newName);
-      // Success toast comes from SourceContext; here we just
-      // reset the form so the user can add another source.
+      await addSource(url, newName);
       setNewUrl("");
       setNewName("");
       setShowAddForm(false);
     } catch (err) {
-      // A "Cancelled" error is expected (user clicked Cancel or
-      // closed the webview) — we still want to keep the form
-      // open with the URL pre-filled so they can retry, but we
-      // skip the toast for cancellations to avoid noise. Other
-      // errors (parse failure, timeout, etc.) get surfaced.
       const msg = String(err);
-      if (!/cancelled/i.test(msg)) {
-        showToast(`Add source failed: ${msg}`, "error");
-      }
+      showToast(`Add source failed: ${msg}`, "error");
     } finally {
       setAdding(false);
     }
-  }, [newUrl, newName, addSourceViaWebview, showToast]);
+  }, [newUrl, newName, addSource, showToast]);
 
   const handleRefreshOne = useCallback(
     async (id: string) => {
@@ -159,8 +146,8 @@ export default function SourceManager() {
           <p className="src-manager-desc">
             Add JSON-formatted source URLs to find download mirrors for your games.
             The built-in format is <code>{`{ name, downloads: [{ title, fileSize, uris }] }`}</code> — Hydra-compatible sources work out of the box.
-            Adding a source opens an in-app Webview so Cloudflare's
-            "are you human?" check can be cleared on this session.
+            Adding a source registers it with the Hydra API, which fetches
+            and validates the source JSON on your behalf.
           </p>
         </div>
         <div className="src-manager-bulk">
@@ -250,11 +237,9 @@ export default function SourceManager() {
               <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
             <span>
-              Clicking <strong>Open Webview</strong> launches an
-              in-app browser at this URL so Cloudflare's "are you
-              human?" check (if any) can be cleared on this
-              session. Then click <strong>Capture JSON</strong> in
-              the dialog to import the downloads list.
+              Clicking <strong>Add Source</strong> registers the URL
+              with the Hydra API, which fetches and parses the source
+              JSON. The downloads list is cached locally for offline use.
             </span>
           </p>
           <div className="src-form-actions">
@@ -278,10 +263,10 @@ export default function SourceManager() {
               {adding ? (
                 <>
                   <span className="src-action-btn spinning" aria-hidden />
-                  Waiting for Webview…
+                  Adding Source…
                 </>
               ) : (
-                <>Open Webview</>
+                <>Add Source</>
               )}
             </button>
           </div>
@@ -322,9 +307,8 @@ export default function SourceManager() {
             Click <strong>Add Source</strong> to paste a JSON source URL. The built-in
             schema is{" "}
             <code>{`{ name, downloads: [{ title, fileSize, uris }] }`}</code>; any
-            Hydra-compatible source should work. The URL opens in an
-            in-app Webview so Cloudflare's "are you human?" check can
-            be cleared on this session.
+            Hydra-compatible source should work. The URL is registered
+            with the Hydra API, which fetches and validates the source JSON.
           </p>
         </div>
       )}

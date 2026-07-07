@@ -46,6 +46,8 @@ export interface GameSource {
  */
 export interface SourceLink {
   id: string;
+  /** ID assigned by the Hydra API — used as the key for sync/refresh calls. */
+  hydraSourceId: string;
   url: string;
   name: string;
   enabled: boolean;

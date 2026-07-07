@@ -35,20 +35,10 @@ interface SourceContextValue {
   sources: SourceLink[];
   /** True until the initial `sources_list` resolves. */
   loading: boolean;
-  /** Add a new source. Validates by attempting a fetch; the
-   *  returned `SourceLink` is the persisted record on success. */
+  /** Add a new source via the Hydra API. POSTs the URL to Hydra's
+   *  `/download-sources` endpoint, which fetches + parses the source
+   *  JSON and returns the full download data. */
   addSource: (url: string, name: string) => Promise<SourceLink>;
-  /** Add a new source via a Cloudflare pass-through Webview.
-   *
-   *  Opens a Tauri WebviewWindow at the URL so the user can
-   *  clear Cloudflare's "are you human?" challenge with the
-   *  in-Webview cookie jar, then click an in-page "Capture JSON"
-   *  button to send the page content to the Rust side. The Rust
-   *  command parses + persists the result. The returned promise
-   *  resolves on success or rejects if the user cancels (clicks
-   *  Cancel, closes the window, or lets the 5-minute timeout
-   *  fire). */
-  addSourceViaWebview: (url: string, name: string) => Promise<SourceLink>;
   removeSource: (id: string) => Promise<void>;
   toggleSource: (id: string) => Promise<void>;
   refreshSource: (id: string) => Promise<void>;
@@ -102,24 +92,6 @@ export function SourceProvider({ children }: { children: ReactNode }) {
   const addSource = useCallback(
     async (url: string, name: string): Promise<SourceLink> => {
       const created = await invoke<SourceLink>("sources_add", { url, name });
-      setSources((prev) => [...prev, created]);
-      showToast(`Added source "${created.name}"`, "success");
-      return created;
-    },
-    [showToast],
-  );
-
-  // Webview-based add: Rust opens a Cloudflare pass-through
-  // Webview, waits for the user to capture the JSON, parses, and
-  // persists. Same `setSources` + toast path as `addSource` on
-  // success; rejects (with a useful message) if the user cancels
-  // or the 5-minute timeout fires.
-  const addSourceViaWebview = useCallback(
-    async (url: string, name: string): Promise<SourceLink> => {
-      const created = await invoke<SourceLink>("add_source_via_webview", {
-        url,
-        name,
-      });
       setSources((prev) => [...prev, created]);
       showToast(`Added source "${created.name}"`, "success");
       return created;
@@ -206,7 +178,6 @@ export function SourceProvider({ children }: { children: ReactNode }) {
       sources,
       loading,
       addSource,
-      addSourceViaWebview,
       removeSource,
       toggleSource,
       refreshSource,
@@ -217,7 +188,6 @@ export function SourceProvider({ children }: { children: ReactNode }) {
       sources,
       loading,
       addSource,
-      addSourceViaWebview,
       removeSource,
       toggleSource,
       refreshSource,
