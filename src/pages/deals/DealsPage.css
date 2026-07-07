@@ -164,45 +164,12 @@
   box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
 
-.deals-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   transition: background var(--transition-fast), transform var(--transition-fast);
   align-self: flex-end;
   height: 36px;
 }
-
-.deals-refresh-btn:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.deals-refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.deals-refresh-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.deals-refresh-btn.spinning svg {
-  animation: deals-spin 0.9s linear infinite;
-}
-
-@keyframes deals-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* Category chips */
 .deals-category-chips {
   display: flex;
@@ -605,6 +572,10 @@
   animation: deals-spin 0.9s linear infinite;
 }
 
+@keyframes deals-spin {
+  to { transform: rotate(360deg); }
+}
+
 .deals-error {
   background: color-mix(in srgb, var(--color-danger) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
@@ -816,12 +787,6 @@
     align-items: stretch;
   }
 
-  .deals-filter-group {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .deals-refresh-btn {
     width: 100%;
     justify-content: center;
   }

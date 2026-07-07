@@ -5,28 +5,30 @@ import { useToast } from "../context/ToastContext";
 import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
 import { useSources } from "../context/SourceContext";
+import { useTheme, type ThemeDescriptor } from "../context/ThemeContext";
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import SourceManager from "../components/SourceManager";
+import { Button } from "../components/ui";
 
-interface ThemeOption {
-  id: string;
-  name: string;
-  // `bg` / `text` / `accent` come from the actual `:root[data-theme="<id>"]`
-  // tokens so theme-card previews stay true to the live theme.
-  colors: { bg: string; text: string; accent: string };
-}
+/** Maps theme ids to preview colors — kept in sync with App.css overrides. */
+const THEME_PREVIEW_COLORS: Record<string, { bg: string; text: string; accent: string }> = {
+  dark:      { bg: "#0a0c10", text: "#f0f2f7", accent: "#7c66ff" },
+  light:     { bg: "#f8fafc", text: "#0f172a", accent: "#7c3aed" },
+  nord:      { bg: "#2e3440", text: "#eceff4", accent: "#88c0d0" },
+  cyberpunk: { bg: "#050508", text: "#f0f2f5", accent: "#00f0ff" },
+  emerald:   { bg: "#08110c", text: "#ecf3ee", accent: "#10b981" },
+  dracula:   { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" },
+};
 
-const themes: ThemeOption[] = [
-  { id: "dark", name: "Default Dark", colors: { bg: "#0f1117", text: "#e8eaed", accent: "#6c5ce7" } },
-  { id: "light", name: "Light Mode", colors: { bg: "#f3f4f6", text: "#1f2937", accent: "#7c3aed" } },
-  { id: "nord", name: "Nord Ice", colors: { bg: "#2e3440", text: "#eceff4", accent: "#88c0d0" } },
-  { id: "cyberpunk", name: "Cyberpunk", colors: { bg: "#0c0817", text: "#f0f2f5", accent: "#ff007f" } },
-  { id: "emerald", name: "Emerald", colors: { bg: "#08110c", text: "#ecf3ee", accent: "#10b981" } },
-  { id: "dracula", name: "Dracula", colors: { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" } },
-];
+const DESCRIPTOR_LABELS: Record<ThemeDescriptor, string> = {
+  vibrant: "🎮 Vibrant",
+  calm: "🧘 Calm",
+  "high-contrast": "♿ High Contrast",
+  minimal: "✨ Minimal",
+};
 
 type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads";
 
@@ -36,6 +38,7 @@ export default function SettingsPage() {
   const { games, addGames } = useGames();
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
+  const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
 
@@ -56,13 +59,14 @@ export default function SettingsPage() {
   const [isEpicLoggingIn, setIsEpicLoggingIn] = useState(false);
   const [isEpicSyncing, setIsEpicSyncing] = useState(false);
 
-  // Theme state
-  const [currentTheme, setCurrentTheme] = useState("dark");
+  // Theme state — powered by ThemeContext
+  function handleThemeChange(themeId: string) {
+    setTheme(themeId);
+    const themeMeta = themes.find((t) => t.id === themeId)?.meta;
+    showToast(`Theme changed to ${themeMeta?.name ?? themeId}`, "success");
+  }
 
   useEffect(() => {
-    const theme = localStorage.getItem("gamelib-theme") || "dark";
-    setCurrentTheme(theme);
-
     (async () => {
       try {
         const session: SteamSession | null = await invoke("steam_get_session");
@@ -102,12 +106,7 @@ export default function SettingsPage() {
     } catch { /* keep defaults */ }
   }, []);
 
-  function handleThemeChange(themeId: string) {
-    setCurrentTheme(themeId);
-    localStorage.setItem("gamelib-theme", themeId);
-    document.documentElement.setAttribute("data-theme", themeId);
-    showToast(`Theme changed to ${themes.find((t) => t.id === themeId)?.name}`, "success");
-  }
+
 
   async function handleSteamLogin() {
     setIsSteamLoggingIn(true);
@@ -398,6 +397,8 @@ export default function SettingsPage() {
           <div className="theme-grid">
             {themes.map((theme) => {
               const isActive = currentTheme === theme.id;
+              const colors = THEME_PREVIEW_COLORS[theme.id] ?? THEME_PREVIEW_COLORS.dark;
+              const descriptorLabel = DESCRIPTOR_LABELS[theme.meta.descriptor] ?? null;
               return (
                 <div
                   key={theme.id}
@@ -420,16 +421,16 @@ export default function SettingsPage() {
                     className="theme-card-preview"
                     style={
                       {
-                        "--miniBg": theme.colors.bg,
-                        "--miniText": theme.colors.text,
-                        "--miniAccent": theme.colors.accent,
+                        "--miniBg": colors.bg,
+                        "--miniText": colors.text,
+                        "--miniAccent": colors.accent,
                       } as React.CSSProperties
                     }
                   >
                     <div className="theme-preview-bar">
-                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.bg }} />
-                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.text }} />
-                      <div className="theme-preview-color" style={{ backgroundColor: theme.colors.accent }} />
+                      <div className="theme-preview-color" style={{ backgroundColor: colors.bg }} />
+                      <div className="theme-preview-color" style={{ backgroundColor: colors.text }} />
+                      <div className="theme-preview-color" style={{ backgroundColor: colors.accent }} />
                     </div>
                     <div className="theme-preview-mini">
                       <div className="theme-preview-mini-sidebar" />
@@ -445,13 +446,28 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="theme-card-info">
-                    <span className="theme-card-name">{theme.name}</span>
+                    <div className="theme-card-text">
+                      <span className="theme-card-name">{theme.meta.name}</span>
+                      {descriptorLabel && (
+                        <span className="theme-card-descriptor">{descriptorLabel}</span>
+                      )}
+                    </div>
                     {isActive && <span className="theme-active-dot" aria-hidden />}
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* System theme sync */}
+          <label className="settings-checkbox-label" style={{ marginTop: "var(--space-lg)" }}>
+            <input
+              type="checkbox"
+              checked={systemSync}
+              onChange={(e) => setSystemSync(e.target.checked)}
+            />
+            <span>Sync with system theme (auto-switch dark/light based on OS preference)</span>
+          </label>
         </section>
       )}
 
@@ -468,38 +484,65 @@ export default function SettingsPage() {
               </p>
             </div>
           </header>
+
+          {/* GPU selection */}
           <div className="settings-row">
-            <div className="settings-control">
-              <label className="settings-label">GPU selection</label>
-              <p className="settings-helper-lead">
-                Select a GPU to monitor during gameplay. Stats only
-                appear when a game is running.
-              </p>
-              <div className="settings-input-group">
-                <select
-                  className="settings-select"
-                  value={selectedGpu?.id || ""}
-                  onChange={(e) => {
-                    const gpu = availableGpus.find((g) => g.id === e.target.value);
-                    setSelectedGpu(gpu || null);
-                    showToast(
-                      gpu ? `Selected ${gpu.name}` : "GPU selection cleared",
-                      "success"
-                    );
-                  }}
-                  aria-label="Select GPU to monitor"
-                >
-                  <option value="">— Select a GPU —</option>
-                  {availableGpus.map((gpu) => (
-                    <option key={gpu.id} value={gpu.id}>
-                      {gpu.name} ({gpu.vramMb} MB)
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="settings-btn" onClick={refreshGpus}>
-                  <RefreshIcon /> Refresh
-                </button>
+            <div className="settings-hardware-control-card">
+              <div className="settings-control">
+                <label className="settings-label">GPU selection</label>
+                <p className="settings-helper-lead">
+                  Select a GPU to monitor during gameplay. Stats only
+                  appear when a game is running.
+                </p>
+                <div className="settings-input-group">
+                  <select
+                    className="settings-select"
+                    value={selectedGpu?.id || ""}
+                    onChange={(e) => {
+                      const gpu = availableGpus.find((g) => g.id === e.target.value);
+                      setSelectedGpu(gpu || null);
+                      showToast(
+                        gpu ? `Selected ${gpu.name}` : "GPU selection cleared",
+                        "success"
+                      );
+                    }}
+                    aria-label="Select GPU to monitor"
+                  >
+                    <option value="">— Select a GPU —</option>
+                    {availableGpus.map((gpu) => (
+                      <option key={gpu.id} value={gpu.id}>
+                        {gpu.name} ({gpu.vramMb} MB)
+                      </option>
+                    ))}
+                  </select>
+                  <Button variant="secondary" size="sm" onClick={refreshGpus} leftIcon={<RefreshIcon />}>
+                    Refresh
+                  </Button>
+                </div>
               </div>
+
+              {/* GPU info card — shown when a GPU is selected */}
+              {selectedGpu && (
+                <div className="settings-gpu-info-card">
+                  <span className="settings-gpu-info-icon">
+                    <HardwareIcon />
+                  </span>
+                  <div className="settings-gpu-info-text">
+                    <span className="settings-gpu-info-name">{selectedGpu.name}</span>
+                    <div className="settings-gpu-info-specs">
+                      <span className="settings-gpu-info-spec">
+                        {selectedGpu.vramMb} MB VRAM
+                      </span>
+                      {selectedGpu.id && (
+                        <span className="settings-gpu-info-spec">
+                          ID: {selectedGpu.id}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="settings-gpu-info-badge">Active</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -507,34 +550,36 @@ export default function SettingsPage() {
            *  Lives under Hardware because it controls how physical
            *  resources are reported, not how the UI looks. */}
           <div className="settings-row settings-row--spaced">
-            <div className="settings-control">
-              <label className="settings-label">Storage size unit</label>
-              <p className="settings-helper-lead">
-                Choose how disk sizes are displayed in the Storage tab.
-                <strong> GB</strong> is decimal (1 GB = 1,000,000,000 bytes — matches
-                Steam and the OS file-explorer).
-                <strong> GiB</strong> is binary (1 GiB = 1,073,741,824 bytes — matches
-                <code> df -h</code> and Windows Task Manager).
-              </p>
-              <div className="settings-input-group">
-                <select
-                  className="settings-select"
-                  value={sizeUnit}
-                  onChange={(e) => {
-                    const next = e.target.value as SizeUnit;
-                    setSizeUnit(next);
-                    showToast(
-                      next === "gb"
-                        ? "Storage sizes now in GB (decimal)"
-                        : "Storage sizes now in GiB (binary)",
-                      "success"
-                    );
-                  }}
-                  aria-label="Select storage size unit"
-                >
-                  <option value="gb">GB — decimal (1,000,000,000 bytes)</option>
-                  <option value="gib">GiB — binary (1,073,741,824 bytes)</option>
-                </select>
+            <div className="settings-hardware-control-card">
+              <div className="settings-control">
+                <label className="settings-label">Storage size unit</label>
+                <p className="settings-helper-lead">
+                  Choose how disk sizes are displayed in the Storage tab.
+                  <strong> GB</strong> is decimal (1 GB = 1,000,000,000 bytes — matches
+                  Steam and the OS file-explorer).
+                  <strong> GiB</strong> is binary (1 GiB = 1,073,741,824 bytes — matches
+                  <code> df -h</code> and Windows Task Manager).
+                </p>
+                <div className="settings-input-group">
+                  <select
+                    className="settings-select"
+                    value={sizeUnit}
+                    onChange={(e) => {
+                      const next = e.target.value as SizeUnit;
+                      setSizeUnit(next);
+                      showToast(
+                        next === "gb"
+                          ? "Storage sizes now in GB (decimal)"
+                          : "Storage sizes now in GiB (binary)",
+                        "success"
+                      );
+                    }}
+                    aria-label="Select storage size unit"
+                  >
+                    <option value="gb">GB — decimal (1,000,000,000 bytes)</option>
+                    <option value="gib">GiB — binary (1,073,741,824 bytes)</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>

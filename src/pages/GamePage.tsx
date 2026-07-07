@@ -14,6 +14,7 @@ import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
+import { Button } from "../components/ui";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 
 
@@ -260,9 +261,9 @@ function GameNotFound() {
         This game could not be found. It may have been removed or the link is
         invalid.
       </p>
-      <button className="game-back-btn" onClick={() => navigate("/library")}>
+      <Button variant="ghost" size="sm" onClick={() => navigate("/library")}>
         Back to Library
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1002,41 +1003,44 @@ function GameDetail({ game }: { game: Game }) {
         </button>
 
         <div className="game-top-actions">
-          <button className="game-edit-btn" onClick={startEditing}>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
+          <Button variant="secondary" size="sm" onClick={startEditing}
+            leftIcon={
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            }
+          >
             Edit
-          </button>
+          </Button>
           {showDeleteConfirm ? (
             <>
               <span className="delete-confirm-text">Are you sure?</span>
-              <button
-                className="game-edit-btn game-edit-danger"
+              <Button
+                variant="danger" size="sm"
                 onClick={handleDelete}
               >
                 Delete
-              </button>
-              <button
-                className="game-edit-btn game-edit-cancel"
+              </Button>
+              <Button
+                variant="ghost" size="sm"
                 onClick={() => setShowDeleteConfirm(false)}
               >
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
-            <button
-              className="game-edit-btn game-delete-btn"
+            <Button
+              variant="danger" size="sm"
               onClick={() => setShowDeleteConfirm(true)}
-            >
+              leftIcon={
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -1048,8 +1052,10 @@ function GameDetail({ game }: { game: Game }) {
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
               </svg>
-              Remove
-            </button>
+            }
+          >
+            Remove
+          </Button>
           )}
         </div>
       </div>
@@ -1816,18 +1822,23 @@ function GameDetail({ game }: { game: Game }) {
                   Customize metadata and images for {game.name}
                 </p>
               </div>
-              <button
-                className="game-edit-btn metadata-fetch-btn"
+              <Button
+                variant="primary" size="sm"
                 onClick={handleFetchMetadata}
                 disabled={fetchingMetadata}
+                isLoading={fetchingMetadata}
                 style={{ marginRight: 'var(--space-sm)' }}
+                leftIcon={
+                  !fetchingMetadata ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  ) : undefined
+                }
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
                 {fetchingMetadata ? "Searching..." : "Fetch Metadata"}
-              </button>
+              </Button>
               <button className="metadata-panel-close" onClick={cancelEditing}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
@@ -1883,9 +1894,15 @@ function GameDetail({ game }: { game: Game }) {
                             {result.genres.length > 0 && (
                               <div className="metadata-result-genres">{result.genres.map((g) => <span key={g} className="metadata-genre-tag">{g}</span>)}</div>
                             )}
-                            <button className="metadata-apply-btn" disabled={applyingMetadata} onClick={() => handleApplyMetadata(result)}>
-                              {applyingMetadata ? 'Applying...' : (<><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>Apply Metadata</>)}
-                            </button>
+                            <Button variant="primary" size="sm" disabled={applyingMetadata} isLoading={applyingMetadata} onClick={() => handleApplyMetadata(result)}
+                              leftIcon={
+                                !applyingMetadata ? (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                ) : undefined
+                              }
+                            >
+                              Apply Metadata
+                            </Button>
                           </div>
                         ))}
                       </div>
@@ -2066,33 +2083,35 @@ function GameDetail({ game }: { game: Game }) {
                 <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
-                <button className="lb-browse-edit-btn" onClick={handleOpenImageBrowser} type="button">
+                <Button variant="secondary" size="sm" onClick={handleOpenImageBrowser} leftIcon={
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="2" y="2" width="20" height="20" rx="2" />
                     <path d="M7 2v20" />
                     <path d="M2 12h5" />
                   </svg>
+                }>
                   Browse LaunchBox Images
-                </button>
-                <button
-                  className="lb-browse-edit-btn"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setShowIgdbMediaBrowser(true)}
-                  type="button"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>
+                  leftIcon={
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>
                     <polygon points="23 7 16 12 23 17 23 7" />
                     <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                   </svg>
+                  }>
                   Browse IGDB Media
-                </button>
+                </Button>
               </div>
             </div>
 
             <div className="modal-footer">
               <span className="modal-footer-count"></span>
               <div className="modal-footer-actions">
-                <button className="modal-btn modal-btn-cancel" onClick={cancelEditing}>Cancel</button>
-                <button className="modal-btn modal-btn-confirm" onClick={saveEdits}>Save Changes</button>
+                <Button variant="secondary" onClick={cancelEditing}>Cancel</Button>
+                <Button variant="primary" onClick={saveEdits}>Save Changes</Button>
               </div>
             </div>
           </div>
@@ -2348,7 +2367,7 @@ function GameDetail({ game }: { game: Game }) {
             <div className="modal-footer">
               <span className="modal-footer-count"></span>
               <div className="modal-footer-actions">
-                <button className="modal-btn modal-btn-confirm" onClick={() => setShowIgdbMediaBrowser(false)}>Done</button>
+                <Button variant="primary" onClick={() => setShowIgdbMediaBrowser(false)}>Done</Button>
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback } from "react";
 import StoreGameCard from "./StoreGameCard";
+import { Button } from "../ui";
 import type { StoreGameSummary } from "../../types/game";
 
 interface StoreGameGridProps {
@@ -75,9 +76,9 @@ export default function StoreGameGrid({
         </svg>
         <h3>Failed to load games</h3>
         <p>{error}</p>
-        <button className="store-retry-btn" onClick={onLoadMore}>
+        <Button variant="secondary" size="sm" onClick={onLoadMore}>
           Try Again
-        </button>
+        </Button>
       </div>
     );
   }

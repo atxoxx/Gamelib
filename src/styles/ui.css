@@ -1,0 +1,408 @@
+/* ============================================================================
+   UI Primitives — Button · Card · Badge · Tooltip · Skeleton
+   ────────────────────────────────
+   Reusable base components that build on the Phase 1 design tokens.
+   Namespaced with `ui-*` to avoid collisions with existing page-level
+   class names (`.btn`, `.library-card`, etc.).
+   ============================================================================ */
+
+/* ── Button ──────────────────────────────────────────────────────────── */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  white-space: nowrap;
+  user-select: none;
+  outline: none;
+  line-height: 1.2;
+}
+
+.ui-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.ui-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ui-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Sizes */
+.ui-btn--sm {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-xs);
+  gap: var(--space-xs);
+}
+
+.ui-btn--lg {
+  padding: var(--space-md) var(--space-2xl);
+  font-size: var(--font-size-md);
+  gap: var(--space-md);
+}
+
+/* Variants */
+.ui-btn--primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px var(--color-accent-glow);
+}
+
+.ui-btn--primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ui-btn--secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.ui-btn--secondary:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+  transform: translateY(-1px);
+}
+
+.ui-btn--ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-color: transparent;
+}
+
+.ui-btn--ghost:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.ui-btn--danger {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 85%, black 15%);
+  transform: translateY(-1px);
+}
+
+/* Icon slots */
+.ui-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ui-btn__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-btn--sm .ui-btn__icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ui-btn--lg .ui-btn__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Spinner */
+.ui-btn__spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ui-spinner-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ui-spinner-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Card ────────────────────────────────────────────────────────────── */
+
+.ui-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-card--surface {
+  background: var(--color-surface);
+}
+
+.ui-card--glass {
+  background: var(--color-surface-glass);
+  border-color: var(--color-border-light);
+}
+
+.ui-card--raised {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border);
+}
+
+.ui-card__header {
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.ui-card__body {
+  padding: var(--space-xl);
+}
+
+/* ── Badge ───────────────────────────────────────────────────────────── */
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  line-height: 1.4;
+}
+
+.ui-badge--md {
+  padding: 4px 10px;
+  font-size: var(--font-size-xs);
+}
+
+.ui-badge--default {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.ui-badge--success {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.ui-badge--warning {
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.ui-badge--danger {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.ui-badge--info {
+  background: color-mix(in srgb, var(--color-info) 12%, transparent);
+  color: var(--color-info);
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+}
+
+.ui-badge--accent {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* Dot indicator */
+.ui-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ── Tooltip ─────────────────────────────────────────────────────────── */
+
+.ui-tooltip__trigger {
+  display: inline-flex;
+}
+
+.ui-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  animation: ui-tooltip-in var(--duration-fast) var(--ease-enter) both;
+}
+
+.ui-tooltip--bottom {
+  transform: translate(-50%, 0);
+}
+
+.ui-tooltip--left {
+  transform: translate(-100%, -50%);
+}
+
+.ui-tooltip--right {
+  transform: translate(0, -50%);
+}
+
+@keyframes ui-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 4px)) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+  }
+}
+
+.ui-tooltip--bottom {
+  animation-name: ui-tooltip-in-bottom;
+}
+
+@keyframes ui-tooltip-in-bottom {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.ui-tooltip__arrow {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 8px;
+  background: var(--color-surface-raised);
+  border-right: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--color-border-light);
+  rotate: 45deg;
+}
+
+.ui-tooltip--bottom .ui-tooltip__arrow {
+  bottom: auto;
+  top: -4px;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--color-border-light);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.ui-tooltip__content {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Skeleton ────────────────────────────────────────────────────────── */
+
+.ui-skeleton {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.ui-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-accent) 10%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 50% 100%;
+  animation: ui-skeleton-shimmer 2s linear infinite;
+}
+
+@keyframes ui-skeleton-shimmer {
+  0%   { background-position: -120% 0; }
+  100% { background-position: 220% 0; }
+}
+
+.ui-skeleton--text {
+  height: 1em;
+  border-radius: var(--radius-xs);
+  margin-bottom: var(--space-xs);
+}
+
+.ui-skeleton--circle {
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ui-skeleton--rect {
+  border-radius: var(--radius-md);
+}
+
+.ui-skeleton--inline {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Skeleton text paragraph */
+.ui-skeleton-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton::after {
+    animation: none;
+  }
+  .ui-tooltip {
+    animation: none !important;
+    opacity: 1;
+  }
+  .ui-btn__spinner {
+    animation: none;
+  }
+}

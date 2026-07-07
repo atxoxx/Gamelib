@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useActiveDownloadCount } from "../context/DownloadContext";
 
 function LibraryIcon() {
@@ -185,8 +185,10 @@ const tabs: Tab[] = [
 
 export default function TopNav() {
   const activeDownloads = useActiveDownloadCount();
+  const location = useLocation();
+
   return (
-    <nav className="topnav">
+    <nav className="topnav" aria-label="Main navigation">
       <div className="topnav-left">
         <div className="topnav-logo">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -194,19 +196,23 @@ export default function TopNav() {
           </svg>
           Gamelib
         </div>
-        <div className="topnav-tabs">
-          {tabs.map((tab) => (
-            <NavLink
-              key={tab.path}
-              to={tab.path}
-              className={({ isActive }) =>
-                `topnav-tab${isActive ? " active" : ""}`
-              }
-            >
-              {tab.icon}
-              {tab.label}
-            </NavLink>
-          ))}
+        <div className="topnav-tabs" role="tablist">
+          {tabs.map((tab) => {
+            const isActive = location.pathname.startsWith(tab.path);
+            return (
+              <NavLink
+                key={tab.path}
+                to={tab.path}
+                className={`topnav-tab hover-lift${isActive ? " active" : ""}`}
+                aria-current={isActive ? "page" : undefined}
+                role="tab"
+                aria-selected={isActive ? "true" : "false"}
+              >
+                {tab.icon}
+                {tab.label}
+              </NavLink>
+            );
+          })}
         </div>
       </div>
 

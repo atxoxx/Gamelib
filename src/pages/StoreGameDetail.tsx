@@ -6,6 +6,7 @@ import { useToast } from "../context/ToastContext";
 import type { GameMetadataResult, IgdbReview, SimilarGame } from "../types/game";
 import { slugify } from "../types/game";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
+import { Button } from "../components/ui";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
@@ -158,8 +159,8 @@ function StoreGameError({ message, onRetry }: { message: string; onRetry: () => 
       <h2 className="main-empty-title">Failed to load game</h2>
       <p className="main-empty-subtitle">{message}</p>
       <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
-        <button className="store-retry-btn" onClick={onRetry}>Try Again</button>
-        <button className="game-back-btn" onClick={() => navigate("/store")}>Back to Store</button>
+        <Button variant="ghost" size="sm" onClick={onRetry}>Try Again</Button>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/store")}>Back to Store</Button>
       </div>
     </div>
   );
@@ -174,7 +175,7 @@ function StoreGameNotFound() {
       </svg>
       <h2 className="main-empty-title">Game Not Found</h2>
       <p className="main-empty-subtitle">This game could not be found on IGDB.</p>
-      <button className="game-back-btn" onClick={() => navigate("/store")}>Back to Store</button>
+      <Button variant="ghost" size="sm" onClick={() => navigate("/store")}>Back to Store</Button>
     </div>
   );
 }

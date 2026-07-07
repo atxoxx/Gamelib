@@ -1,0 +1,115 @@
+/* ============================================================================
+   Centralized Animation System
+   ────────────────────────────────
+   Entrance/exit animations, staggered list utilities, and reduced-motion
+   overrides. Import once in main.tsx so all components can reference these
+   utility classes without redefining keyframes.
+   ============================================================================ */
+
+/* ── Entrance Animations ─────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideLeft {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Exit Animations ────────────────────────────────────────────────── */
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes slideOutDown {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(16px); }
+}
+
+/* ── Attention Animations ───────────────────────────────────────────── */
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+/* ── Utility Classes ────────────────────────────────────────────────── */
+
+.animate-fade-in     { animation: fadeIn   var(--duration-normal) var(--ease-enter) both; }
+.animate-slide-up    { animation: slideUp  var(--duration-normal) var(--ease-enter) both; }
+.animate-slide-down  { animation: slideDown var(--duration-normal) var(--ease-enter) both; }
+.animate-slide-left  { animation: slideLeft var(--duration-normal) var(--ease-enter) both; }
+.animate-slide-right { animation: slideRight var(--duration-normal) var(--ease-enter) both; }
+.animate-scale-in    { animation: scaleIn  var(--duration-normal) var(--ease-enter) both; }
+.animate-scale-up    { animation: scaleUp  var(--duration-normal) var(--ease-bounce) both; }
+
+.animate-fade-out     { animation: fadeOut      var(--duration-normal) var(--ease-exit) both; }
+.animate-slide-out-down { animation: slideOutDown var(--duration-normal) var(--ease-exit) both; }
+
+/* ── Staggered Animation Delays (for lists / grids) ─────────────────── */
+
+.stagger-1  { animation-delay: calc(var(--duration-fast) * 1); }
+.stagger-2  { animation-delay: calc(var(--duration-fast) * 2); }
+.stagger-3  { animation-delay: calc(var(--duration-fast) * 3); }
+.stagger-4  { animation-delay: calc(var(--duration-fast) * 4); }
+.stagger-5  { animation-delay: calc(var(--duration-fast) * 5); }
+.stagger-6  { animation-delay: calc(var(--duration-fast) * 6); }
+.stagger-7  { animation-delay: calc(var(--duration-fast) * 7); }
+.stagger-8  { animation-delay: calc(var(--duration-fast) * 8); }
+
+/* ── Reduced Motion Overrides ───────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-slide-down,
+  .animate-slide-left,
+  .animate-slide-right,
+  .animate-scale-in,
+  .animate-scale-up,
+  .animate-fade-out,
+  .animate-slide-out-down {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .stagger-1, .stagger-2, .stagger-3, .stagger-4,
+  .stagger-5, .stagger-6, .stagger-7, .stagger-8 {
+    animation-delay: 0s !important;
+  }
+}

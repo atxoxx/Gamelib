@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import "./styles/animations.css";
+import "./styles/ui.css";
 import "./styles/store-discover.css";
 import "./styles/wishlist.css";
 import "./styles/download.css";

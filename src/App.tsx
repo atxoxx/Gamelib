@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
@@ -22,6 +21,7 @@ import { DensityProvider } from "./context/DensityContext";
 import { SplashProvider } from "./context/SplashContext";
 import { DownloadProvider } from "./context/DownloadContext";
 import { SourceProvider } from "./context/SourceContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import Splashscreen from "./components/Splashscreen";
 import DownloadProgress from "./components/DownloadProgress";
 import "./App.css";
@@ -43,18 +43,10 @@ function AppLayout() {
   );
 }
 
-function ThemeBootstrap() {
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("gamelib-theme") || "dark";
-    document.documentElement.setAttribute("data-theme", savedTheme);
-  }, []);
-  return null;
-}
-
 function App() {
   return (
     <HashRouter>
-      <ThemeBootstrap />
+      <ThemeProvider>
       <ToastProvider>
         <SplashProvider>
           <GameProvider>
@@ -97,6 +89,7 @@ function App() {
           <Splashscreen />
         </SplashProvider>
       </ToastProvider>
+      </ThemeProvider>
     </HashRouter>
   );
 }

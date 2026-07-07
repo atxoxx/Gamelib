@@ -26,6 +26,7 @@ import { useDownloads } from "../context/DownloadContext";
 import { useSources } from "../context/SourceContext";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
+import { Button } from "./ui";
 import type { MatchedDownload } from "../types/source";
 import type { OwnershipResult } from "../types/download";
 
@@ -266,37 +267,34 @@ export default function DownloadModal({
               : "\u00A0" /* non-breaking space so the row doesn't collapse */}
           </span>
           <div className="modal-footer-actions">
-            <button
-              className="modal-btn modal-btn-cancel"
+            <Button
+              variant="ghost"
               onClick={onClose}
               disabled={step === "starting"}
             >
               Cancel
-            </button>
-            <button
-              className="modal-btn modal-btn-confirm"
+            </Button>
+            <Button
+              variant="primary"
               onClick={handleStart}
               disabled={
                 step === "starting" ||
                 step === "checking" ||
                 selectedIndex == null
               }
-            >
-              {step === "starting" ? (
-                <>
-                  <span className="spinner-small" /> Starting…
-                </>
-              ) : (
-                <>
+              isLoading={step === "starting"}
+              leftIcon={
+                step !== "starting" ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <polyline points="8 17 12 21 16 17" />
                     <line x1="12" y1="12" x2="12" y2="21" />
                     <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
                   </svg>
-                  Start Download
-                </>
-              )}
-            </button>
+                ) : undefined
+              }
+            >
+              Start Download
+            </Button>
           </div>
         </div>
       </div>
@@ -403,9 +401,9 @@ function SavePathSection({
       <span className={`dl-save-path-text${savePath ? "" : " placeholder"}`} title={savePath ?? ""}>
         {savePath ?? "No folder selected — pick where the download will be saved"}
       </span>
-      <button type="button" className="settings-btn" onClick={onPickPath}>
+      <Button variant="secondary" size="sm" onClick={onPickPath}>
         {savePath ? "Change" : "Choose…"}
-      </button>
+      </Button>
     </div>
   );
 }

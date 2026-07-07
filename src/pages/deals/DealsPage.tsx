@@ -9,6 +9,7 @@ import type {
   GamePassGame,
   Giveaway,
 } from "../../types/deals";
+import { Button } from "../../components/ui";
 import "./DealsPage.css";
 
 /**
@@ -466,26 +467,28 @@ export default function DealsPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              className={`deals-refresh-btn ${gpLoading ? "spinning" : ""}`}
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={gpLoading}
               onClick={() => setGpReloadNonce((n) => n + 1)}
-              disabled={gpLoading}
               title="Refresh GamePass catalog"
+              leftIcon={
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
               Refresh
-            </button>
+            </Button>
           </div>
 
           {gpLoading && (
@@ -684,26 +687,28 @@ export default function DealsPage() {
               </select>
             </div>
 
-            <button
-              type="button"
-              className={`deals-refresh-btn ${dealsLoading ? "spinning" : ""}`}
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={dealsLoading}
               onClick={() => setDealsReloadNonce((n) => n + 1)}
-              disabled={dealsLoading}
               title="Refresh deals"
+              leftIcon={
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
               Refresh
-            </button>
+            </Button>
           </div>
 
           {dealsLoading && (
@@ -904,26 +909,28 @@ export default function DealsPage() {
                 Click any card to open the claim page in your browser.
               </span>
             </div>
-            <button
-              type="button"
-              className={`deals-refresh-btn ${giveawaysLoading ? "spinning" : ""}`}
+            <Button
+              variant="secondary"
+              size="sm"
+              isLoading={giveawaysLoading}
               onClick={() => setGiveawaysReloadNonce((n) => n + 1)}
-              disabled={giveawaysLoading}
               title="Refresh giveaways"
+              leftIcon={
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
               Refresh
-            </button>
+            </Button>
           </div>
 
           {giveawaysLoading && (

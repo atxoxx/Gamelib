@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { gameNameFromPath } from "../types/game";
+import { Button } from "./ui";
 import type { GameMetadataResult, StoreGameSummary } from "../types/game";
 
 export interface ExeInfo {
@@ -633,26 +634,28 @@ export default function ImportModal({
             {selectedPaths.size} file{selectedPaths.size !== 1 ? "s" : ""} selected for import
           </span>
           <div className="modal-footer-actions">
-            <button className="modal-btn modal-btn-cancel" onClick={onCancel}>
+            <Button variant="ghost" onClick={onCancel}>
               Cancel
-            </button>
-            <button
-              className="modal-btn modal-btn-confirm"
+            </Button>
+            <Button
+              variant="primary"
               disabled={selectedPaths.size === 0}
               onClick={handleConfirm}
+              leftIcon={
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
               Import Selected
-            </button>
+            </Button>
           </div>
         </div>
       </div>

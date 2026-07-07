@@ -7,6 +7,7 @@ import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import LibraryFilterChips from "../components/library/LibraryFilterChips";
 import LibraryFilterSidebar from "../components/library/LibraryFilterSidebar";
 import DensityToggle from "../components/DensityToggle";
+import { Card, Badge } from "../components/ui";
 import type { Game } from "../types/game";
 
 export default function LibraryPage() {
@@ -185,9 +186,14 @@ export default function LibraryPage() {
             <div className={`library-cards density-${density}`}>
               {filteredGames.map((game) => {
                 const isRunning = runningGameIds.includes(game.id);
+                const installed = game.installed;
+                const platform = game.platform.toLowerCase();
                 return (
-                  <div
+                  <Card
                     key={game.id}
+                    variant="surface"
+                    elevation="1"
+                    hoverLift
                     className={`library-card density-${density}${isRunning ? " running" : ""}`}
                     onClick={() => handleCardClick(game)}
                     onContextMenu={(e) => handleGameContextMenu(e, game)}
@@ -203,39 +209,32 @@ export default function LibraryPage() {
                         </div>
                       )}
                       {isRunning && (
-                        <div className="library-card-running-badge">
-                          <span className="running-badge-dot" />
-                          Running
-                        </div>
+                        <Badge variant="success" size="sm" dot className="library-card-running-badge">Running</Badge>
                       )}
-                      <div className="library-card-playtime-badge">{game.playTime}</div>
-                      <div className={`library-card-status-badge ${game.installed ? "installed" : "not-installed"}`}>
-                        <span className={`library-card-status-dot ${game.installed ? "installed" : "not-installed"}`} />
-                        {game.installed ? "Ready" : "Not Installed"}
-                      </div>
+                      <Badge variant="accent" size="sm" className="library-card-playtime-badge">{game.playTime}</Badge>
+                      <Badge
+                        variant={installed ? "success" : "default"}
+                        size="sm"
+                        dot
+                        className={`library-card-status-badge ${installed ? "installed" : "not-installed"}`}
+                      >
+                        {installed ? "Ready" : "Not Installed"}
+                      </Badge>
                     </div>
                     <div className="library-card-body">
                       <h3 className="library-card-name" title={game.name}>{game.name}</h3>
                       <div className="library-card-meta-row">
-                        <span className={`library-card-platform platform-${game.platform.toLowerCase()}`}>
+                        <Badge variant="info" size="sm" className={`library-card-platform platform-${platform}`}>
                           {game.platform}
-                        </span>
+                        </Badge>
                         {(() => {
-                          // Show the highest available rating so the badge
-                          // matches the filter (`igdbRating ?? criticRating`).
-                          // A user filtering by rating expects to see a
-                          // badge on every card that matches.
                           const rating = game.igdbRating ?? game.criticRating;
                           if (rating == null || rating <= 0) return null;
-                          const isCritic = game.igdbRating == null;
                           return (
-                            <span
-                              className="library-card-rating"
-                              title={`${isCritic ? "Critic" : "IGDB"} Rating: ${Math.round(rating)}%`}
-                            >
-                              <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                            <Badge variant="accent" size="sm" className="library-card-rating" title={`${game.igdbRating != null ? "IGDB" : "Critic"} Rating: ${Math.round(rating)}%`}>
+                              <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" style={{ marginRight: 3 }}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
                               {Math.round(rating)}%
-                            </span>
+                            </Badge>
                           );
                         })()}
                       </div>
@@ -245,7 +244,7 @@ export default function LibraryPage() {
                       {game.genres && game.genres.length > 0 && (
                         <div className="library-card-genres">
                           {game.genres.slice(0, 3).map((g) => (
-                            <span key={g} className="library-card-genre-tag">{g}</span>
+                            <Badge key={g} variant="default" size="sm" className="library-card-genre-tag">{g}</Badge>
                           ))}
                         </div>
                       )}
@@ -259,7 +258,7 @@ export default function LibraryPage() {
                         )
                       )}
                     </div>
-                  </div>
+                  </Card>
                 );
               })}
             </div>

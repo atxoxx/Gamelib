@@ -14,6 +14,7 @@
 import { useState, useCallback } from "react";
 import { useSources } from "../context/SourceContext";
 import { useToast } from "../context/ToastContext";
+import { Button } from "./ui";
 import type { SourceLink } from "../types/source";
 
 /** Format a unix-seconds timestamp as a short relative string. */
@@ -152,51 +153,49 @@ export default function SourceManager() {
         </div>
         <div className="src-manager-bulk">
           {hasSources && (
-            <button
-              type="button"
-              className="settings-btn"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleRefreshAll}
               disabled={refreshingAll || enabledCount === 0}
               title="Re-fetch every enabled source"
+              leftIcon={
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              }
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className={refreshingAll ? "src-action-btn spinning" : ""}
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
               {refreshingAll ? "Refreshing…" : "Refresh All"}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="settings-btn settings-btn-primary"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowAddForm((s) => !s)}
-          >
-            {showAddForm ? (
-              <>
+            leftIcon={
+              showAddForm ? (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
-                Cancel
-              </>
-            ) : (
-              <>
+              ) : (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                Add Source
-              </>
-            )}
-          </button>
+              )
+            }
+          >
+            {showAddForm ? "Cancel" : "Add Source"}
+          </Button>
         </div>
       </div>
 
@@ -243,9 +242,9 @@ export default function SourceManager() {
             </span>
           </p>
           <div className="src-form-actions">
-            <button
-              type="button"
-              className="settings-btn"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setShowAddForm(false);
                 setNewUrl("");
@@ -254,21 +253,16 @@ export default function SourceManager() {
               disabled={adding}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               type="submit"
-              className="settings-btn settings-btn-primary"
               disabled={!newUrl.trim() || adding}
+              isLoading={adding}
             >
-              {adding ? (
-                <>
-                  <span className="src-action-btn spinning" aria-hidden />
-                  Adding Source…
-                </>
-              ) : (
-                <>Add Source</>
-              )}
-            </button>
+              Add Source
+            </Button>
           </div>
         </form>
       )}

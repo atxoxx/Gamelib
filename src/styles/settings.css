@@ -535,10 +535,24 @@
   background: var(--color-bg-secondary);
 }
 
+.theme-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .theme-card-name {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  letter-spacing: 0.2px;
+}
+
+.theme-card-descriptor {
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
   letter-spacing: 0.2px;
 }
 
@@ -639,39 +653,6 @@
   border-color: var(--color-border-light);
 }
 
-.settings-btn {
-  padding: 10px var(--space-xl);
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  font-family: inherit;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.settings-btn:hover {
-  background: var(--color-bg-active);
-  border-color: var(--color-border-light);
-}
-
-.settings-btn-primary {
-  background: var(--color-accent);
-  color: #fff;
-  border-color: var(--color-accent);
-}
-
-.settings-btn-primary:hover {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-}
-
 .settings-checkbox-label {
   display: flex;
   align-items: center;
@@ -736,6 +717,150 @@
   color: var(--color-text-muted);
   margin-top: var(--space-sm);
   line-height: 1.5;
+}
+
+/* Helper lead — descriptive text below settings-label and before the
+ * input group. Used in the Hardware tab to explain GPU selection and
+ * storage size unit options. */
+.settings-helper-lead {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.settings-helper-lead strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.settings-helper-lead code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  font-size: inherit;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: var(--color-text-secondary);
+}
+
+/* ── 7.1 Hardware tab — settings card row ────────────────────────── */
+
+/* A card-like container wrapping each hardware setting row, giving
+ * them the same visual weight as theme cards in the Appearance tab. */
+.settings-hardware-control-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  transition: border-color var(--transition-fast);
+}
+
+.settings-hardware-control-card:hover {
+  border-color: var(--color-border-light);
+}
+
+/* GPU info card — shows the currently selected GPU with key specs.
+ * Only rendered when a GPU is selected so it doubles as positive
+ * feedback that the selection took effect. */
+.settings-gpu-info-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-tertiary)),
+    var(--color-bg-tertiary)
+  );
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, var(--color-border));
+  border-radius: var(--radius-md);
+  animation: importMenuIn 200ms ease;
+}
+
+.settings-gpu-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  flex-shrink: 0;
+  box-shadow: 0 0 12px var(--color-accent-glow);
+}
+
+.settings-gpu-info-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.settings-gpu-info-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-gpu-info-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-gpu-info-specs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.settings-gpu-info-spec {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 1px 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-gpu-info-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+
+.settings-gpu-info-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--color-success);
+  flex-shrink: 0;
 }
 
 /* ── 7. Integration tiles (Steam / Epic) ─────────────────────────── */
