@@ -9,7 +9,7 @@
 //! be fetched, parsed, or doesn't contain game data — the frontend
 //! renders nothing in that case.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -35,11 +35,23 @@ pub struct CrackWatchStatus {
     pub page_url: Option<String>,
 }
 
-/// Convert a game name into a URL-friendly slug.
+/// Convert a game name into a URL-friendly slug matching gamestatus.info's patterns.
+///
+/// Handles common special cases:
+/// - Apostrophes are removed (not replaced with hyphens)
+/// - Trademark/copyright symbols are transliterated: ™ → tm, ® → r, © → c
+/// - All other non-alphanumeric characters become hyphens
+/// - Consecutive hyphens are collapsed
 fn slugify(name: &str) -> String {
-    name.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+    let normalized = name.to_lowercase()
+        .replace('\'', "")
+        .replace('\u{2019}', "") // right single quotation mark (smart quote)
+        .replace('™', "tm")
+        .replace('®', "r")
+        .replace('©', "c");
+
+    normalized.chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -63,28 +75,43 @@ fn empty_status() -> CrackWatchStatus {
 
 /// Resolve a Nuxt payload value (public entry point).
 fn resolve_nuxt_ref(val: &Value, arr: &[Value]) -> Value {
-    resolve_nuxt_ref_inner(val, arr, &mut HashSet::new())
+    resolve_nuxt_ref_inner(val, arr, &mut HashMap::new())
 }
 
-/// Resolve a Nuxt payload value with cycle detection.
+/// Resolve a Nuxt payload value with a resolution cache.
 ///
 /// Nuxt's `__NUXT_DATA__` uses a deduplication scheme where numeric
 /// values in objects/arrays are indices into the top-level array.
 /// This function recursively resolves those references into their
-/// actual values, tracking visited indices to prevent infinite loops
-/// from circular references.
+/// actual values.
+///
+/// Uses a `HashMap<usize, Value>` cache so that:
+/// - Shared references (multiple fields pointing to the same index)
+///   are resolved once and cached, allowing all fields to receive
+///   the resolved value.
+/// - Circular references are detected when an index appears in the
+///   cache before its value has been fully resolved (a placeholder
+///   `Value::Null` is inserted before recursing).
 ///
 /// Nuxt also wraps data in marker arrays:
 /// - `["ShallowReactive", idx]` / `["Reactive", idx]` — follow idx
 /// - `["Set"]` — empty set, return empty array
 /// - `["EmptyRef", "_"]` — null ref, return null
-fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], visited: &mut HashSet<usize>) -> Value {
+fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], cache: &mut HashMap<usize, Value>) -> Value {
     match val {
         Value::Number(n) => {
             if let Some(idx) = n.as_u64() {
                 let i = idx as usize;
-                if i < arr.len() && visited.insert(i) {
-                    return resolve_nuxt_ref_inner(&arr[i], arr, visited);
+                if i < arr.len() {
+                    // Already cached - return clone
+                    if let Some(cached) = cache.get(&i) {
+                        return cached.clone();
+                    }
+                    // Insert placeholder before recursing to detect cycles
+                    cache.insert(i, Value::Null);
+                    let resolved = resolve_nuxt_ref_inner(&arr[i], arr, cache);
+                    cache.insert(i, resolved.clone());
+                    return resolved;
                 }
             }
             val.clone()
@@ -92,7 +119,7 @@ fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], visited: &mut HashSet<usiz
         Value::Object(map) => {
             let mut resolved = serde_json::Map::new();
             for (k, v) in map {
-                resolved.insert(k.clone(), resolve_nuxt_ref_inner(v, arr, visited));
+                resolved.insert(k.clone(), resolve_nuxt_ref_inner(v, arr, cache));
             }
             Value::Object(resolved)
         }
@@ -102,7 +129,7 @@ fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], visited: &mut HashSet<usiz
                 match first {
                     "ShallowReactive" | "Reactive" => {
                         if let Some(second) = items.get(1) {
-                            return resolve_nuxt_ref_inner(second, arr, visited);
+                            return resolve_nuxt_ref_inner(second, arr, cache);
                         }
                     }
                     "Set" => {
@@ -114,7 +141,7 @@ fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], visited: &mut HashSet<usiz
                     _ => {}
                 }
             }
-            Value::Array(items.iter().map(|v| resolve_nuxt_ref_inner(v, arr, visited)).collect())
+            Value::Array(items.iter().map(|v| resolve_nuxt_ref_inner(v, arr, cache)).collect())
         }
         _ => val.clone(),
     }
@@ -216,7 +243,11 @@ pub async fn fetch_crackwatch_status(game_name: String) -> CrackWatchStatus {
     let crack_date = get_str(game, "crack_date");
     let protections = get_str(game, "protections");
     let readable_status = get_str(game, "readable_status");
-    let scene_group = get_str(game, "hacked_groups_en");
+    // Parse scene group: split on " — " to extract just the group name
+    // from long descriptions like "Bypass by DenuvOwO Hypervisor — is bypass..."
+    let scene_group = get_str(game, "hacked_groups_en").map(|s| {
+        s.split(" — ").next().unwrap_or(&s).trim().to_string()
+    });
 
     // Translate Russian readable_status to English
     let status_label = translate_status(readable_status);
@@ -280,46 +311,48 @@ fn extract_nuxt_data(html: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Test slug generation for known gamestatus.info game slugs.
+    #[test]
+    fn test_slugify_accuracy() {
+        let cases = vec![
+            ("Cyberpunk 2077", "cyberpunk-2077"),
+            ("Assassin's Creed Black Flag Resynced", "assassins-creed-black-flag-resynced"),
+            ("EA SPORTS™ College Football 27", "ea-sportstm-college-football-27"),
+            ("Monopoly: Star Wars™ Heroes vs. Villains", "monopoly-star-warstm-heroes-vs-villains"),
+            ("007 First Light", "007-first-light"),
+            ("Forza Horizon 6", "forza-horizon-6"),
+        ];
+        for (input, expected) in cases {
+            let got = slugify(input);
+            assert_eq!(got, expected, "slugify(\"{}\") = \"{}\", expected \"{}\"", input, got, expected);
+        }
+    }
+
     #[tokio::test]
     async fn test_cyberpunk_2077_crackwatch() {
-        let slug = slugify("Cyberpunk 2077");
-        let page_url = format!("https://gamestatus.info/{}/en", slug);
-        println!("\n=== Gamestatus.info diagnostics for Cyberpunk 2077 ===");
-        println!("Slug:       {}", slug);
-        println!("URL:        {}", page_url);
-
-        // Raw HTTP check
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .unwrap();
-
-        match client.get(&page_url).send().await {
-            Ok(resp) => {
-                println!("HTTP:       {}", resp.status());
-                if resp.status().is_success() {
-                    let html = resp.text().await.unwrap_or_default();
-                    let has_data = html.contains("__NUXT_DATA__");
-                    println!("HTML len:   {} chars", html.len());
-                    println!("Has NUXT:   {}", has_data);
-                }
-            }
-            Err(e) => println!("HTTP error: {}", e),
-        }
-
-        // Full scraper result
         let result = fetch_crackwatch_status("Cyberpunk 2077".into()).await;
-        println!("--- Scraper result ---");
-        println!("Page URL:   {:?}", result.page_url);
-        println!("Status:     {:?}", result.status);
-        println!("Label:      {:?}", result.status_label);
-        println!("Release:    {:?}", result.release_date);
-        println!("Crack Date: {:?}", result.crack_date);
-        println!("DRM:        {:?}", result.drm_protection);
-        println!("Scene:      {:?}", result.scene_group);
-        println!("============================================\n");
-
+        println!("Cyberpunk 2077 => Page URL: {:?}, Status: {:?}, Label: {:?}, DRM: {:?}, Scene: {:?}",
+            result.page_url, result.status, result.status_label, result.drm_protection, result.scene_group);
         assert!(result.status.is_some(), "Expected a crack status for Cyberpunk 2077");
+    }
+
+    /// Test a Denuvo-protected game to verify scene group extraction.
+    #[tokio::test]
+    async fn test_denuvo_game() {
+        let result = fetch_crackwatch_status("Assassin's Creed Black Flag Resynced".into()).await;
+        println!("Assassin's Creed => URL: {:?}, Status: {:?}, DRM: {:?}, Scene: {:?}, Crack: {:?}",
+            result.page_url, result.status, result.drm_protection, result.scene_group, result.crack_date);
+        assert!(result.status.is_some(), "Expected crack status for Assassin's Creed");
+        assert!(result.scene_group.is_some(), "Expected scene group for a Denuvo game");
+    }
+
+    /// Test a non-Denuvo game that still has a scene group (RUNE).
+    #[tokio::test]
+    async fn test_nondenuvo_scene_group() {
+        let result = fetch_crackwatch_status("EA SPORTS™ College Football 27".into()).await;
+        println!("EA Sports College Football => URL: {:?}, Status: {:?}, DRM: {:?}, Scene: {:?}",
+            result.page_url, result.status, result.drm_protection, result.scene_group);
+        assert!(result.status.is_some(), "Expected crack status for EA Sports");
+        assert!(result.scene_group.is_some(), "Expected scene group 'RUNE' for EA Sports");
     }
 }

@@ -7647,6 +7647,10 @@
   color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .cw-meta-val-tbd {
