@@ -1,5 +1,8 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Webview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import type { NewsArticle } from "../../hooks/useNewsFeeds";
 import { formatArticleDate } from "../../hooks/useNewsFeeds";
 
@@ -9,7 +12,11 @@ interface NewsArticlePreviewProps {
 }
 
 export default function NewsArticlePreview({ article, onClose }: NewsArticlePreviewProps) {
-  // Close on Escape key
+  const placeholderRef = useRef<HTMLDivElement>(null);
+  const [webviewReady, setWebviewReady] = useState(false);
+  const [webviewError, setWebviewError] = useState(false);
+  const webviewInstRef = useRef<Webview | null>(null);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -17,22 +24,129 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
     [onClose]
   );
 
+  // ── Webview lifecycle ──────────────────────────────────────────────
+
   useEffect(() => {
     if (!article) return;
+
+    let active = true;
+    setWebviewReady(false);
+    setWebviewError(false);
+
     document.addEventListener("keydown", handleKeyDown);
-    // Prevent body scroll while modal is open
     document.body.style.overflow = "hidden";
+
+    // Wait for the modal layout to paint, then create the webview
+    const raf = requestAnimationFrame(async () => {
+      if (!active || !placeholderRef.current) return;
+
+      // Close any existing preview webviews first
+      try {
+        const allWebviews = await Webview.getAll();
+        for (const wv of allWebviews) {
+          if (wv.label.startsWith("news-preview-")) {
+            await wv.close();
+          }
+        }
+      } catch { /* ignore */ }
+
+      if (!active || !placeholderRef.current) return;
+
+      const rect = placeholderRef.current.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const uniqueLabel = "news-preview-" + Math.random().toString(36).substring(2, 9);
+
+      try {
+        const appWindow = getCurrentWindow();
+        const webview = new Webview(appWindow, uniqueLabel, {
+          url: article.link,
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+
+        if (!active) {
+          webview.close().catch(() => {});
+          return;
+        }
+
+        webviewInstRef.current = webview;
+        setWebviewReady(true);
+
+        webview.once("tauri://error", (e) => {
+          console.error("[News] Webview error:", e);
+          if (active) setWebviewError(true);
+        });
+      } catch (err) {
+        console.error("[News] Failed to create webview:", err);
+        if (active) setWebviewError(true);
+      }
+    });
+
     return () => {
+      active = false;
+      cancelAnimationFrame(raf);
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
+
+      const wv = webviewInstRef.current;
+      webviewInstRef.current = null;
+      if (wv) {
+        wv.close().catch(() => {});
+      } else {
+        // Cleanup any orphaned webviews
+        Webview.getAll().then((all) => {
+          for (const w of all) {
+            if (w.label.startsWith("news-preview-")) {
+              w.close().catch(() => {});
+            }
+          }
+        }).catch(() => {});
+      }
     };
   }, [article, handleKeyDown]);
+
+  // ── Geometry sync (resize + scroll tracking) ────────────────────────
+
+  useEffect(() => {
+    if (!placeholderRef.current || !webviewInstRef.current) return;
+
+    const syncGeometry = () => {
+      const el = placeholderRef.current;
+      const wv = webviewInstRef.current;
+      if (!el || !wv) return;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      wv.setPosition(new LogicalPosition(rect.left, rect.top))
+        .catch(() => {});
+      wv.setSize(new LogicalSize(rect.width, rect.height))
+        .catch(() => {});
+    };
+
+    syncGeometry();
+
+    const observer = new ResizeObserver(() => syncGeometry());
+    observer.observe(placeholderRef.current);
+    window.addEventListener("resize", syncGeometry);
+    window.addEventListener("scroll", syncGeometry, true);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncGeometry);
+      window.removeEventListener("scroll", syncGeometry, true);
+    };
+  }, [webviewReady]);
+
+  // ── Render ─────────────────────────────────────────────────────────
 
   if (!article) return null;
 
   const handleOpenInBrowser = () => {
     openUrl(article.link).catch(() => {
-      // Fallback for dev mode without Tauri runtime
       window.open(article.link, "_blank", "noopener,noreferrer");
     });
   };
@@ -70,13 +184,34 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
           </div>
         </div>
 
-        {/* Body */}
+        {/* Body — article content */}
         <div
           className="news-preview-body"
           dangerouslySetInnerHTML={{
             __html: sanitizeHtml(article.content || article.description),
           }}
         />
+
+        {/* Native Webview placeholder — the child webview is layered
+            over this div. Kept as visible fallback if webview fails. */}
+        <div className="news-preview-webview">
+          <div className="news-preview-webview-bar">
+            <span className="news-preview-webview-url" title={article.link}>
+              {article.link}
+            </span>
+          </div>
+          <div
+            ref={placeholderRef}
+            className={
+              "news-preview-webview-placeholder" +
+              (webviewError ? " news-preview-webview-error" : "")
+            }
+          >
+            {!webviewReady && !webviewError && (
+              <div className="news-preview-webview-spinner" />
+            )}
+          </div>
+        </div>
 
         {/* Footer */}
         <div className="news-preview-footer">
@@ -105,20 +240,11 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
   );
 }
 
-/** Very basic HTML sanitization — strips scripts, event handlers, and dangerous tags. */
 function sanitizeHtml(html: string): string {
-  // Strip <script> tags and their content
   let cleaned = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-
-  // Strip on* event handlers
   cleaned = cleaned.replace(/\son\w+="[^"]*"/gi, "");
   cleaned = cleaned.replace(/\son\w+='[^']*'/gi, "");
-
-  // Strip <iframe> tags (could embed arbitrary content)
   cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "");
-
-  // Remove javascript: URLs
   cleaned = cleaned.replace(/href=["']javascript:[^"']*["']/gi, 'href="#"');
-
   return cleaned;
 }

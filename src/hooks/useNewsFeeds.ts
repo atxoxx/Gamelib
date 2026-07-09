@@ -49,12 +49,6 @@ export const DEFAULT_FEEDS: NewsFeed[] = [
     enabled: true,
   },
   {
-    name: "GamingOnLinux",
-    url: "https://www.gamingonlinux.com/feeds/article_rss.php",
-    isDefault: true,
-    enabled: true,
-  },
-  {
     name: "Kotaku",
     url: "https://kotaku.com/rss",
     isDefault: true,

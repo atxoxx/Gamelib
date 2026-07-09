@@ -668,6 +668,79 @@
   color: inherit !important;
 }
 
+/* ── Preview Webview (native owned window placeholder) ────────────── */
+
+.news-preview-webview {
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  overflow: hidden;
+}
+
+.news-preview-webview-bar {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm) var(--space-xl);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.news-preview-webview-url {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+}
+
+.news-preview-webview-placeholder {
+  width: 100%;
+  height: 420px;
+  background: var(--color-bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.news-preview-webview-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: news-spinner 0.7s linear infinite;
+}
+
+@keyframes news-spinner {
+  to { transform: rotate(360deg); }
+}
+
+.news-preview-webview-placeholder .news-preview-webview-spinner::after {
+  content: "Loading article…";
+  position: absolute;
+  top: calc(50% + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.news-preview-webview-error .news-preview-webview-spinner {
+  display: none;
+}
+
+.news-preview-webview-error::after {
+  content: "Could not load preview. Use 'Open in Browser' below.";
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
 /* ── Preview Footer ──────────────────────────────────────────────── */
 
 .news-preview-footer {
