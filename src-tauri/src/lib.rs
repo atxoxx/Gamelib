@@ -715,6 +715,27 @@ fn spawn_game_exe(game_path: String) -> Result<u32, String> {
     Ok(pid)
 }
 
+/// Fetch the contents of a URL and return it as text.
+/// Used by the News page to fetch RSS feeds without browser CORS restrictions.
+#[tauri::command]
+async fn fetch_url(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Gamelib/0.1 (RSS Reader)")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch URL: {}", e))?;
+
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -743,7 +764,8 @@ pub fn run() {
             torrent_engine::torrent_remove,
             torrent_engine::torrent_get_all,
             torrent_engine::torrent_select_save_path,
-            crackwatch::fetch_crackwatch_status])
+            crackwatch::fetch_crackwatch_status,
+            fetch_url])
         .setup(|app| {
             // Initialize the source manager + store checker state.
             //

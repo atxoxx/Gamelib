@@ -12,6 +12,7 @@ import PluginsPage from "./pages/PluginsPage";
 import ActivityPage from "./pages/ActivityPage";
 import StoragePage from "./pages/StoragePage";
 import WishlistPage from "./pages/WishlistPage";
+import NewsPage from "./pages/NewsPage";
 import DealsPage from "./pages/deals/DealsPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
@@ -61,6 +62,7 @@ function App() {
                           <Route path="library" element={<LibraryPage />} />
                           <Route path="library/:gameId" element={<GamePage />} />
                           <Route path="wishlist" element={<WishlistPage />} />
+                          <Route path="news" element={<NewsPage />} />
                           <Route path="deals" element={<DealsPage />} />
                           <Route path="activity" element={<ActivityPage />} />
                           <Route path="storage" element={<StoragePage />} />

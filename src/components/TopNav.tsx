@@ -172,6 +172,24 @@ function StorageIcon() {
   );
 }
 
+function NewsIcon() {
+  return (
+    <svg
+      className="topnav-tab-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 11a9 9 0 0 1 9 9" />
+      <path d="M4 4a16 16 0 0 1 16 16" />
+      <circle cx="5" cy="19" r="1" />
+    </svg>
+  );
+}
+
 const tabs: Tab[] = [
   { path: "/store", label: "Store", icon: <StoreIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
@@ -179,6 +197,7 @@ const tabs: Tab[] = [
   { path: "/deals", label: "Deals", icon: <DealsIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
+  { path: "/news", label: "News", icon: <NewsIcon /> },
   { path: "/community", label: "Community", icon: <CommunityIcon /> },
   { path: "/plugins", label: "Plugins", icon: <PluginsIcon /> },
 ];
