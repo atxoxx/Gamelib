@@ -26,6 +26,12 @@
   gap: var(--space-sm);
 }
 
+.news-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
 .news-title {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
@@ -147,9 +153,25 @@
 
 .news-article-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: var(--space-lg);
   align-content: start;
+}
+
+/* Default / cozy: 2 columns */
+.news-article-grid.density-cozy {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* Compact: 3 columns, tighter gap */
+.news-article-grid.density-compact {
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-md);
+}
+
+/* Cinematic: 2 columns, more spacing */
+.news-article-grid.density-cinematic {
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2xl);
 }
 
 /* ── Article Card ────────────────────────────────────────────────────── */
@@ -164,7 +186,6 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  /* Prevent grid blowout from oversized card content */
   min-width: 0;
 }
 
@@ -176,6 +197,25 @@
 
 .news-article-card:active {
   transform: translateY(-1px);
+}
+
+/* ── Density variants ────────────────────────────────────────────── */
+
+.news-article-card.density-compact .news-card-cover {
+  aspect-ratio: 16 / 7;
+}
+
+.news-article-card.density-cinematic .news-card-cover {
+  aspect-ratio: 16 / 6;
+}
+
+.news-article-card.density-cinematic .news-card-title {
+  font-size: var(--font-size-lg);
+  -webkit-line-clamp: 3;
+}
+
+.news-article-card.density-cinematic .news-card-snippet {
+  -webkit-line-clamp: 4;
 }
 
 /* ── Card Cover (image area) ──────────────────────────────────────── */
