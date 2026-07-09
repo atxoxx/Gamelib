@@ -992,30 +992,6 @@ use std::sync::OnceLock;
 use std::sync::Mutex;
 use std::time::{Instant, Duration};
 
-fn load_env_file() {
-    let mut dir = std::env::current_dir().ok();
-    while let Some(path) = dir {
-        let env_path = path.join(".env");
-        if env_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(env_path) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    if let Some((key, val)) = line.split_once('=') {
-                        let key = key.trim();
-                        let val = val.trim().trim_matches('"').trim_matches('\'');
-                        std::env::set_var(key, val);
-                    }
-                }
-            }
-            break;
-        }
-        dir = path.parent().map(|p| p.to_path_buf());
-    }
-}
-
 struct TokenCache {
     token: String,
     expires_at: Instant,
@@ -1084,11 +1060,14 @@ fn http_client() -> reqwest::Client {
 }
 
 async fn get_twitch_token() -> Result<String, String> {
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID")
-        .map_err(|_| "Missing TWITCH_CLIENT_ID environment variable. Please define it in your .env file.".to_string())?;
-    let client_secret = std::env::var("TWITCH_CLIENT_SECRET")
-        .map_err(|_| "Missing TWITCH_CLIENT_SECRET environment variable. Please define it in your .env file.".to_string())?;
+    let client_id = crate::config::get_twitch_client_id();
+    if client_id.is_empty() {
+        return Err("Missing TWITCH_CLIENT_ID — set it at build time or in your .env file.".to_string());
+    }
+    let client_secret = crate::config::get_twitch_client_secret();
+    if client_secret.is_empty() {
+        return Err("Missing TWITCH_CLIENT_SECRET — set it at build time or in your .env file.".to_string());
+    }
 
     let failure_mutex = TOKEN_FAILURE_UNTIL.get_or_init(|| Mutex::new(None));
     let cache_mutex = TOKEN_CACHE.get_or_init(|| Mutex::new(None));
@@ -1374,8 +1353,7 @@ limit 8;"#,
         escaped_name
     );
     
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+    let client_id = crate::config::get_twitch_client_id();
     
     let _guard = igdb_acquire().await;
     let resp = match client.post("https://api.igdb.com/v4/games")
@@ -1829,8 +1807,7 @@ pub async fn fetch_store_games(
     let token = get_twitch_token().await?;
     let client = http_client();
 
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+    let client_id = crate::config::get_twitch_client_id();
 
     // Resolve the base (where, sort) tuple for the active category
     // (curated IGDB view like `trending` or a pure `-ranked default
@@ -1989,8 +1966,7 @@ pub async fn search_store_games(
     let token = get_twitch_token().await?;
     let client = http_client();
 
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+    let client_id = crate::config::get_twitch_client_id();
 
     let escaped = query.replace('"', "\\\"");
     let body = format!(
@@ -2098,8 +2074,7 @@ limit 1;"#,
         escaped_slug
     );
 
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+    let client_id = crate::config::get_twitch_client_id();
 
     let _guard5 = igdb_acquire().await;
     let resp = match client
@@ -2724,8 +2699,7 @@ async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
     let token = get_twitch_token().await?;
     let client = http_client();
 
-    load_env_file();
-    let client_id = std::env::var("TWITCH_CLIENT_ID").unwrap_or_default();
+    let client_id = crate::config::get_twitch_client_id();
 
     let escaped = game_name.replace('"', "\\\"");
     // First, find the game id by name. We can't fetch reviews without an id.
@@ -2829,7 +2803,7 @@ async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
 /// missing page, etc.). Always concatenate, never format-interpolate
 /// alone. Keep in sync with the docs in `.env` setup.
 const OPENCRITIC_RAPIDAPI_HINT_SUFFIX: &str =
-    " - hint: set OPENCRITIC_RAPIDAPI_KEY in .env for reliable results";
+    " - hint: set OPENCRITIC_RAPIDAPI_KEY at build time or in .env for reliable results";
 
 /// Fetch reviews from an external source (metacritic, opencritic, or rawg).
 ///
@@ -3371,8 +3345,7 @@ async fn fetch_opencritic_reviews(game_name: &str) -> Result<Vec<IgdbReview>, St
         external_reviews_client().ok_or("Failed to create HTTP client")?;
 
     // ── 1. RapidAPI (primary, if key is configured) ───────────────────
-    load_env_file();
-    let rapidapi_key = std::env::var("OPENCRITIC_RAPIDAPI_KEY").unwrap_or_default();
+    let rapidapi_key = crate::config::get_opencritic_rapidapi_key();
     if !rapidapi_key.is_empty() {
         match fetch_opencritic_via_rapidapi(&client, game_name, &rapidapi_key).await {
             Ok(reviews) if !reviews.is_empty() => return Ok(reviews),

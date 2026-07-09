@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
+mod config;
 mod crackwatch;
 mod game_scraper;
 mod gpu_detector;
@@ -767,6 +768,10 @@ pub fn run() {
             crackwatch::fetch_crackwatch_status,
             fetch_url])
         .setup(|app| {
+            // Load .env file for development (production builds have
+            // credentials baked in at compile time via option_env!()).
+            config::load_env_file();
+
             // Initialize the source manager + store checker state.
             //
             // The source manager uses `std::sync::Mutex` (NOT
