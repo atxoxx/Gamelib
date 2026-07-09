@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { gameNameFromPath } from "../types/game";
 import { Button } from "./ui";
@@ -239,7 +240,7 @@ export default function ImportModal({
   const activeMatch = matches[activePath] || null;
   const activeDetail = activeMatch ? previews[activeMatch.slug] : null;
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={onCancel}>
       <div
         className={`modal import-modal${exeInfos.length > 1 ? " batch-import-layout" : ""}`}
@@ -659,6 +660,7 @@ export default function ImportModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
