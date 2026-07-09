@@ -113,6 +113,12 @@ export default function DownloadModal({
         if (cancelled) return;
         setOwnership(own);
         setMatches(searchResults);
+        // A fresh search result invalidates any prior selection
+        // (the user is now looking at a different list) and any
+        // prior error (the previous Start attempt was for stale
+        // data). Clear both so the modal returns to a clean state.
+        setSelectedIndex(null);
+        setError(null);
         setStep("results");
       } catch (err) {
         if (cancelled) return;
@@ -170,12 +176,17 @@ export default function DownloadModal({
     }
   }, [selectedIndex, savePath, matches, addDownload, gameId, showToast, onClose]);
 
-  // Reset the inline error when the user changes their selection
+  // Clear the inline error when the user actively changes their
+  // selection or save path. Note: `step` is intentionally NOT in
+  // the dep array — `handleStart`'s catch block sets `step` to
+  // "results" right after setting the error, and we don't want
+  // this effect to immediately wipe that error. Only user-driven
+  // changes (selectedIndex / savePath) should clear it.
   useEffect(() => {
-    if (step === "results" && startAttemptedRef.current) {
+    if (startAttemptedRef.current) {
       setError(null);
     }
-  }, [selectedIndex, savePath, step]);
+  }, [selectedIndex, savePath]);
 
   // ── Render ──────────────────────────────────────────────────────
   const ownershipBanner = useMemo(

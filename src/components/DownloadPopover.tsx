@@ -27,6 +27,7 @@
 //     button instead.
 
 import { useState, useEffect, useRef, type RefObject } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDownloads } from "../context/DownloadContext";
 import {
   formatBytesPerSecond,
@@ -109,20 +110,105 @@ function DownloadCard({
 
       <div className="dl-progress-card-footer">
         <div className="dl-progress-card-stats">
-          <span>
-            <strong>{formatProgress(download.progress)}</strong>
-            {download.totalSize != null && (
-              <> · {formatBytesShort(download.totalSize)}</>
-            )}
-          </span>
-          {isActiveStatus(status) && download.downloadSpeed > 0 && (
-            <span>{formatBytesPerSecond(download.downloadSpeed)}</span>
-          )}
-          {isCompleted && download.totalSize != null && (
-            <span className="dl-progress-card-stat-meta">
-              via {download.sourceName}
+          <div className="dl-progress-card-stats-row">
+            <span>
+              <strong>{formatProgress(download.progress)}</strong>
+              {download.totalSize != null && (
+                <> · {formatBytesShort(download.totalSize)}</>
+              )}
             </span>
-          )}
+            {isActiveStatus(status) && download.downloadSpeed > 0 && (
+              <span
+                className="dl-progress-card-stat-dl"
+                title="Download speed"
+                aria-label={`Download speed: ${formatBytesPerSecond(download.downloadSpeed)}`}
+              >
+                <span className="dl-progress-card-stat-icon" aria-hidden>↓</span>
+                {formatBytesPerSecond(download.downloadSpeed)}
+              </span>
+            )}
+            {isCompleted && download.totalSize != null && (
+              <span className="dl-progress-card-stat-meta">
+                via {download.sourceName}
+              </span>
+            )}
+          </div>
+          {(() => {
+            // Show the secondary row whenever the torrent is
+            // active OR paused with a non-zero swarm. Paused
+            // torrents don't get an upload-speed slot (the
+            // count is stale) but their swarm numbers are
+            // still useful for "should I resume?" decisions.
+            const isPaused = status.kind === "paused";
+            const hasSwarm = download.peers > 0 || download.seeds > 0;
+            const hasUl = isActiveStatus(status) && download.uploadSpeed > 0;
+            const showSecondary = isActiveStatus(status)
+              ? hasUl || hasSwarm
+              : isPaused && hasSwarm;
+            if (!showSecondary) return null;
+            return (
+              <div className="dl-progress-card-stats-row secondary">
+                {hasUl && (
+                  <span
+                    className="dl-progress-card-stat-ul"
+                    title="Upload speed"
+                    aria-label={`Upload speed: ${formatBytesPerSecond(download.uploadSpeed)}`}
+                  >
+                    <span
+                      className="dl-progress-card-stat-icon"
+                      aria-hidden
+                    >↑</span>
+                    {formatBytesPerSecond(download.uploadSpeed)}
+                  </span>
+                )}
+                <span
+                  className="dl-progress-card-stat-seeds"
+                  title="Known peers in swarm (approximate; excludes those currently connected)"
+                  aria-label={`${download.seeds} known peers in swarm`}
+                >
+                  <svg
+                    className="dl-progress-card-stat-svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    {/* Chevron-up (^) — distinct from the straight
+                        line+arrow used for the upload stat so the
+                        two up-pointing icons don't read as a
+                        duplicate. */}
+                    <polyline points="6 16 12 10 18 16" />
+                  </svg>
+                  {download.seeds}
+                </span>
+                <span
+                  className="dl-progress-card-stat-peers"
+                  title="Peers currently connected"
+                  aria-label={`${download.peers} peers currently connected`}
+                >
+                  <svg
+                    className="dl-progress-card-stat-svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  {download.peers}
+                </span>
+              </div>
+            );
+          })()}
         </div>
         <div className="dl-progress-card-actions">
           {isActiveStatus(status) && !isPaused && (
@@ -187,9 +273,19 @@ export default function DownloadPopover({
     removeDownload,
   } = useDownloads();
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>("active");
   const [clearing, setClearing] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Navigate to the dedicated Downloads page and close the popover.
+  // We close the popover explicitly (rather than relying on
+  // unmount) so the click-outside effect doesn't fight the route
+  // change.
+  function handleViewAll() {
+    onClose();
+    navigate("/downloads");
+  }
 
   // ── Click outside + Escape to close ─────────────────────────────────
   useEffect(() => {
@@ -404,6 +500,47 @@ export default function DownloadPopover({
           </button>
         </div>
       )}
+
+      {/* Always-on footer link to the dedicated Downloads page.
+       *  Sits below whatever the tab-specific footer (clear-history
+       *  button, if any) renders, so it's visible on both the
+       *  Active and History tabs. The link is the natural
+       *  next-step once a popover user wants the full table view,
+       *  bulk actions, or the magnet quick-add bar. */}
+      <div className="dl-popover-footer dl-popover-footer--viewall">
+        <button
+          className="dl-popover-footer-link"
+          onClick={handleViewAll}
+          title="Open the full Downloads page"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          View all downloads
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            style={{ width: 12, height: 12, marginLeft: "auto" }}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

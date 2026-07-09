@@ -18,7 +18,17 @@
 //! - `session.delete(id, delete_files)` for removal (id via `with_torrents` match).
 //! - `TorrentStats.total_bytes` is `u64` (not `Option<u64>`). `0` when unknown.
 //! - `TorrentStats.state` is `TorrentStatsState` enum: `Initializing | Live | Paused | Error`.
-//! - Download/upload speed not publicly accessible in v8.1.1; we report `0`.
+//! - Live download/upload speed and peer swarm counts are exposed via
+//!   `TorrentStats.live` (`Option<LiveStats>`). The `LiveStats.download_speed`
+//!   and `LiveStats.upload_speed` fields are `Speed { mbps: f64 }`, where
+//!   `mbps` is actually Mebibytes/sec (the field is mis-named; its `Display`
+//!   impl formats as `"{:.2} MiB/s"`). Multiply by `1_048_576.0` to get
+//!   bytes/sec for the frontend's `formatBytesPerSecond` helper.
+//!   `LiveStats.snapshot.peer_stats: AggregatePeerStats` exposes
+//!   `{ queued, connecting, live, seen, dead, not_needed, steals }` —
+//!   `live` is the currently-connected count, `seen` is the total ever
+//!   seen this session. We report `peers = live`, `seeds = seen - live`
+//!   (the known-but-not-currently-connected remainder).
 //! - `SessionOptions` has no `disable_upload` field.
 //!
 //! ## Persistence
@@ -73,9 +83,21 @@ pub struct TorrentDownload {
     pub total_size: Option<u64>,
     /// 0.0 - 1.0; `None` while total_size is unknown.
     pub progress: Option<f32>,
-    /// Bytes/sec. Always `0` in v8.1.1 (speed not publicly exposed).
+    /// Live download speed in bytes/sec. `0` while the torrent is
+    /// paused / errored / not yet live.
     pub download_speed: u64,
+    /// Live upload speed in bytes/sec. `0` while the torrent is
+    /// paused / errored / not yet live.
     pub upload_speed: u64,
+    /// Peers currently connected to us. Mirrors
+    /// `LiveStats.snapshot.peer_stats.live`.
+    pub peers: u32,
+    /// Peers we know about but aren't currently connected to
+    /// (`seen - live`, saturating). Approximates "seeds in the
+    /// swarm we can reach out to later". Strict seed/leech
+    /// distinction would require per-peer iteration, which we
+    /// avoid on the 2 s poll path.
+    pub seeds: u32,
     pub status: DownloadStatus,
     /// Optional: the GameContext `game.id` this download was
     /// started for.
@@ -108,6 +130,24 @@ impl TorrentEngine {
 
     /// Open (or create) a librqbit session. Called once at app boot.
     /// No-op if already initialised.
+    ///
+    /// ## Fallback behavior
+    ///
+    /// librqbit 8.1.1's persistent DHT lives in an OS-level cache dir
+    /// (resolved via the `directories` crate, separate from the
+    /// session state folder we pass in). On any platform that
+    /// cache dir may be read-only, hold a path with invalid
+    /// unicode, or contain a corrupted routing table from a
+    /// previous run — in any of those cases `Session::new_with_opts`
+    /// aborts with "error initializing persistent DHT" and the
+    /// whole engine fails to start, taking the Download modal
+    /// down with it.
+    ///
+    /// We try the full persistence setup first, and on ANY init
+    /// error fall back to a non-persistent session (`persistence:
+    /// None`). The DHT will be in-memory only and downloads won't
+    /// resume across restarts, but the rest of the app stays
+    /// functional and the user can still grab a one-shot download.
     pub async fn initialize(&mut self) -> Result<(), String> {
         if self.session.is_some() {
             return Ok(());
@@ -115,16 +155,55 @@ impl TorrentEngine {
         std::fs::create_dir_all(&self.state_dir)
             .map_err(|e| format!("Failed to create state dir: {}", e))?;
 
-        let opts = librqbit::SessionOptions {
+        // 1. Try the full persistent setup.
+        let persistent_opts = librqbit::SessionOptions {
             persistence: Some(librqbit::SessionPersistenceConfig::Json {
                 folder: Some(self.state_dir.clone()),
             }),
             ..Default::default()
         };
-        let session =
-            librqbit::Session::new_with_opts(self.state_dir.clone(), opts)
+
+        let session = match librqbit::Session::new_with_opts(
+            self.state_dir.clone(),
+            persistent_opts,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                let err_msg = e.to_string();
+                eprintln!(
+                    "[gamelib] Warning: persistent torrent session init failed: {}",
+                    err_msg
+                );
+                eprintln!(
+                    "[gamelib] Falling back to non-persistent session \
+                     (downloads will not resume after app restart)."
+                );
+
+                // 2. Fall back to a no-persistence session. librqbit
+                //    handles this gracefully — the DHT and the
+                //    session state both stay in memory and the
+                //    session simply doesn't write to disk.
+                let transient_opts = librqbit::SessionOptions {
+                    persistence: None,
+                    ..Default::default()
+                };
+                librqbit::Session::new_with_opts(
+                    self.state_dir.clone(),
+                    transient_opts,
+                )
                 .await
-                .map_err(|e| format!("Failed to open torrent session: {}", e))?;
+                .map_err(|fallback_err| {
+                    format!(
+                        "Failed to open torrent session (even without persistence): {} \
+                         (original persistent-init error: {})",
+                        fallback_err, err_msg
+                    )
+                })?
+            }
+        };
+
         self.session = Some(session);
         self.sync_from_session();
         Ok(())
@@ -150,6 +229,8 @@ impl TorrentEngine {
                     None
                 };
                 let status = map_state_to_status(&stats.state, total, downloaded);
+                let (download_speed, upload_speed, seeds, peers) =
+                    extract_live_stats(&stats);
                 results.push(TorrentDownload {
                     id: make_frontend_id(id),
                     name,
@@ -158,8 +239,10 @@ impl TorrentEngine {
                     downloaded,
                     total_size: if total > 0 { Some(total) } else { None },
                     progress,
-                    download_speed: 0,
-                    upload_speed: 0,
+                    download_speed,
+                    upload_speed,
+                    seeds,
+                    peers,
                     status,
                     game_id: None,
                     source_name: "Restored".to_string(),
@@ -225,6 +308,8 @@ impl TorrentEngine {
             progress: None,
             download_speed: 0,
             upload_speed: 0,
+            seeds: 0,
+            peers: 0,
             status: DownloadStatus::FetchingMetadata,
             game_id,
             source_name,
@@ -287,6 +372,105 @@ impl TorrentEngine {
         Ok(())
     }
 
+    /// Pause every active (non-completed) torrent. Used by the
+    /// "Pause all" toolbar action on the Downloads page. Already-paused
+    /// and already-completed torrents are no-ops at the librqbit
+    /// level, so we just iterate every entry and skip the ones
+    /// that are neither Downloading / FetchingMetadata / Queued.
+    ///
+    /// Returns the number of torrents that actually transitioned
+    /// (or were already in the target state) so the frontend can
+    /// surface a sensible toast.
+    pub async fn pause_all(&self) -> Result<usize, String> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+        // We must collect `Arc<ManagedTorrent>` under the
+        // `with_torrents` lock and release it before any
+        // `session.pause(...).await` call — the closure runs while
+        // holding the session's internal mutex, so a cross-await
+        // would deadlock. Cloning the Arc is just a refcount bump
+        // and lets us avoid a second O(N) `find_handle` scan per
+        // id (which would make the whole pass O(N²)).
+        //
+        // We also call `mt.stats()` exactly once per torrent and
+        // bind the result: librqbit updates stats continuously, so
+        // calling it 3× (once for state, once for total_bytes,
+        // once for progress_bytes) could observe inconsistent
+        // values and mis-classify a torrent.
+        let to_pause: Vec<Arc<librqbit::ManagedTorrent>> =
+            session.with_torrents(|iter| {
+                iter.filter_map(|(_id, mt)| {
+                    let stats = mt.stats();
+                    let state = &stats.state;
+                    let status = map_state_to_status(
+                        state,
+                        stats.total_bytes,
+                        stats.progress_bytes,
+                    );
+                    let should_pause = matches!(
+                        state,
+                        librqbit::TorrentStatsState::Live
+                            | librqbit::TorrentStatsState::Initializing
+                    ) && !matches!(status, DownloadStatus::Completed);
+                    if should_pause {
+                        Some(Arc::clone(mt))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+            });
+        let mut affected = 0usize;
+        for handle in to_pause {
+            if session.pause(&handle).await.is_ok() {
+                affected += 1;
+            }
+        }
+        Ok(affected)
+    }
+
+    /// Resume every paused / not-yet-started torrent. Mirror of
+    /// `pause_all`. Completed torrents are skipped.
+    pub async fn resume_all(&self) -> Result<usize, String> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+        let to_resume: Vec<Arc<librqbit::ManagedTorrent>> =
+            session.with_torrents(|iter| {
+                iter.filter_map(|(_id, mt)| {
+                    let stats = mt.stats();
+                    let state = &stats.state;
+                    let pausable = matches!(
+                        state,
+                        librqbit::TorrentStatsState::Paused
+                    ) || matches!(
+                        map_state_to_status(
+                            state,
+                            stats.total_bytes,
+                            stats.progress_bytes
+                        ),
+                        DownloadStatus::Paused
+                    );
+                    if pausable {
+                        Some(Arc::clone(mt))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+            });
+        let mut affected = 0usize;
+        for handle in to_resume {
+            if session.unpause(&handle).await.is_ok() {
+                affected += 1;
+            }
+        }
+        Ok(affected)
+    }
+
     /// Snapshot of all current downloads, sorted active-first.
     pub fn list(&self) -> Vec<TorrentDownload> {
         let mut all: Vec<TorrentDownload> =
@@ -308,14 +492,21 @@ impl TorrentEngine {
         let Some(session) = self.session.clone() else {
             return;
         };
-        type StatsEntry = (
-            String,         // frontend id
-            u64,            // downloaded
-            Option<u64>,    // total
-            Option<f32>,    // progress
-            DownloadStatus, // status
-            Option<String>, // name
-        );
+        /// Aggregated per-torrent snapshot pulled from librqbit under
+        /// the session lock. Replaces the previous 10-tuple to keep
+        /// the collect/deconstruct sites readable and order-safe.
+        struct StatsEntry {
+            fid: String,
+            downloaded: u64,
+            total: Option<u64>,
+            progress: Option<f32>,
+            status: DownloadStatus,
+            name: Option<String>,
+            download_speed: u64,
+            upload_speed: u64,
+            seeds: u32,
+            peers: u32,
+        }
         let (collected, alive_ids): (Vec<StatsEntry>, Vec<String>) =
             session.with_torrents(|iter| {
                 let mut entries = Vec::new();
@@ -333,14 +524,20 @@ impl TorrentEngine {
                     };
                     let status =
                         map_state_to_status(&stats.state, total, downloaded);
-                    entries.push((
+                    let (download_speed, upload_speed, seeds, peers) =
+                        extract_live_stats(&stats);
+                    entries.push(StatsEntry {
                         fid,
                         downloaded,
-                        if total > 0 { Some(total) } else { None },
+                        total: if total > 0 { Some(total) } else { None },
                         progress,
                         status,
-                        mt.name(),
-                    ));
+                        name: mt.name(),
+                        download_speed,
+                        upload_speed,
+                        seeds,
+                        peers,
+                    });
                 }
                 (entries, ids)
             });
@@ -348,18 +545,20 @@ impl TorrentEngine {
         let alive_set: HashMap<String, ()> =
             alive_ids.into_iter().map(|id| (id, ())).collect();
 
-        for (fid, downloaded, total, progress, status, name) in collected {
-            if let Some(d) = self.downloads.get_mut(&fid) {
-                d.downloaded = downloaded;
-                d.total_size = total;
-                d.progress = progress;
-                d.download_speed = 0;
-                d.upload_speed = 0;
-                d.status = status;
+        for entry in collected {
+            if let Some(d) = self.downloads.get_mut(&entry.fid) {
+                d.downloaded = entry.downloaded;
+                d.total_size = entry.total;
+                d.progress = entry.progress;
+                d.download_speed = entry.download_speed;
+                d.upload_speed = entry.upload_speed;
+                d.seeds = entry.seeds;
+                d.peers = entry.peers;
+                d.status = entry.status;
                 if d.name.is_empty()
                     || d.name == "Fetching metadata\u{2026}"
                 {
-                    if let Some(n) = name {
+                    if let Some(n) = entry.name {
                         d.name = n;
                     }
                 }
@@ -403,6 +602,47 @@ fn parse_handle_id(frontend_id: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("Invalid download id: {}", frontend_id))?
         .parse::<usize>()
         .map_err(|e| format!("Invalid numeric id in '{}': {}", frontend_id, e))
+}
+
+/// Pull the live download speed, upload speed, seed and peer counts
+/// out of a `TorrentStats` snapshot. Returns `(0, 0, 0, 0)` when the
+/// torrent is in any state that doesn't publish live data
+/// (Initializing / Paused / Error / no live snapshot yet).
+///
+/// `Speed.mbps` is mis-named: the field is actually Mebibytes per
+/// second (its `Display` impl formats `"{:.2} MiB/s"`). We multiply
+/// by `1_048_576.0` (1024 * 1024) to get bytes/sec for the wire
+/// format — the frontend's `formatBytesPerSecond` expects bytes/sec.
+/// NaN/inf would cast to `0` under `as u64` (defined Rust semantics),
+/// so the only "bad" speed librqbit could hand us is silently dropped
+/// to 0 — acceptable, since a NaN/inf speed is a librqbit internal
+/// bug we can't recover from here.
+fn extract_live_stats(
+    stats: &librqbit::TorrentStats,
+) -> (u64, u64, u32, u32) {
+    let Some(live) = stats.live.as_ref() else {
+        return (0, 0, 0, 0);
+    };
+    let download_speed = (live.download_speed.mbps * 1_048_576.0) as u64;
+    let upload_speed = (live.upload_speed.mbps * 1_048_576.0) as u64;
+    // librqbit's `peer_stats` fields are `u64`. Saturate to `u32::MAX`
+    // rather than silently truncating — a torrent with >4B peers is
+    // not a real-world case but the safe cast keeps the wire format
+    // honest.
+    let peers = u32::try_from(live.snapshot.peer_stats.live)
+        .unwrap_or(u32::MAX);
+    // `seen` is "all peers ever observed"; subtracting the currently
+    // connected ones gives the known-but-not-connected remainder,
+    // which is the closest proxy for "seeds in the swarm" we can
+    // compute without per-peer iteration on the 2 s poll path.
+    let seeds = u32::try_from(
+        live.snapshot
+            .peer_stats
+            .seen
+            .saturating_sub(live.snapshot.peer_stats.live),
+    )
+    .unwrap_or(u32::MAX);
+    (download_speed, upload_speed, seeds, peers)
 }
 
 /// Map `TorrentStatsState` to our `DownloadStatus` enum.
@@ -563,4 +803,34 @@ pub async fn torrent_select_save_path(
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     TorrentEngine::pick_folder(&app).await
+}
+
+/// Bulk-pause every active torrent. Returns the count of torrents
+/// that were (re)paused. See `TorrentEngine::pause_all` for the
+/// exact definition of "active" and the no-op behavior on already-
+/// paused or completed torrents.
+#[tauri::command]
+pub async fn torrent_pause_all() -> Result<usize, String> {
+    let engine = engine()
+        .await
+        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let result = {
+        let guard = engine.lock().await;
+        guard.pause_all().await
+    };
+    result
+}
+
+/// Mirror of `torrent_pause_all` for the "Resume all" toolbar
+/// action. Skips completed torrents.
+#[tauri::command]
+pub async fn torrent_resume_all() -> Result<usize, String> {
+    let engine = engine()
+        .await
+        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let result = {
+        let guard = engine.lock().await;
+        guard.resume_all().await
+    };
+    result
 }

@@ -14,6 +14,7 @@ import StoragePage from "./pages/StoragePage";
 import WishlistPage from "./pages/WishlistPage";
 import NewsPage from "./pages/NewsPage";
 import DealsPage from "./pages/deals/DealsPage";
+import DownloadsPage from "./pages/DownloadsPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ActivityProvider } from "./context/ActivityContext";
@@ -64,6 +65,7 @@ function App() {
                           <Route path="news" element={<NewsPage />} />
                           <Route path="deals" element={<DealsPage />} />
                           <Route path="activity" element={<ActivityPage />} />
+                          <Route path="downloads" element={<DownloadsPage />} />
                           <Route path="storage" element={<StoragePage />} />
                           <Route path="store" element={<StorePage />} />
                           <Route path="store/:gameSlug" element={<StoreGameDetail />} />

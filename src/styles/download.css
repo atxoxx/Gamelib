@@ -513,8 +513,104 @@
 
 .dl-progress-card-stats {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dl-progress-card-stats-row {
+  display: flex;
+  align-items: center;
   gap: var(--space-sm);
   flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.dl-progress-card-stats-row.secondary {
+  font-size: 9.5px;
+  letter-spacing: 0.1px;
+  /* Right-align the upload/swarm sub-row so it sits flush under
+   * the right side of the progress row above, creating a
+   * tabular look against the action buttons. */
+  justify-content: flex-end;
+}
+
+.dl-progress-card-stats-row.secondary
+  .dl-progress-card-stat-dl,
+.dl-progress-card-stats-row.secondary
+  .dl-progress-card-stat-ul,
+.dl-progress-card-stats-row.secondary
+  .dl-progress-card-stat-seeds,
+.dl-progress-card-stats-row.secondary
+  .dl-progress-card-stat-peers {
+  /* Small inner divider so the four sub-stats read as a group. */
+  padding-left: var(--space-sm);
+  border-left: 1px solid var(--color-border);
+}
+
+/* Drop the divider on whichever stat span happens to be the
+ * first child of row 2. We list the four stat classes explicitly
+ * (rather than relying on `:first-child`) so the rule is robust
+ * against future layout changes. */
+.dl-progress-card-stats-row.secondary
+  > .dl-progress-card-stat-dl:first-child,
+.dl-progress-card-stats-row.secondary
+  > .dl-progress-card-stat-ul:first-child,
+.dl-progress-card-stats-row.secondary
+  > .dl-progress-card-stat-seeds:first-child,
+.dl-progress-card-stats-row.secondary
+  > .dl-progress-card-stat-peers:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+/* Per-stat accent colours. Seeds = success green, peers = muted
+ * text, upload = accent purple, download = accent. All from theme
+ * variables so the light/dark themes stay in sync. */
+.dl-progress-card-stat-dl,
+.dl-progress-card-stat-ul,
+.dl-progress-card-stat-seeds,
+.dl-progress-card-stat-peers {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.dl-progress-card-stat-dl {
+  color: var(--color-accent);
+}
+
+.dl-progress-card-stat-ul {
+  color: var(--color-accent);
+  opacity: 0.78;
+}
+
+.dl-progress-card-stat-seeds {
+  color: var(--color-success);
+}
+
+.dl-progress-card-stat-peers {
+  color: var(--color-text-muted);
+}
+
+.dl-progress-card-stat-icon {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
+.dl-progress-card-stat-svg {
+  /* Match the unicode arrow's visual weight (~11px). */
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  display: inline-block;
 }
 
 .dl-progress-card-stat strong {
@@ -963,3 +1059,810 @@
 /* The popover embeds (reuses) the existing `dl-progress-card*` rules
  * from earlier in this file. No overrides needed — the cards fit the
  * panel as-is. */
+
+/* "View all downloads" footer link below the tab body. Always
+ * rendered (regardless of which tab is active) so a user who
+ * maxed out the popover's quick-glance role can always escalate
+ * to the full page. The "clear history" button (above) and this
+ * link live in their own footer containers so their styling
+ * doesn't fight. */
+.dl-popover-footer--viewall {
+  border-top: 1px solid var(--color-border);
+  /* When the previous dl-popover-footer (clear-history) is also
+   * present, double the border looks heavy. Drop our own top
+   * border so the seam is invisible. */
+  margin-top: -1px;
+  justify-content: stretch;
+}
+
+.dl-popover-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: color var(--transition-fast);
+}
+
+.dl-popover-footer-link:hover {
+  color: #fff;
+}
+
+.dl-popover-footer-link svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ===========================================================================
+ * Downloads page (src/pages/DownloadsPage.tsx)
+ *
+ * The dedicated home for the download subsystem. Single scrollable
+ * column: page header (title + magnet input), bandwidth hero,
+ * toolbar, active list, history list.
+ *
+ * Layout conventions (match the rest of the app):
+ *   * Theme tokens only (no hard-coded colours).
+ *   * Card surfaces use the same elevation language as the library
+ *     page so the user can tell the two views came from the same
+ *     design system at a glance.
+ *   * Hover states are `transition-fast` (180ms) for tactile
+ *     feedback without feeling laggy.
+ * ========================================================================== */
+
+.dl-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.dl-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.dl-page-title-block {
+  flex: 1;
+  min-width: 240px;
+}
+
+.dl-page-title {
+  margin: 0;
+  font-size: var(--font-size-2xl, 24px);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.dl-page-subtitle {
+  margin: 4px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Magnet quick-add bar (right side of the page header). */
+.dl-magnet-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1 1 360px;
+  max-width: 540px;
+  min-width: 280px;
+  padding: 4px 4px 4px var(--space-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.dl-magnet-bar:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.dl-magnet-bar-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dl-magnet-bar-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  padding: 8px 0;
+}
+
+.dl-magnet-bar-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.dl-magnet-bar-input:disabled {
+  opacity: 0.6;
+}
+
+/* ─── Bandwidth hero ────────────────────────────────────────────── */
+
+.dl-hero {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle accent strip at the top so the hero reads as the
+ * "primary" surface on the page. */
+.dl-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent),
+    transparent
+  );
+  opacity: 0.5;
+}
+
+.dl-hero-stat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dl-hero-divider {
+  width: 1px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.dl-hero-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+}
+
+.dl-hero-value {
+  font-size: 26px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.dl-hero-value-down {
+  color: var(--color-accent);
+}
+
+.dl-hero-value-up {
+  color: var(--color-success);
+}
+
+.dl-hero-sub {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.dl-hero-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dl-hero-dot.pulse {
+  background: var(--color-accent);
+  animation: dl-pulse 1.6s ease-in-out infinite;
+}
+
+/* ─── Sections (Active / History) ───────────────────────────────── */
+
+.dl-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.dl-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.dl-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.dl-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Toolbar (Pause all / Resume all / Clear history) ──────────── */
+
+.dl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.dl-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.dl-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.dl-toolbar-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── List + empty state ────────────────────────────────────────── */
+
+.dl-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xs);
+  min-height: 80px;
+}
+
+.dl-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xl) var(--space-lg);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.dl-list-empty-icon {
+  width: 32px;
+  height: 32px;
+  opacity: 0.4;
+  margin-bottom: var(--space-xs);
+}
+
+.dl-list-empty-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.dl-list-empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.dl-list-show-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: center;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: 4px;
+}
+
+.dl-list-show-more:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+/* ─── DownloadRow: dense table-style row ────────────────────────── */
+
+.dl-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) minmax(110px, 130px) minmax(70px, 90px) auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 10px var(--space-md);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.dl-row:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 3%, var(--color-bg-primary));
+}
+
+.dl-row.error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.dl-row.completed {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.dl-row.paused {
+  opacity: 0.78;
+}
+
+.dl-row-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  width: max-content;
+  justify-self: start;
+}
+
+.dl-row-status--downloading {
+  background: rgba(108, 92, 231, 0.18);
+  color: #8b7cf6;
+}
+
+.dl-row-status--fetchingMetadata {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.dl-row-status--queued {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.dl-row-status--paused {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.dl-row-status--completed {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+}
+
+.dl-row-status--error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.dl-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dl-row-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dl-row-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.dl-row-source {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dl-row-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.dl-row-bar {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  background: var(--color-bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.dl-row-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), #818cf8);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.dl-row.indeterminate .dl-row-bar-fill {
+  width: 30% !important;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-accent) 50%,
+    transparent 100%
+  );
+  animation: dl-indeterminate 1.4s ease-in-out infinite;
+}
+
+.dl-row-progress {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dl-row-size {
+  color: var(--color-text-muted);
+}
+
+.dl-row-error {
+  font-size: 11px;
+  color: #ef4444;
+  word-break: break-word;
+}
+
+.dl-row-speed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.dl-row-speed-dl {
+  color: var(--color-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dl-row-speed-ul {
+  color: var(--color-accent);
+  opacity: 0.78;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dl-row-speed-muted {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-normal);
+}
+
+.dl-row-swarm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.dl-row-swarm > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dl-row-swarm-seeds {
+  color: var(--color-success);
+}
+
+.dl-row-swarm-muted {
+  color: var(--color-text-muted);
+}
+
+.dl-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dl-row-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  padding: 0;
+}
+
+.dl-row-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.dl-row-btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.dl-row-btn.danger:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.dl-row-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive: collapse the table on narrow viewports. We stack the
+ * columns vertically and let the row scroll into a card shape
+ * below 800px. The exact breakpoint matches the rest of the
+ * app's `density-cozy` collapse point. */
+
+/* ─── Bandwidth sparkline ──────────────────────────────────────── *
+ * Slim SVG line chart (no chart library) showing the last 60 s
+ * of aggregate download / upload speeds. The viewBox is fixed
+ * at 600x56 and the SVG stretches to fill the container via
+ * `preserveAspectRatio="none"`, so the chart re-flows with the
+ * page width but the visual proportions stay consistent. */
+
+.dl-sparkline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.dl-sparkline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.dl-sparkline-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+}
+
+.dl-sparkline-icon {
+  width: 11px;
+  height: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.dl-sparkline-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.dl-sparkline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dl-sparkline-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.dl-sparkline-legend-dl .dl-sparkline-legend-swatch {
+  background: var(--color-accent);
+}
+
+.dl-sparkline-legend-ul .dl-sparkline-legend-swatch {
+  background: var(--color-success);
+}
+
+.dl-sparkline-svg {
+  display: block;
+  width: 100%;
+  height: 56px;
+  overflow: visible;
+}
+
+.dl-sparkline-baseline {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.dl-sparkline-line-dl {
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dl-sparkline-line-ul {
+  stroke: var(--color-success);
+  stroke-width: 1.2;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+
+.dl-sparkline-dot-dl {
+  fill: var(--color-accent);
+}
+
+.dl-sparkline-dot-ul {
+  fill: var(--color-success);
+}
+
+@media (max-width: 800px) {
+  .dl-sparkline-legend {
+    gap: var(--space-sm);
+    font-size: 10px;
+  }
+  .dl-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "status actions"
+      "main main"
+      "speed speed"
+      "swarm swarm";
+    gap: var(--space-sm);
+  }
+  .dl-row-status {
+    grid-area: status;
+  }
+  .dl-row-main {
+    grid-area: main;
+  }
+  .dl-row-speed {
+    grid-area: speed;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: var(--space-md);
+  }
+  .dl-row-swarm {
+    grid-area: swarm;
+    flex-direction: row;
+    gap: var(--space-md);
+  }
+  .dl-row-actions {
+    grid-area: actions;
+  }
+  .dl-page-header {
+    flex-direction: column;
+  }
+  .dl-magnet-bar {
+    max-width: none;
+  }
+}

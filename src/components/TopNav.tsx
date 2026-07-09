@@ -218,6 +218,7 @@ const tabs: Tab[] = [
   { path: "/wishlist", label: "Wishlist", icon: <WishlistIcon /> },
   { path: "/deals", label: "Deals", icon: <DealsIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
+  { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
   { path: "/news", label: "News", icon: <NewsIcon /> },
   { path: "/community", label: "Community", icon: <CommunityIcon /> },

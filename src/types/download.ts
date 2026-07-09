@@ -62,8 +62,22 @@ export interface TorrentDownload {
   downloaded: number;
   totalSize: number | null;
   progress: number | null;
+  /** Live download speed in bytes/sec. `0` while paused / errored. */
   downloadSpeed: number;
+  /** Live upload speed in bytes/sec. `0` while paused / errored. */
   uploadSpeed: number;
+  /**
+   * Peers currently connected to us. Mirrors
+   * `LiveStats.snapshot.peer_stats.live` on the Rust side.
+   */
+  peers: number;
+  /**
+   * Peers we know about but aren't currently connected to
+   * (`seen - live`, saturating). Strict seed/leech distinction
+   * would require per-peer iteration, which the backend avoids on
+   * the 2 s poll path.
+   */
+  seeds: number;
   status: DownloadStatus;
   /** Optional GameContext id, set when the DownloadModal knows the game. */
   gameId: string | null;

@@ -63,6 +63,14 @@ interface DownloadContextValue {
   ) => Promise<string>;
   pauseDownload: (id: string) => Promise<void>;
   resumeDownload: (id: string) => Promise<void>;
+  /**
+   * Pause every active (non-completed) torrent. Returns the
+   * number of torrents that were (re)paused. Backend
+   * implementation lives in `torrent_engine::pause_all`.
+   */
+  pauseAll: () => Promise<number>;
+  /** Mirror of `pauseAll` for paused / queued torrents. */
+  resumeAll: () => Promise<number>;
   /** Remove a download. Pass `deleteFiles=true` to also wipe the downloaded bytes. */
   removeDownload: (id: string, deleteFiles?: boolean) => Promise<void>;
   /** Open the system folder picker. Returns null on cancel. */
@@ -181,6 +189,14 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     await invoke("torrent_resume", { id });
   }, []);
 
+  const pauseAll = useCallback(async (): Promise<number> => {
+    return await invoke<number>("torrent_pause_all");
+  }, []);
+
+  const resumeAll = useCallback(async (): Promise<number> => {
+    return await invoke<number>("torrent_resume_all");
+  }, []);
+
   const removeDownload = useCallback(async (id: string, deleteFiles = false) => {
     await invoke("torrent_remove", { id, deleteFiles });
   }, []);
@@ -221,6 +237,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       addDownload,
       pauseDownload,
       resumeDownload,
+      pauseAll,
+      resumeAll,
       removeDownload,
       selectSavePath,
       refresh,
@@ -233,6 +251,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       addDownload,
       pauseDownload,
       resumeDownload,
+      pauseAll,
+      resumeAll,
       removeDownload,
       selectSavePath,
       refresh,
