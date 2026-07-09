@@ -10,6 +10,7 @@ import { Button } from "../components/ui";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
+import CrackWatchCard from "../components/CrackWatchCard";
 import type { Game } from "../types/game";
 
 
@@ -731,6 +732,9 @@ export default function StoreGameDetail() {
                 </div>
               </section>
             )}
+
+            {/* CrackWatch Status */}
+            <CrackWatchCard gameName={data.title} />
 
             {/* Languages Section */}
             {data.languageSupports && data.languageSupports.length > 0 && (

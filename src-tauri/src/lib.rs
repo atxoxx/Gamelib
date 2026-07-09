@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
+mod crackwatch;
 mod game_scraper;
 mod gpu_detector;
 mod metrics_collector;
@@ -741,7 +742,8 @@ pub fn run() {
             torrent_engine::torrent_resume,
             torrent_engine::torrent_remove,
             torrent_engine::torrent_get_all,
-            torrent_engine::torrent_select_save_path])
+            torrent_engine::torrent_select_save_path,
+            crackwatch::fetch_crackwatch_status])
         .setup(|app| {
             // Initialize the source manager + store checker state.
             //

@@ -319,6 +319,29 @@ export const STORE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Number of store games per page (infinite scroll batch size). */
 export const STORE_PAGE_SIZE = 20;
 
+// ─── CrackWatch Status ──────────────────────────────────────────────────────
+
+/** CrackWatch status parsed from crackrelease.com.
+ *  Fetched on-demand via the `fetch_crackwatch_status` Tauri command. */
+export interface CrackWatchStatus {
+  /** "cracked" | "uncracked" | null — null when the page wasn't found or couldn't be parsed. */
+  status: "cracked" | "uncracked" | null;
+  /** Human-readable status label (e.g. "CRACKED", "UNCRACKED"). */
+  statusLabel: string | null;
+  /** e.g. "0 DAYS AND COUNTING" or "X DAYS AFTER RELEASE". */
+  counter: string | null;
+  /** Human-readable release date. */
+  releaseDate: string | null;
+  /** Crack date (e.g. "Jul 9, 2026" or "TBD"). "TBD" when not yet cracked. */
+  crackDate: string | null;
+  /** DRM protection (e.g. "Denuvo", "Steam", "Arxan"). */
+  drmProtection: string | null;
+  /** Scene group name (e.g. "CODEX", "CPY", "EMPRESS" or "TBD"). */
+  sceneGroup: string | null;
+  /** URL of the crackrelease page. */
+  pageUrl: string | null;
+}
+
 /** Extract a human-readable game name from an executable file path. */
 export function gameNameFromPath(filePath: string): string {
   return (

@@ -14,6 +14,7 @@ import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
+import CrackWatchCard from "../components/CrackWatchCard";
 import { Button } from "../components/ui";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 
@@ -1718,6 +1719,9 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
               </section>
             )}
+
+            {/* CrackWatch Status */}
+            <CrackWatchCard gameName={game.name} />
 
             {/* Languages Section */}
             {game.languageSupports && game.languageSupports.length > 0 && (

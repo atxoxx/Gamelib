@@ -28,6 +28,12 @@ interface StoreGameCardProps {
    * Click events stop propagation so they don't also fire `onClick`.
    */
   onToggleWishlist?: (game: StoreGameSummary, event: MouseEvent) => void;
+  /**
+   * CrackWatch status for a quick badge on the cover. When provided,
+   * renders a small colored pill in the bottom-left of the cover.
+   * Omitted by default — wire up once bulk crackwatch fetching exists.
+   */
+  crackStatus?: "cracked" | "uncracked" | null;
 }
 
 /** Rating badge colors — emerald for high, amber for mid, red for low. */
@@ -43,6 +49,7 @@ export default function StoreGameCard({
   density: densityProp,
   wishlisted: wishlistedProp,
   onToggleWishlist: onToggleWishlistProp,
+  crackStatus,
 }: StoreGameCardProps) {
   // Read defaults from context. Both can be null when the page hasn't
   // been wrapped in the provider (e.g. during isolated testing), so we
@@ -116,6 +123,25 @@ export default function StoreGameCard({
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
             {Math.round(game.rating)}
+          </span>
+        )}
+
+        {crackStatus && (
+          <span
+            className={`store-card-cw-badge${crackStatus === "cracked" ? " cw-cracked" : " cw-uncracked"}`}
+            title={crackStatus === "cracked" ? "Cracked" : "Uncracked"}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              width="10"
+              height="10"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            {crackStatus === "cracked" ? "CRACKED" : "UNCRACKED"}
           </span>
         )}
 

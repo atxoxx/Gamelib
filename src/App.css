@@ -7570,3 +7570,150 @@
   white-space: nowrap;
 }
 
+
+/* ==============================
+   CrackWatch Status Card + Badge
+   ============================== */
+
+/* ── CrackWatch Card (sidebar on GamePage / StoreGameDetail) ───────── */
+
+.cw-card {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 3%, var(--color-surface)),
+    var(--color-surface)
+  );
+  border-color: color-mix(in srgb, var(--color-accent) 15%, var(--color-border));
+}
+
+.cw-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.cw-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  letter-spacing: 0.6px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 12px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.cw-counter {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.4px;
+}
+
+/* ── Meta grid rows ────────────────────────────────────────────────── */
+
+.cw-meta-grid-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.cw-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cw-meta-row:last-child {
+  border-bottom: none;
+}
+
+.cw-meta-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.cw-meta-val {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  text-align: right;
+}
+
+.cw-meta-val-tbd {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Source link ────────────────────────────────────────────────────── */
+
+.cw-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-fast);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+  width: 100%;
+  justify-content: center;
+}
+
+.cw-source-link:hover {
+  color: var(--color-accent-hover);
+}
+
+.cw-source-link svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ── Store Game Card CrackWatch badge ───────────────────────────────── */
+
+.store-card-cw-badge {
+  position: absolute;
+  bottom: var(--space-sm);
+  left: var(--space-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.4px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+  z-index: 5;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.store-card-cw-badge.cw-cracked {
+  background: color-mix(in srgb, #10b981 85%, #000 15%);
+  color: #fff;
+  box-shadow: 0 0 8px color-mix(in srgb, #10b981 40%, transparent);
+}
+
+.store-card-cw-badge.cw-uncracked {
+  background: color-mix(in srgb, #ef4444 85%, #000 15%);
+  color: #fff;
+  box-shadow: 0 0 8px color-mix(in srgb, #ef4444 40%, transparent);
+}
+
+.store-card-cw-badge svg {
+  flex-shrink: 0;
+}
