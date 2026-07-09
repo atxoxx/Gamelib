@@ -1,8 +1,9 @@
-import { useContext, type MouseEvent } from "react";
+import { useContext, useEffect, useState, type MouseEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useProgressiveImage } from "../../hooks/useProgressiveImages";
 import { WishlistContext } from "../../context/WishlistContext";
 import { DensityContext } from "../../context/DensityContext";
-import type { StoreGameSummary, ViewDensity } from "../../types/game";
+import type { StoreGameSummary, ViewDensity, CrackWatchStatus } from "../../types/game";
 
 interface StoreGameCardProps {
   game: StoreGameSummary;
@@ -28,12 +29,6 @@ interface StoreGameCardProps {
    * Click events stop propagation so they don't also fire `onClick`.
    */
   onToggleWishlist?: (game: StoreGameSummary, event: MouseEvent) => void;
-  /**
-   * CrackWatch status for a quick badge on the cover. When provided,
-   * renders a small colored pill in the bottom-left of the cover.
-   * Omitted by default — wire up once bulk crackwatch fetching exists.
-   */
-  crackStatus?: "cracked" | "uncracked" | null;
 }
 
 /** Rating badge colors — emerald for high, amber for mid, red for low. */
@@ -49,7 +44,6 @@ export default function StoreGameCard({
   density: densityProp,
   wishlisted: wishlistedProp,
   onToggleWishlist: onToggleWishlistProp,
-  crackStatus,
 }: StoreGameCardProps) {
   // Read defaults from context. Both can be null when the page hasn't
   // been wrapped in the provider (e.g. during isolated testing), so we
@@ -74,6 +68,24 @@ export default function StoreGameCard({
           wishlistCtx.toggle(g);
         }
       : undefined);
+
+  // ── CrackWatch self-fetch ─────────────────────────────────────────────
+  const [crackStatus, setCrackStatus] = useState<"cracked" | "uncracked" | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<CrackWatchStatus>("fetch_crackwatch_status", { gameName: game.name })
+      .then((result) => {
+        if (cancelled) return;
+        if (result.status) {
+          setCrackStatus((result.status === "cracked" || result.status === "uncracked") ? result.status : null);
+        }
+      })
+      .catch(() => {
+        // Silently ignore — the badge simply won't render
+      });
+    return () => { cancelled = true; };
+  }, [game.name]);
 
   const [coverUrl, imgRef] = useProgressiveImage(game.coverUrl);
 
