@@ -8,6 +8,7 @@ import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import { gameNameFromPath, type Game, type GameMetadataResult } from "../types/game";
 import ImportModal, { type ExeInfo } from "./ImportModal";
 import SidebarFilterPopover from "./SidebarFilterPopover";
+import { Button } from "./ui";
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -225,26 +226,29 @@ export default function Sidebar() {
         </div>
 
         <div className="sidebar-import-wrapper">
-          <button
+          <Button
             ref={importBtnRef}
+            variant="secondary"
             className="sidebar-import-btn"
             title="Import games"
             onClick={() => setShowImportMenu((v) => !v)}
+            leftIcon={
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ width: 16, height: 16 }}
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            }
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ width: 16, height: 16 }}
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span style={{ marginLeft: "var(--space-sm)", fontSize: "var(--font-size-sm)", fontWeight: "var(--font-weight-medium)" }}>Import Games</span>
-          </button>
+            Import Games
+          </Button>
 
           {showImportMenu && (
             <div ref={importMenuRef} className="sidebar-import-menu" onMouseDown={(e) => e.stopPropagation()}>

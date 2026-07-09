@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../../context/GameContext";
 import { useToast } from "../../context/ToastContext";
 import type { Game } from "../../types/game";
+import { Button } from "../../components/ui";
 
 interface Props {
   /** Installed games whose size hasn't been measured yet. The bar hides
@@ -130,21 +131,19 @@ export function BulkRecalcBar({ unsizedGames }: Props) {
         <span className="storage__bulk-progress" aria-live="polite">
           Recalculating {done}/{total} ({pct}%)
         </span>
-        <button
-          type="button"
-          className="storage__btn storage__btn--ghost"
+        <Button
+          variant="ghost"
           onClick={stop}
         >
           Stop
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      className="storage__btn storage__btn--primary"
+    <Button
+      variant="primary"
       onClick={run}
       title={
         skipped > 0
@@ -153,6 +152,6 @@ export function BulkRecalcBar({ unsizedGames }: Props) {
       }
     >
       Recalculate {target.length} missing
-    </button>
+    </Button>
   );
 }

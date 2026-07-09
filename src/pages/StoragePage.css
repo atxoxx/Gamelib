@@ -670,54 +670,7 @@
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
-
-.storage__btn {
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  border-radius: var(--radius-md);
-  padding: 6px 14px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.storage__btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-light);
-}
-
-.storage__btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.storage__btn--primary {
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  color: color-mix(in srgb, var(--color-accent) 90%, var(--color-text-primary));
-}
-
-.storage__btn--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
-  border-color: color-mix(in srgb, var(--color-accent) 75%, transparent);
-}
-
-.storage__btn--ghost {
-  background: transparent;
-}
-
-.storage__btn--danger {
-  color: var(--color-danger);
-  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
-}
-
-.storage__btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
-  border-color: var(--color-danger);
-}
+/* Deprecated: Migrated to global ui Button component. Custom styles removed. */
 
 /* ── Bulk Recalculate bar ────────────────────────────────────────────── */
 

@@ -1,5 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useActiveDownloadCount } from "../context/DownloadContext";
+import { Badge } from "./ui";
 
 function LibraryIcon() {
   return (
@@ -242,21 +243,31 @@ export default function TopNav() {
        *  still sees where they are. */}
       <div className="topnav-right">
         {activeDownloads > 0 && (
-          <span
-            className="topnav-download-indicator"
+          <Badge
+            variant="accent"
+            size="md"
+            className="topnav-download-badge"
             title={`${activeDownloads} active download${activeDownloads === 1 ? "" : "s"} — see the floating progress panel`}
             aria-label={`${activeDownloads} active downloads`}
             role="status"
+            style={{ display: "inline-flex", alignItems: "center", marginRight: "var(--space-sm)" }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ width: 12, height: 12, marginRight: 4 }}
+              aria-hidden
+            >
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <span className="topnav-download-indicator-count">
-              {activeDownloads}
-            </span>
-          </span>
+            {activeDownloads}
+          </Badge>
         )}
         <NavLink
           to="/settings"

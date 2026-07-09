@@ -639,23 +639,21 @@ export default function SettingsPage() {
 
                 <div className="integration-tile-actions">
                   {steamAuth.isAuthenticated ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-steam"
+                    <Button
+                      variant="primary"
                       onClick={() => handleSyncNow()}
-                      disabled={isSyncing}
+                      isLoading={isSyncing}
                     >
-                      {isSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Library"}
-                    </button>
+                      Sync Library
+                    </Button>
                   ) : (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-steam"
+                    <Button
+                      variant="primary"
                       onClick={handleSteamLogin}
-                      disabled={isSteamLoggingIn}
+                      isLoading={isSteamLoggingIn}
                     >
-                      {isSteamLoggingIn ? <><span className="spinner" /> Waiting for login…</> : "Connect Steam Account"}
-                    </button>
+                      Connect Steam Account
+                    </Button>
                   )}
                 </div>
 
@@ -713,9 +711,9 @@ export default function SettingsPage() {
                   <strong>Disconnect Steam.</strong> Clears your local
                   session — your Steam account is untouched.
                 </p>
-                <button type="button" className="btn btn-danger btn-sm" onClick={handleDisconnect}>
+                <Button variant="danger" size="sm" onClick={handleDisconnect}>
                   Disconnect
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -755,23 +753,21 @@ export default function SettingsPage() {
 
                 <div className="integration-tile-actions">
                   {epicAuth.isAuthenticated ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
+                    <Button
+                      variant="primary"
                       onClick={handleEpicSync}
-                      disabled={isEpicSyncing}
+                      isLoading={isEpicSyncing}
                     >
-                      {isEpicSyncing ? <><span className="spinner" /> Syncing…</> : "Sync Library"}
-                    </button>
+                      Sync Library
+                    </Button>
                   ) : (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
+                    <Button
+                      variant="primary"
                       onClick={handleEpicLogin}
-                      disabled={isEpicLoggingIn}
+                      isLoading={isEpicLoggingIn}
                     >
-                      {isEpicLoggingIn ? <><span className="spinner" /> Waiting for login…</> : "Connect Epic Account"}
-                    </button>
+                      Connect Epic Account
+                    </Button>
                   )}
                 </div>
 
@@ -797,9 +793,9 @@ export default function SettingsPage() {
                   <strong>Disconnect Epic Games.</strong> Clears local
                   tokens — your Epic account is unaffected.
                 </p>
-                <button type="button" className="btn btn-danger btn-sm" onClick={handleEpicDisconnect}>
+                <Button variant="danger" size="sm" onClick={handleEpicDisconnect}>
                   Disconnect
-                </button>
+                </Button>
               </div>
             )}
           </div>

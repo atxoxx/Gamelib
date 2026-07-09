@@ -3,8 +3,8 @@
    ========================================================================== */
 
 :root {
-  --color-brand-teal: #10b981; /* Emerald/Teal brand color */
-  --color-brand-blue: #3b82f6;
+  --color-brand-teal: var(--color-accent); /* Dynamic mapping to theme accent */
+  --color-brand-blue: var(--color-info);   /* Dynamic mapping to theme info */
   --spacing-unit: 8px;
 }
 

@@ -3,6 +3,7 @@ import { useGames } from "../context/GameContext";
 import { useDensityContext } from "../context/DensityContext";
 import DensityToggle from "../components/DensityToggle";
 import { DEFAULT_SORT, sortGames, type SortKey } from "./storage/utils";
+import { Button } from "../components/ui";
 import { BulkRecalcBar } from "./storage/BulkRecalcBar";
 import { StorageHeader } from "./storage/StorageHeader";
 import { StorageSortSelect } from "./storage/StorageSortSelect";
@@ -177,13 +178,12 @@ export default function StoragePage() {
                 : "Use Auto-detect or Set size on each game to measure its folder."}
           </p>
           {showingFiltered && (
-            <button
-              type="button"
-              className="storage__btn storage__btn--ghost"
+            <Button
+              variant="ghost"
               onClick={() => setSearch("")}
             >
               Clear search
-            </button>
+            </Button>
           )}
         </div>
       ) : (

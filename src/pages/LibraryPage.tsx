@@ -7,7 +7,7 @@ import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import LibraryFilterChips from "../components/library/LibraryFilterChips";
 import LibraryFilterSidebar from "../components/library/LibraryFilterSidebar";
 import DensityToggle from "../components/DensityToggle";
-import { Card, Badge } from "../components/ui";
+import { Card, Badge, Button } from "../components/ui";
 import type { Game } from "../types/game";
 
 export default function LibraryPage() {
@@ -178,21 +178,22 @@ export default function LibraryPage() {
               <p className="library-empty-filtered-subtitle">
                 Try removing a filter or broadening your search.
               </p>
-              <button className="library-empty-filtered-reset" onClick={reset}>
+              <Button variant="primary" onClick={reset}>
                 Clear all filters
-              </button>
+              </Button>
             </div>
           ) : (
             <div className={`library-cards density-${density}`}>
-              {filteredGames.map((game) => (
-                <LibraryGameCard
-                  key={game.id}
-                  game={game}
-                  density={density}
-                  isRunning={runningGameIds.includes(game.id)}
-                  onClick={() => handleCardClick(game)}
-                  onContextMenu={(e) => handleGameContextMenu(e, game)}
-                />
+              {filteredGames.map((game, index) => (
+                <div key={game.id} className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}>
+                  <LibraryGameCard
+                    game={game}
+                    density={density}
+                    isRunning={runningGameIds.includes(game.id)}
+                    onClick={() => handleCardClick(game)}
+                    onContextMenu={(e) => handleGameContextMenu(e, game)}
+                  />
+                </div>
               ))}
             </div>
           )}

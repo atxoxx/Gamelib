@@ -5,6 +5,7 @@ import { useGames } from "../../context/GameContext";
 import { useToast } from "../../context/ToastContext";
 import { useSizeUnit } from "../../hooks/useSizeUnit";
 import { formatSize, type Game } from "../../types/game";
+import { Button } from "../../components/ui";
 
 interface Props {
   game: Game;
@@ -137,17 +138,18 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
         {isSized ? (
           <span className="storage__row-size">{formatSize(game.sizeBytes, unit)}</span>
         ) : (
-          <button
-            type="button"
-            className="storage__set-size-pill"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={(e) => {
               e.stopPropagation();
               detect();
             }}
             title="Pick a folder and calculate size"
+            style={{ padding: "2px 8px", fontSize: "11px", height: "auto" }}
           >
             Set size
-          </button>
+          </Button>
         )}
         <span
           className={`storage__row-detected${stale ? " storage__row-detected--stale" : ""}`}
@@ -198,28 +200,26 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
             )}
           </div>
           <div className="storage__row-actions">
-            <button
-              type="button"
-              className="storage__btn storage__btn--primary"
+            <Button
+              variant="primary"
               onClick={() => detect()}
-              disabled={detecting}
+              isLoading={detecting}
               title={
                 stale
                   ? "Pick a new folder to re-link the size measurement"
                   : undefined
               }
             >
-              {detecting ? "Detecting..." : stale ? "Re-link" : "Auto-detect"}
-            </button>
+              {stale ? "Re-link" : "Auto-detect"}
+            </Button>
             {isSized && (
-              <button
-                type="button"
-                className="storage__btn storage__btn--ghost"
+              <Button
+                variant="ghost"
                 onClick={clearSize}
                 disabled={detecting}
               >
                 Clear
-              </button>
+              </Button>
             )}
             <span className="storage__row-spacer" />
           </div>

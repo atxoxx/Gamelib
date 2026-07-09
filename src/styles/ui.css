@@ -156,6 +156,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: transform var(--duration-normal) var(--ease-standard),
+              box-shadow var(--duration-normal) var(--ease-standard),
+              border-color var(--duration-normal) var(--ease-standard);
 }
 
 .ui-card--surface {
