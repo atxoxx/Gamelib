@@ -104,7 +104,7 @@ export default function DownloadModal({
 
         const [own, searchResults] = await Promise.all([
           ownershipPromise,
-          searchSources(gameName).catch((e) => {
+          searchSources(gameName, steamAppId).catch((e) => {
             console.error("[DownloadModal] searchSources failed:", e);
             return [];
           }),

@@ -293,6 +293,17 @@ export default function StoreGameDetail() {
     return games.find((g) => g.name.toLowerCase().trim() === norm) ?? null;
   }, [data, games]);
 
+  const steamAppId = useMemo(() => {
+    if (!data?.websites) return undefined;
+    for (const url of data.websites) {
+      const match = url.match(/store\.steampowered\.com\/app\/(\d+)/i);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return undefined;
+  }, [data]);
+
   // Callback for ReviewsTab to update our local state when it fetches reviews.
   const handleReviewsFetched = useCallback(
     (reviews: IgdbReview[], _source: string) => {
@@ -396,6 +407,7 @@ export default function StoreGameDetail() {
               </button>
               <DownloadButton
                 gameName={data.title}
+                steamAppId={steamAppId}
                 variant="prominent"
                 label="Find Download"
               />

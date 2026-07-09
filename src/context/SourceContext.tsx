@@ -43,8 +43,8 @@ interface SourceContextValue {
   toggleSource: (id: string) => Promise<void>;
   refreshSource: (id: string) => Promise<void>;
   refreshAllSources: () => Promise<void>;
-  /** Fuzzy-match `query` against every enabled source's cache. */
-  searchSources: (query: string) => Promise<MatchedDownload[]>;
+  /** Fuzzy-match `query` against every enabled source's cache, checking Hydra online when possible. */
+  searchSources: (query: string, steamAppId?: number) => Promise<MatchedDownload[]>;
 }
 
 const SourceContext = createContext<SourceContextValue | null>(null);
@@ -163,11 +163,12 @@ export function SourceProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   const searchSources = useCallback(
-    async (query: string): Promise<MatchedDownload[]> => {
+    async (query: string, steamAppId?: number): Promise<MatchedDownload[]> => {
       const trimmed = query.trim();
       if (!trimmed) return [];
       return await invoke<MatchedDownload[]>("sources_search_game", {
         query: trimmed,
+        steamAppId: steamAppId ?? null,
       });
     },
     [],

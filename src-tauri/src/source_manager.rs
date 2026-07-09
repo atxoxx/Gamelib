@@ -834,6 +834,258 @@ impl SourceManager {
         });
         results
     }
+
+    pub async fn search_online(
+        &self,
+        query: &str,
+        steam_app_id: Option<u32>,
+    ) -> Result<Vec<MatchedDownload>, String> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Get enabled source IDs and map local IDs to hydra IDs
+        let mut enabled_hydra_ids = Vec::new();
+        let mut hydra_to_local = HashMap::new();
+        for source in &self.sources {
+            if source.enabled && !source.hydra_source_id.is_empty() {
+                enabled_hydra_ids.push(source.hydra_source_id.clone());
+                hydra_to_local.insert(source.hydra_source_id.clone(), source.id.clone());
+            }
+        }
+
+        if enabled_hydra_ids.is_empty() {
+            // Fall back to local search if no hydra sources are enabled/synced
+            return Ok(self.search(q));
+        }
+
+        let mut repacks = Vec::new();
+
+        // 1. Try search by Steam AppID first if available
+        if let Some(appid) = steam_app_id {
+            match self.fetch_repacks_by_appid(appid, &enabled_hydra_ids).await {
+                Ok(list) => {
+                    repacks = list;
+                }
+                Err(e) => {
+                    eprintln!("[source_manager] fetch_repacks_by_appid failed: {}", e);
+                }
+            }
+        }
+
+        // 2. If no AppID or AppID search returned 0 results, search catalogue by title
+        if repacks.is_empty() {
+            match self.search_catalogue_by_title(q, &enabled_hydra_ids).await {
+                Ok(list) => {
+                    repacks = list;
+                }
+                Err(e) => {
+                    eprintln!("[source_manager] search_catalogue_by_title failed: {}", e);
+                }
+            }
+        }
+
+        // 3. Map repacks to MatchedDownload
+        if !repacks.is_empty() {
+            let query_tokens: Vec<String> = q
+                .split_whitespace()
+                .map(|t| t.to_ascii_lowercase())
+                .collect();
+
+            let mut results = Vec::new();
+            for repack in repacks {
+                let score = score_match(&query_tokens, q, &repack.title);
+                if score < 0.3 {
+                    continue;
+                }
+
+                let local_id = hydra_to_local
+                    .get(&repack.download_source_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let magnet = repack
+                    .uris
+                    .iter()
+                    .find(|u| u.starts_with("magnet:"))
+                    .cloned();
+
+                results.push(MatchedDownload {
+                    source_name: repack.download_source_name.clone(),
+                    source_id: local_id,
+                    title: repack.title.clone(),
+                    file_size: repack.file_size.clone().unwrap_or_default(),
+                    uris: repack.uris.clone(),
+                    magnet,
+                    upload_date: repack.upload_date.clone(),
+                    match_score: score,
+                });
+            }
+
+            results.sort_by(|a, b| {
+                b.match_score
+                    .partial_cmp(&a.match_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            return Ok(results);
+        }
+
+        // 4. Ultimate fallback: local search
+        Ok(self.search(q))
+    }
+
+    async fn fetch_repacks_by_appid(
+        &self,
+        steam_app_id: u32,
+        hydra_source_ids: &[String],
+    ) -> Result<Vec<HydraRepack>, String> {
+        let url = format!("{}/games/steam/{}/download-sources", HYDRA_API_BASE, steam_app_id);
+        
+        let mut query_params = vec![
+            ("take".to_string(), "100".to_string()),
+            ("skip".to_string(), "0".to_string()),
+        ];
+        for id in hydra_source_ids {
+            query_params.push(("downloadSourceIds[]".to_string(), id.clone()));
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send query to Hydra API: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Hydra API returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            ));
+        }
+
+        response
+            .json::<Vec<HydraRepack>>()
+            .await
+            .map_err(|e| format!("Failed to parse Hydra repacks response: {}", e))
+    }
+
+    async fn search_catalogue_by_title(
+        &self,
+        title: &str,
+        hydra_source_ids: &[String],
+    ) -> Result<Vec<HydraRepack>, String> {
+        let search_url = format!("{}/catalogue/search", HYDRA_API_BASE);
+        
+        // 1. Try search with original title
+        let mut search_req = CatalogueSearchRequest {
+            title: title.to_string(),
+            take: 1,
+            skip: 0,
+            download_source_fingerprints: Vec::new(),
+        };
+
+        let search_resp = self
+            .client
+            .post(&search_url)
+            .json(&search_req)
+            .send()
+            .await
+            .map_err(|e| format!("Catalogue search request failed: {}", e))?;
+
+        let status = search_resp.status();
+        let mut search_result = if status.is_success() {
+            search_resp
+                .json::<HydraSearchResponse>()
+                .await
+                .map_err(|e| format!("Failed to parse search response: {}", e))?
+        } else {
+            HydraSearchResponse { edges: Vec::new() }
+        };
+
+        // 2. If 0 results, clean the title and try again (e.g. remove TM/R, split at colon or dash)
+        if search_result.edges.is_empty() {
+            let cleaned = clean_search_title(title);
+            if cleaned != title {
+                search_req.title = cleaned;
+                if let Ok(resp) = self.client.post(&search_url).json(&search_req).send().await {
+                    if resp.status().is_success() {
+                        if let Ok(res) = resp.json::<HydraSearchResponse>().await {
+                            search_result = res;
+                        }
+                    }
+                }
+            }
+        }
+
+        if search_result.edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Step B: Fetch repacks for the first match
+        let best_match = &search_result.edges[0];
+        let repacks_url = format!(
+            "{}/games/{}/{}/download-sources",
+            HYDRA_API_BASE, best_match.shop, best_match.object_id
+        );
+
+        let mut query_params = vec![
+            ("take".to_string(), "100".to_string()),
+            ("skip".to_string(), "0".to_string()),
+        ];
+        for id in hydra_source_ids {
+            query_params.push(("downloadSourceIds[]".to_string(), id.clone()));
+        }
+
+        let repacks_resp = self
+            .client
+            .get(&repacks_url)
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to get repacks from Hydra API: {}", e))?;
+
+        let repacks_status = repacks_resp.status();
+        if !repacks_status.is_success() {
+            let body = repacks_resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "Hydra API returned HTTP {} on repacks: {}",
+                repacks_status.as_u16(),
+                body
+            ));
+        }
+
+        repacks_resp
+            .json::<Vec<HydraRepack>>()
+            .await
+            .map_err(|e| format!("Failed to parse repacks response: {}", e))
+    }
+}
+
+fn clean_search_title(title: &str) -> String {
+    let mut cleaned = title
+        .replace('®', "")
+        .replace('™', "")
+        .replace('©', "");
+    
+    if let Some(pos) = cleaned.find(':') {
+        let first_part = cleaned[..pos].trim();
+        if first_part.len() >= 3 {
+            cleaned = first_part.to_string();
+        }
+    } else if let Some(pos) = cleaned.find('-') {
+        let first_part = cleaned[..pos].trim();
+        if first_part.len() >= 3 {
+            cleaned = first_part.to_string();
+        }
+    }
+    
+    cleaned.trim().to_string()
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -980,6 +1232,41 @@ pub async fn sources_refresh_all(
 pub async fn sources_search_game(
     state: tauri::State<'_, Arc<tokio::sync::Mutex<SourceManager>>>,
     query: String,
+    steam_app_id: Option<u32>,
 ) -> Result<Vec<MatchedDownload>, String> {
-    Ok(state.lock().await.search(&query))
+    state.lock().await.search_online(&query, steam_app_id).await
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogueSearchRequest {
+    title: String,
+    take: usize,
+    skip: usize,
+    download_source_fingerprints: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HydraSearchEdge {
+    object_id: String,
+    title: String,
+    shop: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HydraSearchResponse {
+    edges: Vec<HydraSearchEdge>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HydraRepack {
+    id: String,
+    title: String,
+    file_size: Option<String>,
+    uris: Vec<String>,
+    upload_date: Option<String>,
+    download_source_id: String,
+    download_source_name: String,
 }
