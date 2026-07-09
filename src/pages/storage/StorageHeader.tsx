@@ -20,7 +20,10 @@ interface Props {
 
 /** Phase-5 Storage header — totals card + per-platform + per-drive
  *  breakdown bars. Pure presentational: receives the unsorted games
- *  array (the orchestrator handles sorting) and aggregates internally. */
+ *  array (the orchestrator handles sorting) and aggregates internally.
+ *
+ *  Note: the page title/subtitle are rendered by StoragePage itself
+ *  so this component just produces the three breakdown cards. */
 export function StorageHeader({ games, staleCount = 0 }: Props) {
   const { unit } = useSizeUnit();
   const total = useMemo(() => totalBytes(games), [games]);
@@ -30,15 +33,7 @@ export function StorageHeader({ games, staleCount = 0 }: Props) {
   const uncategorized = coverage.unsized;
 
   return (
-    <header className="storage__header">
-      <div className="storage__header-left">
-        <h1 className="storage__title">Storage</h1>
-        <p className="storage__subtitle">
-          Disk usage across every installed game, broken down by platform and drive.
-        </p>
-      </div>
-
-      <div className="storage__header-grid">
+    <div className="storage__header-grid">
         {/* Totals card */}
         <section className="storage__card storage__card--totals">
           <span className="storage__card-label">Tracked size</span>
@@ -60,8 +55,7 @@ export function StorageHeader({ games, staleCount = 0 }: Props) {
 
         <BreakdownCard title="By platform" buckets={platforms} total={total} unit={unit} />
         <BreakdownCard title="By drive" buckets={drives} total={total} unit={unit} />
-      </div>
-    </header>
+    </div>
   );
 }
 

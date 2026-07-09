@@ -12,6 +12,8 @@ interface Props {
    *  The row renders a stale indicator + a "Re-link" CTA in its
    *  expanded panel. */
   stale?: boolean;
+  /** View density from the shared DensityContext. */
+  density?: string;
   /** Fired after the row's sizeRootPath/sizeBytes update successfully.
    *  The StoragePage orchestrator uses this to refresh the per-row
    *  staleness check (the new path may or may not exist yet). */
@@ -31,7 +33,7 @@ interface SizeDetectionResult {
  *  Tauri command convention from earlier work -- args are camelCase on
  *  the JS side (`exePath`, `gameName`, `rootOverride`) and map to the
  *  snake_case Rust parameters via Tauri's default rename behavior. */
-export function StorageRow({ game, stale = false, onSizeUpdated }: Props) {
+export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdated }: Props) {
   const { updateGame } = useGames();
   const { showToast } = useToast();
   const { unit } = useSizeUnit();
@@ -88,7 +90,7 @@ export function StorageRow({ game, stale = false, onSizeUpdated }: Props) {
 
   return (
     <li
-      className={`storage__row${expanded ? " storage__row--expanded" : ""}${stale ? " storage__row--stale" : ""}`}
+      className={`storage__row density-${density}${expanded ? " storage__row--expanded" : ""}${stale ? " storage__row--stale" : ""}`}
       data-game-id={game.id}
     >
       {/* Collapsed row summary */}
@@ -111,8 +113,23 @@ export function StorageRow({ game, stale = false, onSizeUpdated }: Props) {
         }}
         aria-expanded={expanded}
       >
+        {/* Game cover thumbnail */}
+        <div className="storage__row-thumb">
+          {game.coverArtUrl || game.iconUrl ? (
+            <img src={game.coverArtUrl || game.iconUrl} alt="" loading="lazy" />
+          ) : (
+            <span className="storage__row-thumb-placeholder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            </span>
+          )}
+        </div>
         <span className="storage__row-name" title={game.name}>
           {game.name}
+          {stale && (
+            <span className="storage__stale-badge">Stale</span>
+          )}
         </span>
         <span className="storage__row-platform">
           {game.platform || "Unknown"}
