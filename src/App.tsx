@@ -24,7 +24,6 @@ import { DownloadProvider } from "./context/DownloadContext";
 import { SourceProvider } from "./context/SourceContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import Splashscreen from "./components/Splashscreen";
-import DownloadProgress from "./components/DownloadProgress";
 import "./App.css";
 import "./store.css";
 
@@ -73,10 +72,6 @@ function App() {
                           <Route path="plugins" element={<PluginsPage />} />
                         </Route>
                       </Routes>
-                      {/* Floating download-progress overlay. Mounted
-                       *  INSIDE DownloadProvider so useDownloads() works,
-                       *  OUTSIDE Routes so it floats above every page. */}
-                      <DownloadProgress />
                     </DownloadProvider>
                   </SourceProvider>
                 </WishlistProvider>

@@ -1,0 +1,409 @@
+// Topnav-anchored popover for managing downloads.
+//
+// Opens when the user clicks the download button in the topnav.
+// Shows the full list of downloads split into "Active" and "History"
+// (completed) tabs. Each card has inline pause/resume/remove actions,
+// and the History tab exposes a "Clear history" affordance so the
+// completed list doesn't accumulate forever.
+//
+// Replaces the previous floating "live activity" widget:
+//
+//   * Same data source (`useDownloads`), so state stays in sync with
+//     the engine in real time.
+//   * Discoverability: anchored to a button that always shows the
+//     active count, so users don't need to wait for a download to
+//     start before knowing where to look.
+//   * Consistency: the topnav right-hand cluster is the place every
+//     other app puts a "system tray"-style entry point, so users
+//     who muscle-memory reach for it will find the downloads UI.
+//
+// Behavior:
+//   * Click outside the popover or the button → closes.
+//   * Escape key → closes.
+//   * Tabs auto-switch if a tab becomes empty (so an Open → none-active
+//     transition swaps to History automatically).
+//   * The History tab's "Clear history" removes every completed
+//     download; if you want per-item delete, use the card's Remove
+//     button instead.
+
+import { useState, useEffect, useRef, type RefObject } from "react";
+import { useDownloads } from "../context/DownloadContext";
+import {
+  formatBytesPerSecond,
+  formatBytesShort,
+  formatProgress,
+  getStatusError,
+  getStatusLabel,
+  getStatusClassSuffix,
+  isActiveStatus,
+  type TorrentDownload,
+} from "../types/download";
+import { useToast } from "../context/ToastContext";
+
+interface DownloadPopoverProps {
+  open: boolean;
+  onClose: () => void;
+  /** Button (or trigger) that opened the popover. Clicks inside this
+   *  element are ignored by the click-outside handler so the user
+   *  can toggle the popover by tapping the button twice. */
+  anchorRef: RefObject<HTMLElement | null>;
+  /** Optional id used for ARIA linking with the trigger button's
+   *  `aria-controls`. Required for screen-reader correctness. */
+  id?: string;
+}
+
+type TabKey = "active" | "history";
+
+/**
+ * Per-card actions. Each action is a small icon button — we keep the
+ * surface minimal so a 380px panel can fit 2-3 cards before scrolling.
+ *
+ * Mirrors the layout of the old floating widget so anyone who used
+ * that surface will recognise it instantly.
+ */
+function DownloadCard({
+  download,
+  onPause,
+  onResume,
+  onRemove,
+}: {
+  download: TorrentDownload;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const status = download.status;
+  const errorMessage = getStatusError(status);
+  const indeterminate = download.progress == null && isActiveStatus(status);
+  const isPaused = status.kind === "paused";
+  const isCompleted = status.kind === "completed";
+  const isError = status.kind === "error";
+
+  // Border tint + indeterminate bar animation
+  const cardClass = [
+    "dl-progress-card",
+    isError && "error",
+    isCompleted && "completed",
+    indeterminate && "indeterminate",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={cardClass}>
+      <div className="dl-progress-card-header">
+        <span className="dl-progress-card-name" title={download.name}>
+          {download.name}
+        </span>
+        <span className={`dl-progress-card-status dl-progress-card-status--${getStatusClassSuffix(status)}`}>
+          {getStatusLabel(status)}
+        </span>
+      </div>
+
+      <div className="dl-progress-card-bar">
+        <div
+          className="dl-progress-card-bar-fill"
+          style={{ width: indeterminate ? "30%" : `${(download.progress ?? 0) * 100}%` }}
+        />
+      </div>
+
+      <div className="dl-progress-card-footer">
+        <div className="dl-progress-card-stats">
+          <span>
+            <strong>{formatProgress(download.progress)}</strong>
+            {download.totalSize != null && (
+              <> · {formatBytesShort(download.totalSize)}</>
+            )}
+          </span>
+          {isActiveStatus(status) && download.downloadSpeed > 0 && (
+            <span>{formatBytesPerSecond(download.downloadSpeed)}</span>
+          )}
+          {isCompleted && download.totalSize != null && (
+            <span className="dl-progress-card-stat-meta">
+              via {download.sourceName}
+            </span>
+          )}
+        </div>
+        <div className="dl-progress-card-actions">
+          {isActiveStatus(status) && !isPaused && (
+            <button
+              className="dl-progress-card-btn"
+              onClick={() => onPause(download.id)}
+              title="Pause"
+              aria-label="Pause download"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" />
+                <rect x="14" y="4" width="4" height="16" />
+              </svg>
+            </button>
+          )}
+          {isPaused && (
+            <button
+              className="dl-progress-card-btn"
+              onClick={() => onResume(download.id)}
+              title="Resume"
+              aria-label="Resume download"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            </button>
+          )}
+          <button
+            className="dl-progress-card-btn danger"
+            onClick={() => onRemove(download.id)}
+            title={isCompleted ? "Remove from history" : "Remove"}
+            aria-label="Remove download"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {isError && errorMessage && (
+        <div className="dl-progress-card-error" role="alert">
+          {errorMessage}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function DownloadPopover({
+  open,
+  onClose,
+  anchorRef,
+  id,
+}: DownloadPopoverProps) {
+  const {
+    activeDownloads,
+    completedDownloads,
+    pauseDownload,
+    resumeDownload,
+    removeDownload,
+  } = useDownloads();
+  const { showToast } = useToast();
+  const [tab, setTab] = useState<TabKey>("active");
+  const [clearing, setClearing] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // ── Click outside + Escape to close ─────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const inPopover = popoverRef.current?.contains(target);
+      const inAnchor = anchorRef.current?.contains(target);
+      if (!inPopover && !inAnchor) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose, anchorRef]);
+
+  // ── Auto-switch tabs when one becomes empty ─────────────────────────
+  // Smooth UX so a user who just finished their last download isn't
+  // left looking at "No active downloads" — the panel flips to
+  // History automatically.
+  useEffect(() => {
+    if (tab === "active" && activeDownloads.length === 0 && completedDownloads.length > 0) {
+      setTab("history");
+    }
+    if (tab === "history" && completedDownloads.length === 0 && activeDownloads.length > 0) {
+      setTab("active");
+    }
+  }, [tab, activeDownloads.length, completedDownloads.length]);
+
+  async function handlePause(id: string) {
+    try {
+      await pauseDownload(id);
+    } catch (err) {
+      showToast(`Pause failed: ${err}`, "error");
+    }
+  }
+  async function handleResume(id: string) {
+    try {
+      await resumeDownload(id);
+    } catch (err) {
+      showToast(`Resume failed: ${err}`, "error");
+    }
+  }
+  async function handleRemove(id: string) {
+    try {
+      await removeDownload(id, false);
+      showToast("Download removed", "info");
+    } catch (err) {
+      showToast(`Remove failed: ${err}`, "error");
+    }
+  }
+
+  async function handleClearHistory() {
+    if (clearing) return;
+    setClearing(true);
+    const ids = completedDownloads.map((d) => d.id);
+    let success = 0;
+    let failed = 0;
+    try {
+      // Fire sequentially — Rust side does file-system work per call
+      // and we don't want a thundering herd against the engine.
+      for (const id of ids) {
+        try {
+          await removeDownload(id, false);
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+      if (failed === 0) {
+        showToast(`Cleared ${success} from history`, "info");
+      } else {
+        showToast(`Cleared ${success}, ${failed} failed`, "error");
+      }
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  if (!open) return null;
+
+  const activeCount = activeDownloads.length;
+  const historyCount = completedDownloads.length;
+  const list = tab === "active" ? activeDownloads : completedDownloads;
+  const totalCount = activeCount + historyCount;
+
+  return (
+    <div
+      id={id}
+      className="dl-popover"
+      ref={popoverRef}
+      role="dialog"
+      aria-label="Downloads manager"
+    >
+      <div className="dl-popover-header">
+        <div className="dl-popover-tabs" role="tablist">
+          <button
+            role="tab"
+            aria-selected={tab === "active"}
+            className={`dl-popover-tab${tab === "active" ? " active" : ""}`}
+            onClick={() => setTab("active")}
+          >
+            Active
+            {activeCount > 0 && (
+              <span className={`dl-popover-tab-count${activeCount > 0 && tab !== "active" ? " pulse" : ""}`}>
+                {activeCount}
+              </span>
+            )}
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "history"}
+            className={`dl-popover-tab${tab === "history" ? " active" : ""}`}
+            onClick={() => setTab("history")}
+          >
+            History
+            {historyCount > 0 && (
+              <span className="dl-popover-tab-count">{historyCount}</span>
+            )}
+          </button>
+        </div>
+        <button
+          className="dl-popover-close"
+          onClick={onClose}
+          aria-label="Close downloads panel"
+          title="Close"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="dl-popover-body" role="tabpanel">
+        {list.length === 0 ? (
+          <div className="dl-popover-empty">
+            <svg
+              className="dl-popover-empty-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <p className="dl-popover-empty-title">
+              {tab === "active"
+                ? totalCount === 0
+                  ? "No downloads yet"
+                  : "No active downloads"
+                : "No completed downloads"}
+            </p>
+            <p className="dl-popover-empty-hint">
+              {tab === "active"
+                ? "Start one from a game's Store or Library page."
+                : "Completed downloads will appear here for easy access."}
+            </p>
+          </div>
+        ) : (
+          list.map((d) => (
+            <DownloadCard
+              key={d.id}
+              download={d}
+              onPause={handlePause}
+              onResume={handleResume}
+              onRemove={handleRemove}
+            />
+          ))
+        )}
+      </div>
+
+      {tab === "history" && historyCount > 0 && (
+        <div className="dl-popover-footer">
+          <button
+            className="dl-popover-footer-btn"
+            onClick={handleClearHistory}
+            disabled={clearing}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+            </svg>
+            {clearing ? "Clearing…" : "Clear history"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

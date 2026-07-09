@@ -1,6 +1,7 @@
+import { useId, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useActiveDownloadCount } from "../context/DownloadContext";
-import { Badge } from "./ui";
+import DownloadPopover from "./DownloadPopover";
 
 function LibraryIcon() {
   return (
@@ -191,6 +192,26 @@ function NewsIcon() {
   );
 }
 
+function DownloadIcon() {
+  // Down-into-tray icon, matches the inline icon style of every
+  // other tab button in this file.
+  return (
+    <svg
+      className="topnav-tab-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
 const tabs: Tab[] = [
   { path: "/store", label: "Store", icon: <StoreIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
@@ -206,6 +227,16 @@ const tabs: Tab[] = [
 export default function TopNav() {
   const activeDownloads = useActiveDownloadCount();
   const location = useLocation();
+
+  // Download popover state. We keep the trigger element and the
+  // popover as siblings inside `.topnav-right`, so the popover can
+  // position itself relative to the trigger via the absolute
+  // `.topnav` containing block (set in App.css).
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const downloadBtnRef = useRef<HTMLButtonElement>(null);
+  // Stable id so the popover div and the trigger button are linked
+  // via `aria-controls` for screen readers.
+  const popoverId = useId();
 
   return (
     <nav className="topnav" aria-label="Main navigation">
@@ -237,38 +268,46 @@ export default function TopNav() {
       </div>
 
       {/* Contextual actions live on the far right (system-style actions
-       *  like Settings, Profile). Icon-only so they don't compete
-       *  with the primary nav for attention. The gear button picks up
-       *  the same `active` treatment as the regular tabs so the user
-       *  still sees where they are. */}
+       *  like Settings, Downloads). Icon-only so they don't compete
+       *  with the primary nav for attention. The Download button
+       *  opens a popover (below) that lists every active and
+       *  completed torrent; the Settings button uses NavLink so the
+       *  "active" treatment matches the regular tabs. */}
       <div className="topnav-right">
-        {activeDownloads > 0 && (
-          <Badge
-            variant="accent"
-            size="md"
-            className="topnav-download-badge"
-            title={`${activeDownloads} active download${activeDownloads === 1 ? "" : "s"} — see the floating progress panel`}
-            aria-label={`${activeDownloads} active downloads`}
-            role="status"
-            style={{ display: "inline-flex", alignItems: "center", marginRight: "var(--space-sm)" }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ width: 12, height: 12, marginRight: 4 }}
-              aria-hidden
+        <button
+          ref={downloadBtnRef}
+          type="button"
+          className={`topnav-btn topnav-btn-downloads${downloadsOpen ? " active" : ""}`}
+          onClick={() => setDownloadsOpen((o) => !o)}
+          aria-label={`Downloads${activeDownloads > 0 ? ` (${activeDownloads} active)` : ""}`}
+          aria-expanded={downloadsOpen}
+          aria-haspopup="dialog"
+          aria-controls={popoverId}
+          title="Downloads"
+        >
+          <DownloadIcon />
+          {activeDownloads > 0 && (
+            <span
+              className="topnav-btn-badge"
+              role="status"
+              aria-label={`${activeDownloads} active downloads`}
             >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            {activeDownloads}
-          </Badge>
-        )}
+              {activeDownloads}
+            </span>
+          )}
+        </button>
+        <DownloadPopover
+          open={downloadsOpen}
+          onClose={() => {
+            setDownloadsOpen(false);
+            // Restore focus to the trigger so keyboard users don't
+            // get stranded after Escape / click-outside closes the
+            // popover.
+            downloadBtnRef.current?.focus();
+          }}
+          anchorRef={downloadBtnRef}
+          id={popoverId}
+        />
         <NavLink
           to="/settings"
           className={({ isActive }) =>

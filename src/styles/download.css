@@ -674,3 +674,292 @@
   font-weight: 700;
   border-radius: 8px;
 }
+
+/* ===========================================================================
+ * Topnav-anchored Downloads popover
+ *
+ * Replaces the previous floating "live activity" widget (DownloadProgress).
+ * Opens when the user clicks the downloads button in the topnav right
+ * cluster. Lists every active and completed torrent with inline
+ * pause/resume/remove actions, plus a "Clear history" affordance.
+ *
+ * Anchoring notes:
+ *   * The popover is positioned `absolute` relative to `.topnav` (which
+ *     we set to `position: relative` in App.css), so it sits flush to
+ *     the bottom edge of the nav, ~12 px down.
+ *   * `right: 0` aligns the popover with the download button; the
+ *     popover itself is ~380 px wide so it doesn't escape the viewport
+ *     on small windows.
+ *   * `z-index: 9999` puts it above everything except the splash
+ *     overlay (which uses 9500 + a higher stacked z-index out of band).
+ * ========================================================================== */
+
+.topnav-btn-downloads {
+  position: relative;
+}
+
+.topnav-btn-downloads.active {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.topnav-btn-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-bg-primary);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  animation: download-badge-in var(--transition-fast) ease-out;
+}
+
+@keyframes download-badge-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.dl-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 380px;
+  max-width: calc(100vw - var(--space-xl) * 2);
+  max-height: min(560px, calc(100vh - var(--topnav-height) - var(--space-2xl)));
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9999;
+  animation: dl-popover-in 220ms var(--ease-bounce, ease);
+  /* Subtle accent glow at the top so the panel feels "anchored" to
+   * the button that opened it. */
+  box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+@keyframes dl-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dl-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.dl-popover-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-primary);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.dl-popover-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.dl-popover-tab:hover:not(.active) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.dl-popover-tab.active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.dl-popover-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-popover-tab.active .dl-popover-tab-count {
+  background: color-mix(in srgb, #ffffff 25%, transparent);
+  color: #fff;
+}
+
+.dl-popover-tab-count.pulse {
+  animation: dl-badge-pulse 1.8s ease-in-out infinite;
+}
+
+.dl-popover-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.dl-popover-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  transform: translateY(-1px);
+}
+
+.dl-popover-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dl-popover-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  background: var(--color-bg-secondary);
+}
+
+.dl-popover-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xl) var(--space-lg);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.dl-popover-empty-icon {
+  width: 36px;
+  height: 36px;
+  opacity: 0.4;
+  margin-bottom: var(--space-xs);
+}
+
+.dl-popover-empty-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.dl-popover-empty-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.dl-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.dl-popover-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dl-popover-footer-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  transform: translateY(-1px);
+}
+
+.dl-popover-footer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dl-popover-footer-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Card meta line (e.g. "via Source name" on history entries) — tight,
+ * muted, sits next to the size/speed stats inside a card. */
+.dl-progress-card-stat-meta {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* The popover embeds (reuses) the existing `dl-progress-card*` rules
+ * from earlier in this file. No overrides needed — the cards fit the
+ * panel as-is. */

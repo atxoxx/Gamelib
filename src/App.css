@@ -397,6 +397,8 @@
   -webkit-app-region: drag;
   z-index: 100;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
+  /* The Download Popover uses  to anchor under the downloads button; this containing block is required for that to land in the right spot. */
+  position: relative;
 }
 
 .topnav-left {
