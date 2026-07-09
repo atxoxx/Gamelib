@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Game } from "../types/game";
 import type { LibrarySource } from "../types/game";
-import { parsePlayTime } from "../types/game";
+import { LIBRARY_FILTERS_STORAGE_KEY, parsePlayTime } from "../types/game";
 
 /** Status facets for the library filter sidebar. */
 export type LibraryStatus = "all" | "installed" | "not_installed";
@@ -130,6 +130,28 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
   return true;
 }
 
+/** Parse and sanitize a LibraryFilters object from localStorage JSON.
+ *  Validates each field individually and falls back to EMPTY_LIBRARY_FILTERS
+ *  defaults for any invalid/missing fields, so corrupted stored data can't
+ *  crash the app. */
+function parseStoredFilters(raw: unknown): LibraryFilters {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return EMPTY_LIBRARY_FILTERS;
+  }
+  const obj = raw as Record<string, unknown>;
+  return {
+    search: typeof obj.search === "string" ? obj.search : "",
+    genres: Array.isArray(obj.genres) ? obj.genres.filter((g): g is string => typeof g === "string") : [],
+    platforms: Array.isArray(obj.platforms) ? obj.platforms.filter((p): p is string => typeof p === "string") : [],
+    yearMin: typeof obj.yearMin === "number" && Number.isFinite(obj.yearMin) ? obj.yearMin : null,
+    yearMax: typeof obj.yearMax === "number" && Number.isFinite(obj.yearMax) ? obj.yearMax : null,
+    ratingMin: typeof obj.ratingMin === "number" && Number.isFinite(obj.ratingMin) ? obj.ratingMin : null,
+    status: obj.status === "installed" || obj.status === "not_installed" ? obj.status : "all",
+    source: obj.source === "steam" || obj.source === "local" || obj.source === "gog" || obj.source === "epic" ? obj.source : "all",
+    sort: obj.sort === "date_added" || obj.sort === "most_played" || obj.sort === "rating" ? obj.sort : "alphabetical",
+  };
+}
+
 /**
  * useLibraryFilters: in-memory filter state + derivation for the Library
  * page. Unlike `useStoreGames` (which talks to the Rust backend), the
@@ -146,7 +168,48 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
  * - **reset** — clear every facet back to the empty defaults
  */
 export function useLibraryFilters(games: Game[]) {
-  const [filters, setFilters] = useState<LibraryFilters>(EMPTY_LIBRARY_FILTERS);
+  // Initialize from localStorage so filter choices (All / Installed /
+  // Not Installed, Source, Sort, etc.) survive app restarts.
+  const [filters, setFilters] = useState<LibraryFilters>(() => {
+    try {
+      const raw = localStorage.getItem(LIBRARY_FILTERS_STORAGE_KEY);
+      if (raw) return parseStoredFilters(JSON.parse(raw));
+    } catch {
+      // localStorage may be unavailable or the stored value corrupt.
+    }
+    return EMPTY_LIBRARY_FILTERS;
+  });
+
+  // Persist filter state to localStorage on every change so choices
+  // survive app restarts. Mirrors the pattern used by useViewDensity
+  // and useSizeUnit.
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIBRARY_FILTERS_STORAGE_KEY, JSON.stringify(filters));
+    } catch {
+      // localStorage may throw in private browsing / sandboxed contexts.
+    }
+  }, [filters]);
+
+  // Cross-instance sync: when multiple useLibraryFilters instances
+  // mount (e.g. Sidebar + LibraryPage), they each write to the same
+  // localStorage key. The `storage` event propagates writes to other
+  // windows/tabs (same origin), so if the app ever opens additional
+  // windows both views stay in lockstep. Within a single window the
+  // event doesn't fire — each instance independently reads the latest
+  // persisted value on its next mount (page nav, etc.).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== LIBRARY_FILTERS_STORAGE_KEY || !e.newValue) return;
+      try {
+        setFilters(parseStoredFilters(JSON.parse(e.newValue)));
+      } catch {
+        /* stored value unreadable — keep current in-memory state */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Build unique, sorted facet lists from the source array so the sidebar
   // only shows values that actually exist in the user's library.

@@ -245,6 +245,9 @@ export type SizeUnit = "gb" | "gib";
 /** localStorage key for the user's chosen size unit. */
 export const SIZE_UNIT_STORAGE_KEY = "gamelib_size_unit_v1";
 
+/** localStorage key for persisted library filter state (status, source, sort, etc.). */
+export const LIBRARY_FILTERS_STORAGE_KEY = "gamelib_library_filters_v1";
+
 /** Default unit when nothing is stored (or stored value is invalid). */
 export const DEFAULT_SIZE_UNIT: SizeUnit = "gb";
 
