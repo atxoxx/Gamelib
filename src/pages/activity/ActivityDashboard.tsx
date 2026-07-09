@@ -490,7 +490,7 @@ export function ActivityDashboard({
                     <div className="section-panel__empty">No platform data available</div>
                   ) : (
                     <div className="platform-breakdown__content">
-                      <DonutChart slices={platformBreakdownSlices} size={150} formatValue={(v) => `${v}h`} />
+                      <DonutChart slices={platformBreakdownSlices} size={150} formatValue={(v) => `${Math.round(v * 10) / 10}h`} />
                     </div>
                   )}
                 </div>
@@ -501,7 +501,7 @@ export function ActivityDashboard({
                     <div className="section-panel__empty">No genre data available</div>
                   ) : (
                     <div className="genre-breakdown__content">
-                      <DonutChart slices={genreBreakdownSlices} size={150} formatValue={(v) => `${v}h`} />
+                      <DonutChart slices={genreBreakdownSlices} size={150} formatValue={(v) => `${Math.round(v * 10) / 10}h`} />
                     </div>
                   )}
                 </div>

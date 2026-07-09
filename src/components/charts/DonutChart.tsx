@@ -34,7 +34,12 @@ export default function DonutChart({
   showLegend = true,
   formatValue = (v) => String(v),
 }: DonutChartProps) {
-  const total = useMemo(() => slices.reduce((s, sl) => s + sl.value, 0) || 1, [slices]);
+  const total = useMemo(() => {
+    const raw = slices.reduce((s, sl) => s + sl.value, 0) || 1;
+    // Round to strip floating-point summation artifacts (e.g. 0.1 + 0.2 = 0.300...004)
+    // while preserving up to 2 decimals of legitimate precision.
+    return Math.round(raw * 100) / 100;
+  }, [slices]);
 
   const arcs = useMemo(() => {
     let startAngle = -90;
