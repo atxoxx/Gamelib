@@ -26,6 +26,11 @@ export interface Game {
   epicNamespace?: string;
   /** Epic Games Store catalog item ID */
   epicCatalogItemId?: string;
+  /** The exe path that the game watcher detected at runtime.
+   *  Set when the game was resolved via PE-header analysis during
+   *  sync, or discovered dynamically by the passive process poll.
+   *  Distinct from `path` (which is user-set or from old sync). */
+  detectedExe?: string;
   /** Playtime in minutes reported by Steam (used as fallback for playTime) */
   steamPlaytime?: number;
   /** Achievement completion data synced from Steam */

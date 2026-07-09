@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::types::{SteamSession, SteamSyncResult, SyncedGameEntry};
+use crate::game_watcher;
 use crate::size;
 use crate::steam_game_watcher;
 
@@ -136,10 +137,10 @@ pub async fn steam_sync_games(
         } else {
             None
         };
-        // `resolve_main_exe` itself calls `game_install_path` internally,
-        // so we just gate on whether we expect a local install at all.
+        // Use the smart resolver (PE header + name scoring + depth)
+        // instead of the old "largest exe" heuristic.
         let exe_path = if install_dir.is_some() {
-            resolve_main_exe(game.appid)
+            game_watcher::resolve_steam_game_exe(game.appid, &game.name)
         } else {
             None
         };
@@ -249,72 +250,15 @@ fn find_steam_library_folders() -> Vec<PathBuf> {
 }
 
 /// Resolve the main game executable for a Steam AppID.
+/// Delegates to the smart resolver in `game_watcher` which uses
+/// PE header analysis, name scoring, depth, and keyword exclusion
+/// — much more accurate than the old "largest .exe" heuristic.
 pub fn resolve_main_exe(app_id: u32) -> Option<String> {
     let install_dir = steam_game_watcher::game_install_path(app_id)?;
     if !install_dir.exists() {
         return None;
     }
-    scan_for_largest_exe(&install_dir)
-}
-
-const SKIP_KEYWORDS: &[&str] = &[
-    "redist", "autorun", "helper", "unin", "crash", "setup", "install",
-    "plugin", "manual", "readme", "register", "7za", "dotnet", "vcredist",
-    "dxsetup", "directx", "ue4prereq", "ue4-prereq", "launcher",
-];
-
-fn scan_for_largest_exe(dir: &Path) -> Option<String> {
-    let mut best_path: Option<PathBuf> = None;
-    let mut best_size: u64 = 0;
-    scan_exe_dir(dir, &mut best_path, &mut best_size, 0);
-    best_path.map(|p| p.to_string_lossy().to_string())
-}
-
-fn scan_exe_dir(
-    dir: &Path,
-    best: &mut Option<PathBuf>,
-    best_size: &mut u64,
-    depth: u32,
-) {
-    if depth > 4 {
-        return;
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.')
-                    || name.starts_with('_')
-                    || name.eq_ignore_ascii_case("redist")
-                    || name.eq_ignore_ascii_case("redistributables")
-                    || name.eq_ignore_ascii_case("__installer")
-                    || name.eq_ignore_ascii_case("support")
-                {
-                    continue;
-                }
-            }
-            scan_exe_dir(&path, best, best_size, depth + 1);
-        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if !ext.eq_ignore_ascii_case("exe") {
-                continue;
-            }
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                let lower = stem.to_lowercase();
-                if SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
-                    continue;
-                }
-            }
-            if let Ok(meta) = entry.metadata() {
-                let size = meta.len();
-                if size > *best_size {
-                    *best_size = size;
-                    *best = Some(path);
-                }
-            }
-        }
-    }
+    // Read game name from appmanifest for the name-matching scorer
+    let manifest = steam_game_watcher::find_app_install_dir(app_id)?;
+    game_watcher::resolve_game_exe(&install_dir, &manifest.name)
 }

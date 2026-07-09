@@ -1,14 +1,13 @@
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
-use std::time::Instant;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 mod config;
 mod crackwatch;
 mod game_scraper;
+mod game_watcher;
 mod gpu_detector;
 mod metrics_collector;
 mod rtss_reader;
@@ -24,8 +23,8 @@ mod source_manager;
 mod store_checker;
 mod torrent_engine;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
+use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
-use metrics_collector::SessionMetrics;
 use epic::auth::{epic_start_login, epic_finish_login, epic_is_authenticated, epic_logout};
 use epic::sync::{epic_sync_library, epic_get_filters};
 use steam::auth::{
@@ -173,224 +172,120 @@ fn load_games(app: tauri::AppHandle) -> Result<Vec<GameData>, String> {
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
-/// Payload emitted via the "game-exited" event when a launched process terminates.
-/// Now includes real hardware metrics collected during gameplay.
-#[derive(Clone, Serialize)]
-struct GameExitPayload {
-    #[serde(rename = "gameId")]
-    game_id: String,
-    #[serde(rename = "elapsedSeconds")]
-    elapsed_seconds: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    metrics: Option<SessionMetrics>,
-}
-
 /// Detect GPUs on the system using WMI.
 #[tauri::command]
 fn detect_gpus() -> Vec<GpuInfo> {
     gpu_detector::detect_gpus()
 }
 
-/// Launch a game executable. A background thread waits for the process to exit,
-/// collects real-time performance metrics via WMI, and emits a "game-exited"
-/// event with aggregated metrics so the frontend can update play time and activity.
+/// Launch a game executable with unified process tracking.
+///
+/// Replaces the old split between `launch_game` (local, child.wait()),
+/// `spawn_game_exe` (Steam fire-and-forget), and `watch_steam_game`
+/// (Steam WMI polling). Now all platforms use the same GameWatcher
+/// poll loop for process lifecycle detection.
+///
+/// **Steam games with known exe path**: spawns the exe directly,
+/// registers with the watcher for WMI-based tracking.
+///
+/// **Steam games without exe path**: opens `steam://run/<appid>` via
+/// the opener plugin, registers a pending session that the watcher
+/// activates when a matching process appears.
+///
+/// **Local games**: spawns the exe directly, registers with the watcher.
+///
+/// The watcher's background poll loop handles all session lifecycle:
+/// process detection → metrics collection → exit detection → game-exited event.
 #[tauri::command]
 fn launch_game(
     app: tauri::AppHandle,
     game_id: String,
+    game_name: String,
     game_path: String,
+    platform: String,
+    steam_app_id: Option<u32>,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
 ) -> Result<String, String> {
-    let path = Path::new(&game_path);
+    let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
 
-    if !path.exists() {
-        return Err(format!("Game executable not found: {}", game_path));
+    // Update GPU info on the watcher for metrics collection
+    {
+        let mut w = watcher.lock().map_err(|e| e.to_string())?;
+        w.set_gpu(gpu_id.clone(), gpu_name.clone());
     }
 
-    let cwd = path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let initial_pid: u32;
+    let exe_path: Option<String>;
 
-    let child = Command::new(path)
-        .current_dir(cwd)
-        .spawn()
-        .map_err(|e| format!("Failed to launch game: {}", e))?;
+    // ── Determine launch strategy ──────────────────────────────────────
+    if platform == "Steam" && (game_path.is_empty() || !Path::new(&game_path).exists()) {
+        // Steam game without local exe — use steam:// protocol
+        let sid = steam_app_id.ok_or("Steam games require a steamAppId")?;
+        let url = format!("steam://run/{}", sid);
+        tauri_plugin_opener::open_url(url, None::<&str>)
+            .map_err(|e| format!("Failed to open Steam URL: {}", e))?;
 
-    let pid = child.id();
-    let start = Instant::now();
-
-    // Start metrics collection on a separate thread (polls every 5 seconds).
-    // Pass the PID so RTSS can be used for real FPS data when available.
-    let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(5, pid, gpu_id, gpu_name);
-
-    // Background thread: wait for the game to exit, stop metrics, report results
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-
-        // Signal the metrics collector to stop
-        let _ = stop_tx.send(());
-
-        let elapsed = start.elapsed().as_secs();
-
-        // Collect the aggregated metrics (with a timeout)
-        let metrics = result_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(None);
-
-        let _ = app.emit(
-            "game-exited",
-            GameExitPayload {
-                game_id,
-                elapsed_seconds: elapsed,
-                metrics,
-            },
-        );
-    });
-
-    Ok(format!("Launched: {}", game_path))
-}
-
-/// Watch a Steam-launched game for its actual lifetime.
-///
-/// `openUrl("steam://run/<appid>")` returns as soon as Steam dispatches
-/// the protocol — there's no child handle, no PID, no waitable
-/// notification. This command reattaches the same monitoring pipeline
-/// that `launch_game` uses for local executables:
-///
-/// 1. Resolve the game's install dir via `libraryfolders.vdf` +
-///    `appmanifest_<appid>.acf` (see `steam_game_watcher`).
-/// 2. Phase 1: poll `Win32_Process` every 2 s for up to 60 s, waiting
-///    for the game's executable to spawn. If it never appears
-///    (Steam launch failed, user cancelled, etc.) we emit a fallback
-///    `game-exited` so the frontend updates playTime / activity
-///    consistently with how Local games behave on a no-op launch.
-/// 3. Phase 2: poll every 5 s waiting for the process to disappear.
-///    When it does, stop metrics and emit `game-exited` with real
-///    elapsed seconds + aggregated SessionMetrics — same payload
-///    shape as `launch_game`, so both listeners (GameContext and
-///    ActivityContext) react without code changes.
-///
-/// `game_pid` is recomputed on every poll: we hand RTSS the dominant
-/// (highest-memory) PID matching the install dir so FPS hooks line up
-/// with the actual game render thread once it's running.
-#[tauri::command]
-fn watch_steam_game(
-    app: tauri::AppHandle,
-    game_id: String,
-    steam_app_id: u32,
-    gpu_id: Option<String>,
-    gpu_name: Option<String>,
-) -> Result<(), String> {
-    let install_dir = steam_game_watcher::game_install_path(steam_app_id).ok_or_else(|| {
-        format!(
-            "Steam app manifest not found for appid {} — is the game installed locally?",
-            steam_app_id
-        )
-    })?;
-
-    let start = Instant::now();
-    let app_handle_for_thread = app.clone();
-    let install_path = install_dir.clone();
-
-    std::thread::spawn(move || {
-        // Phase 1 — wait for the game process to appear (≤ 60 s).
-        //
-        // Steam's protocol handler hands off to steam.exe, which then
-        // launches the game; 60 s comfortably covers installations on
-        // slow disks or games that show a splash first.
-        const STARTUP_GRACE_SECS: u64 = 60;
-        const STARTUP_POLL_SECS: u64 = 2;
-        let mut elapsed_secs: u64 = 0;
-        let mut saw_process = false;
-        let mut last_pid: Option<u32> = None;
-
-        while elapsed_secs < STARTUP_GRACE_SECS {
-            let matched = steam_game_watcher::is_game_process_running(&install_path);
-            if matched.running {
-                saw_process = true;
-                last_pid = matched.dominant_pid;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_secs(STARTUP_POLL_SECS));
-            elapsed_secs += STARTUP_POLL_SECS;
+        // No PID — the watcher will detect the process when it appears
+        initial_pid = 0;
+        exe_path = None;
+    } else {
+        // Known exe path: spawn directly
+        let path = Path::new(&game_path);
+        if !path.exists() {
+            return Err(format!("Game executable not found: {}", game_path));
         }
+        let cwd = path.parent().unwrap_or_else(|| Path::new("."));
+        let child = std::process::Command::new(path)
+            .current_dir(cwd)
+            .spawn()
+            .map_err(|e| format!("Failed to launch game: {}", e))?;
 
-        // If the game process never spawned, exit with a short fallback
-        // session (≥ 60 s raw → still filtered by ActivityContext since
-        // `durationMin = Math.round(60/60) = 1`, but provides a real
-        // playTime delta of 1 minute on the Game record). We deliberately
-        // avoid hardcoding 300 s here like the previous hack — the
-        // recorded time should reflect what actually happened.
-        if !saw_process {
-            let elapsed = start.elapsed().as_secs();
-            let _ = app_handle_for_thread.emit(
-                "game-exited",
-                GameExitPayload {
-                    game_id,
-                    elapsed_seconds: elapsed,
-                    metrics: None,
-                },
-            );
-            return;
-        }
+        initial_pid = child.id();
+        exe_path = Some(game_path.clone());
+        // std::process::Child does not kill on drop, so we can safely
+        // discard the handle — the watcher's WMI poll will track the
+        // real process lifecycle.
+    }
 
-        // Start metrics collection once the game is up, using the
-        // dominant PID we discovered — matches what `launch_game` does
-        // and lets RTSS read FPS for the actual game process.
-        let pid = last_pid.unwrap_or(0);
-        let (stop_tx, result_rx) = metrics_collector::start_metrics_collection(
-            5, pid, gpu_id, gpu_name,
+    // ── Register with watcher ──────────────────────────────────────────
+    // Start metrics collection immediately if we have a valid PID.
+    // The stop_tx and metrics_rx are stored in the session so the
+    // watcher's finish_session can stop collection and read results.
+    let (metrics_stop_tx, metrics_rx) = if initial_pid > 0 {
+        let (tx, rx) = metrics_collector::start_metrics_collection(
+            5, initial_pid, gpu_id.clone(), gpu_name.clone(),
         );
+        (tx, rx)
+    } else {
+        // No PID yet (Steam protocol launch) — create dummy channels.
+        // Sends will fail silently in finish_session — acceptable
+        // because metrics were never started for this session.
+        let (dummy_stop_tx, _) = std::sync::mpsc::channel::<()>();
+        let (_, dummy_metrics_rx) = std::sync::mpsc::channel::<Option<metrics_collector::SessionMetrics>>();
+        (dummy_stop_tx, dummy_metrics_rx)
+    };
 
-        // Phase 2 — wait for the game to exit.
-        //
-        // Poll every 5 s (matches the metrics interval so each poll =
-        // one new sample). No max time bound — some users idle games
-        // for days and we don't want to silently cut activity off.
-        // (The `metrics_collector` captures the PID once at start, so
-        //  RTSS FPS hooks stick to the original process even if an
-        //  anti-cheat layer relaunches the EXE — acceptable since
-        //  RTSS survives across the same Steam big-picture session.)
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            let matched = steam_game_watcher::is_game_process_running(&install_path);
-            if !matched.running {
-                break;
-            }
-        }
-
-        let _ = stop_tx.send(());
-        let elapsed = start.elapsed().as_secs();
-        let metrics = match result_rx.recv_timeout(std::time::Duration::from_secs(10)) {
-            Ok(m) => {
-                if m.is_none() {
-                    eprintln!(
-                        "[watch_steam_game] metrics thread returned None for game {} (appid={}, elapsed={}s)",
-                        game_id, steam_app_id, elapsed
-                    );
-                }
-                m
-            }
-            Err(_) => {
-                eprintln!(
-                    "[watch_steam_game] timeout (10s) waiting for metrics thread for game {} (appid={}, elapsed={}s)",
-                    game_id, steam_app_id, elapsed
-                );
-                None
-            }
-        };
-
-        let _ = app_handle_for_thread.emit(
-            "game-exited",
-            GameExitPayload {
-                game_id,
-                elapsed_seconds: elapsed,
-                metrics,
-            },
+    {
+        let mut w = watcher.lock().map_err(|e| e.to_string())?;
+        w.register_launched_session(
+            &game_id,
+            &game_name,
+            &platform,
+            steam_app_id,
+            exe_path.as_deref(),
+            initial_pid,
+            metrics_stop_tx,
+            metrics_rx,
         );
-    });
+    }
 
-    Ok(())
+    let msg = if platform == "Steam" && initial_pid == 0 {
+        format!("Launched {} via Steam (tracking via process watcher)", game_name)
+    } else {
+        format!("Launched: {}", game_path)
+    };
+    Ok(msg)
 }
 
 /// Read an image file from disk and return it as a base64 data URL.
@@ -677,43 +572,31 @@ fn debug_mahm_entries() -> Vec<(String, String, f32)> {
 }
 
 /// Resolve the main game executable for a Steam AppID.
-///
-/// Uses the appmanifest to find the install directory, then scans for the
-/// largest non-utility .exe file. Returns `None` if the game isn't installed
-/// locally or no suitable executable is found.
-///
-/// Callable on-demand from the frontend (e.g., GamePage "Detect EXE" button)
-/// in addition to the bulk resolution that happens during `steam_sync_games`.
+/// Uses the smart resolver in `game_watcher` (PE header analysis,
+/// name scoring, depth heuristics) instead of the old
+/// "largest .exe" heuristic.
 #[tauri::command]
 fn resolve_steam_exe(steam_app_id: u32) -> Option<String> {
-    steam::sync::resolve_main_exe(steam_app_id)
+    // Try to get the game name from the manifest for scoring
+    let manifest = steam_game_watcher::find_app_install_dir(steam_app_id);
+    let game_name = manifest.as_ref().map(|m| m.name.as_str()).unwrap_or("");
+    game_watcher::resolve_steam_game_exe(steam_app_id, game_name)
 }
 
-/// Spawn a game executable and return immediately (fire-and-forget).
-///
-/// Unlike `launch_game`, this does NOT wait for the child process or
-/// collect metrics — it simply starts the process and returns its PID.
-/// Designed for Steam games where `watch_steam_game` handles the full
-/// lifecycle via WMI polling (process detection → metrics → exit).
-///
-/// `std::process::Child` does not kill on drop, so the spawned process
-/// outlives this function regardless of whether the handle is stored.
+/// Rebuild the game watcher's process index from the current library.
+/// Called by the frontend after loading games and after Steam/Epic syncs.
+/// This enables passive detection — the background poll loop can match
+/// running processes to known games even when launched outside Gamelib.
 #[tauri::command]
-fn spawn_game_exe(game_path: String) -> Result<u32, String> {
-    let path = Path::new(&game_path);
-    if !path.exists() {
-        return Err(format!("Game executable not found: {}", game_path));
-    }
-    let cwd = path.parent().unwrap_or_else(|| Path::new("."));
-    let child = Command::new(path)
-        .current_dir(cwd)
-        .spawn()
-        .map_err(|e| format!("Failed to launch game: {}", e))?;
-    let pid = child.id();
-    // Fire-and-forget: the child lives independently. Rust's Child
-    // does NOT kill on drop (unlike e.g. Python's Popen), so we can
-    // safely discard the handle here.
-    Ok(pid)
+fn rebuild_watcher_index(
+    app: tauri::AppHandle,
+    games: Vec<GameRefInput>,
+) -> Result<(), String> {
+    let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
+    let refs = game_watcher::build_game_refs_from_library(&games);
+    let mut w = watcher.lock().map_err(|e| e.to_string())?;
+    w.rebuild_index(refs);
+    Ok(())
 }
 
 /// Fetch the contents of a URL and return it as text.
@@ -742,7 +625,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, spawn_game_exe, watch_steam_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
             steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             // Download-feature commands. The torrent engine manages
@@ -766,11 +649,28 @@ pub fn run() {
             torrent_engine::torrent_get_all,
             torrent_engine::torrent_select_save_path,
             crackwatch::fetch_crackwatch_status,
-            fetch_url])
+            fetch_url,
+            rebuild_watcher_index])
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).
             config::load_env_file();
+
+            // ── Initialize the GameWatcher ──────────────────────────
+            // Long-lived background service that polls WMI for running
+            // game processes. Handles both app-launched sessions and
+            // passive detection (games launched outside Gamelib).
+            let game_watcher = Arc::new(std::sync::Mutex::new(GameWatcher::new()));
+            app.manage(game_watcher.clone());
+
+            // Start the background poll loop (every 5s, picks up
+            // running processes and tracks sessions)
+            game_watcher::start_background_poll(
+                game_watcher,
+                app.handle().clone(),
+            );
+
+            let app_data_dir = app.path().app_data_dir()?;
 
             // Initialize the source manager + store checker state.
             //

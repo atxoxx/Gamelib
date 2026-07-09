@@ -9,7 +9,6 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   addSessionTime,
   gameNameFromPath,
@@ -50,6 +49,14 @@ function getLastPersistedSession(gameId: string): GameSession | null {
 interface GameExitEvent {
   gameId: string;
   elapsedSeconds: number;
+}
+
+/** Payload for the "game-started" event emitted by the watcher
+ *  when a game process is passively detected. */
+interface GameStartedEvent {
+  gameId: string;
+  gameName: string;
+  detectedExe?: string;
 }
 
 interface GameContextType {
@@ -141,7 +148,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     invoke<Game[]>("load_games")
       .then((data) => {
-        if (data.length > 0) setGames(data);
+        if (data.length > 0) {
+          setGames(data);
+          // Populate the watcher's process index for passive detection.
+          // Pass game refs so the background poll loop can match
+          // running processes to known games.
+          const refs = data.map((g) => ({
+            gameId: g.id,
+            gameName: g.name,
+            platform: g.platform,
+            exePath: g.path || "",
+            steamAppId: g.steamAppId ?? null,
+          }));
+          invoke("rebuild_watcher_index", { games: refs }).catch((err) =>
+            console.error("Failed to rebuild watcher index:", err)
+          );
+        }
       })
       .catch((err) => console.error("Failed to load games:", err))
       .finally(() => {
@@ -174,6 +196,31 @@ export function GameProvider({ children }: { children: ReactNode }) {
             : g
         )
       );
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Listen for game-started events (passive detection by the watcher)
+  useEffect(() => {
+    const unlisten = listen<GameStartedEvent>("game-started", (event) => {
+      const { gameId, detectedExe } = event.payload;
+
+      // Add to running games list so the UI shows "now playing"
+      setRunningGameIds((prev) => {
+        if (prev.includes(gameId)) return prev;
+        return [...prev, gameId];
+      });
+
+      // Persist the detected exe path if one was found
+      if (detectedExe) {
+        setGames((prev) =>
+          prev.map((g) =>
+            g.id === gameId ? { ...g, detectedExe } : g
+          )
+        );
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -425,9 +472,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Resolve the selected GPU ONCE up front — both the Steam watcher
-    // and the local-game launcher need to pass it to the Rust metrics
-    // collector so performance monitoring picks up the right device.
+    // Resolve the selected GPU from localStorage
     let gpuId: string | null = null;
     let gpuName: string | null = null;
     const savedGpu = localStorage.getItem("gamelib-gpus");
@@ -445,9 +490,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Show the launch splash if the user has it enabled. The setting
-    // is read fresh on every launch so a Settings toggle takes effect
-    // immediately without needing a remount.
+    // Show the launch splash if the user has it enabled
     const splashOn = isSplashEnabled();
     if (splashOn) {
       const lastSession = getLastPersistedSession(game.id);
@@ -455,90 +498,30 @@ export function GameProvider({ children }: { children: ReactNode }) {
       splash.open(payload);
     }
 
-    // ── Steam games ────────────────────────────────────────────────────
-    // Two launch strategies depending on whether we know the exe path:
-    //
-    // A) **Exe path known** (detected during sync or manually set):
-    //    Spawn the exe directly via `spawn_game_exe` (fire-and-forget),
-    //    then delegate lifetime tracking to `watch_steam_game`. This
-    //    gives us a real child PID for the initial process while WMI
-    //    handles launcher → game hand-offs, DRM re-parenting, and
-    //    anti-cheat relaunches — same reliable monitoring as the
-    //    `steam://` protocol but with direct exe launch.
-    //
-    // B) **No exe path** (game not installed locally, or exe detection
-    //    failed): Fall back to `steam://run/<appid>` + `watch_steam_game`.
-    if (game.platform === "Steam" && game.steamAppId) {
-      setRunningGameIds((prev) => [...prev, game.id]);
-
-      // Strategy A: direct exe launch (reliable metrics via WMI)
-      if (game.path && game.path.trim() !== "") {
-        try {
-          await invoke<number>("spawn_game_exe", { gamePath: game.path });
-          if (splashOn) splash.updateStatus("started");
-          showToast(`Launched ${game.name}`, "success");
-
-          invoke<void>("watch_steam_game", {
-            gameId: game.id,
-            steamAppId: game.steamAppId,
-            gpuId,
-            gpuName,
-          }).catch((err: unknown) => {
-            console.error(`Steam session watch failed: ${err}`);
-            setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-            showToast(`Steam session tracking unavailable: ${err}`, "error");
-          });
-        } catch (err: any) {
-          setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-          if (splashOn) splash.updateStatus("error");
-          showToast(`Launch failed: ${err}`, "error");
-        }
-        return;
-      }
-
-      // Strategy B: steam:// protocol fallback (no local exe)
-      try {
-        await openUrl(`steam://run/${game.steamAppId}`);
-        if (splashOn) splash.updateStatus("started");
-        showToast(`Launched ${game.name} via Steam`, "success");
-
-        invoke<void>("watch_steam_game", {
-          gameId: game.id,
-          steamAppId: game.steamAppId,
-          gpuId,
-          gpuName,
-        }).catch((err: unknown) => {
-          console.error(`Steam session watch failed: ${err}`);
-          setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-          showToast(`Steam session tracking unavailable: ${err}`, "error");
-        });
-      } catch (err: any) {
-        setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-        if (splashOn) splash.updateStatus("error");
-        showToast(`Launch failed: ${err}`, "error");
-      }
-      return;
-    }
-
     setRunningGameIds((prev) => [...prev, game.id]);
 
     try {
-      await invoke("launch_game", {
+      // ── Unified launch: single Tauri command for all game types ──────
+      // The Rust backend handles:
+      //   * Direct exe spawn (Local games, Steam with known path)
+      //   * steam:// protocol (Steam without local exe)
+      //   * Process lifecycle tracking via GameWatcher background poll
+      //   * Metrics collection (starts automatically when PID is known)
+      await invoke<string>("launch_game", {
         gameId: game.id,
-        gamePath: game.path,
+        gameName: game.name,
+        gamePath: game.path || "",
+        platform: game.platform,
+        steamAppId: game.steamAppId ?? null,
         gpuId,
-        gpuName
+        gpuName,
       });
-      // Flip the splash status pill from "Launching…" to "Game is
-      // launching" once the OS process is up. The splash itself
-      // schedules its fade + close when it sees this status.
+
       if (splashOn) splash.updateStatus("started");
       showToast(`Launched ${game.name}`, "success");
     } catch (err: any) {
       setRunningGameIds((prev) => prev.filter((id) => id !== game.id));
-      if (splashOn) {
-        splash.updateStatus("error");
-      }
+      if (splashOn) splash.updateStatus("error");
       showToast(`Launch failed: ${err}`, "error");
     }
   }, [runningGameIds, showToast, splash]);
