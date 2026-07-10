@@ -65,7 +65,14 @@ interface DownloadContextValue {
     savePath: string,
     gameId?: string | null,
     sourceName?: string,
+    autoExtract?: boolean,
+    listOnly?: boolean,
   ) => Promise<TorrentDownload>;
+  startSelectedDownload: (
+    id: string,
+    onlyFiles: number[],
+    autoExtract: boolean,
+  ) => Promise<void>;
   pauseDownload: (id: string) => Promise<void>;
   resumeDownload: (id: string) => Promise<void>;
   /**
@@ -175,12 +182,16 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       savePath: string,
       gameId: string | null | undefined = null,
       sourceName: string = "Unknown",
+      autoExtract?: boolean,
+      listOnly?: boolean,
     ): Promise<TorrentDownload> => {
       const newDownload = await invoke<TorrentDownload>("torrent_add", {
         magnetUri,
         savePath,
         gameId: gameId ?? null,
         sourceName,
+        autoExtract: autoExtract ?? false,
+        listOnly: listOnly ?? false,
       });
       // Optimistic merge: insert (or replace) the new record so the
       // UI updates within milliseconds of `torrent_add` returning,
@@ -192,6 +203,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         return [newDownload, ...without];
       });
       return newDownload;
+    },
+    [],
+  );
+
+  const startSelectedDownload = useCallback(
+    async (id: string, onlyFiles: number[], autoExtract: boolean): Promise<void> => {
+      await invoke("torrent_start_selected", { id, onlyFiles, autoExtract });
     },
     [],
   );
@@ -250,6 +268,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       activeCount: activeDownloads.length,
       loading,
       addDownload,
+      startSelectedDownload,
       pauseDownload,
       resumeDownload,
       pauseAll,
@@ -264,6 +283,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       completedDownloads,
       loading,
       addDownload,
+      startSelectedDownload,
       pauseDownload,
       resumeDownload,
       pauseAll,

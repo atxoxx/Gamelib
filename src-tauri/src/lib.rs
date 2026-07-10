@@ -650,6 +650,8 @@ pub fn run() {
             torrent_engine::torrent_select_save_path,
             torrent_engine::torrent_pause_all,
             torrent_engine::torrent_resume_all,
+            torrent_engine::torrent_update_only_files,
+            torrent_engine::torrent_start_selected,
             crackwatch::fetch_crackwatch_status,
             fetch_url,
             rebuild_watcher_index])

@@ -28,7 +28,7 @@ import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import { Button } from "./ui";
 import type { MatchedDownload } from "../types/source";
-import type { OwnershipResult } from "../types/download";
+import { type OwnershipResult, formatBytesShort } from "../types/download";
 
 export interface DownloadModalProps {
   /** The game to look up. Required. */
@@ -42,7 +42,7 @@ export interface DownloadModalProps {
   onClose: () => void;
 }
 
-type Step = "checking" | "results" | "starting" | "error";
+type Step = "checking" | "results" | "starting" | "error" | "fetching_metadata" | "file_selection";
 
 export default function DownloadModal({
   gameName,
@@ -50,7 +50,7 @@ export default function DownloadModal({
   steamAppId,
   onClose,
 }: DownloadModalProps) {
-  const { addDownload, selectSavePath } = useDownloads();
+  const { addDownload, selectSavePath, activeDownloads, startSelectedDownload, removeDownload } = useDownloads();
   const { searchSources } = useSources();
   const { games } = useGames();
   const { showToast } = useToast();
@@ -61,6 +61,22 @@ export default function DownloadModal({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [savePath, setSavePath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [chooseFiles, setChooseFiles] = useState(false);
+  const [autoExtract, setAutoExtract] = useState(false);
+  const [tempTorrentId, setTempTorrentId] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
+
+  // Wait for metadata loaded to show file checklist
+  useEffect(() => {
+    if (step === "fetching_metadata" && tempTorrentId) {
+      const dl = activeDownloads.find((d) => d.id === tempTorrentId);
+      if (dl && dl.files && dl.files.length > 0) {
+        setSelectedFiles(new Set(dl.files.map((_, i) => i)));
+        setStep("file_selection");
+      }
+    }
+  }, [activeDownloads, step, tempTorrentId]);
   // Suppress the "user has not picked a save path" inline error
   // until they've tried to start at least once.
   const startAttemptedRef = useRef(false);
@@ -161,7 +177,6 @@ export default function DownloadModal({
       return;
     }
     setError(null);
-    setStep("starting");
     try {
       const match = matches[selectedIndex];
       // Prefer the resolved magnet URI (the source provided it OR
@@ -171,18 +186,33 @@ export default function DownloadModal({
       if (!sourceUri) {
         throw new Error("Selected source has no downloadable URI");
       }
-      await addDownload(sourceUri, savePath, gameId ?? null, match.sourceName);
-      showToast(
-        `Downloading "${match.title}" from ${match.sourceName}`,
-        "success",
-      );
-      onClose();
+
+      const safeGameFolder = gameName.replace(/[:*?"<>|\\/]/g, "").trim();
+      const normalizedSave = savePath.replace(/\\/g, "/");
+      const finalSavePath = normalizedSave.endsWith(safeGameFolder)
+        ? savePath
+        : `${savePath}/${safeGameFolder}`.replace(/\\/g, "/");
+
+      if (chooseFiles) {
+        setStep("fetching_metadata");
+        // Start the torrent with listOnly = true
+        const newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
+        setTempTorrentId(newDl.id);
+      } else {
+        setStep("starting");
+        await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, false);
+        showToast(
+          `Downloading "${match.title}" from ${match.sourceName}`,
+          "success",
+        );
+        onClose();
+      }
     } catch (err) {
       console.error("[DownloadModal] torrent_add failed:", err);
       setError(String(err));
       setStep("results");
     }
-  }, [selectedIndex, savePath, matches, addDownload, gameId, showToast, onClose]);
+  }, [selectedIndex, savePath, matches, addDownload, gameId, showToast, onClose, chooseFiles, autoExtract, gameName]);
 
   // Clear the inline error when the user actively changes their
   // selection or save path. Note: `step` is intentionally NOT in
@@ -195,6 +225,17 @@ export default function DownloadModal({
       setError(null);
     }
   }, [selectedIndex, savePath]);
+
+  // Clean up any temporary listing-only torrent on unmount (e.g. backdrop clicks, escape)
+  useEffect(() => {
+    return () => {
+      if (tempTorrentId) {
+        invoke("torrent_remove", { id: tempTorrentId, deleteFiles: true }).catch((e) =>
+          console.error("Failed to clean up temporary torrent on unmount:", e)
+        );
+      }
+    };
+  }, [tempTorrentId]);
 
   // Tick the elapsed-seconds counter while the engine is
   // accepting the new torrent. Stops and resets the moment we
@@ -281,6 +322,45 @@ export default function DownloadModal({
             />
           )}
 
+          {(step === "results" || step === "starting") && selectedIndex != null && (
+            <div className="dl-options-section" style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
+              <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
+                <input
+                  type="checkbox"
+                  checked={autoExtract}
+                  onChange={(e) => setAutoExtract(e.target.checked)}
+                />
+                <span>Auto extract archives and delete after extraction</span>
+              </label>
+              <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
+                <input
+                  type="checkbox"
+                  checked={chooseFiles}
+                  onChange={(e) => setChooseFiles(e.target.checked)}
+                />
+                <span>Choose files to download</span>
+              </label>
+            </div>
+          )}
+
+          {step === "fetching_metadata" && (
+            <div className="dl-search-loading" style={{ flexDirection: "column", gap: "var(--space-md)", padding: "var(--space-xl) 0" }}>
+              <div className="spinner-small" style={{ width: 24, height: 24 }} />
+              <span>Fetching torrent files list…</span>
+              <p style={{ textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--font-size-xs)", maxWidth: "420px" }}>
+                Connecting to peers to retrieve files metadata. This usually takes a few seconds.
+              </p>
+            </div>
+          )}
+
+          {step === "file_selection" && (
+            <FileSelectionSection
+              files={activeDownloads.find((d) => d.id === tempTorrentId)?.files ?? []}
+              selectedFiles={selectedFiles}
+              onChange={setSelectedFiles}
+            />
+          )}
+
           {error && step === "results" && (
             <p
               role="alert"
@@ -307,37 +387,75 @@ export default function DownloadModal({
           <span className="modal-footer-count">
             {step === "results" && matches.length > 0
               ? `${matches.length} source result${matches.length !== 1 ? "s" : ""}`
-              : "\u00A0" /* non-breaking space so the row doesn't collapse */}
+              : step === "file_selection"
+                ? `${activeDownloads.find((d) => d.id === tempTorrentId)?.files.length ?? 0} total files`
+                : "\u00A0" /* non-breaking space so the row doesn't collapse */}
           </span>
           <div className="modal-footer-actions">
             <Button
               variant="ghost"
-              onClick={onClose}
+              onClick={async () => {
+                if (step === "fetching_metadata" || step === "file_selection") {
+                  if (tempTorrentId) {
+                    try {
+                      await removeDownload(tempTorrentId, true);
+                    } catch (e) {
+                      console.error("Failed to remove list-only torrent:", e);
+                    }
+                  }
+                  setTempTorrentId(null);
+                  setStep("results");
+                } else {
+                  onClose();
+                }
+              }}
               disabled={step === "starting"}
             >
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              onClick={handleStart}
-              disabled={
-                step === "starting" ||
-                step === "checking" ||
-                selectedIndex == null
-              }
-              isLoading={step === "starting"}
-              leftIcon={
-                step !== "starting" ? (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <polyline points="8 17 12 21 16 17" />
-                    <line x1="12" y1="12" x2="12" y2="21" />
-                    <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
-                  </svg>
-                ) : undefined
-              }
-            >
-              Start Download
-            </Button>
+            {step === "file_selection" ? (
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  if (!tempTorrentId) return;
+                  setStep("starting");
+                  try {
+                    await startSelectedDownload(tempTorrentId, Array.from(selectedFiles), autoExtract);
+                    showToast("Download started with file selection", "success");
+                    onClose();
+                  } catch (e) {
+                    setError(String(e));
+                    setStep("file_selection");
+                  }
+                }}
+                disabled={selectedFiles.size === 0}
+              >
+                Confirm Download ({selectedFiles.size} selected)
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                onClick={handleStart}
+                disabled={
+                  step === "starting" ||
+                  step === "checking" ||
+                  step === "fetching_metadata" ||
+                  selectedIndex == null
+                }
+                isLoading={step === "starting"}
+                leftIcon={
+                  step !== "starting" ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polyline points="8 17 12 21 16 17" />
+                      <line x1="12" y1="12" x2="12" y2="21" />
+                      <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
+                    </svg>
+                  ) : undefined
+                }
+              >
+                {chooseFiles ? "Fetch Files List" : "Start Download"}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -492,6 +610,141 @@ function StartingStatus({
       {label}
       {elapsedSec > 0 && <> ({elapsedSec}s)</>}
     </p>
+  );
+}
+
+// ─── File Selection ──────────────────────────────────────────────────────
+
+function FileSelectionSection({
+  files,
+  selectedFiles,
+  onChange,
+}: {
+  files: { name: string; size: number }[];
+  selectedFiles: Set<number>;
+  onChange: (indices: Set<number>) => void;
+}) {
+  const [filter, setFilter] = useState("");
+
+  const filtered = useMemo(() => {
+    return files
+      .map((f, i) => ({ file: f, idx: i }))
+      .filter(({ file }) => file.name.toLowerCase().includes(filter.toLowerCase()));
+  }, [files, filter]);
+
+  const handleToggle = (idx: number) => {
+    const next = new Set(selectedFiles);
+    if (next.has(idx)) {
+      next.delete(idx);
+    } else {
+      next.add(idx);
+    }
+    onChange(next);
+  };
+
+  const handleSelectAll = () => {
+    onChange(new Set(files.map((_, i) => i)));
+  };
+
+  const handleDeselectAll = () => {
+    onChange(new Set());
+  };
+
+  return (
+    <div className="dl-file-selection">
+      <div
+        className="dl-file-selection-header"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "var(--space-sm)",
+          gap: "var(--space-sm)",
+        }}
+      >
+        <input
+          type="text"
+          placeholder="Filter files..."
+          className="search-input"
+          style={{
+            flex: 1,
+            background: "var(--color-bg-tertiary)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-sm)",
+            padding: "var(--space-xs) var(--space-sm)",
+            color: "var(--color-text-primary)",
+            fontSize: "var(--font-size-sm)",
+          }}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div style={{ display: "flex", gap: "var(--space-xs)" }}>
+          <Button variant="secondary" size="sm" onClick={handleSelectAll}>
+            Select All
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleDeselectAll}>
+            Clear
+          </Button>
+        </div>
+      </div>
+
+      <div
+        className="dl-file-list scrollable"
+        style={{
+          maxHeight: "300px",
+          overflowY: "auto",
+          border: "1px solid var(--color-border)",
+          borderRadius: "var(--radius-md)",
+          background: "var(--color-bg-secondary)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {filtered.length === 0 ? (
+          <div style={{ padding: "var(--space-md)", textAlign: "center", color: "var(--color-text-muted)" }}>
+            No files match filter
+          </div>
+        ) : (
+          filtered.map(({ file, idx }) => {
+            const isChecked = selectedFiles.has(idx);
+            return (
+              <label
+                key={idx}
+                className="dl-file-select-item"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "var(--space-xs) var(--space-sm)",
+                  borderBottom: "1px solid var(--color-border-subtle, rgba(255,255,255,0.05))",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  gap: "var(--space-sm)",
+                }}
+              >
+                <input type="checkbox" checked={isChecked} onChange={() => handleToggle(idx)} />
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    textOverflow: "ellipsis",
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    fontSize: "var(--font-size-sm)",
+                    color: "var(--color-text-primary)",
+                  }}
+                  title={file.name}
+                >
+                  {file.name}
+                </span>
+                <span style={{ color: "var(--color-text-muted)", fontSize: "var(--font-size-xs)", flexShrink: 0 }}>
+                  {formatBytesShort(file.size)}
+                </span>
+              </label>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
 

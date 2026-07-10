@@ -40,6 +40,7 @@ import {
   type TorrentDownload,
 } from "../types/download";
 import { useToast } from "../context/ToastContext";
+import { useSizeUnit } from "../hooks/useSizeUnit";
 
 interface DownloadPopoverProps {
   open: boolean;
@@ -73,6 +74,7 @@ function DownloadCard({
   onResume: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
+  const { unit } = useSizeUnit();
   const status = download.status;
   const errorMessage = getStatusError(status);
   const indeterminate = download.progress == null && isActiveStatus(status);
@@ -114,17 +116,17 @@ function DownloadCard({
             <span>
               <strong>{formatProgress(download.progress)}</strong>
               {download.totalSize != null && (
-                <> · {formatBytesShort(download.totalSize)}</>
+                <> · {formatBytesShort(download.totalSize, unit)}</>
               )}
             </span>
             {isActiveStatus(status) && download.downloadSpeed > 0 && (
               <span
                 className="dl-progress-card-stat-dl"
                 title="Download speed"
-                aria-label={`Download speed: ${formatBytesPerSecond(download.downloadSpeed)}`}
+                aria-label={`Download speed: ${formatBytesPerSecond(download.downloadSpeed, unit)}`}
               >
                 <span className="dl-progress-card-stat-icon" aria-hidden>↓</span>
-                {formatBytesPerSecond(download.downloadSpeed)}
+                {formatBytesPerSecond(download.downloadSpeed, unit)}
               </span>
             )}
             {isCompleted && download.totalSize != null && (
@@ -152,13 +154,13 @@ function DownloadCard({
                   <span
                     className="dl-progress-card-stat-ul"
                     title="Upload speed"
-                    aria-label={`Upload speed: ${formatBytesPerSecond(download.uploadSpeed)}`}
+                    aria-label={`Upload speed: ${formatBytesPerSecond(download.uploadSpeed, unit)}`}
                   >
                     <span
                       className="dl-progress-card-stat-icon"
                       aria-hidden
                     >↑</span>
-                    {formatBytesPerSecond(download.uploadSpeed)}
+                    {formatBytesPerSecond(download.uploadSpeed, unit)}
                   </span>
                 )}
                 <span

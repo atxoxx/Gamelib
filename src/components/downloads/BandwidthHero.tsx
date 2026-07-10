@@ -18,9 +18,11 @@
 import { useMemo } from "react";
 import { useDownloads } from "../../context/DownloadContext";
 import { formatBytesPerSecond, isActiveStatus } from "../../types/download";
+import { useSizeUnit } from "../../hooks/useSizeUnit";
 
 export default function BandwidthHero() {
   const { activeDownloads } = useDownloads();
+  const { unit } = useSizeUnit();
 
   const stats = useMemo(() => {
     let totalDown = 0;
@@ -70,7 +72,7 @@ export default function BandwidthHero() {
           Download
         </div>
         <div className="dl-hero-value dl-hero-value-down">
-          {formatBytesPerSecond(stats.totalDown)}
+          {formatBytesPerSecond(stats.totalDown, unit)}
         </div>
         <div className="dl-hero-sub">Across all active torrents</div>
       </div>
@@ -86,7 +88,7 @@ export default function BandwidthHero() {
           Upload
         </div>
         <div className="dl-hero-value dl-hero-value-up">
-          {formatBytesPerSecond(stats.totalUp)}
+          {formatBytesPerSecond(stats.totalUp, unit)}
         </div>
         <div className="dl-hero-sub">
           {stats.totalUp > 0

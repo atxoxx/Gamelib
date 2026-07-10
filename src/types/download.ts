@@ -2,6 +2,8 @@
 // and `src-tauri/src/store_checker.rs`. Field names are camelCase because
 // the backend uses `#[serde(rename_all = "camelCase")]` on its structs.
 //
+import type { SizeUnit } from "./game";
+
 // Keep this file in sync with the Rust side — the frontend DTOs and the
 // wire format must stay byte-for-byte compatible, or `invoke<DownloadStatus>`
 // will fail to deserialize and every Tauri command will throw.
@@ -93,6 +95,8 @@ export interface TorrentDownload {
   /** Unix seconds when the user added the download. */
   addedAt: number;
   files: TorrentFile[];
+  autoExtract?: boolean;
+  extracted?: boolean;
 }
 
 /**
@@ -119,26 +123,34 @@ export interface StoreOwnership {
 // ─── Display helpers ───────────────────────────────────────────────────────
 
 /** Render a byte/sec value as a human speed string. */
-export function formatBytesPerSecond(bytesPerSec: number): string {
+export function formatBytesPerSecond(bytesPerSec: number, unit: SizeUnit = "gb"): string {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0 B/s";
-  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  const isGib = unit === "gib";
+  const divisor = isGib ? 1024 : 1000;
+  const units = isGib
+    ? ["B/s", "KiB/s", "MiB/s", "GiB/s"]
+    : ["B/s", "KB/s", "MB/s", "GB/s"];
   let value = bytesPerSec;
   let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
+  while (value >= divisor && unitIndex < units.length - 1) {
+    value /= divisor;
     unitIndex++;
   }
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
-/** Render a byte total as a short size string ("1.4 GB", "820 MB"). */
-export function formatBytesShort(bytes: number): string {
+/** Render a byte total as a short size string ("1.4 GB", "820 MB", "1.4 GiB", "820 MiB"). */
+export function formatBytesShort(bytes: number, unit: SizeUnit = "gb"): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const isGib = unit === "gib";
+  const divisor = isGib ? 1024 : 1000;
+  const units = isGib
+    ? ["B", "KiB", "MiB", "GiB", "TiB"]
+    : ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
+  while (value >= divisor && unitIndex < units.length - 1) {
+    value /= divisor;
     unitIndex++;
   }
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;

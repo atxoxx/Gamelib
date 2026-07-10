@@ -14,6 +14,7 @@
 // consistent.
 
 import { useState } from "react";
+import { useSizeUnit } from "../../hooks/useSizeUnit";
 import {
   formatBytesPerSecond,
   formatBytesShort,
@@ -38,6 +39,7 @@ export default function DownloadRow({
   onResume,
   onRemove,
 }: DownloadRowProps) {
+  const { unit } = useSizeUnit();
   const [expanded, setExpanded] = useState(false);
   const status = download.status;
   const indeterminate = download.progress == null && isActiveStatus(status);
@@ -92,7 +94,7 @@ export default function DownloadRow({
               {download.totalSize != null && (
                 <span className="dl-row-size">
                   {" · "}
-                  {formatBytesShort(download.totalSize)}
+                  {formatBytesShort(download.totalSize, unit)}
                 </span>
               )}
             </span>
@@ -109,12 +111,12 @@ export default function DownloadRow({
             <>
               <span className="dl-row-speed-dl" title="Download speed">
                 <span aria-hidden>↓</span>
-                {formatBytesPerSecond(download.downloadSpeed)}
+                {formatBytesPerSecond(download.downloadSpeed, unit)}
               </span>
               {download.uploadSpeed > 0 && (
                 <span className="dl-row-speed-ul" title="Upload speed">
                   <span aria-hidden>↑</span>
-                  {formatBytesPerSecond(download.uploadSpeed)}
+                  {formatBytesPerSecond(download.uploadSpeed, unit)}
                 </span>
               )}
             </>
@@ -251,7 +253,7 @@ export default function DownloadRow({
                   {file.name}
                 </span>
                 <span className="dl-file-size">
-                  {formatBytesShort(file.size)}
+                  {formatBytesShort(file.size, unit)}
                 </span>
                 <div className="dl-file-progress-bar">
                   <div
