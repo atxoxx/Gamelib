@@ -80,6 +80,9 @@ export default function DownloadModal({
   // Suppress the "user has not picked a save path" inline error
   // until they've tried to start at least once.
   const startAttemptedRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const tempTorrentIdRef = useRef<string | null>(null);
+  tempTorrentIdRef.current = tempTorrentId;
   // Seconds elapsed since the user clicked Start. Reset to 0 the
   // moment `step` leaves "starting" (success → modal closes, or
   // failure → step becomes "results" again). The footer renders
@@ -167,6 +170,7 @@ export default function DownloadModal({
   }, [selectSavePath, showToast]);
 
   const handleStart = useCallback(async () => {
+    cancelledRef.current = false;
     startAttemptedRef.current = true;
     if (selectedIndex == null) {
       setError("Pick a source result to download from.");
@@ -197,6 +201,12 @@ export default function DownloadModal({
         setStep("fetching_metadata");
         // Start the torrent with listOnly = true
         const newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
+        if (cancelledRef.current) {
+          invoke("torrent_remove", { id: newDl.id, deleteFiles: true }).catch((e) =>
+            console.error("Failed to clean up cancelled temporary torrent:", e)
+          );
+          return;
+        }
         setTempTorrentId(newDl.id);
       } else {
         setStep("starting");
@@ -208,6 +218,7 @@ export default function DownloadModal({
         onClose();
       }
     } catch (err) {
+      if (cancelledRef.current) return;
       console.error("[DownloadModal] torrent_add failed:", err);
       setError(String(err));
       setStep("results");
@@ -229,13 +240,36 @@ export default function DownloadModal({
   // Clean up any temporary listing-only torrent on unmount (e.g. backdrop clicks, escape)
   useEffect(() => {
     return () => {
-      if (tempTorrentId) {
-        invoke("torrent_remove", { id: tempTorrentId, deleteFiles: true }).catch((e) =>
+      cancelledRef.current = true;
+      if (tempTorrentIdRef.current) {
+        invoke("torrent_remove", { id: tempTorrentIdRef.current, deleteFiles: true }).catch((e) =>
           console.error("Failed to clean up temporary torrent on unmount:", e)
         );
       }
     };
-  }, [tempTorrentId]);
+  }, []);
+
+  // Escape to close the modal — except when starting
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && step !== "starting") {
+        if (step === "fetching_metadata" || step === "file_selection") {
+          cancelledRef.current = true;
+          if (tempTorrentIdRef.current) {
+            invoke("torrent_remove", { id: tempTorrentIdRef.current, deleteFiles: true }).catch((e) =>
+              console.error("Failed to remove list-only torrent on escape:", e)
+            );
+          }
+          setTempTorrentId(null);
+          setStep("results");
+        } else {
+          onClose();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [step, onClose]);
 
   // Tick the elapsed-seconds counter while the engine is
   // accepting the new torrent. Stops and resets the moment we
@@ -260,7 +294,15 @@ export default function DownloadModal({
   );
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div
+      className="modal-backdrop"
+      onMouseDown={() => {
+        if (step !== "starting") {
+          cancelledRef.current = true;
+          onClose();
+        }
+      }}
+    >
       <div
         className="modal dl-modal"
         onMouseDown={(e) => e.stopPropagation()}
@@ -396,6 +438,7 @@ export default function DownloadModal({
               variant="ghost"
               onClick={async () => {
                 if (step === "fetching_metadata" || step === "file_selection") {
+                  cancelledRef.current = true;
                   if (tempTorrentId) {
                     try {
                       await removeDownload(tempTorrentId, true);
