@@ -52,15 +52,20 @@ interface DownloadContextValue {
   /** True until the initial `torrent_get_all` resolves. */
   loading: boolean;
   /**
-   * Enqueue a new download. Returns the new download's id
-   * (matches `TorrentDownload.id`, format `dl_<n>`).
+   * Enqueue a new download. Returns the full `TorrentDownload`
+   * record that the Rust engine created. The context also merges
+   * it into local state immediately so the modal, the popover
+   * badge, and the Downloads page all update without waiting
+   * for the next 2 s progress tick. The background poller will
+   * reconcile live stats (downloaded bytes, speed, peers) on
+   * its next tick.
    */
   addDownload: (
     magnetUri: string,
     savePath: string,
     gameId?: string | null,
     sourceName?: string,
-  ) => Promise<string>;
+  ) => Promise<TorrentDownload>;
   pauseDownload: (id: string) => Promise<void>;
   resumeDownload: (id: string) => Promise<void>;
   /**
@@ -170,13 +175,23 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       savePath: string,
       gameId: string | null | undefined = null,
       sourceName: string = "Unknown",
-    ): Promise<string> => {
-      return await invoke<string>("torrent_add", {
+    ): Promise<TorrentDownload> => {
+      const newDownload = await invoke<TorrentDownload>("torrent_add", {
         magnetUri,
         savePath,
         gameId: gameId ?? null,
         sourceName,
       });
+      // Optimistic merge: insert (or replace) the new record so the
+      // UI updates within milliseconds of `torrent_add` returning,
+      // not up to 2 s later when the background poller next ticks.
+      // The poller will overwrite our placeholder fields with the
+      // live stats on the next emission.
+      setDownloads((prev) => {
+        const without = prev.filter((d) => d.id !== newDownload.id);
+        return [newDownload, ...without];
+      });
+      return newDownload;
     },
     [],
   );

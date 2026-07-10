@@ -1866,3 +1866,117 @@
     max-width: none;
   }
 }
+
+/* ─── Collapsible Torrent Files Details ────────────────────────── */
+
+.dl-row-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.dl-row-details {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+  margin-top: -4px;
+  padding: var(--space-md);
+  z-index: 1;
+  animation: slideDown 0.2s ease-out;
+}
+
+/* Flatten the bottom border-radius of dl-row when expanded */
+.dl-row-container:has(.dl-row-details) .dl-row {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.dl-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: var(--space-xs);
+}
+
+/* Scrollbar styling for files drawer */
+.dl-files-list::-webkit-scrollbar {
+  width: 6px;
+}
+.dl-files-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dl-files-list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+.dl-files-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+}
+
+.dl-file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 120px 45px;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 6px var(--space-sm);
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.dl-file-item:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.dl-file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+}
+
+.dl-file-size {
+  text-align: right;
+  font-family: monospace;
+}
+
+.dl-file-progress-bar {
+  height: 4px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.dl-file-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width 0.3s ease;
+}
+
+.dl-file-percentage {
+  text-align: right;
+  font-family: monospace;
+  font-weight: var(--font-weight-semibold);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

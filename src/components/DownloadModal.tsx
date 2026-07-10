@@ -64,6 +64,14 @@ export default function DownloadModal({
   // Suppress the "user has not picked a save path" inline error
   // until they've tried to start at least once.
   const startAttemptedRef = useRef(false);
+  // Seconds elapsed since the user clicked Start. Reset to 0 the
+  // moment `step` leaves "starting" (success → modal closes, or
+  // failure → step becomes "results" again). The footer renders
+  // this as a "Starting for Ns…" hint so the user knows the
+  // engine is still working, not stalled — especially important
+  // for `http(s)://.torrent` sources where librqbit has to
+  // download the torrent file before it can return.
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   // Snapshot the local library name list. The Rust `check_ownership*`
   // commands require a `local_library_names` argument; we pass the
@@ -188,6 +196,22 @@ export default function DownloadModal({
     }
   }, [selectedIndex, savePath]);
 
+  // Tick the elapsed-seconds counter while the engine is
+  // accepting the new torrent. Stops and resets the moment we
+  // leave the "starting" state (either the modal closes on
+  // success, or we fall back to "results" on failure). The
+  // interval is created lazily so the timer doesn't leak.
+  useEffect(() => {
+    if (step !== "starting") {
+      setElapsedSec(0);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setElapsedSec((s) => s + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [step]);
+
   // ── Render ──────────────────────────────────────────────────────
   const ownershipBanner = useMemo(
     () => buildOwnershipBanner(ownership, step),
@@ -268,6 +292,14 @@ export default function DownloadModal({
             >
               {error}
             </p>
+          )}
+
+          {step === "starting" && (
+            <StartingStatus
+              matches={matches}
+              selectedIndex={selectedIndex}
+              elapsedSec={elapsedSec}
+            />
           )}
         </div>
 
@@ -416,6 +448,50 @@ function SavePathSection({
         {savePath ? "Change" : "Choose…"}
       </Button>
     </div>
+  );
+}
+
+/**
+ * Status line shown while the engine is accepting the new torrent.
+ * Distinguishes between a magnet link (resolves essentially
+ * instantly in librqbit) and an `http(s)://.torrent` URL (librqbit
+ * has to download the torrent file before it can return, which
+ * can take several seconds on a slow source server). After 10s we
+ * nudge the user with a slightly more concerned label so they
+ * know the engine is still waiting on the network — not on us.
+ */
+function StartingStatus({
+  matches,
+  selectedIndex,
+  elapsedSec,
+}: {
+  matches: MatchedDownload[];
+  selectedIndex: number | null;
+  elapsedSec: number;
+}) {
+  const m = selectedIndex != null ? matches[selectedIndex] : null;
+  const uri = m ? m.magnet || m.uris[0] : null;
+  const isHttpFetch = !!uri && /^https?:/i.test(uri);
+  const slow = elapsedSec >= 10;
+  const label = isHttpFetch
+    ? slow
+      ? "Source server is slow — you can cancel and try another source"
+      : "Fetching torrent file from source server…"
+    : "Starting download…";
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      style={{
+        fontSize: "var(--font-size-xs)",
+        color: "var(--text-muted, #888)",
+        marginTop: "var(--space-sm)",
+        textAlign: "center",
+      }}
+    >
+      {label}
+      {elapsedSec > 0 && <> ({elapsedSec}s)</>}
+    </p>
   );
 }
 

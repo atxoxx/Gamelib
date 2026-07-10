@@ -52,6 +52,13 @@ export type DownloadStatus =
  * has been fetched). Once known, it's a 0.0-1.0 fraction. The
  * frontend uses `null` to render an indeterminate progress bar.
  */
+export interface TorrentFile {
+  name: string;
+  size: number;
+  downloaded: number;
+  progress: number;
+}
+
 export interface TorrentDownload {
   id: string;
   name: string;
@@ -85,6 +92,7 @@ export interface TorrentDownload {
   sourceName: string;
   /** Unix seconds when the user added the download. */
   addedAt: number;
+  files: TorrentFile[];
 }
 
 /**
@@ -150,13 +158,9 @@ export function formatProgress(progress: number | null | undefined): string {
   return `${Math.round(clamped * 100)}%`;
 }
 
-/** Return true if the status indicates the download is still in flight. */
+/** Return true if the status indicates the download is still in flight or active (not completed). */
 export function isActiveStatus(status: DownloadStatus): boolean {
-  return (
-    status.kind === "downloading" ||
-    status.kind === "queued" ||
-    status.kind === "fetchingMetadata"
-  );
+  return status.kind !== "completed";
 }
 
 /** Return true if the status indicates the download finished. */

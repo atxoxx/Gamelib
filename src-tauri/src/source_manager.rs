@@ -905,11 +905,21 @@ impl SourceManager {
                     .cloned()
                     .unwrap_or_default();
 
+                // Prefer the dedicated `magnet` field if the Hydra
+                // source populated it; fall back to scanning the
+                // `uris` array for a `magnet:` prefix. This mirrors
+                // the resolution logic in the local `search()`
+                // function so the online and offline paths agree.
                 let magnet = repack
-                    .uris
-                    .iter()
-                    .find(|u| u.starts_with("magnet:"))
-                    .cloned();
+                    .magnet
+                    .clone()
+                    .or_else(|| {
+                        repack
+                            .uris
+                            .iter()
+                            .find(|u| u.starts_with("magnet:"))
+                            .cloned()
+                    });
 
                 results.push(MatchedDownload {
                     source_name: repack.download_source_name.clone(),
@@ -982,10 +992,14 @@ impl SourceManager {
     ) -> Result<Vec<HydraRepack>, String> {
         let search_url = format!("{}/catalogue/search", HYDRA_API_BASE);
         
-        // 1. Try search with original title
+        // 1. Try search with original title. Fetch a handful of
+        //    candidates instead of just one — the catalogue often
+        //    returns DLCs, sequels, or similarly-named games first,
+        //    and we want to score them against the query before
+        //    picking one to fetch repacks for.
         let mut search_req = CatalogueSearchRequest {
             title: title.to_string(),
-            take: 1,
+            take: 10,
             skip: 0,
             download_source_fingerprints: Vec::new(),
         };
@@ -1027,8 +1041,59 @@ impl SourceManager {
             return Ok(Vec::new());
         }
 
-        // Step B: Fetch repacks for the first match
-        let best_match = &search_result.edges[0];
+        // Step B: Pick the best-matching edge instead of blindly
+        // taking `edges[0]`. The catalogue often returns DLCs and
+        // sequels that contain the base game's title as a substring
+        // (e.g. "Elden Ring: Shadow of the Erdtree" for a search
+        // of "Elden Ring"), so we prefer exact (case-insensitive)
+        // title matches and fall back to `score_match` for fuzzy
+        // ranking. Tokenize once and reuse for both the ranking
+        // and the threshold check. Trim defensively in case the
+        // caller passed a query with leading/trailing whitespace
+        // — the local `search()` function does the same.
+        let trimmed_title = title.trim();
+        let query_tokens: Vec<String> = trimmed_title
+            .split_whitespace()
+            .map(|t| t.to_ascii_lowercase())
+            .collect();
+        let best_match = search_result
+            .edges
+            .iter()
+            .max_by(|a, b| {
+                // Exact (case-insensitive) match wins outright.
+                // `eq_ignore_ascii_case` avoids the per-comparison
+                // String allocation that `to_ascii_lowercase() ==`
+                // would incur.
+                let a_exact = a.title.eq_ignore_ascii_case(trimmed_title);
+                let b_exact = b.title.eq_ignore_ascii_case(trimmed_title);
+                if a_exact != b_exact {
+                    return if a_exact {
+                        std::cmp::Ordering::Greater
+                    } else {
+                        std::cmp::Ordering::Less
+                    };
+                }
+                // Otherwise rank by fuzzy score.
+                let score_a = score_match(&query_tokens, trimmed_title, &a.title);
+                let score_b = score_match(&query_tokens, trimmed_title, &b.title);
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        let Some(best_match) = best_match else {
+            return Ok(Vec::new());
+        };
+
+        // If the best match is still below the local-search
+        // threshold (0.3), the catalogue didn't find a
+        // meaningful match — return empty rather than fetching
+        // repacks for a likely-wrong game.
+        if score_match(&query_tokens, trimmed_title, &best_match.title) < 0.3 {
+            return Ok(Vec::new());
+        }
+
+        // Step C: Fetch repacks for the best match
         let repacks_url = format!(
             "{}/games/{}/{}/download-sources",
             HYDRA_API_BASE, best_match.shop, best_match.object_id
@@ -1266,6 +1331,16 @@ struct HydraRepack {
     title: String,
     file_size: Option<String>,
     uris: Vec<String>,
+    /// Dedicated magnet URI that some Hydra sources populate
+    /// directly on the repack (instead of putting it in the
+    /// `uris` array). When present, the torrent engine prefers
+    /// this over any URI scanned from `uris`. The local
+    /// `SourceDownload` struct has the same optional field;
+    /// adding it here keeps the online and offline paths in
+    /// sync so a repack that exposes only `magnet` is not
+    /// silently downgraded to a `.torrent` URL.
+    #[serde(default)]
+    magnet: Option<String>,
     upload_date: Option<String>,
     download_source_id: String,
     download_source_name: String,

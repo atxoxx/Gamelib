@@ -126,17 +126,18 @@ export default function BandwidthSparkline() {
 
   // ── Derive the paths from the buffer ─────────────────────────────────
   const samples = samplesRef.current;
-  const now = Date.now();
+  const lastSample = samples[samples.length - 1];
+  const refTime = lastSample ? lastSample.t : Date.now();
   const peak = Math.max(
     MIN_PEAK_BYTES_PER_SEC,
     ...samples.map((s) => Math.max(s.dl, s.ul)),
   );
 
   // xFor / yFor translate (timestamp, bytesPerSec) → SVG coords.
-  // We map the live `now` against the right edge so the line
-  // appears to scroll left as time advances.
+  // We map the reference time (last sample's timestamp) against the right
+  // edge so the line remains completely stable between sample updates.
   const xFor = (t: number) => {
-    const age = now - t;
+    const age = refTime - t;
     return VIEW_W - (age / WINDOW_MS) * VIEW_W;
   };
   const yFor = (v: number) => {

@@ -69,6 +69,24 @@ pub enum DownloadStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct TorrentFile {
+    pub name: String,
+    pub size: u64,
+    pub downloaded: u64,
+    pub progress: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SavedMetadata {
+    pub source_uri: String,
+    pub save_path: String,
+    pub game_id: Option<String>,
+    pub source_name: String,
+    pub added_at: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TorrentDownload {
     pub id: String,
     pub name: String,
@@ -106,6 +124,7 @@ pub struct TorrentDownload {
     pub source_name: String,
     /// Unix seconds when the user added the download.
     pub added_at: u64,
+    pub files: Vec<TorrentFile>,
 }
 
 // ─── Engine wrapper ─────────────────────────────────────────────────────────
@@ -156,10 +175,33 @@ impl TorrentEngine {
             .map_err(|e| format!("Failed to create state dir: {}", e))?;
 
         // 1. Try the full persistent setup.
+        //
+        // Performance tuning (see `build_peer_opts` doc comment
+        // for the per-field rationale). Summary: the defaults
+        // are tuned for "thousands of small torrents on a
+        // server", which is the wrong profile for a desktop
+        // client downloading 1–3 game repacks at a time. The
+        // biggest wins are `listen_port_range` + UPnP (lets
+        // peers reach us through the home router) and the
+        // shorter `peer_opts` timeouts (cycle to fast peers
+        // faster).
         let persistent_opts = librqbit::SessionOptions {
             persistence: Some(librqbit::SessionPersistenceConfig::Json {
                 folder: Some(self.state_dir.clone()),
             }),
+            fastresume: true,
+            listen_port_range: Some(6881..6891),
+            enable_upnp_port_forwarding: true,
+            peer_opts: Self::build_peer_opts(),
+            concurrent_init_limit: Some(4),
+            // `defer_writes_up_to` is in MEGABYTES (per librqbit's
+            // doc comment), NOT pieces or bytes. 4 MiB is enough
+            // to coalesce piece-sized writes into ~1–2 disk
+            // flushes per second without pinning a noticeable
+            // amount of RAM for a typical 50 GB game download.
+            // Default is 0 (no deferral → per-packet writes,
+            // which thrashes SSDs under heavy I/O).
+            defer_writes_up_to: Some(4),
             ..Default::default()
         };
 
@@ -184,9 +226,18 @@ impl TorrentEngine {
                 // 2. Fall back to a no-persistence session. librqbit
                 //    handles this gracefully — the DHT and the
                 //    session state both stay in memory and the
-                //    session simply doesn't write to disk.
+                //    session simply doesn't write to disk. We
+                //    keep the same performance tuning as the
+                //    persistent branch so the fallback isn't
+                //    silently slower than the primary path.
                 let transient_opts = librqbit::SessionOptions {
                     persistence: None,
+                    fastresume: true,
+                    listen_port_range: Some(6881..6891),
+                    enable_upnp_port_forwarding: true,
+                    peer_opts: Self::build_peer_opts(),
+                    concurrent_init_limit: Some(4),
+                    defer_writes_up_to: Some(4),
                     ..Default::default()
                 };
                 librqbit::Session::new_with_opts(
@@ -214,6 +265,18 @@ impl TorrentEngine {
         let Some(session) = self.session.as_ref() else {
             return;
         };
+
+        // Load saved metadata from downloads.json if it exists
+        let metadata_path = self.state_dir.join("downloads.json");
+        let saved_metadata: HashMap<String, SavedMetadata> = if metadata_path.exists() {
+            std::fs::read_to_string(&metadata_path)
+                .ok()
+                .and_then(|content| serde_json::from_str(&content).ok())
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
         let collected: Vec<TorrentDownload> = session.with_torrents(|iter| {
             let mut results = Vec::new();
             for (id, mt) in iter {
@@ -231,11 +294,41 @@ impl TorrentEngine {
                 let status = map_state_to_status(&stats.state, total, downloaded);
                 let (download_speed, upload_speed, seeds, peers) =
                     extract_live_stats(&stats);
+
+                let fid = make_frontend_id(id);
+                let meta = saved_metadata.get(&fid);
+                let source_uri = meta.map(|m| m.source_uri.clone()).unwrap_or_default();
+                let save_path = meta.map(|m| m.save_path.clone()).unwrap_or_default();
+                let game_id = meta.and_then(|m| m.game_id.clone());
+                let source_name = meta
+                    .map(|m| m.source_name.clone())
+                    .unwrap_or_else(|| "Restored".to_string());
+                let added_at = meta.map(|m| m.added_at).unwrap_or(0);
+
+                // Fetch files list if metadata is available
+                let files = mt.with_metadata(|meta_data| {
+                    meta_data.file_infos.iter().enumerate().map(|(i, info)| {
+                        let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
+                        let f_size = info.len;
+                        let f_progress = if f_size > 0 {
+                            f_downloaded as f32 / f_size as f32
+                        } else {
+                            0.0
+                        };
+                        TorrentFile {
+                            name: info.relative_filename.to_string_lossy().into_owned(),
+                            size: f_size,
+                            downloaded: f_downloaded,
+                            progress: f_progress,
+                        }
+                    }).collect::<Vec<TorrentFile>>()
+                }).unwrap_or_default();
+
                 results.push(TorrentDownload {
-                    id: make_frontend_id(id),
+                    id: fid,
                     name,
-                    source_uri: String::new(),
-                    save_path: String::new(),
+                    source_uri,
+                    save_path,
                     downloaded,
                     total_size: if total > 0 { Some(total) } else { None },
                     progress,
@@ -244,9 +337,10 @@ impl TorrentEngine {
                     seeds,
                     peers,
                     status,
-                    game_id: None,
-                    source_name: "Restored".to_string(),
-                    added_at: 0,
+                    game_id,
+                    source_name,
+                    added_at,
+                    files,
                 });
             }
             results
@@ -254,54 +348,101 @@ impl TorrentEngine {
         for d in collected {
             self.downloads.insert(d.id.clone(), d);
         }
+        self.save_downloads_metadata();
     }
 
-    /// Add a new download. `source_uri` is a magnet link or .torrent URL.
-    pub async fn add(
-        &mut self,
+    fn save_downloads_metadata(&self) {
+        let metadata_path = self.state_dir.join("downloads.json");
+        let saved: HashMap<String, SavedMetadata> = self.downloads.iter().map(|(id, d)| {
+            (id.clone(), SavedMetadata {
+                source_uri: d.source_uri.clone(),
+                save_path: d.save_path.clone(),
+                game_id: d.game_id.clone(),
+                source_name: d.source_name.clone(),
+                added_at: d.added_at,
+            })
+        }).collect();
+        if let Ok(content) = serde_json::to_string_pretty(&saved) {
+            let _ = std::fs::write(&metadata_path, content);
+        }
+    }
+
+    /// Accessor for the librqbit session Arc. Returns `None` if
+    /// the engine hasn't been initialized yet. The caller can
+    /// `.clone()` the returned Arc and use it independently of
+    /// the engine mutex — that's how `torrent_add` avoids
+    /// holding the lock during the (potentially slow) network
+    /// I/O on the session.
+    pub fn session(&self) -> Option<&Arc<librqbit::Session>> {
+        self.session.as_ref()
+    }
+
+    /// Mutable accessor for the downloads metadata map. The caller
+    /// must hold the engine mutex. Used by `torrent_add` to insert
+    /// the new `TorrentDownload` record after `add_torrent`
+    /// returns; the insert itself is fast (no network I/O) so
+    /// the lock is only held for milliseconds.
+    pub fn downloads_mut(&mut self) -> &mut HashMap<String, TorrentDownload> {
+        &mut self.downloads
+    }
+
+/// Build the peer-connection options applied to the librqbit
+/// session. The fields here are the single biggest factor in
+/// "is this torrent actually downloading at the speed the user
+/// expects?":
+///
+/// * `connect_timeout: 2 s` — librqbit's default is 10 s. A
+///   10 s window for *every* peer handshake means a slow
+///   tracker can hold up the whole swarm discovery phase.
+///   2 s drops unresponsive peers fast and lets us cycle
+///   to good ones. Slightly above the 1.5 s TCP SYN retry
+///   so transient packet loss doesn't get treated as a
+///   dead peer.
+///
+/// * `read_write_timeout: 20 s` — librqbit's default is 60 s.
+///   60 s of silence is far too generous for a protocol that
+///   expects a chatter of piece requests; 20 s catches
+///   genuinely stuck peers (e.g. a NAT mapping that timed
+///   out upstream) without dropping a slow-but-alive peer
+///   on a high-latency link.
+///
+/// * `keep_alive_interval: 30 s` — librqbit's default is 120 s.
+///   30 s is the standard BitTorrent protocol's recommended
+///   keep-alive cadence and matches what uTorrent / qBittorrent
+///   ship with. Catches NAT bindings before they expire
+///   (most home routers idle mappings at 60–120 s), so we
+///   keep more of our peer connections alive between
+///   piece bursts.
+///
+/// Method (not a free function) so the impl-block callers can
+/// write it without `Self::`; the `torrent_add` command calls
+/// it as `Self::build_peer_opts()`. AddTorrentOptions inherits
+/// the session's `peer_opts` automatically — no need to repeat
+/// the same struct on every add.
+    fn build_peer_opts() -> Option<librqbit::PeerConnectionOptions> {
+        Some(librqbit::PeerConnectionOptions {
+            connect_timeout: Some(Duration::from_secs(15)),
+            read_write_timeout: Some(Duration::from_secs(45)),
+            keep_alive_interval: Some(Duration::from_secs(60)),
+        })
+    }
+
+/// Build a fresh `TorrentDownload` record for a newly-added
+/// torrent. Extracted so the Tauri command can call it after
+/// the `add_torrent` network call returns (with the engine
+/// mutex re-acquired for just this fast in-memory step).
+    fn build_download(
+        id_str: String,
+        name: String,
         source_uri: String,
         save_path: String,
         game_id: Option<String>,
         source_name: String,
-    ) -> Result<String, String> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        let trimmed = source_uri.trim().to_string();
-        if !(trimmed.starts_with("magnet:")
-            || trimmed.starts_with("http://")
-            || trimmed.starts_with("https://"))
-        {
-            return Err(
-                "Source URI must be a magnet: link or http(s):// torrent URL"
-                    .to_string(),
-            );
-        }
-
-        let add = librqbit::AddTorrent::from_url(trimmed.clone());
-        let add_opts = librqbit::AddTorrentOptions {
-            output_folder: Some(save_path.clone().into()),
-            ..Default::default()
-        };
-        let response = session
-            .add_torrent(add, Some(add_opts))
-            .await
-            .map_err(|e| format!("Failed to add torrent: {}", e))?;
-
-        let handle = response
-            .into_handle()
-            .ok_or_else(|| "Torrent was added for listing only (no handle)".to_string())?;
-
-        let handle_id = handle.id();
-        let name = handle
-            .name()
-            .unwrap_or_else(|| "Fetching metadata\u{2026}".to_string());
-        let id_str = make_frontend_id(handle_id);
-        let download = TorrentDownload {
-            id: id_str.clone(),
+    ) -> TorrentDownload {
+        TorrentDownload {
+            id: id_str,
             name,
-            source_uri: trimmed,
+            source_uri,
             save_path,
             downloaded: 0,
             total_size: None,
@@ -314,9 +455,8 @@ impl TorrentEngine {
             game_id,
             source_name,
             added_at: unix_now(),
-        };
-        self.downloads.insert(id_str.clone(), download);
-        Ok(id_str)
+            files: Vec::new(),
+        }
     }
 
     /// Pause a download. No-op on already-paused / completed torrents.
@@ -369,6 +509,7 @@ impl TorrentEngine {
                 .map_err(|e| format!("Failed to remove: {}", e))?;
         }
         self.downloads.remove(id);
+        self.save_downloads_metadata();
         Ok(())
     }
 
@@ -506,6 +647,7 @@ impl TorrentEngine {
             upload_speed: u64,
             seeds: u32,
             peers: u32,
+            files: Vec<TorrentFile>,
         }
         let (collected, alive_ids): (Vec<StatsEntry>, Vec<String>) =
             session.with_torrents(|iter| {
@@ -526,6 +668,26 @@ impl TorrentEngine {
                         map_state_to_status(&stats.state, total, downloaded);
                     let (download_speed, upload_speed, seeds, peers) =
                         extract_live_stats(&stats);
+
+                    // Fetch files list if metadata is available
+                    let files = mt.with_metadata(|meta_data| {
+                        meta_data.file_infos.iter().enumerate().map(|(i, info)| {
+                            let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
+                            let f_size = info.len;
+                            let f_progress = if f_size > 0 {
+                                f_downloaded as f32 / f_size as f32
+                            } else {
+                                0.0
+                            };
+                            TorrentFile {
+                                name: info.relative_filename.to_string_lossy().into_owned(),
+                                size: f_size,
+                                downloaded: f_downloaded,
+                                progress: f_progress,
+                            }
+                        }).collect::<Vec<TorrentFile>>()
+                    }).unwrap_or_default();
+
                     entries.push(StatsEntry {
                         fid,
                         downloaded,
@@ -537,6 +699,7 @@ impl TorrentEngine {
                         upload_speed,
                         seeds,
                         peers,
+                        files,
                     });
                 }
                 (entries, ids)
@@ -545,6 +708,7 @@ impl TorrentEngine {
         let alive_set: HashMap<String, ()> =
             alive_ids.into_iter().map(|id| (id, ())).collect();
 
+        let mut save_needed = false;
         for entry in collected {
             if let Some(d) = self.downloads.get_mut(&entry.fid) {
                 d.downloaded = entry.downloaded;
@@ -555,14 +719,42 @@ impl TorrentEngine {
                 d.seeds = entry.seeds;
                 d.peers = entry.peers;
                 d.status = entry.status;
+                d.files = entry.files;
                 if d.name.is_empty()
                     || d.name == "Fetching metadata\u{2026}"
                 {
                     if let Some(n) = entry.name {
                         d.name = n;
+                        save_needed = true;
                     }
                 }
+            } else {
+                // Auto-discovery
+                let name = entry.name.unwrap_or_else(|| "Restored".to_string());
+                let download = TorrentDownload {
+                    id: entry.fid.clone(),
+                    name,
+                    source_uri: String::new(),
+                    save_path: String::new(),
+                    downloaded: entry.downloaded,
+                    total_size: entry.total,
+                    progress: entry.progress,
+                    download_speed: entry.download_speed,
+                    upload_speed: entry.upload_speed,
+                    seeds: entry.seeds,
+                    peers: entry.peers,
+                    status: entry.status,
+                    game_id: None,
+                    source_name: "Discovered".to_string(),
+                    added_at: unix_now(),
+                    files: entry.files,
+                };
+                self.downloads.insert(entry.fid.clone(), download);
+                save_needed = true;
             }
+        }
+        if save_needed {
+            self.save_downloads_metadata();
         }
         self.downloads
             .retain(|id, _| alive_set.contains_key(id));
@@ -696,6 +888,25 @@ pub async fn engine() -> Option<Arc<tokio::sync::Mutex<TorrentEngine>>> {
     ENGINE.get().cloned()
 }
 
+/// Poll the global engine until it's initialized, up to ~2 s
+/// (20 × 100 ms). Mostly a safety net for the cold-start race:
+/// `initialize_engine` is spawned from the lib.rs `setup` closure
+/// and may not finish before the first user click. Without this
+/// grace period, a user who clicks Download within the first
+/// ~100 ms of app launch sees a spurious "engine not initialized"
+/// error and assumes the download failed.
+async fn wait_for_engine() -> Result<Arc<tokio::sync::Mutex<TorrentEngine>>, String> {
+    const MAX_ATTEMPTS: usize = 20;
+    const DELAY_MS: u64 = 100;
+    for _ in 0..MAX_ATTEMPTS {
+        if let Some(engine) = engine().await {
+            return Ok(engine);
+        }
+        tokio::time::sleep(Duration::from_millis(DELAY_MS)).await;
+    }
+    Err("Torrent engine not initialized".to_string())
+}
+
 /// Initialize the global engine and spawn the background polling task.
 pub async fn initialize_engine(
     app: AppHandle,
@@ -734,24 +945,140 @@ pub async fn torrent_add(
     save_path: String,
     game_id: Option<String>,
     source_name: String,
-) -> Result<String, String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-    let result = {
-        let mut guard = engine.lock().await;
+) -> Result<TorrentDownload, String> {
+    let engine = wait_for_engine().await?;
+
+    // Step 1: Clone the session Arc while holding the lock briefly.
+    // We need the session to call `add_torrent`, but we don't want
+    // to hold the engine mutex during the (potentially 30 s)
+    // network call — that would block all other torrent commands
+    // (pause, resume, remove, get_all, etc.) for the full timeout
+    // and leave the user unable to cancel a stuck download.
+    let session = {
+        let guard = engine.lock().await;
         guard
-            .add(magnet_uri, save_path, game_id, source_name)
-            .await
+            .session()
+            .ok_or_else(|| "Torrent engine not initialized".to_string())?
+            .clone()
     };
-    result
+
+    // Step 2: Validate the URI and call `add_torrent` WITHOUT
+    // holding the engine mutex.
+    let trimmed = magnet_uri.trim().to_string();
+    if !(trimmed.starts_with("magnet:")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://"))
+    {
+        return Err(
+            "Source URI must be a magnet: link or http(s):// torrent URL"
+                .to_string(),
+        );
+    }
+
+    let add = librqbit::AddTorrent::from_url(trimmed.clone());
+    // Be explicit about what we want from AddTorrentOptions so
+    // a future librqbit default change doesn't silently alter
+    // behavior. The fields below are the ones that matter for
+    // the "magnet hangs and never starts" symptom:
+    //   * output_folder — where librqbit writes the downloaded
+    //     files. Always set; the frontend never lets the user
+    //     start a download without picking a folder first.
+    //   * overwrite — don't fail when the output folder already
+    //     contains a partial download from a previous attempt.
+    //     librqbit's default is `false`, which is too strict for
+    //     a restart-friendly app.
+    //   * list_only — `false` means "start downloading
+    //     immediately". librqbit's default is already `false`,
+    //     but pinning it makes the intent explicit and protects
+    //     against an accidental default flip upstream.
+    // All other options keep librqbit's defaults (tracker
+    // announce on, DHT on, no file selection filters, etc.).
+    let add_opts = librqbit::AddTorrentOptions {
+        output_folder: Some(save_path.clone().into()),
+        overwrite: true,
+        list_only: false,
+        ..Default::default()
+    };
+    // 120 s timeout on the entire add_torrent operation. If
+    // librqbit hangs waiting for DHT bootstrap or tracker
+    // responses (common when the user's firewall blocks the
+    // default bootstrap nodes like `router.bittorrent.com`),
+    // the user gets a clear error instead of an infinite
+    // spinner. The torrent may still be added to librqbit
+    // internally; the timeout just means *our* command
+    // returns so the UI can react.
+    let response = tokio::time::timeout(
+        Duration::from_secs(120),
+        session.add_torrent(add, Some(add_opts)),
+    )
+    .await
+    .map_err(|_| {
+        "Torrent is taking too long to fetch metadata — your network \
+         may be blocking DHT or trackers. Check your firewall or try \
+         a different source."
+            .to_string()
+    })?
+    .map_err(|e| format!("Failed to add torrent: {}", e))?;
+
+    let handle = response
+        .into_handle()
+        .ok_or_else(|| "Torrent was added for listing only (no handle)".to_string())?;
+
+    let handle_id = handle.id();
+    let id_str = make_frontend_id(handle_id);
+
+    // Step 3: Re-acquire the lock to insert into the downloads
+    // map. This is fast (no network I/O), so the lock is held
+    // for milliseconds, not the full timeout.
+    //
+    // Dedup: if librqbit already manages this id (either because
+    // the user double-clicked Start, or because a previous
+    // `add_torrent` returned the `AlreadyManaged` variant for the
+    // same infohash), refresh the user-supplied association
+    // fields on the cached record and return it. We deliberately
+    // leave the live stats (downloaded / total_size / progress /
+    // download_speed / upload_speed / seeds / peers / status /
+    // name) alone — those are owned by the background poller,
+    // not by the user. The `save_path` / `game_id` /
+    // `source_name` refresh lets the user re-add the same
+    // torrent with a different folder or game association
+    // without us silently keeping the old values.
+    let mut guard = engine.lock().await;
+    if guard.downloads_mut().contains_key(&id_str) {
+        let updated = {
+            let existing = guard.downloads_mut().get_mut(&id_str).unwrap();
+            existing.save_path = save_path;
+            existing.game_id = game_id;
+            existing.source_name = source_name;
+            existing.clone()
+        };
+        guard.save_downloads_metadata();
+        return Ok(updated);
+    }
+
+    let name = handle
+        .name()
+        .unwrap_or_else(|| "Fetching metadata\u{2026}".to_string());
+    // Capture the insert key before `build_download` consumes
+    // `id_str` — saves one `String` allocation per add compared
+    // to cloning `id_str` into both the helper and the insert.
+    let key = id_str.clone();
+    let download = TorrentEngine::build_download(
+        id_str,
+        name,
+        trimmed,
+        save_path,
+        game_id,
+        source_name,
+    );
+    guard.downloads_mut().insert(key, download.clone());
+    guard.save_downloads_metadata();
+    Ok(download)
 }
 
 #[tauri::command]
 pub async fn torrent_pause(id: String) -> Result<(), String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let guard = engine.lock().await;
         guard.pause(&id).await
@@ -761,9 +1088,7 @@ pub async fn torrent_pause(id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn torrent_resume(id: String) -> Result<(), String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let guard = engine.lock().await;
         guard.resume(&id).await
@@ -776,9 +1101,7 @@ pub async fn torrent_remove(
     id: String,
     delete_files: Option<bool>,
 ) -> Result<(), String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let mut guard = engine.lock().await;
         guard.remove(&id, delete_files.unwrap_or(false)).await
@@ -788,9 +1111,7 @@ pub async fn torrent_remove(
 
 #[tauri::command]
 pub async fn torrent_get_all() -> Result<Vec<TorrentDownload>, String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let guard = engine.lock().await;
         Ok(guard.list())
@@ -811,9 +1132,7 @@ pub async fn torrent_select_save_path(
 /// paused or completed torrents.
 #[tauri::command]
 pub async fn torrent_pause_all() -> Result<usize, String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let guard = engine.lock().await;
         guard.pause_all().await
@@ -825,9 +1144,7 @@ pub async fn torrent_pause_all() -> Result<usize, String> {
 /// action. Skips completed torrents.
 #[tauri::command]
 pub async fn torrent_resume_all() -> Result<usize, String> {
-    let engine = engine()
-        .await
-        .ok_or_else(|| "Torrent engine not initialized".to_string())?;
+    let engine = wait_for_engine().await?;
     let result = {
         let guard = engine.lock().await;
         guard.resume_all().await
