@@ -27,7 +27,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  background-color: var(--color-bg-primary);
+  background: var(--color-bg-gradient, var(--color-bg-primary));
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
 }

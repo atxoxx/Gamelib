@@ -20,7 +20,7 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-standard);
+  transition: all var(--duration-normal) var(--ease-standard);
   white-space: nowrap;
   user-select: none;
   outline: none;
@@ -33,7 +33,7 @@
 }
 
 .ui-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
 }
@@ -47,43 +47,50 @@
   padding: var(--space-xs) var(--space-md);
   font-size: var(--font-size-xs);
   gap: var(--space-xs);
+  border-radius: var(--radius-sm);
 }
 
 .ui-btn--lg {
   padding: var(--space-md) var(--space-2xl);
   font-size: var(--font-size-md);
   gap: var(--space-md);
+  border-radius: var(--radius-lg);
 }
 
 /* Variants */
 .ui-btn--primary {
-  background: var(--color-accent);
+  background: linear-gradient(135deg, var(--color-accent) 0%, color-mix(in srgb, var(--color-accent) 75%, white 25%) 100%);
   color: #fff;
-  border-color: var(--color-accent);
-  box-shadow: 0 4px 14px var(--color-accent-glow);
+  border-color: transparent;
+  box-shadow: 0 4px 14px var(--color-accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .ui-btn--primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px var(--color-accent-glow);
+  background: linear-gradient(135deg, var(--color-accent-hover) 0%, color-mix(in srgb, var(--color-accent-hover) 75%, white 25%) 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 20px var(--color-accent-glow), 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .ui-btn--primary:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: scale(0.96) translateY(0);
 }
 
 .ui-btn--secondary {
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   border-color: var(--color-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .ui-btn--secondary:hover:not(:disabled) {
   background: var(--color-bg-hover);
   border-color: var(--color-border-light);
-  transform: translateY(-1px);
+  transform: translateY(-1.5px);
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-btn--secondary:active:not(:disabled) {
+  transform: scale(0.96) translateY(0);
 }
 
 .ui-btn--ghost {
@@ -96,18 +103,24 @@
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
   border-color: var(--color-border);
+  transform: translateY(-1px);
 }
 
 .ui-btn--danger {
   color: #fff;
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-danger) 35%, transparent);
+  background: linear-gradient(135deg, var(--color-danger) 0%, color-mix(in srgb, var(--color-danger) 80%, white 20%) 100%);
+  border-color: transparent;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-danger) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .ui-btn--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger) 85%, black 15%);
-  transform: translateY(-1px);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-danger) 85%, white 15%) 0%, var(--color-danger) 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--color-danger) 45%, transparent);
+}
+
+.ui-btn--danger:active:not(:disabled) {
+  transform: scale(0.96) translateY(0);
 }
 
 /* Icon slots */
@@ -152,13 +165,14 @@
 
 .ui-card {
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: transform var(--duration-normal) var(--ease-standard),
               box-shadow var(--duration-normal) var(--ease-standard),
-              border-color var(--duration-normal) var(--ease-standard);
+              border-color var(--duration-normal) var(--ease-standard),
+              background-color var(--duration-normal) var(--ease-standard);
 }
 
 .ui-card--surface {
@@ -168,11 +182,24 @@
 .ui-card--glass {
   background: var(--color-surface-glass);
   border-color: var(--color-border-light);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .ui-card--raised {
   background: var(--color-surface-raised);
   border-color: var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-card:hover {
+  border-color: var(--color-border-light);
+}
+
+.ui-card--raised:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border-glow);
 }
 
 .ui-card__header {

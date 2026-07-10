@@ -16,9 +16,11 @@
   flex-direction: column;
   gap: var(--space-md);
   padding: var(--space-md);
-  background: var(--color-bg-secondary);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   width: 240px;
   flex-shrink: 0;
   align-self: flex-start;
@@ -303,15 +305,17 @@
   position: relative;
   margin: 0 0 var(--space-md) 0;
   padding: var(--space-md) var(--space-lg);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)),
-    var(--color-surface)
+    color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)),
+    var(--color-surface-glass) 90%
   );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--color-border);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   isolation: isolate;
   animation: libraryHeroIn 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -335,12 +339,12 @@
   height: 130px;
   background: radial-gradient(
     ellipse at 50% 0%,
-    color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
-    transparent 65%
+    color-mix(in srgb, var(--color-accent) 30%, transparent) 0%,
+    transparent 75%
   );
   pointer-events: none;
   z-index: -1;
-  opacity: 0.75;
+  opacity: 0.85;
 }
 
 .library-hero-content {
