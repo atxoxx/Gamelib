@@ -133,6 +133,10 @@ struct GameData {
     epic_namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     epic_catalog_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    launch_arguments: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_as_admin: Option<bool>,
     /// Unix-millisecond timestamp of when the user most recently exited a
     /// session for this game. `None` until the first session ends. Used by
     /// the Library page's "Continue Playing" rail to surface recently-active
@@ -200,7 +204,7 @@ const ERROR_ELEVATION_REQUIRED: i32 = 740;
 ///
 /// This triggers a UAC prompt. If the user cancels, an error is returned.
 #[cfg(windows)]
-fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path) -> Result<Option<u32>, String> {
+fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path, args: Option<&str>) -> Result<Option<u32>, String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
@@ -222,6 +226,12 @@ fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path) -> Result<Opti
         .encode_wide()
         .chain(Some(0))
         .collect();
+    let args_wide: Option<Vec<u16>> = args.map(|s| {
+        OsStr::new(s)
+            .encode_wide()
+            .chain(Some(0))
+            .collect()
+    });
 
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -229,7 +239,9 @@ fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path) -> Result<Opti
         hwnd: HWND(ptr::null_mut()),
         lpVerb: PCWSTR::from_raw(runas_verb.as_ptr()),
         lpFile: PCWSTR::from_raw(file_wide.as_ptr()),
-        lpParameters: PCWSTR::null(),
+        lpParameters: args_wide.as_ref()
+            .map(|v| PCWSTR::from_raw(v.as_ptr()))
+            .unwrap_or(PCWSTR::null()),
         lpDirectory: PCWSTR::from_raw(cwd_wide.as_ptr()),
         nShow: SW_SHOWNORMAL.0,
         ..Default::default()
@@ -302,6 +314,8 @@ fn launch_game(
     steam_app_id: Option<u32>,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
+    launch_arguments: Option<String>,
+    run_as_admin: Option<bool>,
 ) -> Result<String, String> {
     let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
 
@@ -333,27 +347,56 @@ fn launch_game(
         }
         let cwd = path.parent().unwrap_or_else(|| Path::new("."));
 
-        // Try a normal spawn first. On Windows, if the executable requires
-        // elevation, retry with a UAC prompt so the user isn't blocked.
-        let child = std::process::Command::new(path)
-            .current_dir(cwd)
-            .spawn();
+        // Check if we need to force run as admin
+        let child = if run_as_admin.unwrap_or(false) {
+            #[cfg(windows)]
+            {
+                initial_pid = launch_elevated(path, cwd, launch_arguments.as_deref())?.unwrap_or(0);
+                None
+            }
+            #[cfg(not(windows))]
+            {
+                return Err("Running as administrator is only supported on Windows".to_string());
+            }
+        } else {
+            let mut cmd = std::process::Command::new(path);
+            cmd.current_dir(cwd);
 
-        let child = match child {
-            Ok(child) => Some(child),
-            Err(e) => {
-                #[cfg(windows)]
-                {
-                    if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) {
-                        initial_pid = launch_elevated(path, cwd)?.unwrap_or(0);
-                        None
-                    } else {
-                        return Err(format!("Failed to launch game: {}", e));
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                if let Some(args) = launch_arguments.as_deref() {
+                    if !args.trim().is_empty() {
+                        cmd.raw_arg(args);
                     }
                 }
-                #[cfg(not(windows))]
-                {
-                    return Err(format!("Failed to launch game: {}", e));
+            }
+            #[cfg(not(windows))]
+            {
+                if let Some(args) = launch_arguments.as_deref() {
+                    if !args.trim().is_empty() {
+                        cmd.args(args.split_whitespace());
+                    }
+                }
+            }
+
+            let spawn_res = cmd.spawn();
+            match spawn_res {
+                Ok(child) => Some(child),
+                Err(e) => {
+                    #[cfg(windows)]
+                    {
+                        if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) {
+                            initial_pid = launch_elevated(path, cwd, launch_arguments.as_deref())?.unwrap_or(0);
+                            None
+                        } else {
+                            return Err(format!("Failed to launch game: {}", e));
+                        }
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        return Err(format!("Failed to launch game: {}", e));
+                    }
                 }
             }
         };

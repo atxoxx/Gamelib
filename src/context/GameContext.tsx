@@ -543,6 +543,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         steamAppId: game.steamAppId ?? null,
         gpuId,
         gpuName,
+        launchArguments: game.launchArguments || null,
+        runAsAdmin: game.runAsAdmin || null,
       });
 
       if (splashOn) splash.updateStatus("started");

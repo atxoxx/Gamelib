@@ -355,6 +355,10 @@ function GameDetail({ game }: { game: Game }) {
   const [applyingMetadata, setApplyingMetadata] = useState(false);
 
   const [editing, setEditing] = useState(false);
+  const [editTab, setEditTab] = useState<"metadata" | "media" | "data" | "launch">("metadata");
+  const [editPath, setEditPath] = useState(game.path || "");
+  const [editLaunchArguments, setEditLaunchArguments] = useState(game.launchArguments || "");
+  const [editRunAsAdmin, setEditRunAsAdmin] = useState(game.runAsAdmin || false);
   const [editName, setEditName] = useState(game.name);
   const [editPlatform, setEditPlatform] = useState(game.platform);
   const [editIcon, setEditIcon] = useState(game.iconUrl || "");
@@ -520,6 +524,11 @@ function GameDetail({ game }: { game: Game }) {
 
     setEditMetadataSource(game.metadataSource || "");
     setEditMetadataUrl(game.metadataUrl || "");
+    
+    setEditPath(game.path || "");
+    setEditLaunchArguments(game.launchArguments || "");
+    setEditRunAsAdmin(game.runAsAdmin || false);
+    setEditTab("metadata");
     
     setEditing(true);
   }
@@ -703,6 +712,25 @@ function GameDetail({ game }: { game: Game }) {
       }
     } catch (err) {
       showToast("Failed to load image", "error");
+    }
+  }
+
+  async function handlePickExecutable() {
+    try {
+      const filePath = await open({
+        multiple: false,
+        directory: false,
+        title: "Select Game Executable",
+        filters: [
+          { name: "Executables", extensions: ["exe", "bat", "lnk", "cmd"] },
+          { name: "All Files", extensions: ["*"] }
+        ],
+      });
+      if (filePath && typeof filePath === "string") {
+        setEditPath(filePath);
+      }
+    } catch (err) {
+      showToast("Failed to select executable", "error");
     }
   }
 
@@ -973,6 +1001,9 @@ function GameDetail({ game }: { game: Game }) {
       languageSupports: newLanguageSupports.length > 0 ? newLanguageSupports : undefined,
       metadataSource: editMetadataSource ? editMetadataSource : undefined,
       metadataUrl: editMetadataUrl ? editMetadataUrl : undefined,
+      path: editPath.trim() || undefined,
+      launchArguments: editLaunchArguments.trim() || undefined,
+      runAsAdmin: editRunAsAdmin || undefined,
     });
     setEditing(false);
     showToast("Game updated", "success");
@@ -1856,9 +1887,25 @@ function GameDetail({ game }: { game: Game }) {
               </button>
             </div>
 
+            <div className="edit-modal-tabs">
+              {(["metadata", "media", "data", "launch"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={`edit-modal-tab ${editTab === tab ? "active" : ""}`}
+                  onClick={() => setEditTab(tab)}
+                >
+                  {tab === "metadata" && "Metadata"}
+                  {tab === "media" && "Media & Images"}
+                  {tab === "data" && "Additional Data"}
+                  {tab === "launch" && "Launch Options"}
+                </button>
+              ))}
+            </div>
+
             <div className="edit-modal-body">
               {/* Metadata Results (inside modal) */}
-              {showMetadataPanel && (
+              {editTab === "metadata" && showMetadataPanel && (
                 <div className="metadata-panel">
                   <div className="metadata-panel-header">
                     <h3>
@@ -1920,8 +1967,163 @@ function GameDetail({ game }: { game: Game }) {
                 </div>
               )}
 
-              <div className="edit-form">
-                <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+              {/* TAB 1: METADATA */}
+              {editTab === "metadata" && (
+                <div className="edit-form">
+                  <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-name">Name</label>
+                      <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-platform">Platform</label>
+                      <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-developer">Developer</label>
+                      <input id="edit-developer" className="edit-input" type="text" value={editDeveloper} onChange={(e) => setEditDeveloper(e.target.value)} placeholder="Developer name" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-publisher">Publisher</label>
+                      <input id="edit-publisher" className="edit-input" type="text" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} placeholder="Publisher name" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-release-date">Release Date</label>
+                      <input id="edit-release-date" className="edit-input" type="text" value={editReleaseDate} onChange={(e) => setEditReleaseDate(e.target.value)} placeholder="e.g., YYYY-MM-DD" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-genres">Genres</label>
+                      <input id="edit-genres" className="edit-input" type="text" value={editGenres} onChange={(e) => setEditGenres(e.target.value)} placeholder="Action, Adventure, Shooter" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-themes">Themes</label>
+                      <input id="edit-themes" className="edit-input" type="text" value={editThemes} onChange={(e) => setEditThemes(e.target.value)} placeholder="Sci-Fi, Survival, Sandbox" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-modes">Game Modes</label>
+                      <input id="edit-modes" className="edit-input" type="text" value={editGameModes} onChange={(e) => setEditGameModes(e.target.value)} placeholder="Single player, Multiplayer, Co-op" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
+                      <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
+                    </div>
+                    <div className="edit-field-row">
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
+                        <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
+                        <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
+                      </div>
+                    </div>
+                    
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-collection">Series</label>
+                      <input id="edit-collection" className="edit-input" type="text" value={editCollection} onChange={(e) => setEditCollection(e.target.value)} placeholder="Series or Collection" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-franchise">Franchise</label>
+                      <input id="edit-franchise" className="edit-input" type="text" value={editFranchise} onChange={(e) => setEditFranchise(e.target.value)} placeholder="Franchise name" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-game-category">Game Type</label>
+                      <input id="edit-game-category" className="edit-input" type="text" value={editGameCategory} onChange={(e) => setEditGameCategory(e.target.value)} placeholder="e.g. Main Game, Expansion" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-release-status">Release Status</label>
+                      <input id="edit-release-status" className="edit-input" type="text" value={editReleaseStatus} onChange={(e) => setEditReleaseStatus(e.target.value)} placeholder="e.g. Released, Alpha" />
+                    </div>
+
+                    <div className="edit-field-row" style={{ marginTop: 'var(--space-md)' }}>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
+                        <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (Hours)</label>
+                        <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (Hours)</label>
+                        <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-similar-games">Similar Games (Comma-separated)</label>
+                    <input id="edit-similar-games" className="edit-input" type="text" value={editSimilarGamesText} onChange={(e) => setEditSimilarGamesText(e.target.value)} placeholder="Game A, Game B, Game C" />
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-alternative-names">Alternative Names (Comma-separated)</label>
+                    <input id="edit-alternative-names" className="edit-input" type="text" value={editAlternativeNamesText} onChange={(e) => setEditAlternativeNamesText(e.target.value)} placeholder="Witcher III, Wiedźmin 3" />
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-description">Description</label>
+                    <textarea id="edit-description" className="edit-input edit-textarea" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Short description or summary..." rows={3} />
+                  </div>
+                  
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-storyline">Storyline</label>
+                    <textarea id="edit-storyline" className="edit-input edit-textarea" value={editStoryline} onChange={(e) => setEditStoryline(e.target.value)} placeholder="Deep storyline/narrative summary..." rows={3} />
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-notes">Notes</label>
+                    <textarea id="edit-notes" className="edit-input edit-textarea" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Personal notes about this game..." rows={3} />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: MEDIA */}
+              {editTab === "media" && (
+                <div>
+                  <h4 className="edit-modal-section-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    Images
+                  </h4>
+                  <div className="edit-images-grid">
+                    <EditImageSlot label="Icon" subtitle="Sidebar" imageUrl={editIcon} previewSize={{ w: 64, h: 64 }} isFetching={fetchingImageKey === "icon"} onChooseFile={() => handlePickImage("icon")} onFetchWeb={() => handleFetchImage("icon")} onRemove={() => handleRemoveImage("icon")} />
+                    <EditImageSlot label="Cover Art" subtitle="Library cards" imageUrl={editCover} previewSize={{ w: 120, h: 160 }} isFetching={fetchingImageKey === "cover"} onChooseFile={() => handlePickImage("cover")} onFetchWeb={() => handleFetchImage("cover")} onRemove={() => handleRemoveImage("cover")} />
+                    <EditImageSlot label="Hero Banner" subtitle="Game page top" imageUrl={editHero} previewSize={{ w: 240, h: 100 }} isFetching={fetchingImageKey === "hero"} onChooseFile={() => handlePickImage("hero")} onFetchWeb={() => handleFetchImage("hero")} onRemove={() => handleRemoveImage("hero")} />
+                    <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
+                    <Button variant="secondary" size="sm" onClick={handleOpenImageBrowser} leftIcon={
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="2" width="20" height="20" rx="2" />
+                        <path d="M7 2v20" />
+                        <path d="M2 12h5" />
+                      </svg>
+                    }>
+                      Browse LaunchBox Images
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowIgdbMediaBrowser(true)}
+                      leftIcon={
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                      </svg>
+                      }>
+                      Browse IGDB Media
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: ADDITIONAL DATA */}
+              {editTab === "data" && (
+                <div className="edit-form">
                   <div className="edit-field full-width" data-storage-row>
                     <label className="edit-label">Size</label>
                     <div className="size-edit-row">
@@ -1956,164 +2158,99 @@ function GameDetail({ game }: { game: Game }) {
                       </span>
                     )}
                   </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-name">Name</label>
-                    <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-platform">Platform</label>
-                    <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-developer">Developer</label>
-                    <input id="edit-developer" className="edit-input" type="text" value={editDeveloper} onChange={(e) => setEditDeveloper(e.target.value)} placeholder="Developer name" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-publisher">Publisher</label>
-                    <input id="edit-publisher" className="edit-input" type="text" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} placeholder="Publisher name" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-release-date">Release Date</label>
-                    <input id="edit-release-date" className="edit-input" type="text" value={editReleaseDate} onChange={(e) => setEditReleaseDate(e.target.value)} placeholder="e.g., YYYY-MM-DD" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-genres">Genres</label>
-                    <input id="edit-genres" className="edit-input" type="text" value={editGenres} onChange={(e) => setEditGenres(e.target.value)} placeholder="Action, Adventure, Shooter" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-themes">Themes</label>
-                    <input id="edit-themes" className="edit-input" type="text" value={editThemes} onChange={(e) => setEditThemes(e.target.value)} placeholder="Sci-Fi, Survival, Sandbox" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-modes">Game Modes</label>
-                    <input id="edit-modes" className="edit-input" type="text" value={editGameModes} onChange={(e) => setEditGameModes(e.target.value)} placeholder="Single player, Multiplayer, Co-op" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
-                    <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
-                  </div>
-                  <div className="edit-field-row">
+
+                  <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
                     <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
-                      <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
+                      <label className="edit-label" htmlFor="edit-metadata-source">Metadata Source</label>
+                      <input id="edit-metadata-source" className="edit-input" type="text" value={editMetadataSource} onChange={(e) => setEditMetadataSource(e.target.value)} placeholder="e.g., IGDB, Steam" />
                     </div>
                     <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
-                      <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
+                      <label className="edit-label" htmlFor="edit-metadata-url">Metadata URL</label>
+                      <input id="edit-metadata-url" className="edit-input" type="text" value={editMetadataUrl} onChange={(e) => setEditMetadataUrl(e.target.value)} placeholder="https://..." />
                     </div>
                   </div>
-                  
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-collection">Series</label>
-                    <input id="edit-collection" className="edit-input" type="text" value={editCollection} onChange={(e) => setEditCollection(e.target.value)} placeholder="Series or Collection" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-franchise">Franchise</label>
-                    <input id="edit-franchise" className="edit-input" type="text" value={editFranchise} onChange={(e) => setEditFranchise(e.target.value)} placeholder="Franchise name" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-game-category">Game Type</label>
-                    <input id="edit-game-category" className="edit-input" type="text" value={editGameCategory} onChange={(e) => setEditGameCategory(e.target.value)} placeholder="e.g. Main Game, Expansion" />
-                  </div>
-                  <div className="edit-field">
-                    <label className="edit-label" htmlFor="edit-release-status">Release Status</label>
-                    <input id="edit-release-status" className="edit-input" type="text" value={editReleaseStatus} onChange={(e) => setEditReleaseStatus(e.target.value)} placeholder="e.g. Released, Alpha" />
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-releases-list">Releases (Line-by-line: Platform | YYYY-MM-DD | Region)</label>
+                    <textarea id="edit-releases-list" className="edit-input edit-textarea" value={editReleasesText} onChange={(e) => setEditReleasesText(e.target.value)} placeholder="PC | 2020-12-10 | North America&#10;PS5 | 2020-12-10 | Worldwide" rows={3} />
                   </div>
 
-                  <div className="edit-field-row" style={{ marginTop: 'var(--space-md)' }}>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
-                      <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-igdb-reviews-json">Community Reviews (JSON format)</label>
+                    <textarea id="edit-igdb-reviews-json" className="edit-input edit-textarea" value={editIgdbReviewsText} onChange={(e) => setEditIgdbReviewsText(e.target.value)} placeholder="[ { &quot;username&quot;: &quot;Player1&quot;, &quot;rating&quot;: 90, &quot;content&quot;: &quot;Amazing!&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-languages-json">Supported Languages (JSON format)</label>
+                    <textarea id="edit-languages-json" className="edit-input edit-textarea" value={editLanguageSupportsText} onChange={(e) => setEditLanguageSupportsText(e.target.value)} placeholder="[ { &quot;language&quot;: &quot;English&quot;, &quot;supportType&quot;: &quot;Audio&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: LAUNCH OPTIONS */}
+              {editTab === "launch" && (
+                <div className="edit-form">
+                  <div className="edit-field full-width">
+                    <label className="edit-label" htmlFor="edit-path">Executable Path</label>
+                    <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                      <input
+                        id="edit-path"
+                        className="edit-input"
+                        type="text"
+                        value={editPath}
+                        onChange={(e) => setEditPath(e.target.value)}
+                        placeholder="Path to game executable"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="edit-btn edit-btn-secondary"
+                        onClick={handlePickExecutable}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        Browse...
+                      </button>
                     </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (Hours)</label>
-                      <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (Hours)</label>
-                      <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
-                    </div>
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                    <label className="edit-label" htmlFor="edit-launch-arguments">Launch Arguments</label>
+                    <input
+                      id="edit-launch-arguments"
+                      className="edit-input"
+                      type="text"
+                      value={editLaunchArguments}
+                      onChange={(e) => setEditLaunchArguments(e.target.value)}
+                      placeholder="e.g. -windowed -novid -dev"
+                    />
+                    <span className="size-edit-hint">
+                      Custom command-line parameters passed directly to the executable on startup.
+                    </span>
+                  </div>
+
+                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-lg)' }}>
+                    <label className="checkbox-container" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: 'pointer', userSelect: 'none' }}>
+                      <input
+                        type="checkbox"
+                        checked={editRunAsAdmin}
+                        onChange={(e) => setEditRunAsAdmin(e.target.checked)}
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          accentColor: 'var(--color-accent)',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                        Run as Administrator
+                      </span>
+                    </label>
+                    <span className="size-edit-hint" style={{ display: 'block', marginTop: '4px', marginLeft: '26px' }}>
+                      Elevate process privileges using Windows UAC when launching.
+                    </span>
                   </div>
                 </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-similar-games">Similar Games (Comma-separated)</label>
-                  <input id="edit-similar-games" className="edit-input" type="text" value={editSimilarGamesText} onChange={(e) => setEditSimilarGamesText(e.target.value)} placeholder="Game A, Game B, Game C" />
-                </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-alternative-names">Alternative Names (Comma-separated)</label>
-                  <input id="edit-alternative-names" className="edit-input" type="text" value={editAlternativeNamesText} onChange={(e) => setEditAlternativeNamesText(e.target.value)} placeholder="Witcher III, Wiedźmin 3" />
-                </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-releases-list">Releases (Line-by-line: Platform | YYYY-MM-DD | Region)</label>
-                  <textarea id="edit-releases-list" className="edit-input edit-textarea" value={editReleasesText} onChange={(e) => setEditReleasesText(e.target.value)} placeholder="PC | 2020-12-10 | North America&#10;PS5 | 2020-12-10 | Worldwide" rows={3} />
-                </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-igdb-reviews-json">Community Reviews (JSON format)</label>
-                  <textarea id="edit-igdb-reviews-json" className="edit-input edit-textarea" value={editIgdbReviewsText} onChange={(e) => setEditIgdbReviewsText(e.target.value)} placeholder="[ { &quot;username&quot;: &quot;Player1&quot;, &quot;rating&quot;: 90, &quot;content&quot;: &quot;Amazing!&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
-                </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-languages-json">Supported Languages (JSON format)</label>
-                  <textarea id="edit-languages-json" className="edit-input edit-textarea" value={editLanguageSupportsText} onChange={(e) => setEditLanguageSupportsText(e.target.value)} placeholder="[ { &quot;language&quot;: &quot;English&quot;, &quot;supportType&quot;: &quot;Audio&quot; } ]" rows={3} style={{ fontFamily: 'monospace', fontSize: 'var(--font-size-xs)' }} />
-                </div>
-                
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-description">Description</label>
-                  <textarea id="edit-description" className="edit-input edit-textarea" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Short description or summary..." rows={3} />
-                </div>
-                
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-storyline">Storyline</label>
-                  <textarea id="edit-storyline" className="edit-input edit-textarea" value={editStoryline} onChange={(e) => setEditStoryline(e.target.value)} placeholder="Deep storyline/narrative summary..." rows={3} />
-                </div>
-
-                <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                  <label className="edit-label" htmlFor="edit-notes">Notes</label>
-                  <textarea id="edit-notes" className="edit-input edit-textarea" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Personal notes about this game..." rows={3} />
-                </div>
-              </div>
-
-              <h4 className="edit-modal-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-                Images
-              </h4>
-              <div className="edit-images-grid">
-                <EditImageSlot label="Icon" subtitle="Sidebar" imageUrl={editIcon} previewSize={{ w: 64, h: 64 }} isFetching={fetchingImageKey === "icon"} onChooseFile={() => handlePickImage("icon")} onFetchWeb={() => handleFetchImage("icon")} onRemove={() => handleRemoveImage("icon")} />
-                <EditImageSlot label="Cover Art" subtitle="Library cards" imageUrl={editCover} previewSize={{ w: 120, h: 160 }} isFetching={fetchingImageKey === "cover"} onChooseFile={() => handlePickImage("cover")} onFetchWeb={() => handleFetchImage("cover")} onRemove={() => handleRemoveImage("cover")} />
-                <EditImageSlot label="Hero Banner" subtitle="Game page top" imageUrl={editHero} previewSize={{ w: 240, h: 100 }} isFetching={fetchingImageKey === "hero"} onChooseFile={() => handlePickImage("hero")} onFetchWeb={() => handleFetchImage("hero")} onRemove={() => handleRemoveImage("hero")} />
-                <EditImageSlot label="Logo" subtitle="Title image" imageUrl={editLogo} previewSize={{ w: 200, h: 60 }} isFetching={fetchingImageKey === "logo"} onChooseFile={() => handlePickImage("logo")} onFetchWeb={() => handleFetchImage("logo")} onRemove={() => handleRemoveImage("logo")} />
-              </div>
-              <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-md)' }}>
-                <Button variant="secondary" size="sm" onClick={handleOpenImageBrowser} leftIcon={
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="2" width="20" height="20" rx="2" />
-                    <path d="M7 2v20" />
-                    <path d="M2 12h5" />
-                  </svg>
-                }>
-                  Browse LaunchBox Images
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowIgdbMediaBrowser(true)}
-                  leftIcon={
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-accent)' }}>
-                    <polygon points="23 7 16 12 23 17 23 7" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                  </svg>
-                  }>
-                  Browse IGDB Media
-                </Button>
-              </div>
+              )}
             </div>
 
             <div className="modal-footer">

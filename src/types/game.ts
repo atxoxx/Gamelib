@@ -81,6 +81,8 @@ export interface Game {
   gameCategory?: string;
   releaseStatus?: string;
   languageSupports?: LanguageSupportInfo[];
+  launchArguments?: string;
+  runAsAdmin?: boolean;
 }
 
 export interface TimeToBeat {
