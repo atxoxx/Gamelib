@@ -211,15 +211,15 @@ export default function LibraryPage() {
             ) : (
               <div className={`library-cards density-${density}`}>
                 {filteredGames.map((game, index) => (
-                  <div key={game.id} className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}>
-                    <LibraryGameCard
-                      game={game}
-                      density={density}
-                      isRunning={runningGameIds.includes(game.id)}
-                      onClick={() => handleCardClick(game)}
-                      onContextMenu={(e) => handleGameContextMenu(e, game)}
-                    />
-                  </div>
+                  <LibraryGameCard
+                    key={game.id}
+                    game={game}
+                    density={density}
+                    isRunning={runningGameIds.includes(game.id)}
+                    onClick={() => handleCardClick(game)}
+                    onContextMenu={(e) => handleGameContextMenu(e, game)}
+                    className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}
+                  />
                 ))}
               </div>
             )}
@@ -335,12 +335,14 @@ function LibraryGameCard({
   isRunning,
   onClick,
   onContextMenu,
+  className,
 }: {
   game: Game;
   density: string;
   isRunning: boolean;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  className?: string;
 }) {
   const { updateGame, enrichGameMetadata } = useGames();
   const coverRef = useRef<HTMLDivElement | null>(null);
@@ -387,7 +389,7 @@ function LibraryGameCard({
       variant="surface"
       elevation="1"
       hoverLift
-      className={`library-card density-${density}${isRunning ? " running" : ""}`}
+      className={`library-card density-${density}${isRunning ? " running" : ""}${className ? ` ${className}` : ""}`}
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
