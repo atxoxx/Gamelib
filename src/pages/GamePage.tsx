@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import html2canvas from "html2canvas";
+import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
@@ -2518,6 +2519,10 @@ function generateConsistentSeries(avgVal: number, minVal: number, maxVal: number
 
 export function GameActivityTab({ game }: { game: Game }) {
   const { getGameSessions, deleteSession } = useActivity();
+  // Toast feedback for screenshot success / error — GameActivityTab is
+  // a sibling component to GameDetail, so its own useToast() (rather
+  // than the one inside GameDetail) is in scope here.
+  const { showToast } = useToast();
   const sessions = useMemo(() => getGameSessions(game.id), [game.id, getGameSessions]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("playtime");
@@ -2531,11 +2536,31 @@ export function GameActivityTab({ game }: { game: Game }) {
       const container = document.querySelector(".game-activity-tab");
       if (!container) return;
 
+      // Capture the *entire* activity view in height, not just the
+      // currently-visible portion. scrollHeight reflects the full
+      // rendered tab including content below the fold; passing it as
+      // both `height` and `windowHeight` lets html2canvas paint the
+      // complete layout in one pass instead of just viewport-clipped
+      // pixels.
+      const fullHeight = (container as HTMLElement).scrollHeight;
+      const fullWidth = (container as HTMLElement).scrollWidth;
+
       const canvas = await html2canvas(container as HTMLElement, {
         backgroundColor: "#0f1117",
         scale: 2,
         logging: false,
         useCORS: true,
+        width: fullWidth,
+        height: fullHeight,
+        windowWidth: fullWidth,
+        windowHeight: fullHeight,
+        // html2canvas 1.4.1 doesn't understand CSS Color Module L4
+        // `color-mix(in srgb, …)` and throws "Attempting to parse an
+        // unsupported color function 'color'". The project uses
+        // color-mix in 170+ rules, so we rewrite every `color-mix()`
+        // in the clone to a literal rgb() / rgba() before html2canvas
+        // reads computed styles (see src/utils/color.ts).
+        onclone: prepareClonedDocumentForCanvasCapture,
       });
 
       const dataUrl = canvas.toDataURL("image/png");
@@ -2549,9 +2574,10 @@ export function GameActivityTab({ game }: { game: Game }) {
       if (!filePath) return;
 
       await invoke("save_screenshot", { filePath, base64Data: dataUrl });
+      showToast("Activity screenshot saved", "success");
     } catch (error) {
       console.error("Screenshot error:", error);
-      alert(`Failed to save screenshot: ${error}`);
+      showToast(`Failed to save screenshot: ${error}`, "error");
     }
   };
 
