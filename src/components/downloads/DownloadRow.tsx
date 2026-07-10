@@ -15,6 +15,8 @@
 
 import { useState } from "react";
 import { useSizeUnit } from "../../hooks/useSizeUnit";
+import { useDownloads } from "../../context/DownloadContext";
+import { useToast } from "../../context/ToastContext";
 import {
   formatBytesPerSecond,
   formatBytesShort,
@@ -40,7 +42,35 @@ export default function DownloadRow({
   onRemove,
 }: DownloadRowProps) {
   const { unit } = useSizeUnit();
+  const { updateSelectedFiles } = useDownloads();
+  const { showToast } = useToast();
   const [expanded, setExpanded] = useState(false);
+
+  const handleToggleFile = async (idx: number) => {
+    if (!download.files) return;
+    
+    const currentSelected = download.files
+      .map((f, i) => ({ selected: f.selected, index: i }))
+      .filter((item) => item.selected)
+      .map((item) => item.index);
+      
+    let newSelected: number[];
+    if (download.files[idx].selected) {
+      if (currentSelected.length <= 1) {
+        showToast("At least one file must be selected for download.", "error");
+        return;
+      }
+      newSelected = currentSelected.filter((i) => i !== idx);
+    } else {
+      newSelected = [...currentSelected, idx];
+    }
+    
+    try {
+      await updateSelectedFiles(download.id, newSelected);
+    } catch (err) {
+      showToast(`Failed to update file selection: ${err}`, "error");
+    }
+  };
   const status = download.status;
   const indeterminate = download.progress == null && isActiveStatus(status);
   const isPaused = status.kind === "paused";
@@ -248,8 +278,21 @@ export default function DownloadRow({
         <div className="dl-row-details">
           <div className="dl-files-list">
             {download.files.map((file, idx) => (
-              <div key={idx} className="dl-file-item">
-                <span className="dl-file-name" title={file.name}>
+              <div key={idx} className="dl-file-item" style={{ opacity: file.selected ? 1 : 0.45 }}>
+                <input
+                  type="checkbox"
+                  checked={file.selected}
+                  disabled={isCompleted}
+                  onChange={() => handleToggleFile(idx)}
+                  title={file.selected ? "File selected for download" : "File skipped"}
+                  style={{
+                    cursor: isCompleted ? "not-allowed" : "pointer",
+                    width: "14px",
+                    height: "14px",
+                    margin: "0"
+                  }}
+                />
+                <span className="dl-file-name" title={file.name} style={{ textDecoration: file.selected ? "none" : "line-through" }}>
                   {file.name}
                 </span>
                 <span className="dl-file-size">

@@ -90,6 +90,12 @@ interface DownloadContextValue {
   /** Force a one-shot refresh from the engine. Rarely needed — the
    *  `download-progress` event keeps state in sync. */
   refresh: () => Promise<void>;
+  updateSpeedLimits: (
+    downloadKbps: number | null,
+    uploadKbps: number | null,
+    disableUpload: boolean,
+  ) => Promise<void>;
+  updateSelectedFiles: (id: string, onlyFiles: number[]) => Promise<void>;
 }
 
 const DownloadContext = createContext<DownloadContextValue | null>(null);
@@ -127,6 +133,26 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
+        // Apply speed limits on startup
+        try {
+          const dlLimitEnabled = localStorage.getItem("gamelib-dl-limit-download-enabled") === "true";
+          const dlLimitVal = parseInt(localStorage.getItem("gamelib-dl-limit-download-value") || "0", 10);
+          const ulLimitEnabled = localStorage.getItem("gamelib-dl-limit-upload-enabled") === "true";
+          const ulLimitVal = parseInt(localStorage.getItem("gamelib-dl-limit-upload-value") || "0", 10);
+          const disableUpload = localStorage.getItem("gamelib-dl-limit-disable-upload") === "true";
+
+          const downloadKbps = dlLimitEnabled && dlLimitVal > 0 ? dlLimitVal : null;
+          const uploadKbps = ulLimitEnabled && ulLimitVal > 0 ? ulLimitVal : null;
+
+          await invoke("torrent_set_speed_limits", {
+            downloadLimitKbps: downloadKbps,
+            uploadLimitKbps: uploadKbps,
+            disableUpload,
+          });
+        } catch (e) {
+          console.error("Failed to apply initial speed limits:", e);
+        }
+
         // 1. Subscribe to the background-polling event FIRST so we
         //    don't miss the first emission if the engine is already
         //    running. (In practice, the engine isn't init'd until
@@ -249,6 +275,28 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateSpeedLimits = useCallback(
+    async (
+      downloadKbps: number | null,
+      uploadKbps: number | null,
+      disableUpload: boolean,
+    ): Promise<void> => {
+      await invoke("torrent_set_speed_limits", {
+        downloadLimitKbps: downloadKbps,
+        uploadLimitKbps: uploadKbps,
+        disableUpload,
+      });
+    },
+    [],
+  );
+
+  const updateSelectedFiles = useCallback(
+    async (id: string, onlyFiles: number[]): Promise<void> => {
+      await invoke("torrent_update_only_files", { id, onlyFiles });
+    },
+    [],
+  );
+
   // ── Derived state ──────────────────────────────────────────────────
   const sorted = useMemo(() => [...downloads].sort(sortDownloads), [downloads]);
   const activeDownloads = useMemo(
@@ -276,6 +324,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       removeDownload,
       selectSavePath,
       refresh,
+      updateSpeedLimits,
+      updateSelectedFiles,
     }),
     [
       sorted,
@@ -291,6 +341,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       removeDownload,
       selectSavePath,
       refresh,
+      updateSpeedLimits,
+      updateSelectedFiles,
     ],
   );
 

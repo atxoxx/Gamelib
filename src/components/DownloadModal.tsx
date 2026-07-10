@@ -418,12 +418,15 @@ export default function DownloadModal({
                 variant="primary"
                 onClick={async () => {
                   if (!tempTorrentId) return;
+                  const activeId = tempTorrentId;
                   setStep("starting");
                   try {
-                    await startSelectedDownload(tempTorrentId, Array.from(selectedFiles), autoExtract);
+                    setTempTorrentId(null);
+                    await startSelectedDownload(activeId, Array.from(selectedFiles), autoExtract);
                     showToast("Download started with file selection", "success");
                     onClose();
                   } catch (e) {
+                    setTempTorrentId(activeId);
                     setError(String(e));
                     setStep("file_selection");
                   }

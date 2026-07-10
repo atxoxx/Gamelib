@@ -74,9 +74,11 @@ pub struct TorrentFile {
     pub size: u64,
     pub downloaded: u64,
     pub progress: f32,
+    pub selected: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct SavedMetadata {
     pub source_uri: String,
     pub save_path: String,
@@ -85,6 +87,10 @@ pub struct SavedMetadata {
     pub added_at: u64,
     pub auto_extract: Option<bool>,
     pub extracted: Option<bool>,
+    pub total_size: Option<u64>,
+    #[serde(default)]
+    pub files: Vec<TorrentFile>,
+    pub status: Option<DownloadStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -140,6 +146,7 @@ pub struct TorrentEngine {
     /// keyed by frontend-facing id (`"dl_<n>"`).
     downloads: HashMap<String, TorrentDownload>,
     state_dir: PathBuf,
+    auto_paused_completed: std::collections::HashSet<String>,
 }
 
 impl TorrentEngine {
@@ -148,6 +155,7 @@ impl TorrentEngine {
             session: None,
             downloads: HashMap::new(),
             state_dir,
+            auto_paused_completed: std::collections::HashSet::new(),
         }
     }
 
@@ -281,6 +289,38 @@ impl TorrentEngine {
             HashMap::new()
         };
 
+        // Pre-populate our downloads list from saved metadata (completed history, etc.)
+        self.downloads.clear();
+        for (id, meta) in &saved_metadata {
+            let status = meta.status.clone().unwrap_or(DownloadStatus::Completed);
+            let name = std::path::Path::new(&meta.save_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Restored Download")
+                .to_string();
+            self.downloads.insert(id.clone(), TorrentDownload {
+                id: id.clone(),
+                name,
+                source_uri: meta.source_uri.clone(),
+                save_path: meta.save_path.clone(),
+                downloaded: if matches!(status, DownloadStatus::Completed) { meta.total_size.unwrap_or(0) } else { 0 },
+                total_size: meta.total_size,
+                progress: if matches!(status, DownloadStatus::Completed) { Some(1.0) } else { Some(0.0) },
+                download_speed: 0,
+                upload_speed: 0,
+                seeds: 0,
+                peers: 0,
+                status,
+                game_id: meta.game_id.clone(),
+                source_name: meta.source_name.clone(),
+                added_at: meta.added_at,
+                files: meta.files.clone(),
+                auto_extract: meta.auto_extract,
+                extracted: meta.extracted,
+            });
+        }
+
+        let to_delete_restored = std::sync::Mutex::new(Vec::new());
         let collected: Vec<TorrentDownload> = session.with_torrents(|iter| {
             let mut results = Vec::new();
             for (id, mt) in iter {
@@ -295,7 +335,12 @@ impl TorrentEngine {
                 } else {
                     None
                 };
-                let status = map_state_to_status(&stats.state, total, downloaded);
+                let status = map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref(), stats.finished);
+                
+                if matches!(status, DownloadStatus::Completed) {
+                    to_delete_restored.lock().unwrap().push(mt.clone());
+                }
+
                 let (download_speed, upload_speed, seeds, peers) =
                     extract_live_stats(&stats);
 
@@ -312,6 +357,7 @@ impl TorrentEngine {
                 let extracted = meta.and_then(|m| m.extracted).unwrap_or(false);
 
                 // Fetch files list if metadata is available
+                let only_files_list = mt.only_files();
                 let files = mt.with_metadata(|meta_data| {
                     meta_data.file_infos.iter().enumerate().map(|(i, info)| {
                         let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
@@ -321,11 +367,16 @@ impl TorrentEngine {
                         } else {
                             0.0
                         };
+                        let f_selected = match &only_files_list {
+                            Some(indices) => indices.contains(&i),
+                            None => true,
+                        };
                         TorrentFile {
                             name: info.relative_filename.to_string_lossy().into_owned(),
                             size: f_size,
                             downloaded: f_downloaded,
                             progress: f_progress,
+                            selected: f_selected,
                         }
                     }).collect::<Vec<TorrentFile>>()
                 }).unwrap_or_default();
@@ -386,6 +437,15 @@ impl TorrentEngine {
                 }
             });
         }
+
+        let to_delete_restored = to_delete_restored.into_inner().unwrap();
+        for handle in to_delete_restored {
+            let session_clone = session.clone();
+            tokio::spawn(async move {
+                println!("[TorrentEngine] Restored completed torrent in librqbit session. Deleting from session to release file locks.");
+                let _ = session_clone.delete(librqbit::api::TorrentIdOrHash::Id(handle.id()), false).await;
+            });
+        }
     }
 
     fn save_downloads_metadata(&self) {
@@ -399,6 +459,9 @@ impl TorrentEngine {
                 added_at: d.added_at,
                 auto_extract: d.auto_extract,
                 extracted: d.extracted,
+                total_size: d.total_size,
+                files: d.files.clone(),
+                status: Some(d.status.clone()),
             })
         }).collect();
         if let Ok(content) = serde_json::to_string_pretty(&saved) {
@@ -556,6 +619,8 @@ impl TorrentEngine {
                         state,
                         stats.total_bytes,
                         stats.progress_bytes,
+                        stats.error.as_deref(),
+                        stats.finished,
                     );
                     let should_pause = matches!(
                         state,
@@ -598,7 +663,9 @@ impl TorrentEngine {
                         map_state_to_status(
                             state,
                             stats.total_bytes,
-                            stats.progress_bytes
+                            stats.progress_bytes,
+                            stats.error.as_deref(),
+                            stats.finished,
                         ),
                         DownloadStatus::Paused
                     );
@@ -634,8 +701,6 @@ impl TorrentEngine {
         all
     }
 
-    /// Refresh our metadata cache from the session. Called every ~2 s
-    /// by the background polling task.
     pub async fn refresh_stats(&mut self) {
         let Some(session) = self.session.clone() else {
             return;
@@ -655,6 +720,7 @@ impl TorrentEngine {
             seeds: u32,
             peers: u32,
             files: Vec<TorrentFile>,
+            handle: Arc<librqbit::ManagedTorrent>,
         }
         let (collected, alive_ids): (Vec<StatsEntry>, Vec<String>) =
             session.with_torrents(|iter| {
@@ -672,11 +738,12 @@ impl TorrentEngine {
                         None
                     };
                     let status =
-                        map_state_to_status(&stats.state, total, downloaded);
+                        map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref(), stats.finished);
                     let (download_speed, upload_speed, seeds, peers) =
                         extract_live_stats(&stats);
 
                     // Fetch files list if metadata is available
+                    let only_files_list = mt.only_files();
                     let files = mt.with_metadata(|meta_data| {
                         meta_data.file_infos.iter().enumerate().map(|(i, info)| {
                             let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
@@ -686,11 +753,16 @@ impl TorrentEngine {
                             } else {
                                 0.0
                             };
+                            let f_selected = match &only_files_list {
+                                Some(indices) => indices.contains(&i),
+                                None => true,
+                            };
                             TorrentFile {
                                 name: info.relative_filename.to_string_lossy().into_owned(),
                                 size: f_size,
                                 downloaded: f_downloaded,
                                 progress: f_progress,
+                                selected: f_selected,
                             }
                         }).collect::<Vec<TorrentFile>>()
                     }).unwrap_or_default();
@@ -707,6 +779,7 @@ impl TorrentEngine {
                         seeds,
                         peers,
                         files,
+                        handle: Arc::clone(mt),
                     });
                 }
                 (entries, ids)
@@ -717,6 +790,7 @@ impl TorrentEngine {
 
         let mut save_needed = false;
         let mut to_extract = Vec::new();
+        let mut to_delete = Vec::new();
 
         for entry in collected {
             if let Some(d) = self.downloads.get_mut(&entry.fid) {
@@ -733,10 +807,16 @@ impl TorrentEngine {
                 d.files = entry.files;
 
                 let is_completed = matches!(d.status, DownloadStatus::Completed);
-                if is_completed && !was_completed && d.auto_extract.unwrap_or(false) && !d.extracted.unwrap_or(false) {
-                    d.extracted = Some(true);
-                    save_needed = true;
-                    to_extract.push((d.id.clone(), d.save_path.clone(), d.name.clone(), d.files.clone()));
+                if is_completed {
+                    if !self.auto_paused_completed.contains(&entry.fid) {
+                        self.auto_paused_completed.insert(entry.fid.clone());
+                        to_delete.push(entry.handle.clone());
+                    }
+                    if !was_completed && d.auto_extract.unwrap_or(false) && !d.extracted.unwrap_or(false) {
+                        d.extracted = Some(true);
+                        save_needed = true;
+                        to_extract.push((d.id.clone(), d.save_path.clone(), d.name.clone(), d.files.clone()));
+                    }
                 }
 
                 if d.name.is_empty()
@@ -778,7 +858,9 @@ impl TorrentEngine {
             self.save_downloads_metadata();
         }
         self.downloads
-            .retain(|id, d| alive_set.contains_key(id) || (matches!(d.status, DownloadStatus::Paused) && !d.files.is_empty() && !d.source_uri.is_empty() && id.starts_with("dl_")));
+            .retain(|id, d| alive_set.contains_key(id) || matches!(d.status, DownloadStatus::Completed) || (matches!(d.status, DownloadStatus::Paused) && !d.files.is_empty() && !d.source_uri.is_empty() && id.starts_with("dl_")));
+
+        self.auto_paused_completed.retain(|id| self.downloads.contains_key(id));
 
         for (id, save_path, name, files) in to_extract {
             let engine_clone = ENGINE.get().cloned();
@@ -796,6 +878,14 @@ impl TorrentEngine {
                         guard.save_downloads_metadata();
                     }
                 }
+            });
+        }
+
+        for handle in to_delete {
+            let session_clone = session.clone();
+            tokio::spawn(async move {
+                println!("[TorrentEngine] Torrent download completed. Deleting from librqbit session to release file locks.");
+                let _ = session_clone.delete(librqbit::api::TorrentIdOrHash::Id(handle.id()), false).await;
             });
         }
     }
@@ -882,19 +972,25 @@ fn map_state_to_status(
     state: &librqbit::TorrentStatsState,
     total: u64,
     downloaded: u64,
+    error: Option<&str>,
+    finished: bool,
 ) -> DownloadStatus {
+    if finished {
+        return DownloadStatus::Completed;
+    }
+    if total > 0 && downloaded >= total {
+        return DownloadStatus::Completed;
+    }
     match state {
         librqbit::TorrentStatsState::Paused => DownloadStatus::Paused,
         librqbit::TorrentStatsState::Error => {
-            DownloadStatus::Error("Torrent error".into())
+            DownloadStatus::Error(error.unwrap_or("Torrent error").to_string())
         }
         librqbit::TorrentStatsState::Initializing => {
             DownloadStatus::FetchingMetadata
         }
         librqbit::TorrentStatsState::Live => {
-            if total > 0 && downloaded >= total {
-                DownloadStatus::Completed
-            } else if total == 0 {
+            if total == 0 {
                 DownloadStatus::FetchingMetadata
             } else {
                 DownloadStatus::Downloading
@@ -979,6 +1075,17 @@ pub async fn initialize_engine(
 
 // ─── Tauri commands ─────────────────────────────────────────────────────────
 
+fn normalize_path(p: &str) -> String {
+    let mut normalized = p.replace('/', "\\");
+    while normalized.contains("\\\\") {
+        normalized = normalized.replace("\\\\", "\\");
+    }
+    if normalized.ends_with('\\') && normalized.len() > 3 {
+        normalized.pop();
+    }
+    normalized
+}
+
 #[tauri::command]
 pub async fn torrent_add(
     magnet_uri: String,
@@ -989,6 +1096,7 @@ pub async fn torrent_add(
     list_only: Option<bool>,
 ) -> Result<TorrentDownload, String> {
     let engine = wait_for_engine().await?;
+    let save_path = normalize_path(&save_path);
 
     // Step 1: Clone the session Arc while holding the lock briefly.
     // We need the session to call `add_torrent`, but we don't want
@@ -1070,13 +1178,19 @@ pub async fn torrent_add(
                 .name()
                 .unwrap_or_else(|| "Fetching metadata\u{2026}".to_string());
             
+            let only_files_list = handle.only_files();
             let files = handle.with_metadata(|meta_data| {
-                meta_data.file_infos.iter().map(|info| {
+                meta_data.file_infos.iter().enumerate().map(|(i, info)| {
+                    let f_selected = match &only_files_list {
+                        Some(indices) => indices.contains(&i),
+                        None => true,
+                    };
                     TorrentFile {
                         name: info.relative_filename.to_string_lossy().into_owned(),
                         size: info.len,
                         downloaded: 0,
                         progress: 0.0,
+                        selected: f_selected,
                     }
                 }).collect::<Vec<TorrentFile>>()
             }).unwrap_or_default();
@@ -1100,6 +1214,7 @@ pub async fn torrent_add(
                         size: info.len,
                         downloaded: 0,
                         progress: 0.0,
+                        selected: true,
                     }
                 }).collect::<Vec<TorrentFile>>()
             }).unwrap_or_default();
@@ -1213,6 +1328,36 @@ pub async fn torrent_pause_all() -> Result<usize, String> {
     result
 }
 
+#[tauri::command]
+pub async fn torrent_set_speed_limits(
+    download_limit_kbps: Option<u32>,
+    upload_limit_kbps: Option<u32>,
+    disable_upload: bool,
+) -> Result<(), String> {
+    let engine = wait_for_engine().await?;
+    let session = {
+        let guard = engine.lock().await;
+        guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
+    };
+
+    let download_bps = download_limit_kbps
+        .filter(|&v| v > 0)
+        .and_then(|v| std::num::NonZeroU32::new(v * 1024));
+
+    let upload_bps = if disable_upload {
+        std::num::NonZeroU32::new(1) // 1 byte/sec is effectively disabled
+    } else {
+        upload_limit_kbps
+            .filter(|&v| v > 0)
+            .and_then(|v| std::num::NonZeroU32::new(v * 1024))
+    };
+
+    session.ratelimits.set_download_bps(download_bps);
+    session.ratelimits.set_upload_bps(upload_bps);
+
+    Ok(())
+}
+
 /// Mirror of `torrent_pause_all` for the "Resume all" toolbar
 /// action. Skips completed torrents.
 #[tauri::command]
@@ -1254,10 +1399,11 @@ pub async fn torrent_start_selected(
     let engine = wait_for_engine().await?;
 
     let (source_uri, save_path, game_id, source_name) = {
-        let guard = engine.lock().await;
-        let d = guard.downloads.get(&id)
+        let mut guard = engine.lock().await;
+        let d = guard.downloads.get_mut(&id)
             .ok_or_else(|| format!("Download not found in engine: {}", id))?;
-        (d.source_uri.clone(), d.save_path.clone(), d.game_id.clone(), d.source_name.clone())
+        d.status = DownloadStatus::FetchingMetadata;
+        (d.source_uri.clone(), normalize_path(&d.save_path), d.game_id.clone(), d.source_name.clone())
     };
 
     let session = {
@@ -1265,77 +1411,94 @@ pub async fn torrent_start_selected(
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
-    let add = librqbit::AddTorrent::from_url(source_uri.clone());
-    let add_opts = librqbit::AddTorrentOptions {
-        output_folder: Some(save_path.clone().into()),
-        overwrite: true,
-        list_only: false,
-        ..Default::default()
-    };
-
-    let response = tokio::time::timeout(
-        Duration::from_secs(120),
-        session.add_torrent(add, Some(add_opts)),
-    )
-    .await
-    .map_err(|_| "Timeout starting torrent".to_string())?
-    .map_err(|e| format!("Failed to add torrent: {}", e))?;
-
-    let handle = response
-         .into_handle()
-         .ok_or_else(|| "Failed to get handle for started torrent".to_string())?;
-
-    let only_files_set: std::collections::HashSet<usize> = only_files.into_iter().collect();
-    session.update_only_files(&handle, &only_files_set).await.map_err(|e| {
-        format!("Failed to update files: {}", e)
-    })?;
-
-    let handle_id = handle.id();
-    let new_id_str = make_frontend_id(handle_id);
-
-    {
-        let mut guard = engine.lock().await;
-        
-        if new_id_str != id {
-            guard.downloads_mut().remove(&id);
-        }
-
-        let name = handle
-            .name()
-            .unwrap_or_else(|| "Downloading\u{2026}".to_string());
-
-        let download = TorrentDownload {
-            id: new_id_str.clone(),
-            name,
-            source_uri,
-            save_path,
-            downloaded: 0,
-            total_size: Some(handle.stats().total_bytes),
-            progress: Some(0.0),
-            download_speed: 0,
-            upload_speed: 0,
-            seeds: 0,
-            peers: 0,
-            status: DownloadStatus::Downloading,
-            game_id,
-            source_name,
-            added_at: unix_now(),
-            files: handle.with_metadata(|meta_data| {
-                meta_data.file_infos.iter().map(|info| {
-                    TorrentFile {
-                        name: info.relative_filename.to_string_lossy().into_owned(),
-                        size: info.len,
-                        downloaded: 0,
-                        progress: 0.0,
-                    }
-                }).collect::<Vec<TorrentFile>>()
-            }).unwrap_or_default(),
-            auto_extract: Some(auto_extract),
-            extracted: Some(false),
+    let engine_clone = Arc::clone(&engine);
+    tokio::spawn(async move {
+        let add = librqbit::AddTorrent::from_url(source_uri.clone());
+        let add_opts = librqbit::AddTorrentOptions {
+            output_folder: Some(save_path.clone().into()),
+            overwrite: true,
+            list_only: false,
+            only_files: Some(only_files.clone()),
+            ..Default::default()
         };
-        guard.downloads_mut().insert(new_id_str, download);
-        guard.save_downloads_metadata();
-    }
+
+        match tokio::time::timeout(
+            Duration::from_secs(120),
+            session.add_torrent(add, Some(add_opts)),
+        )
+        .await
+        {
+            Ok(Ok(response)) => {
+                if let Some(handle) = response.into_handle() {
+                    let only_files_set: std::collections::HashSet<usize> = only_files.into_iter().collect();
+                    let _ = session.update_only_files(&handle, &only_files_set).await;
+                    let _ = session.unpause(&handle).await;
+
+                    let handle_id = handle.id();
+                    let new_id_str = make_frontend_id(handle_id);
+
+                    let mut guard = engine_clone.lock().await;
+                    if new_id_str != id {
+                        guard.downloads_mut().remove(&id);
+                    }
+
+                    let name = handle
+                        .name()
+                        .unwrap_or_else(|| "Downloading\u{2026}".to_string());
+
+                    let download = TorrentDownload {
+                        id: new_id_str.clone(),
+                        name,
+                        source_uri,
+                        save_path,
+                        downloaded: 0,
+                        total_size: Some(handle.stats().total_bytes),
+                        progress: Some(0.0),
+                        download_speed: 0,
+                        upload_speed: 0,
+                        seeds: 0,
+                        peers: 0,
+                        status: DownloadStatus::Downloading,
+                        game_id,
+                        source_name,
+                        added_at: unix_now(),
+                        files: handle.with_metadata(|meta_data| {
+                            meta_data.file_infos.iter().enumerate().map(|(i, info)| {
+                                let f_selected = only_files_set.contains(&i);
+                                TorrentFile {
+                                    name: info.relative_filename.to_string_lossy().into_owned(),
+                                    size: info.len,
+                                    downloaded: 0,
+                                    progress: 0.0,
+                                    selected: f_selected,
+                                }
+                            }).collect::<Vec<TorrentFile>>()
+                        }).unwrap_or_default(),
+                        auto_extract: Some(auto_extract),
+                        extracted: Some(false),
+                    };
+                    guard.downloads_mut().insert(new_id_str, download);
+                    guard.save_downloads_metadata();
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("[gamelib] Failed to add torrent in background: {}", e);
+                let mut guard = engine_clone.lock().await;
+                if let Some(d) = guard.downloads_mut().get_mut(&id) {
+                    d.status = DownloadStatus::Error(format!("Failed to start torrent: {}", e));
+                    guard.save_downloads_metadata();
+                }
+            }
+            Err(_) => {
+                eprintln!("[gamelib] Timeout starting torrent in background");
+                let mut guard = engine_clone.lock().await;
+                if let Some(d) = guard.downloads_mut().get_mut(&id) {
+                    d.status = DownloadStatus::Error("Timeout starting torrent".to_string());
+                    guard.save_downloads_metadata();
+                }
+            }
+        }
+    });
 
     Ok(())
 }

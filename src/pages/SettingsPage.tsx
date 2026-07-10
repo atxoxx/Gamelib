@@ -12,6 +12,7 @@ import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { useAchievements } from "../context/AchievementContext";
 import SourceManager from "../components/SourceManager";
+import { useDownloads } from "../context/DownloadContext";
 import { Button } from "../components/ui";
 
 /** Maps theme ids to preview colors — kept in sync with App.css overrides. */
@@ -41,8 +42,53 @@ export default function SettingsPage() {
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
   const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
+  const { updateSpeedLimits } = useDownloads();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
+
+  // Speed Limit Settings State
+  const [dlLimitEnabled, setDlLimitEnabled] = useState(false);
+  const [dlLimitValue, setDlLimitValue] = useState(0);
+  const [ulLimitEnabled, setUlLimitEnabled] = useState(false);
+  const [ulLimitValue, setUlLimitValue] = useState(0);
+  const [disableUpload, setDisableUpload] = useState(false);
+
+  // Load limits on mount
+  useEffect(() => {
+    try {
+      setDlLimitEnabled(localStorage.getItem("gamelib-dl-limit-download-enabled") === "true");
+      setDlLimitValue(parseInt(localStorage.getItem("gamelib-dl-limit-download-value") || "0", 10));
+      setUlLimitEnabled(localStorage.getItem("gamelib-dl-limit-upload-enabled") === "true");
+      setUlLimitValue(parseInt(localStorage.getItem("gamelib-dl-limit-upload-value") || "0", 10));
+      setDisableUpload(localStorage.getItem("gamelib-dl-limit-disable-upload") === "true");
+    } catch (e) {
+      console.error("Failed to load speed limit settings:", e);
+    }
+  }, []);
+
+  const saveAndApplyLimits = async (
+    dlEnabled: boolean,
+    dlVal: number,
+    ulEnabled: boolean,
+    ulVal: number,
+    noUpload: boolean
+  ) => {
+    try {
+      localStorage.setItem("gamelib-dl-limit-download-enabled", String(dlEnabled));
+      localStorage.setItem("gamelib-dl-limit-download-value", String(dlVal));
+      localStorage.setItem("gamelib-dl-limit-upload-enabled", String(ulEnabled));
+      localStorage.setItem("gamelib-dl-limit-upload-value", String(ulVal));
+      localStorage.setItem("gamelib-dl-limit-disable-upload", String(noUpload));
+
+      await updateSpeedLimits(
+        dlEnabled && dlVal > 0 ? dlVal : null,
+        ulEnabled && ulVal > 0 ? ulVal : null,
+        noUpload
+      );
+    } catch (e) {
+      console.error("Failed to update speed limits:", e);
+    }
+  };
 
   // Steam integration state
   const [steamAuth, setSteamAuth] = useState<SteamAuthState>({ isAuthenticated: false });
@@ -825,22 +871,117 @@ export default function SettingsPage() {
 
       {/* Downloads — manage download sources for finding game mirrors. */}
       {activeSettingsTab === "downloads" && (
-        <section className="settings-section">
-          <header className="settings-section-header">
-            <span className="settings-section-icon"><DownloadIcon /></span>
-            <div className="settings-section-header-text">
-              <h2 className="settings-section-title">Download sources</h2>
-              <p className="settings-section-desc">
-                Add JSON-formatted source URLs to find download mirrors for
-                your games. Sources use the Hydra-compatible format with a
-                <code> name </code>and a <code> downloads </code>array and
-                are registered with the Hydra API. The Download button on
-                any game's page will search your enabled sources.
-              </p>
+        <>
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Bandwidth limits</h2>
+                <p className="settings-section-desc">
+                  Control the maximum speed used for downloading and uploading game torrents.
+                </p>
+              </div>
+            </header>
+
+            <div className="settings-bandwidth-limits" style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+              <div className="settings-limit-row" style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", flexWrap: "wrap" }}>
+                <label className="settings-checkbox-label" style={{ minWidth: "220px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={dlLimitEnabled}
+                    onChange={(e) => {
+                      setDlLimitEnabled(e.target.checked);
+                      void saveAndApplyLimits(e.target.checked, dlLimitValue, ulLimitEnabled, ulLimitValue, disableUpload);
+                    }}
+                  />
+                  <span>Limit download speed</span>
+                </label>
+                {dlLimitEnabled && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}>
+                    <input
+                      type="number"
+                      className="src-form-input"
+                      style={{ width: "120px", padding: "6px 12px", border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)", background: "var(--color-bg-secondary)", color: "var(--color-text-primary)" }}
+                      min="1"
+                      value={dlLimitValue || ""}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10) || 0;
+                        setDlLimitValue(val);
+                        void saveAndApplyLimits(dlLimitEnabled, val, ulLimitEnabled, ulLimitValue, disableUpload);
+                      }}
+                      placeholder="Speed"
+                    />
+                    <span style={{ fontSize: "var(--font-size-sm)", color: "var(--color-text-secondary)" }}>KB/s</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-limit-row" style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", flexWrap: "wrap" }}>
+                <label className="settings-checkbox-label" style={{ minWidth: "220px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", opacity: disableUpload ? 0.5 : 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={ulLimitEnabled}
+                    disabled={disableUpload}
+                    onChange={(e) => {
+                      setUlLimitEnabled(e.target.checked);
+                      void saveAndApplyLimits(dlLimitEnabled, dlLimitValue, e.target.checked, ulLimitValue, disableUpload);
+                    }}
+                  />
+                  <span>Limit upload speed</span>
+                </label>
+                {ulLimitEnabled && !disableUpload && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-xs)" }}>
+                    <input
+                      type="number"
+                      className="src-form-input"
+                      style={{ width: "120px", padding: "6px 12px", border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)", background: "var(--color-bg-secondary)", color: "var(--color-text-primary)" }}
+                      min="1"
+                      value={ulLimitValue || ""}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10) || 0;
+                        setUlLimitValue(val);
+                        void saveAndApplyLimits(dlLimitEnabled, dlLimitValue, ulLimitEnabled, val, disableUpload);
+                      }}
+                      placeholder="Speed"
+                    />
+                    <span style={{ fontSize: "var(--font-size-sm)", color: "var(--color-text-secondary)" }}>KB/s</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-limit-row">
+                <label className="settings-checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={disableUpload}
+                    onChange={(e) => {
+                      setDisableUpload(e.target.checked);
+                      void saveAndApplyLimits(dlLimitEnabled, dlLimitValue, ulLimitEnabled, ulLimitValue, e.target.checked);
+                    }}
+                  />
+                  <span>Disable upload completely (do not seed)</span>
+                </label>
+              </div>
             </div>
-          </header>
-          <SourceManager />
-        </section>
+          </section>
+
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Download sources</h2>
+                <p className="settings-section-desc">
+                  Add JSON-formatted source URLs to find download mirrors for
+                  your games. Sources use the Hydra-compatible format with a
+                  <code> name </code>and a <code> downloads </code>array and
+                  are registered with the Hydra API. The Download button on
+                  any game's page will search your enabled sources.
+                </p>
+              </div>
+            </header>
+            <SourceManager />
+          </section>
+        </>
       )}
     </div>
   );

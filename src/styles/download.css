@@ -1918,7 +1918,7 @@
 
 .dl-file-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px 120px 45px;
+  grid-template-columns: 24px minmax(0, 1fr) 80px 120px 45px;
   align-items: center;
   gap: var(--space-md);
   font-size: 11px;

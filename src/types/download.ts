@@ -59,6 +59,7 @@ export interface TorrentFile {
   size: number;
   downloaded: number;
   progress: number;
+  selected: boolean;
 }
 
 export interface TorrentDownload {
