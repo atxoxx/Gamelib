@@ -335,9 +335,15 @@ impl TorrentEngine {
                 } else {
                     None
                 };
-                let status = map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref(), stats.finished);
-                
-                if matches!(status, DownloadStatus::Completed) {
+                let status = map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref());
+
+                // Only auto-delete restored torrents that have genuinely
+                // transferred bytes. Without the `downloaded > 0` gate
+                // we'd queue deletion for librqbit's transient
+                // `finished = true` state on a previously list_only
+                // torrent (where progress_bytes stayed 0 throughout
+                // the live phase).
+                if matches!(status, DownloadStatus::Completed) && downloaded > 0 {
                     to_delete_restored.lock().unwrap().push(mt.clone());
                 }
 
@@ -356,9 +362,18 @@ impl TorrentEngine {
                 let auto_extract = meta.and_then(|m| m.auto_extract).unwrap_or(false);
                 let extracted = meta.and_then(|m| m.extracted).unwrap_or(false);
 
-                // Fetch files list if metadata is available
+                // Fetch files list if metadata is available. We keep
+                // the Option around: returning a transiently-empty
+                // vec here would wipe a recently-confirmed file
+                // selection out of `downloads.files` on the next
+                // poll and break the file-selector UX (Bug #1).
+                //
+                // librqbit 8.1.1's `with_metadata` returns
+                // `Result<R, anyhow::Error>` (not `Option<R>`), so
+                // we `.ok()` to flatten the success path to an
+                // `Option` for the `or_else` fallback below.
                 let only_files_list = mt.only_files();
-                let files = mt.with_metadata(|meta_data| {
+                let live_files: Option<Vec<TorrentFile>> = mt.with_metadata(|meta_data| {
                     meta_data.file_infos.iter().enumerate().map(|(i, info)| {
                         let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
                         let f_size = info.len;
@@ -379,7 +394,15 @@ impl TorrentEngine {
                             selected: f_selected,
                         }
                     }).collect::<Vec<TorrentFile>>()
-                }).unwrap_or_default();
+                }).ok();
+                // Preserve the saved file list when the live
+                // metadata isn't currently available — the torrent
+                // may be in a transient `Initializing` state where
+                // `with_metadata` returns Err even though we
+                // previously cached a stable file list.
+                let files = live_files
+                    .or_else(|| meta.map(|m| m.files.clone()).filter(|v| !v.is_empty()))
+                    .unwrap_or_default();
 
                 results.push(TorrentDownload {
                     id: fid,
@@ -620,7 +643,6 @@ impl TorrentEngine {
                         stats.total_bytes,
                         stats.progress_bytes,
                         stats.error.as_deref(),
-                        stats.finished,
                     );
                     let should_pause = matches!(
                         state,
@@ -665,7 +687,6 @@ impl TorrentEngine {
                             stats.total_bytes,
                             stats.progress_bytes,
                             stats.error.as_deref(),
-                            stats.finished,
                         ),
                         DownloadStatus::Paused
                     );
@@ -708,6 +729,13 @@ impl TorrentEngine {
         /// Aggregated per-torrent snapshot pulled from librqbit under
         /// the session lock. Replaces the previous 10-tuple to keep
         /// the collect/deconstruct sites readable and order-safe.
+        ///
+        /// `files` is `Option<Vec<TorrentFile>>` rather than `Vec<…>`:
+        /// a transient `with_metadata` miss (during librqbit
+        /// `Initializing` → `Live` transitions, or during the few
+        /// hundred ms after `unpause`) must NOT wipe the
+        /// cached file list — the user's confirmed file selection
+        /// would disappear from the UI on the next poll. See Bug 1.
         struct StatsEntry {
             fid: String,
             downloaded: u64,
@@ -719,7 +747,7 @@ impl TorrentEngine {
             upload_speed: u64,
             seeds: u32,
             peers: u32,
-            files: Vec<TorrentFile>,
+            files: Option<Vec<TorrentFile>>,
             handle: Arc<librqbit::ManagedTorrent>,
         }
         let (collected, alive_ids): (Vec<StatsEntry>, Vec<String>) =
@@ -738,13 +766,21 @@ impl TorrentEngine {
                         None
                     };
                     let status =
-                        map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref(), stats.finished);
+                        map_state_to_status(&stats.state, total, downloaded, stats.error.as_deref());
                     let (download_speed, upload_speed, seeds, peers) =
                         extract_live_stats(&stats);
 
-                    // Fetch files list if metadata is available
+                    // Fetch files list if metadata is available.
+                    // `None` here means "metadata not yet parsed";
+                    // we'll preserve whatever files were already
+                    // cached against this id rather than overwrite
+                    // them with `[]`.
+                    //
+                    // librqbit 8.1.1's `with_metadata` returns
+                    // `Result<R, anyhow::Error>`, so we `.ok()` to
+                    // get an `Option` for `StatsEntry.files`.
                     let only_files_list = mt.only_files();
-                    let files = mt.with_metadata(|meta_data| {
+                    let files: Option<Vec<TorrentFile>> = mt.with_metadata(|meta_data| {
                         meta_data.file_infos.iter().enumerate().map(|(i, info)| {
                             let f_downloaded = stats.file_progress.get(i).copied().unwrap_or(0);
                             let f_size = info.len;
@@ -765,7 +801,7 @@ impl TorrentEngine {
                                 selected: f_selected,
                             }
                         }).collect::<Vec<TorrentFile>>()
-                    }).unwrap_or_default();
+                    }).ok();
 
                     entries.push(StatsEntry {
                         fid,
@@ -795,7 +831,7 @@ impl TorrentEngine {
         for entry in collected {
             if let Some(d) = self.downloads.get_mut(&entry.fid) {
                 let was_completed = matches!(d.status, DownloadStatus::Completed);
-                
+
                 d.downloaded = entry.downloaded;
                 d.total_size = entry.total;
                 d.progress = entry.progress;
@@ -804,15 +840,30 @@ impl TorrentEngine {
                 d.seeds = entry.seeds;
                 d.peers = entry.peers;
                 d.status = entry.status;
-                d.files = entry.files;
+                // Only overwrite the file list when we have a live
+                // snapshot from librqbit. A `None` snapshot preserves
+                // the user's confirmed selection across a transient
+                // metadata miss (Bug 1 — see StatsEntry doc comment).
+                if let Some(files) = entry.files {
+                    d.files = files;
+                }
 
                 let is_completed = matches!(d.status, DownloadStatus::Completed);
                 if is_completed {
-                    if !self.auto_paused_completed.contains(&entry.fid) {
+                    // Don't auto-delete a torrent that hasn't actually
+                    // transferred any bytes. librqbit can leave
+                    // `finished = true` on a torrent that was
+                    // previously in list_only mode (Bug 2); trusting
+                    // that alone would make us delete the entry before
+                    // any real download happens. We've already assigned
+                    // `d.downloaded = entry.downloaded` above, so this
+                    // single check is the authoritative gate.
+                    let actually_downloaded = d.downloaded > 0;
+                    if actually_downloaded && !self.auto_paused_completed.contains(&entry.fid) {
                         self.auto_paused_completed.insert(entry.fid.clone());
                         to_delete.push(entry.handle.clone());
                     }
-                    if !was_completed && d.auto_extract.unwrap_or(false) && !d.extracted.unwrap_or(false) {
+                    if !was_completed && actually_downloaded && d.auto_extract.unwrap_or(false) && !d.extracted.unwrap_or(false) {
                         d.extracted = Some(true);
                         save_needed = true;
                         to_extract.push((d.id.clone(), d.save_path.clone(), d.name.clone(), d.files.clone()));
@@ -846,7 +897,7 @@ impl TorrentEngine {
                     game_id: None,
                     source_name: "Discovered".to_string(),
                     added_at: unix_now(),
-                    files: entry.files,
+                    files: entry.files.unwrap_or_default(),
                     auto_extract: Some(false),
                     extracted: Some(false),
                 };
@@ -968,16 +1019,30 @@ fn extract_live_stats(
 }
 
 /// Map `TorrentStatsState` to our `DownloadStatus` enum.
+///
+/// ## Completion semantics (Bug 2 fix)
+///
+/// We deliberately ignore `librqbit::TorrentStats.finished`
+/// (hence the absence of a `finished` parameter) and instead key
+/// completion purely off byte counts. `finished` is `true` as
+/// soon as every selected piece is local — INCLUDING the case
+/// where the torrent was registered in `list_only` mode, where no
+/// piece is ever downloaded. After we apply `update_only_files` +
+/// `unpause` to that torrent, the stale `finished = true` flag
+/// stays in place. Trusting it would make us mark the torrent
+/// Completed before any bytes ever transferred (and then
+/// auto-delete it on the next poll).
+///
+/// Completion therefore requires `total > 0 && downloaded >= total`,
+/// which implies `downloaded > 0` automatically. A 0-bytes
+/// torrent can never be Completed, regardless of how the bits
+/// are flipped inside librqbit.
 fn map_state_to_status(
     state: &librqbit::TorrentStatsState,
     total: u64,
     downloaded: u64,
     error: Option<&str>,
-    finished: bool,
 ) -> DownloadStatus {
-    if finished {
-        return DownloadStatus::Completed;
-    }
     if total > 0 && downloaded >= total {
         return DownloadStatus::Completed;
     }
@@ -1398,13 +1463,29 @@ pub async fn torrent_start_selected(
 ) -> Result<(), String> {
     let engine = wait_for_engine().await?;
 
-    let (source_uri, save_path, game_id, source_name) = {
+    // Snapshot what we know about the torrent BEFORE we go async —
+    // especially the file list. The async branch below can run for
+    // a while (waiting on metadata), during which the user might
+    // interact with the engine through other commands, so pulling
+    // the inputs out under the lock now avoids grabbing the lock
+    // later and keeps the snapshot consistent with what we showed
+    // in the file-selection UI.
+    let source_uri;
+    let save_path;
+    let game_id;
+    let source_name;
+    let existing_files: Vec<TorrentFile>;
+    {
         let mut guard = engine.lock().await;
         let d = guard.downloads.get_mut(&id)
             .ok_or_else(|| format!("Download not found in engine: {}", id))?;
         d.status = DownloadStatus::FetchingMetadata;
-        (d.source_uri.clone(), normalize_path(&d.save_path), d.game_id.clone(), d.source_name.clone())
-    };
+        source_uri = d.source_uri.clone();
+        save_path = normalize_path(&d.save_path);
+        game_id = d.game_id.clone();
+        source_name = d.source_name.clone();
+        existing_files = d.files.clone();
+    }
 
     let session = {
         let guard = engine.lock().await;
@@ -1413,6 +1494,32 @@ pub async fn torrent_start_selected(
 
     let engine_clone = Arc::clone(&engine);
     tokio::spawn(async move {
+        // The torrent was already added with list_only=true (during
+        // the "Fetch Files List" step in DownloadModal). Calling
+        // add_torrent again would normally return AlreadyManaged,
+        // but the original add's `list_only` flag isn't undone by
+        // a re-add — librqbit continues to treat the torrent as a
+        // metadata-only entry and never starts piece downloads.
+        //
+        // Force a clean slate by removing the list_only entry from
+        // the librqbit session first. Re-adding the same magnet
+        // afterwards is fast: librqbit retains the metadata in its
+        // session-state cache, so the new add_torrent returns
+        // straight to Live without another DHT bootstrap.
+        match parse_handle_id(&id) {
+            Ok(numeric_id) => {
+                if let Err(e) = session
+                    .delete(librqbit::api::TorrentIdOrHash::Id(numeric_id), false)
+                    .await
+                {
+                    eprintln!("[gamelib] torrent_start_selected: pre-delete failed (will continue): {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[gamelib] torrent_start_selected: pre-delete skipped — invalid id '{}': {}", id, e);
+            }
+        }
+
         let add = librqbit::AddTorrent::from_url(source_uri.clone());
         let add_opts = librqbit::AddTorrentOptions {
             output_folder: Some(save_path.clone().into()),
@@ -1429,13 +1536,76 @@ pub async fn torrent_start_selected(
         .await
         {
             Ok(Ok(response)) => {
-                if let Some(handle) = response.into_handle() {
-                    let only_files_set: std::collections::HashSet<usize> = only_files.into_iter().collect();
-                    let _ = session.update_only_files(&handle, &only_files_set).await;
-                    let _ = session.unpause(&handle).await;
+                let handle_opt = response.into_handle();
+                if handle_opt.is_none() {
+                    eprintln!("[gamelib] torrent_start_selected: add_torrent returned a response with no handle (unexpected for list_only=false); surfacing as Error.");
+                }
+                if let Some(handle) = handle_opt {
+                    let only_files_set: std::collections::HashSet<usize> =
+                        only_files.into_iter().collect();
+
+                    // `update_only_files` requires metadata to be
+                    // loaded; if we call it before librqbit has parsed
+                    // the .torrent / magnet metadata, it returns an
+                    // error and our file selection is silently lost.
+                    // Retry briefly (up to ~30s) until metadata is
+                    // available so the user's selection actually
+                    // sticks.
+                    //
+                    // librqbit 8.1.1's `with_metadata` returns
+                    // `Result<R, Error>`, not `Option<R>`, so we use
+                    // `.is_ok()` to test for the parsed-metadata
+                    // success state.
+                    let mut update_ok = false;
+                    for attempt in 0..30 {
+                        if handle.with_metadata(|_| ()).is_ok() {
+                            match session
+                                .update_only_files(&handle, &only_files_set)
+                                .await
+                            {
+                                Ok(()) => {
+                                    update_ok = true;
+                                    break;
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[gamelib] torrent_start_selected: update_only_files failed (will retry): {}",
+                                        e
+                                    );
+                                }
+                            }
+                        } else if attempt == 9 {
+                            // Single progress log at ~10s so a stuck
+                            // download shows up in the logs instead
+                            // of looking like a hang. Don't spam
+                            // every iteration.
+                            eprintln!(
+                                "[gamelib] torrent_start_selected: metadata not parsed after 10s; continuing to wait for file selection to apply..."
+                            );
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                    if !update_ok {
+                        eprintln!(
+                            "[gamelib] torrent_start_selected: gave up waiting for metadata; file selection may not be applied."
+                        );
+                    }
+
+                    if let Err(e) = session.unpause(&handle).await {
+                        eprintln!("[gamelib] torrent_start_selected: unpause failed: {}", e);
+                    }
 
                     let handle_id = handle.id();
                     let new_id_str = make_frontend_id(handle_id);
+
+                    let stats = handle.stats();
+                    let total_bytes = stats.total_bytes;
+                    let initial_status = map_state_to_status(
+                        &stats.state,
+                        total_bytes,
+                        stats.progress_bytes,
+                        stats.error.as_deref(),
+                    );
 
                     let mut guard = engine_clone.lock().await;
                     if new_id_str != id {
@@ -1446,39 +1616,108 @@ pub async fn torrent_start_selected(
                         .name()
                         .unwrap_or_else(|| "Downloading\u{2026}".to_string());
 
+                    // Build the file list from the live handle when
+                    // metadata is available; otherwise fall back to
+                    // the cached `existing_files` snapshot so the UI
+                    // doesn't briefly show an empty list. Either
+                    // path applies `only_files_set` to `.selected`
+                    // so the engine-derived file list matches the
+                    // user's choice.
+                    let live_files: Option<Vec<TorrentFile>> = handle.with_metadata(|meta_data| {
+                        meta_data.file_infos.iter().enumerate().map(|(i, info)| {
+                            let f_selected = only_files_set.contains(&i);
+                            TorrentFile {
+                                name: info.relative_filename.to_string_lossy().into_owned(),
+                                size: info.len,
+                                downloaded: 0,
+                                progress: 0.0,
+                                selected: f_selected,
+                            }
+                        }).collect::<Vec<TorrentFile>>()
+                    }).ok();
+                    let files = live_files.unwrap_or_else(|| {
+                        existing_files
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, mut f)| {
+                                // Default `.selected = true` for any
+                                // index the user kept in the
+                                // selection set, otherwise false.
+                                f.selected = only_files_set.contains(&i);
+                                f.downloaded = 0;
+                                f.progress = 0.0;
+                                f
+                            })
+                            .collect()
+                    });
+
+                    // `total_bytes` is the size of the entire
+                    // torrent, but the user may have deselected most
+                    // of the files — using the full size as the
+                    // progress denominator would make the bar
+                    // report a misleadingly low percentage of
+                    // "remaining" work. Sum only the SELECTED files
+                    // so the denominator matches what we're
+                    // actually downloading.
+                    let selected_sum: u64 = files
+                        .iter()
+                        .filter(|f| f.selected)
+                        .map(|f| f.size)
+                        .sum();
+                    let total_size = if selected_sum > 0 {
+                        Some(selected_sum)
+                    } else {
+                        // No selected files (shouldn't happen
+                        // because the UI gates on size > 0) — fall
+                        // back to stats.total_bytes, then to None.
+                        if total_bytes > 0 {
+                            Some(total_bytes)
+                        } else {
+                            None
+                        }
+                    };
+
                     let download = TorrentDownload {
                         id: new_id_str.clone(),
                         name,
                         source_uri,
                         save_path,
                         downloaded: 0,
-                        total_size: Some(handle.stats().total_bytes),
+                        total_size,
                         progress: Some(0.0),
                         download_speed: 0,
                         upload_speed: 0,
                         seeds: 0,
                         peers: 0,
-                        status: DownloadStatus::Downloading,
+                        // Don't hardcode `Downloading` — trust the
+                        // librqbit state. If the torrent is still
+                        // `Initializing` we'll show FetchingMetadata
+                        // until it goes Live, which is the honest
+                        // status. (Bug 2's class of issues are
+                        // addressed by `map_state_to_status` and
+                        // the auto-delete gate in `refresh_stats`,
+                        // not by overstating the status here.)
+                        status: initial_status,
                         game_id,
                         source_name,
                         added_at: unix_now(),
-                        files: handle.with_metadata(|meta_data| {
-                            meta_data.file_infos.iter().enumerate().map(|(i, info)| {
-                                let f_selected = only_files_set.contains(&i);
-                                TorrentFile {
-                                    name: info.relative_filename.to_string_lossy().into_owned(),
-                                    size: info.len,
-                                    downloaded: 0,
-                                    progress: 0.0,
-                                    selected: f_selected,
-                                }
-                            }).collect::<Vec<TorrentFile>>()
-                        }).unwrap_or_default(),
+                        files,
                         auto_extract: Some(auto_extract),
                         extracted: Some(false),
                     };
                     guard.downloads_mut().insert(new_id_str, download);
                     guard.save_downloads_metadata();
+                } else {
+                    // No handle from `into_handle()` — surface as
+                    // an Error status so the user gets feedback
+                    // instead of a stuck FetchingMetadata row.
+                    let mut guard = engine_clone.lock().await;
+                    if let Some(d) = guard.downloads_mut().get_mut(&id) {
+                        d.status = DownloadStatus::Error(
+                            "Failed to start torrent: no handle returned".to_string(),
+                        );
+                        guard.save_downloads_metadata();
+                    }
                 }
             }
             Ok(Err(e)) => {
