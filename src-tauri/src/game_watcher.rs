@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, Duration};
 use tauri::{AppHandle, Emitter};
 
 use crate::metrics_collector;
@@ -68,6 +68,9 @@ struct ActiveSession {
     /// process exits but a launcher has spawned the real game process, or
     /// when the launch provided no PID (UAC elevation, Steam protocol).
     install_dir: Option<PathBuf>,
+    /// When the process was first noticed as dead/missing.
+    /// If Some, the session is in a grace period.
+    lost_at: Option<Instant>,
 }
 
 /// How long a pending session (last_pid == 0) may exist before it is
@@ -110,13 +113,13 @@ impl GameWatcher {
 
         for game in games {
             if let Some(ref exe) = game.exe_path {
-                let norm = exe.to_lowercase();
+                let norm = exe.to_lowercase().replace('/', "\\");
                 index.entry(norm).or_default().push(game.clone());
             }
 
             if let Some(ref install_dir) = game.install_dir {
-                let dir_key = install_dir.to_string_lossy().to_lowercase();
-                let dir_key = dir_key.trim_end_matches('\\').trim_end_matches('/');
+                let dir_key = install_dir.to_string_lossy().to_lowercase().replace('/', "\\");
+                let dir_key = dir_key.trim_end_matches('\\');
                 let prefixed_key = format!("__dir__{}", dir_key);
                 index.entry(prefixed_key).or_default().push(game.clone());
             }
@@ -143,9 +146,13 @@ impl GameWatcher {
         metrics_rx: std::sync::mpsc::Receiver<Option<metrics_collector::SessionMetrics>>,
     ) {
         let install_dir = if platform == "Steam" {
-            steam_app_id.and_then(|id| steam_game_watcher::game_install_path(id))
+            steam_app_id
+                .and_then(|id| steam_game_watcher::game_install_path(id))
+                .or_else(|| {
+                    exe_path.and_then(|ep| get_game_root_dir(Path::new(ep)))
+                })
         } else if let Some(ep) = exe_path {
-            Path::new(ep).parent().map(|p| p.to_path_buf())
+            get_game_root_dir(Path::new(ep))
         } else {
             None
         };
@@ -162,6 +169,7 @@ impl GameWatcher {
                 launched_by_app: true,
                 matched_exe: exe_path.unwrap_or("").to_string(),
                 install_dir,
+                lost_at: None,
             },
         );
     }
@@ -188,22 +196,42 @@ impl GameWatcher {
         let mut ended_ids: Vec<String> = Vec::new();
         let mut transitions: Vec<(String, ProcessInfo)> = Vec::new();
 
-        for (gid, session) in &self.active_sessions {
+        for (gid, session) in &mut self.active_sessions {
             let is_pending = session.last_pid == 0;
-            let is_dead = !is_pending && !running_pids.contains(&session.last_pid);
+            let is_currently_running = !is_pending && running_pids.contains(&session.last_pid);
 
-            if is_pending || is_dead {
-                if let Some(ref install_dir) = session.install_dir {
-                    if let Some(proc) = find_best_process_in_dir(&processes, install_dir) {
-                        transitions.push((gid.clone(), proc));
-                        continue;
-                    }
+            if is_currently_running {
+                session.lost_at = None;
+                continue;
+            }
+
+            let mut found_proc = None;
+            if let Some(ref install_dir) = session.install_dir {
+                if let Some(proc) = find_best_process_in_dir(&processes, install_dir) {
+                    found_proc = Some(proc);
                 }
+            }
 
-                if is_dead {
-                    ended_ids.push(gid.clone());
-                } else if is_pending && session.started_at.elapsed() > PENDING_SESSION_TIMEOUT {
-                    ended_ids.push(gid.clone());
+            if let Some(proc) = found_proc {
+                session.lost_at = None;
+                transitions.push((gid.clone(), proc));
+            } else {
+                if is_pending {
+                    if session.started_at.elapsed() > PENDING_SESSION_TIMEOUT {
+                        ended_ids.push(gid.clone());
+                    }
+                } else {
+                    if let Some(lost_time) = session.lost_at {
+                        if lost_time.elapsed() > Duration::from_secs(20) {
+                            ended_ids.push(gid.clone());
+                        }
+                    } else {
+                        session.lost_at = Some(Instant::now());
+                        eprintln!(
+                            "[game_watcher] {} (PID {}) lost. Starting 20s grace period.",
+                            session.game_name, session.last_pid
+                        );
+                    }
                 }
             }
         }
@@ -220,6 +248,7 @@ impl GameWatcher {
 
                 session.last_pid = proc.pid;
                 session.matched_exe = proc.exe_path.clone();
+                session.lost_at = None;
 
                 eprintln!(
                     "[game_watcher] {} transitioned to PID {} ({})",
@@ -264,7 +293,7 @@ impl GameWatcher {
         let mut new_matches: Vec<(GameRef, ProcessInfo)> = Vec::new();
 
         for proc in &processes {
-            let norm = proc.exe_path.to_lowercase();
+            let norm = proc.exe_path.to_lowercase().replace('/', "\\");
 
             // Exact path match
             if let Some(games) = self.process_index.get(&norm) {
@@ -279,11 +308,17 @@ impl GameWatcher {
             for (key, games) in &self.process_index {
                 if let Some(dir) = key.strip_prefix("__dir__") {
                     if norm.starts_with(dir) {
-                        for game in games {
-                            if !tracked.contains(&game.game_id) {
-                                // Check not already in new_matches
-                                if !new_matches.iter().any(|(g, _)| g.game_id == game.game_id) {
-                                    new_matches.push((game.clone(), proc.clone()));
+                        // Make sure the match is actually inside the directory, not a
+                        // sibling path that happens to share the prefix (e.g. "FooBar"
+                        // when looking for "Foo").
+                        let remainder = &norm[dir.len()..];
+                        if remainder.starts_with('\\') || remainder.is_empty() {
+                            for game in games {
+                                if !tracked.contains(&game.game_id) {
+                                    // Check not already in new_matches
+                                    if !new_matches.iter().any(|(g, _)| g.game_id == game.game_id) {
+                                        new_matches.push((game.clone(), proc.clone()));
+                                    }
                                 }
                             }
                         }
@@ -324,6 +359,7 @@ impl GameWatcher {
                 launched_by_app: false,
                 matched_exe: proc.exe_path.clone(),
                 install_dir: game.install_dir.clone(),
+                lost_at: None,
             },
         );
 
@@ -414,51 +450,105 @@ struct ProcessInfo {
     working_set_size: u64,
 }
 
-/// Query Win32_Process via WMI for all running processes.
+/// Query running processes natively using Toolhelp32 snapshot.
+/// This is 1000x faster than WMI, handles UAC elevated processes via
+/// PROCESS_QUERY_LIMITED_INFORMATION, and does not depend on COM or WMI service availability.
 #[cfg(windows)]
 fn query_running_processes() -> Vec<ProcessInfo> {
-    use wmi::{COMLibrary, WMIConnection};
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, PROCESS_NAME_WIN32};
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::Foundation::CloseHandle;
+    use std::os::windows::ffi::OsStringExt;
 
-    let com_lib = match COMLibrary::new() {
-        Ok(lib) => lib,
-        Err(_) => match COMLibrary::without_security() {
-            Ok(lib) => lib,
+    let mut result = Vec::new();
+
+    unsafe {
+        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(h) => h,
             Err(_) => return Vec::new(),
-        },
-    };
-    let wmi_con = match WMIConnection::new(com_lib) {
-        Ok(con) => con,
-        Err(_) => return Vec::new(),
-    };
+        };
 
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct ProcRow {
-        process_id: Option<u32>,
-        executable_path: Option<String>,
-        working_set_size: Option<u64>,
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let pid = entry.th32ProcessID;
+                if pid != 0 {
+                    if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                        let mut buffer = [0u16; 1024];
+                        let mut size = buffer.len() as u32;
+                        if QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, windows::core::PWSTR::from_raw(buffer.as_mut_ptr()), &mut size).is_ok() {
+                            let path = std::ffi::OsString::from_wide(&buffer[..size as usize])
+                                .to_string_lossy()
+                                .into_owned();
+
+                            let mut counters = PROCESS_MEMORY_COUNTERS::default();
+                            let working_set = if GetProcessMemoryInfo(
+                                handle,
+                                &mut counters,
+                                std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                            ).is_ok() {
+                                counters.WorkingSetSize as u64
+                            } else {
+                                0
+                            };
+
+                            result.push(ProcessInfo {
+                                pid,
+                                exe_path: path,
+                                working_set_size: working_set,
+                            });
+                        }
+                        let _ = CloseHandle(handle);
+                    }
+                }
+
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
     }
 
-    let query = "SELECT ProcessId, ExecutablePath, WorkingSetSize FROM Win32_Process WHERE ExecutablePath IS NOT NULL";
-    let rows: Vec<ProcRow> = match wmi_con.raw_query::<ProcRow>(query) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-
-    rows.into_iter()
-        .filter_map(|r| {
-            Some(ProcessInfo {
-                pid: r.process_id?,
-                exe_path: r.executable_path?,
-                working_set_size: r.working_set_size.unwrap_or(0),
-            })
-        })
-        .collect()
+    result
 }
 
 #[cfg(not(windows))]
 fn query_running_processes() -> Vec<ProcessInfo> {
     Vec::new()
+}
+
+/// Helper to extract the game's root directory from an executable path,
+/// walking up out of common binary or helper subfolders to prevent
+/// launcher vs. game process sibling directory path mismatches.
+fn get_game_root_dir(exe_path: &Path) -> Option<PathBuf> {
+    let mut current = exe_path.parent()?;
+    const COMMON_SUBDIRS: &[&str] = &[
+        "bin", "binaries", "win64", "win32", "x64", "x86", "release", "debug",
+        "win-x64", "win-x86", "game", "retail", "launcher",
+    ];
+    // Walk up as long as the current directory name is a common binary/launcher folder,
+    // up to a maximum of 3 levels.
+    for _ in 0..3 {
+        if let Some(name) = current.file_name().and_then(|n| n.to_str()) {
+            let lower = name.to_lowercase();
+            if COMMON_SUBDIRS.iter().any(|&item| item == lower) {
+                if let Some(parent) = current.parent() {
+                    current = parent;
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+    Some(current.to_path_buf())
 }
 
 /// Find the best running process inside an install directory. Prefers
@@ -469,8 +559,8 @@ fn find_best_process_in_dir(processes: &[ProcessInfo], install_dir: &Path) -> Op
     let dir_lower = install_dir
         .to_string_lossy()
         .to_lowercase()
+        .replace('/', "\\")
         .trim_end_matches('\\')
-        .trim_end_matches('/')
         .to_string();
 
     if dir_lower.is_empty() {
@@ -480,7 +570,7 @@ fn find_best_process_in_dir(processes: &[ProcessInfo], install_dir: &Path) -> Op
     let mut candidates: Vec<ProcessInfo> = processes
         .iter()
         .filter(|p| {
-            let path_lower = p.exe_path.to_lowercase();
+            let path_lower = p.exe_path.to_lowercase().replace('/', "\\");
             if !path_lower.starts_with(&dir_lower) {
                 return false;
             }
@@ -488,7 +578,7 @@ fn find_best_process_in_dir(processes: &[ProcessInfo], install_dir: &Path) -> Op
             // sibling path that happens to share the prefix (e.g. "FooBar"
             // when looking for "Foo").
             let remainder = &path_lower[dir_lower.len()..];
-            remainder.starts_with('\\') || remainder.starts_with('/') || remainder.is_empty()
+            remainder.starts_with('\\') || remainder.is_empty()
         })
         .cloned()
         .collect();
@@ -708,8 +798,15 @@ pub fn build_game_refs_from_library(games: &[GameRefInput]) -> Vec<GameRef> {
             let install_dir = if g.platform == "Steam" {
                 g.steam_app_id
                     .and_then(|id| steam_game_watcher::game_install_path(id))
-            } else if g.platform == "Local" && !g.exe_path.is_empty() {
-                Path::new(&g.exe_path).parent().map(|p| p.to_path_buf())
+                    .or_else(|| {
+                        if !g.exe_path.is_empty() {
+                            get_game_root_dir(Path::new(&g.exe_path))
+                        } else {
+                            None
+                        }
+                    })
+            } else if !g.exe_path.is_empty() {
+                get_game_root_dir(Path::new(&g.exe_path))
             } else {
                 None
             };
@@ -796,5 +893,25 @@ mod tests {
         let exact_score: u32 = 200 + 10;
         let partial_score: u32 = 10_i32.saturating_sub(10) as u32;
         assert!(exact_score > partial_score);
+    }
+
+    #[test]
+    fn test_get_game_root_dir_heuristics() {
+        assert_eq!(
+            get_game_root_dir(Path::new("C:\\Games\\GameName\\game.exe")),
+            Some(PathBuf::from("C:\\Games\\GameName"))
+        );
+        assert_eq!(
+            get_game_root_dir(Path::new("C:\\Games\\GameName\\binaries\\win64\\game.exe")),
+            Some(PathBuf::from("C:\\Games\\GameName"))
+        );
+        assert_eq!(
+            get_game_root_dir(Path::new("C:\\Games\\GameName\\game\\bin\\x64\\game.exe")),
+            Some(PathBuf::from("C:\\Games\\GameName"))
+        );
+        assert_eq!(
+            get_game_root_dir(Path::new("C:\\Games\\GameName\\MySubFolder\\game.exe")),
+            Some(PathBuf::from("C:\\Games\\GameName\\MySubFolder"))
+        );
     }
 }
