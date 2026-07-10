@@ -666,6 +666,118 @@
   height: 12px;
 }
 
+/* ── Rail header actions (hint + toggle) ──────────────────── */
+
+/* New flex wrapper on the right side of `.library-rail-header`.
+ * Houses the optional "Scroll" hint badge AND the collapse toggle
+ * button so the two align cleanly in a single row. Replaces the
+ * previous single-child `.library-rail-hint` placement — both
+ * children now share the `flex-shrink: 0` guarantee. */
+.library-rail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── Rail collapse toggle button ──────────────────────────── */
+
+/* Compact icon button that flips the section between collapsed and
+ * expanded. Mirrors the visual weight of the `.library-rail-hint`
+ * badge next to it so they sit nicely as a pair in the header row.
+ * The `aria-expanded` attribute drives the chevron rotation through
+ * the descendant selector `.library-rail--collapsed .library-rail-toggle svg`
+ * so the toggled state doesn't need its own JS class. */
+.library-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.library-rail-toggle:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+.library-rail-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.library-rail-toggle:active {
+  transform: scale(0.94);
+}
+
+.library-rail-toggle svg {
+  width: 14px;
+  height: 14px;
+  /* The icon is a chevron-down SVG. We rotate it 180° in the
+   * base (expanded) state so it appears as a chevron-UP — the
+   * conventional affordance for "section is currently open, click
+   * to collapse it back up into the header".
+   * In the collapsed variant we drop the rotation so the icon
+   * shows as a chevron-DOWN instead — "section is closed, click to
+   * expand it downward". The rotation animates so the transition
+   * between states reads cleanly. */
+  transform: rotate(180deg);
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.library-rail--collapsed .library-rail-toggle svg {
+  transform: rotate(0deg);
+}
+
+/* ── Rail collapse animation (grid-template-rows trick) ───── */
+
+/* The CSS grid `0fr ↔ 1fr` track trick is the cleanest way to
+ * animate to an intrinsic (auto) height — a plain `max-height` would
+ * need a hard-coded ceiling that introduces a "dead time" at the
+ * end of the animation (animating to e.g. 600px when the real
+ * content is ~280px tall wastes ~half the duration traversing empty
+ * space). Browsers compute the resolved fr→px value mid-transition
+ * based on actual content height, so the animation feels linear.
+ *
+ * Requires the inner `.library-rail-viewport` child to:
+ *   - `overflow: hidden` so content past the collapsing row tracks
+ *     gets clipped cleanly,
+ *   - `min-height: 0` so the grid track can shrink all the way to zero
+ *     (the default `min-height: auto` on grid items would otherwise
+ *     preserve the intrinsic content height forever). */
+.library-rail-viewport-wrapper {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 220ms ease;
+}
+
+.library-rail-viewport-wrapper--collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.library-rail-viewport-wrapper--collapsed .library-rail-viewport {
+  /* Remove keyboard focus from hidden cards during and after the
+   * collapse so screen-reader / tab navigation can't reach elements
+   * the user can't visually see. The focus ring on the toggle button
+   * already covers the only keyboard-visible control in this state. */
+  visibility: hidden;
+  transition: visibility 0ms linear 280ms;
+}
+
 /* ── Rail empty state ─────────────────────────────────────────── */
 
 /* Friendly placeholder shown when a rail has no items to display.
@@ -704,6 +816,29 @@
 
 .library-rail-viewport {
   position: relative;
+  /* `min-height: 0` + `overflow: hidden` are required for the parent
+   * `.library-rail-viewport-wrapper` grid track `0fr ↔ 1fr` collapse
+   * animation to work:
+   *   - `overflow: hidden` clips children (including the absolutely
+   *     positioned edge fades and the track's overflow-x content)
+   *     cleanly while the row track collapses vertically,
+   *   - `min-height: 0` overrides the grid item default of
+   *     `min-height: auto` (which preserves the child's intrinsic
+   *     content height and would prevent `0fr` from actually
+   *     shrinking it to zero). Without this, the animation snaps
+   *     back to full height at the end.
+   *
+   * The baseline `visibility: visible` transition with a 0ms delay
+   * is a no-op on the way OUT (visibly visible by default), but the
+   * collapsed variant below overrides it with a 280ms DELAYED
+   * visibility transition so cards become non-tabbable only AFTER
+   * the collapse animation completes — symmetric timing in both
+   * directions keeps keyboard / screen-reader focus from landing on
+   * invisible cards. */
+  overflow: hidden;
+  min-height: 0;
+  visibility: visible;
+  transition: visibility 0ms linear 280ms;
 }
 
 .library-rail-track {

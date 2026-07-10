@@ -106,22 +106,25 @@ export default function LibraryPage() {
     <div className="library-grid">
       <LibraryHero games={games} />
 
-      {/* Recently Added rail: skipped entirely when the library is empty
-          (the rail would be blank) or when there are fewer than 4 games
-          (the rail duplicates the main grid). */}
-      {!isLibraryEmpty && games.length >= 4 && (
-        <RecentlyAddedRail
+      {/* Continue Playing rail: surfaces games the user has launched
+          in the last 14 days. Now sits ABOVE Recently Added per the
+          library swap — it's the more immediately useful rail (resume
+          a session) so it gets first-claim on the user's scroll.
+          The component self-gates on `recent.length >= 1` so we don't
+          need a length check here. */}
+      {!isLibraryEmpty && (
+        <ContinuePlayingRail
           games={games}
           onCardClick={handleCardClick}
         />
       )}
 
-      {/* Continue Playing rail: surfaces games the user has launched
-          in the last 14 days. Sits BELOW Recently Added per the spec.
-          The component self-gates on `recent.length >= 1` so we don't
-          need a length check here. */}
-      {!isLibraryEmpty && (
-        <ContinuePlayingRail
+      {/* Recently Added rail: skipped entirely when the library is empty
+          (the rail would be blank) or when there are fewer than 4 games
+          (the rail duplicates the main grid). Sits BELOW Continue
+          Playing after the swap. */}
+      {!isLibraryEmpty && games.length >= 4 && (
+        <RecentlyAddedRail
           games={games}
           onCardClick={handleCardClick}
         />

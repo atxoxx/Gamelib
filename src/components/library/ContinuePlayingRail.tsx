@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { Card } from "../ui";
+import { useCollapsedState } from "../../hooks/useCollapsedState";
 
 interface ContinuePlayingRailProps {
   games: Game[];
@@ -18,6 +19,10 @@ interface ContinuePlayingRailProps {
    */
   onCardClick?: (game: Game) => void;
 }
+
+/** localStorage key for the Continue Playing rail's collapsed state.
+ *  Versioned suffix so a schema change can co-exist with stale reads. */
+const COLLAPSED_STORAGE_KEY = "gamelib:rail:continue-playing:collapsed:v1";
 
 /**
  * "Continue Playing" rail: surfaces games the user has played in the
@@ -55,6 +60,19 @@ export default function ContinuePlayingRail({
       .slice(0, maxItems);
   }, [games, maxItems, windowDays]);
 
+  // Collapsed-by-default: rail is hidden until the user expands it.
+  // The `hasContent` arg drives the "auto-expand when empty" rule
+  // inside the hook — when `recent.length === 0` we always show
+  // the friendly "play a game to start tracking" message so first
+  // visitors can learn the feature exists. The user's actual
+  // collapsed preference is still stored, so when a session
+  // timestamps back into the window later, their choice is restored.
+  const [collapsed, toggleCollapsed] = useCollapsedState(
+    COLLAPSED_STORAGE_KEY,
+    recent.length > 0,
+    true
+  );
+
   function handleClick(game: Game) {
     if (onCardClick) {
       onCardClick(game);
@@ -64,9 +82,11 @@ export default function ContinuePlayingRail({
     navigate(`/library/${game.id}`);
   }
 
+  const viewportId = "library-rail-continue-playing-viewport";
+
   return (
     <section
-      className="library-rail library-rail--continue"
+      className={`library-rail library-rail--continue${collapsed ? " library-rail--collapsed" : ""}`}
       aria-label="Continue playing — recently played games"
     >
       <div className="library-rail-header">
@@ -76,8 +96,38 @@ export default function ContinuePlayingRail({
             Your last {windowDays} days of gaming — pick up where you left off
           </p>
         </div>
-        {recent.length > 0 && (
-          <div className="library-rail-hint" aria-hidden>
+        <div className="library-rail-header-actions">
+          {/* Scroll hint only makes sense when the rail is both expanded
+           * AND has actual cards. We hide it on collapse AND on empty
+           * state to avoid dangling affordance. */}
+          {!collapsed && recent.length > 0 && (
+            <div className="library-rail-hint" aria-hidden>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Scroll
+            </div>
+          )}
+          <button
+            type="button"
+            className="library-rail-toggle"
+            onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
+            aria-controls={viewportId}
+            aria-label={
+              collapsed
+                ? "Expand Continue Playing rail"
+                : "Collapse Continue Playing rail"
+            }
+            title={collapsed ? "Expand" : "Collapse"}
+          >
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -85,102 +135,112 @@ export default function ContinuePlayingRail({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden
             >
-              <polyline points="9 18 15 12 9 6" />
+              <polyline points="6 9 12 15 18 9" />
             </svg>
-            Scroll
-          </div>
-        )}
+          </button>
+        </div>
       </div>
 
-      <div className="library-rail-viewport">
-        {recent.length === 0 ? (
-          /* Empty state — the rail stays visible so the user knows
-           * the feature exists and where to look once they've played
-           * a game. Dashed border + tertiary bg differentiates it
-           * from the regular card track so it doesn't read as a
-           * broken card. */
-          <div className="library-rail-empty">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-            <span>
-              Play a game to start tracking your sessions — finished
-              sessions will show up here.
-            </span>
-          </div>
-        ) : (
-          <>
-            <div className="library-rail-track" ref={railRef}>
-              {recent.map((game, i) => (
-                <div
-                  key={game.id}
-                  className={`library-rail-item animate-fade-in stagger-${Math.min(i + 1, 8)}`}
-                >
-                  <Card
-                    variant="surface"
-                    elevation="1"
-                    hoverLift
-                    className="library-rail-card"
-                    onClick={() => handleClick(game)}
-                  >
-                    <div className="library-rail-card-cover">
-                      {game.coverArtUrl ? (
-                        <img src={game.coverArtUrl} alt={game.name} />
-                      ) : (
-                        <div className="library-rail-card-cover-placeholder">
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1"
-                            aria-hidden
-                          >
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                          </svg>
-                        </div>
-                      )}
-                      <span className="library-rail-card-platform">
-                        {game.platform}
-                      </span>
-                    </div>
-                    <div className="library-rail-card-body">
-                      <div className="library-rail-card-name" title={game.name}>
-                        {game.name}
-                      </div>
-                      <div
-                        className="library-rail-card-meta library-rail-card-meta--continue"
-                        title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}
-                      >
-                        {formatAgo(game.lastPlayed ?? 0)}
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-              ))}
+      <div
+        id={viewportId}
+        className={`library-rail-viewport-wrapper${collapsed ? " library-rail-viewport-wrapper--collapsed" : ""}`}
+      >
+        <div className="library-rail-viewport">
+          {recent.length === 0 ? (
+            /* Empty state — the rail stays visible so the user knows
+             * the feature exists and where to look once they've played
+             * a game. Dashed border + tertiary bg differentiates it
+             * from the regular card track so it doesn't read as a
+             * broken card. */
+            <div className="library-rail-empty">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              <span>
+                Play a game to start tracking your sessions — finished
+                sessions will show up here.
+              </span>
             </div>
-            <div
-              className="library-rail-fade library-rail-fade--left"
-              aria-hidden
-            />
-            <div
-              className="library-rail-fade library-rail-fade--right"
-              aria-hidden
-            />
-          </>
-        )}
+          ) : (
+            <>
+              <div className="library-rail-track" ref={railRef}>
+                {recent.map((game, i) => (
+                  <div
+                    key={game.id}
+                    className={`library-rail-item animate-fade-in stagger-${Math.min(i + 1, 8)}`}
+                  >
+                    <Card
+                      variant="surface"
+                      elevation="1"
+                      hoverLift
+                      className="library-rail-card"
+                      onClick={() => handleClick(game)}
+                    >
+                      <div className="library-rail-card-cover">
+                        {game.coverArtUrl ? (
+                          <img src={game.coverArtUrl} alt={game.name} />
+                        ) : (
+                          <div className="library-rail-card-cover-placeholder">
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1"
+                              aria-hidden
+                            >
+                              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                            </svg>
+                          </div>
+                        )}
+                        <span className="library-rail-card-platform">
+                          {game.platform}
+                        </span>
+                      </div>
+                      <div className="library-rail-card-body">
+                        <div className="library-rail-card-name" title={game.name}>
+                          {game.name}
+                        </div>
+                        <div
+                          className="library-rail-card-meta library-rail-card-meta--continue"
+                          title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}
+                        >
+                          {formatAgo(game.lastPlayed ?? 0)}
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+                ))}
+              </div>
+              <div
+                className="library-rail-fade library-rail-fade--left"
+                aria-hidden
+              />
+              <div
+                className="library-rail-fade library-rail-fade--right"
+                aria-hidden
+              />
+            </>
+          )}
+        </div>
       </div>
     </section>
   );
 }
+
+/** Persistence + collapse logic now lives in `useCollapsedState`
+ *  (`src/hooks/useCollapsedState.ts`) so the Continue Playing and
+ *  Recently Added rails can't drift their storage conventions out
+ *  of sync. */
 
 /**
  * Compact "time since" formatter. Matches the look of the existing
