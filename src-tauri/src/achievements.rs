@@ -37,6 +37,14 @@ pub struct GameAchievementData {
     pub total: u32,
     pub unlocked: u32,
     pub locked: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced: Option<u64>,
+}
+
+/// Whole-library achievements cache.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AchievementsCache {
+    pub games: std::collections::HashMap<String, GameAchievementData>,
 }
 
 // ── Steam API response types (private, for deserialization only) ─────
@@ -133,14 +141,12 @@ fn build_client() -> Result<Client, String> {
 ///
 /// `api_token` is the Steam `web_api_token` extracted during login — it works
 /// as the `key` parameter for these `ISteamUserStats` endpoints.
-#[tauri::command]
-pub async fn fetch_achievements(
+pub async fn fetch_achievements_with_client(
+    client: &Client,
     steam_app_id: u32,
-    steam_id: String,
-    api_token: String,
+    steam_id: &str,
+    api_token: &str,
 ) -> Result<GameAchievementData, String> {
-    let client = build_client()?;
-
     // ── 1. Get achievement schema (definitions) ────────────────────
     let schema_url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/\
@@ -181,6 +187,7 @@ pub async fn fetch_achievements(
             total: 0,
             unlocked: 0,
             locked: 0,
+            last_synced: None,
         });
     }
 
@@ -294,7 +301,27 @@ pub async fn fetch_achievements(
         total,
         unlocked: unlocked_count,
         locked: total - unlocked_count,
+        last_synced: None,
     })
+}
+
+/// Fetch achievements for a single game from Steam.
+///
+/// Calls three endpoints:
+/// 1. `GetSchemaForGame/v2/` — achievement definitions (names, descriptions, icons)
+/// 2. `GetPlayerAchievements/v1/` — user's unlock status & timestamps
+/// 3. `GetGlobalAchievementPercentagesForApp/v2/` — global rarity percentages
+///
+/// `api_token` is the Steam `web_api_token` extracted during login — it works
+/// as the `key` parameter for these `ISteamUserStats` endpoints.
+#[tauri::command]
+pub async fn fetch_achievements(
+    steam_app_id: u32,
+    steam_id: String,
+    api_token: String,
+) -> Result<GameAchievementData, String> {
+    let client = build_client()?;
+    fetch_achievements_with_client(&client, steam_app_id, &steam_id, &api_token).await
 }
 
 /// Save the achievements cache to disk as JSON.
@@ -316,4 +343,27 @@ pub fn load_achievements_cache(app: tauri::AppHandle) -> Result<String, String> 
         return Ok(String::new());
     }
     std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+}
+
+/// Internal helper to load the achievements cache as a Rust struct.
+pub fn load_cache_internal(app: &tauri::AppHandle) -> Result<AchievementsCache, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file_path = data_dir.join("achievements_cache.json");
+    if !file_path.exists() {
+        return Ok(AchievementsCache {
+            games: std::collections::HashMap::new(),
+        });
+    }
+    let content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+/// Internal helper to save the achievements cache to disk.
+pub fn save_cache_internal(app: &tauri::AppHandle, cache: &AchievementsCache) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let file_path = data_dir.join("achievements_cache.json");
+    let content = serde_json::to_string(cache).map_err(|e| e.to_string())?;
+    std::fs::write(&file_path, content).map_err(|e| e.to_string())?;
+    Ok(())
 }

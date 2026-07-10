@@ -10,6 +10,7 @@ import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } fro
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
+import { useAchievements } from "../context/AchievementContext";
 import SourceManager from "../components/SourceManager";
 import { Button } from "../components/ui";
 
@@ -36,6 +37,7 @@ export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames } = useGames();
+  const { reloadCache } = useAchievements();
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
   const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
@@ -147,6 +149,7 @@ export default function SettingsPage() {
       if (result.success) {
         const g = result.gamesSynced ?? 0;
         const p = result.playtimeUpdated ?? 0;
+        const a = result.achievementsSynced ?? 0;
 
         // Persist synced games to the library, skipping duplicates by Steam AppID
         const existingAppIds = new Set(games.map((gm) => gm.steamAppId).filter(Boolean));
@@ -178,11 +181,17 @@ export default function SettingsPage() {
             sizeDetectedAt: entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
           });
         }
+
+        if (steamSettings.syncAchievements) {
+          await reloadCache();
+        }
+
+        const achMsg = steamSettings.syncAchievements ? ` · ${a} games achievements synced` : "";
         if (newGames.length > 0) {
           addGames(newGames);
-          showToast(`Synced ${g} games · ${p} playtime updates (${newGames.length} new)`, "success");
+          showToast(`Synced ${g} games · ${p} playtime updates${achMsg} (${newGames.length} new)`, "success");
         } else {
-          showToast(`Synced ${g} games · ${p} playtime updates (all already in library)`, "success");
+          showToast(`Synced ${g} games · ${p} playtime updates${achMsg} (all already in library)`, "success");
         }
       }
     } catch (err) {
@@ -660,7 +669,7 @@ export default function SettingsPage() {
                 {syncResult && (
                   <div className={`sync-result ${syncResult.success ? "success" : "error"}`}>
                     {syncResult.success
-                      ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates`
+                      ? `✓ Synced ${syncResult.gamesSynced ?? 0} games · ${syncResult.playtimeUpdated ?? 0} playtime updates${syncResult.achievementsSynced ? ` · ${syncResult.achievementsSynced} games achievements synced` : ""}`
                       : `✗ ${syncResult.error || "Sync failed"}`}
                   </div>
                 )}
@@ -692,9 +701,17 @@ export default function SettingsPage() {
                       />
                       <span>Sync playtime</span>
                     </label>
-                    <label className="settings-checkbox-label settings-checkbox-label--disabled">
-                      <input type="checkbox" disabled />
-                      <span>Achievements sync not available with WebView login</span>
+                    <label className="settings-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={steamSettings.syncAchievements}
+                        onChange={(e) => {
+                          const u = { ...steamSettings, syncAchievements: e.target.checked };
+                          setSteamSettings(u);
+                          localStorage.setItem("gamelib-steam-settings", JSON.stringify(u));
+                        }}
+                      />
+                      <span>Sync achievements</span>
                     </label>
                     <label className="settings-checkbox-label settings-checkbox-label--disabled">
                       <input type="checkbox" checked disabled />

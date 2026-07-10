@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useGames } from "./GameContext";
 import type {
   Game,
   GameAchievementData,
@@ -68,6 +70,8 @@ interface AchievementContextType {
   updateSettings: (updates: Partial<AchievementSettings>) => void;
   /** Clear the entire achievements cache. */
   clearCache: () => Promise<void>;
+  /** Reload the achievements cache from disk. */
+  reloadCache: () => Promise<void>;
 }
 
 const AchievementContext = createContext<AchievementContextType | null>(null);
@@ -237,6 +241,46 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const reloadCache = useCallback(async () => {
+    try {
+      const raw: string = await invoke("load_achievements_cache");
+      if (raw) {
+        const parsed = JSON.parse(raw) as AchievementsCache;
+        if (parsed && parsed.games) {
+          setCache(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn("[AchievementContext] Failed to reload cache:", err);
+    }
+  }, []);
+
+  // Listen for game-exited events to automatically sync achievements for that game
+  const { games } = useGames();
+  const gamesRef = useRef(games);
+  useEffect(() => {
+    gamesRef.current = games;
+  }, [games]);
+
+  useEffect(() => {
+    const unlisten = listen<{ gameId: string }>("game-exited", async (event) => {
+      const { gameId } = event.payload;
+      const game = gamesRef.current.find((g) => g.id === gameId);
+      if (game && game.steamAppId && game.platform === "Steam") {
+        try {
+          await syncGameAchievements(game.id, game.steamAppId);
+          console.log(`[AchievementContext] Auto-synced achievements for ${game.name} on exit`);
+        } catch (err) {
+          console.warn(`[AchievementContext] Failed to auto-sync achievements on exit for ${game.name}:`, err);
+        }
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [syncGameAchievements]);
+
   return (
     <AchievementContext.Provider
       value={{
@@ -249,6 +293,7 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
         settings,
         updateSettings,
         clearCache,
+        reloadCache,
       }}
     >
       {children}

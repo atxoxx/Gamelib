@@ -43,9 +43,10 @@ struct OwnedGame {
 /// `steam_start_login`.
 #[tauri::command]
 pub async fn steam_sync_games(
+    app: tauri::AppHandle,
     session: SteamSession,
     include_playtime: bool,
-    #[allow(unused)] include_achievements: bool,
+    include_achievements: bool,
 ) -> Result<SteamSyncResult, String> {
     // Steam ID validation guard.
     if !session.steam_id.chars().all(|c| c.is_ascii_digit())
@@ -164,11 +165,79 @@ pub async fn steam_sync_games(
         });
     }
 
+    // ── Sync achievements if requested ──────────────────────────────
+    let mut achievements_synced: u32 = 0;
+    if include_achievements {
+        if let Ok(mut cache) = crate::achievements::load_cache_internal(&app) {
+            let mut fetched_any = false;
+            for game in &owned_games {
+                let game_key = format!("steam-{}", game.appid);
+                let needs_sync = match cache.games.get(&game_key) {
+                    None => true, // Not in cache
+                    Some(entry) => {
+                        let is_installed = installed_set.contains(&game.appid);
+                        if is_installed {
+                            true
+                        } else if game.playtime_forever > 0 {
+                            match entry.last_synced {
+                                None => true,
+                                Some(last_synced_ms) => {
+                                    let last_played_ms = game.rtime_last_played * 1000;
+                                    last_played_ms > last_synced_ms
+                                }
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                };
+
+                if needs_sync {
+                    if fetched_any {
+                        // Rate limit to be gentle with Steam API
+                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    }
+                    match crate::achievements::fetch_achievements_with_client(
+                        &client,
+                        game.appid,
+                        &session.steam_id,
+                        &session.web_api_token,
+                    )
+                    .await
+                    {
+                        Ok(mut data) => {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            data.last_synced = Some(now_ms);
+                            cache.games.insert(game_key, data);
+                            achievements_synced += 1;
+                            fetched_any = true;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[steam_sync] Failed to fetch achievements for appid {}: {}",
+                                game.appid, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            if fetched_any {
+                if let Err(e) = crate::achievements::save_cache_internal(&app, &cache) {
+                    eprintln!("[steam_sync] Failed to save achievements cache: {}", e);
+                }
+            }
+        }
+    }
+
     Ok(SteamSyncResult {
         success: true,
         games_synced: synced,
         playtime_updated,
-        achievements_synced: 0,
+        achievements_synced,
         synced_games,
         installed_appids,
         error: None,
