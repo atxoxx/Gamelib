@@ -649,6 +649,21 @@
   color: #ef4444;
 }
 
+/* Mirrors the row's danger-fill style for use inside the top-nav
+ * Downloads popover. Same rationale: destructive-emphasis for the
+ * "delete from disk" trash button. */
+.dl-progress-card-btn.danger-fill {
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+  color: var(--color-danger);
+}
+
+.dl-progress-card-btn.danger-fill:hover {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #fff;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+
 .dl-progress-card-btn svg {
   width: 10px;
   height: 10px;
@@ -1700,6 +1715,23 @@
   color: #ef4444;
 }
 
+/* Destructive-emphasis variant — used by the "delete from disk"
+ * action where the button nukes real bytes. Adds a solid red fill
+ * on hover so the user understands they're about to do something
+ * more irreversible than the existing Remove (X). Default state
+ * stays muted so the row doesn't look hostile when scanning. */
+.dl-row-btn.danger-fill {
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+  color: var(--color-danger);
+}
+
+.dl-row-btn.danger-fill:hover:not(:disabled) {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #fff;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+
 .dl-row-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1979,4 +2011,88 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ===========================================================================
+ * ConfirmModal (used by the Downloads "Delete from disk" flow)
+ *
+ * Reusable destructive-action dialog rendered via React Portal
+ * (`document.body`) so the top-nav popover's `overflow: hidden`
+ * doesn't clip the overlay. Kept here because the modifier icons
+ * and copy follow the download feature's visual language even
+ * though the modal itself is a generic UI primitive.
+ * ========================================================================== */
+
+.confirm-modal {
+  max-width: 460px;
+  width: min(480px, calc(100vw - var(--space-xl) * 2));
+}
+
+.confirm-modal-body {
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.confirm-modal-body strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.confirm-modal-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  word-break: break-all;
+  color: var(--color-text-primary);
+}
+
+/* Yellow warning block — for the auto-extract case where the
+ * deletion only wipes source archives. */
+.confirm-modal-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  color: #f59e0b;
+  line-height: 1.45;
+}
+
+.confirm-modal-warning::before {
+  content: "!";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #1f1306;
+  font-weight: var(--font-weight-bold);
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+.modal-header-icon--danger {
+  color: var(--color-danger);
+}
+
+/* Cursor feedback when an async destructive op is in flight on
+ * the ConfirmModal: clicking the backdrop does nothing because
+ * the confirm handler is detached, but a `progress` / `not-allowed`
+ * cursor tells the user that. We set it on the backdrop root
+ * via a `data-state` attribute set by the component. */
+.modal-backdrop[data-busy="true"] {
+  cursor: progress;
 }

@@ -25,11 +25,14 @@
 import { useState } from "react";
 import { useDownloads } from "../context/DownloadContext";
 import { useToast } from "../context/ToastContext";
+import { useSizeUnit } from "../hooks/useSizeUnit";
+import { formatBytesShort, type TorrentDownload } from "../types/download";
 import BandwidthHero from "../components/downloads/BandwidthHero";
 import BandwidthSparkline from "../components/downloads/BandwidthSparkline";
 import MagnetInputBar from "../components/downloads/MagnetInputBar";
 import DownloadsToolbar from "../components/downloads/DownloadsToolbar";
 import DownloadRow from "../components/downloads/DownloadRow";
+import { ConfirmModal } from "../components/ui";
 
 const HISTORY_PREVIEW = 5;
 
@@ -43,7 +46,17 @@ export default function DownloadsPage() {
     loading,
   } = useDownloads();
   const { showToast } = useToast();
+  const { unit } = useSizeUnit();
   const [historyExpanded, setHistoryExpanded] = useState(false);
+
+  // ── "Delete from disk" confirmation state ────────────────────────
+  // At most one modal at a time. `deletingContext` carries the full
+  // record so the dialog can render name / size / save path context;
+  // null means no modal open. `deletingBusy` keeps the buttons
+  // disabled while the Rust call is in flight so a double-click
+  // can't fire the destructive command twice.
+  const [deletingContext, setDeletingContext] = useState<TorrentDownload | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
 
   // Pause / resume / remove handlers. Errors are surfaced via the
   // shared toast so the failure mode is consistent with the
@@ -68,6 +81,33 @@ export default function DownloadsPage() {
       showToast("Download removed", "info");
     } catch (err) {
       showToast(`Remove failed: ${err}`, "error");
+    }
+  }
+
+  // "Delete from disk" — opens the confirmation dialog with full
+  // download context. The actual Rust call (`removeDownload` with
+  // `deleteFiles=true`) only fires from `confirmDelete`.
+  function handleDeleteFiles(download: TorrentDownload) {
+    setDeletingContext(download);
+  }
+
+  async function confirmDelete() {
+    if (!deletingContext) return;
+    const target = deletingContext;
+    setDeletingBusy(true);
+    try {
+      await removeDownload(target.id, true);
+      showToast(
+        target.autoExtract
+          ? `Deleted archives for "${target.name}"; installed files kept`
+          : `Deleted "${target.name}" from disk`,
+        "info",
+      );
+      setDeletingContext(null);
+    } catch (err) {
+      showToast(`Delete failed: ${err}`, "error");
+    } finally {
+      setDeletingBusy(false);
     }
   }
 
@@ -139,6 +179,7 @@ export default function DownloadsPage() {
                 onPause={handlePause}
                 onResume={handleResume}
                 onRemove={handleRemove}
+                onDeleteFiles={handleDeleteFiles}
               />
             ))
           )}
@@ -191,6 +232,7 @@ export default function DownloadsPage() {
                   onPause={handlePause}
                   onResume={handleResume}
                   onRemove={handleRemove}
+                  onDeleteFiles={handleDeleteFiles}
                 />
               ))}
               {completedDownloads.length > HISTORY_PREVIEW && (
@@ -226,6 +268,56 @@ export default function DownloadsPage() {
           )}
         </div>
       </section>
+
+      {/* ── "Delete from disk" confirmation ──────────────────────
+       * Single modal per page. Renders into `document.body` via
+       * the ConfirmModal portal so the modal is not clipped by
+       * ancestor overflow rules. The dialog is rich: it surfaces
+       * the bytes that will be wiped, the save path, and — when
+       * the torrent auto-extracted on completion — an extra note
+       * that the installed game files are NOT being removed. */}
+      <ConfirmModal
+        open={deletingContext !== null}
+        title={
+          deletingContext ? (
+            <>
+              Delete <strong>{deletingContext.name}</strong> from disk?
+            </>
+          ) : (
+            "Delete from disk?"
+          )
+        }
+        message={
+          deletingContext && (
+            <>
+              This will permanently remove{" "}
+              <strong>
+                {formatBytesShort(deletingContext.downloaded, unit)}
+              </strong>{" "}
+              from{" "}
+              <code title={deletingContext.savePath}>
+                {deletingContext.savePath}
+              </code>
+              . This action cannot be undone.
+            </>
+          )
+        }
+        warning={
+          deletingContext?.autoExtract && (
+            <>
+              This download was auto-extracted. If any source archive files
+              remain, only those will be removed — extracted game files in
+              the same folder will stay on disk.
+            </>
+          )
+        }
+        confirmLabel={`Delete from disk${deletingContext?.autoExtract ? " (archives only)" : ""}`}
+        busy={deletingBusy}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!deletingBusy) setDeletingContext(null);
+        }}
+      />
     </div>
   );
 }

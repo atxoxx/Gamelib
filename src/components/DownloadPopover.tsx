@@ -41,6 +41,7 @@ import {
 } from "../types/download";
 import { useToast } from "../context/ToastContext";
 import { useSizeUnit } from "../hooks/useSizeUnit";
+import { ConfirmModal } from "./ui";
 
 interface DownloadPopoverProps {
   open: boolean;
@@ -68,11 +69,16 @@ function DownloadCard({
   onPause,
   onResume,
   onRemove,
+  onDeleteFiles,
 }: {
   download: TorrentDownload;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onRemove: (id: string) => void;
+  /** Parent opens a confirmation dialog before invoking the actual
+   * `removeDownload(id, true)` — we pass the whole record so the
+   * dialog can render size / name / save path context. */
+  onDeleteFiles: (download: TorrentDownload) => void;
 }) {
   const { unit } = useSizeUnit();
   const status = download.status;
@@ -249,6 +255,19 @@ function DownloadCard({
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
+          <button
+            className="dl-progress-card-btn danger-fill"
+            onClick={() => onDeleteFiles(download)}
+            title="Delete from disk"
+            aria-label="Delete download from disk"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -275,10 +294,43 @@ export default function DownloadPopover({
     removeDownload,
   } = useDownloads();
   const { showToast } = useToast();
+  const { unit } = useSizeUnit();
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>("active");
   const [clearing, setClearing] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // ── "Delete from disk" confirmation state ────────────────────────
+  // At most one modal per popover instance. The dialog is rendered
+  // via a React Portal inside `ConfirmModal`, which is critical
+  // here — the popover has `overflow: hidden` and would otherwise
+  // clip the overlay.
+  const [deletingContext, setDeletingContext] = useState<TorrentDownload | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
+
+  function handleDeleteFiles(download: TorrentDownload) {
+    setDeletingContext(download);
+  }
+
+  async function confirmDelete() {
+    if (!deletingContext) return;
+    const target = deletingContext;
+    setDeletingBusy(true);
+    try {
+      await removeDownload(target.id, true);
+      showToast(
+        target.autoExtract
+          ? `Deleted archives for "${target.name}"; installed files kept`
+          : `Deleted "${target.name}" from disk`,
+        "info",
+      );
+      setDeletingContext(null);
+    } catch (err) {
+      showToast(`Delete failed: ${err}`, "error");
+    } finally {
+      setDeletingBusy(false);
+    }
+  }
 
   // Navigate to the dedicated Downloads page and close the popover.
   // We close the popover explicitly (rather than relying on
@@ -290,12 +342,28 @@ export default function DownloadPopover({
   }
 
   // ── Click outside + Escape to close ─────────────────────────────────
+  // Critical: when the user has a "Delete from disk" confirmation
+  // modal open (which renders into `document.body` via React Portal),
+  // clicks INSIDE that modal also count as "outside the popover" by
+  // the naive `popoverRef.contains` / `anchorRef.contains` check,
+  // which would otherwise fire `onClose` and orphan the dialog
+  // mid-confirmation. We additionally exclude any mousedown whose
+  // target is inside a `.modal-backdrop`.
+  //
+  // TypeScript note: `closest` is defined on `Element`, not on the
+  // abstract `Node` interface, so we narrow the target to Element
+  // before calling it (and short-circuit on Text nodes etc. which
+  // have no `closest`).
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const inPopover = popoverRef.current?.contains(target);
-      const inAnchor = anchorRef.current?.contains(target);
+      const target = e.target as Node | null;
+      const inModal = target instanceof Element
+        ? target.closest(".modal-backdrop")
+        : null;
+      if (inModal) return;
+      const inPopover = popoverRef.current?.contains(target ?? null);
+      const inAnchor = anchorRef.current?.contains(target ?? null);
       if (!inPopover && !inAnchor) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -307,7 +375,7 @@ export default function DownloadPopover({
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, anchorRef]);
+  }, [open, onClose, anchorRef, deletingContext]);
 
   // ── Auto-switch tabs when one becomes empty ─────────────────────────
   // Smooth UX so a user who just finished their last download isn't
@@ -471,6 +539,7 @@ export default function DownloadPopover({
               onPause={handlePause}
               onResume={handleResume}
               onRemove={handleRemove}
+              onDeleteFiles={handleDeleteFiles}
             />
           ))
         )}
@@ -543,6 +612,55 @@ export default function DownloadPopover({
           </svg>
         </button>
       </div>
+
+      {/* ── "Delete from disk" confirmation modal ────────────────
+       * Rendered via Portal inside `ConfirmModal` so the popover's
+       * `overflow: hidden` doesn't clip the overlay. The dialog
+       * carries the same rich copy as the page-level modal: bytes
+       * that will be wiped, save path, and a yellow warning when
+       * auto-extract keeps the installed game files. */}
+      <ConfirmModal
+        open={deletingContext !== null}
+        title={
+          deletingContext ? (
+            <>
+              Delete <strong>{deletingContext.name}</strong> from disk?
+            </>
+          ) : (
+            "Delete from disk?"
+          )
+        }
+        message={
+          deletingContext && (
+            <>
+              This will permanently remove{" "}
+              <strong>
+                {formatBytesShort(deletingContext.downloaded, unit)}
+              </strong>{" "}
+              from{" "}
+              <code title={deletingContext.savePath}>
+                {deletingContext.savePath}
+              </code>
+              . This action cannot be undone.
+            </>
+          )
+        }
+        warning={
+          deletingContext?.autoExtract && (
+            <>
+              This download was auto-extracted. If any source archive files
+              remain, only those will be removed — extracted game files in
+              the same folder will stay on disk.
+            </>
+          )
+        }
+        confirmLabel={`Delete from disk${deletingContext?.autoExtract ? " (archives only)" : ""}`}
+        busy={deletingBusy}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!deletingBusy) setDeletingContext(null);
+        }}
+      />
     </div>
   );
 }

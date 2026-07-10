@@ -33,6 +33,13 @@ interface DownloadRowProps {
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onRemove: (id: string) => void;
+  /**
+   * Destructive-emphasis "delete from disk" handler. The parent
+   * typically opens a confirmation dialog before invoking the actual
+   * `removeDownload(id, true)` — we pass the whole `download` so the
+   * dialog can render size / name / save path context.
+   */
+  onDeleteFiles: (download: TorrentDownload) => void;
 }
 
 export default function DownloadRow({
@@ -40,6 +47,7 @@ export default function DownloadRow({
   onPause,
   onResume,
   onRemove,
+  onDeleteFiles,
 }: DownloadRowProps) {
   const { unit } = useSizeUnit();
   const { updateSelectedFiles } = useDownloads();
@@ -269,6 +277,27 @@ export default function DownloadRow({
             >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+          <button
+            className="dl-row-btn danger-fill"
+            onClick={() => onDeleteFiles(download)}
+            title="Delete from disk"
+            aria-label="Delete download from disk"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
             </svg>
           </button>
         </div>

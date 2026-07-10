@@ -12,3 +12,6 @@ export type { TooltipProps } from "./Tooltip";
 
 export { Skeleton, SkeletonText } from "./Skeleton";
 export type { SkeletonProps, SkeletonTextProps } from "./Skeleton";
+
+export { ConfirmModal } from "./ConfirmModal";
+export type { ConfirmModalProps } from "./ConfirmModal";
