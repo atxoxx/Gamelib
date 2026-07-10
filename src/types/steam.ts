@@ -59,6 +59,9 @@ export interface SyncedGameEntry {
    *  Auditable from the Storage tab so users can re-link if the
    *  default install dir is wrong. */
   sizeRootPath?: string;
+  /** Unix timestamp (seconds) of the last Steam play session. The
+   *  frontend converts this to milliseconds for `Game.lastPlayed`. */
+  rtimeLastPlayed?: number;
 }
 
 export interface SteamSettings {

@@ -78,4 +78,9 @@ pub struct SyncedGameEntry {
     /// root we summed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_root_path: Option<String>,
+    /// Unix timestamp (seconds) of the last time the user played this
+    /// game on Steam. Passed through to the frontend so the Library
+    /// page's "Continue Playing" rail can surface recently-active titles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rtime_last_played: Option<u64>,
 }

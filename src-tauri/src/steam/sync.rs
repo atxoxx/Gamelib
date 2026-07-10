@@ -162,6 +162,11 @@ pub async fn steam_sync_games(
             exe_path,
             size_bytes: size_info.as_ref().map(|s| s.size_bytes),
             size_root_path: size_info.as_ref().map(|s| s.root_path.clone()),
+            rtime_last_played: if game.rtime_last_played > 0 {
+                Some(game.rtime_last_played)
+            } else {
+                None
+            },
         });
     }
 

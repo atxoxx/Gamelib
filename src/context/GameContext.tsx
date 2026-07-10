@@ -229,14 +229,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
         return [...prev, gameId];
       });
 
-      // Persist the detected exe path if one was found
-      if (detectedExe) {
-        setGames((prev) =>
-          prev.map((g) =>
-            g.id === gameId ? { ...g, detectedExe } : g
-          )
-        );
-      }
+      // Stamp lastPlayed when the watcher first detects a running game
+      // so passively-launched titles show up in "Continue Playing".
+      // Also persist the detected exe path if one was found.
+      setGames((prev) =>
+        prev.map((g) =>
+          g.id === gameId
+            ? { ...g, lastPlayed: Date.now(), ...(detectedExe ? { detectedExe } : {}) }
+            : g
+        )
+      );
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -515,6 +517,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     setRunningGameIds((prev) => [...prev, game.id]);
+
+    // Stamp lastPlayed immediately so the game surfaces in the
+    // "Continue Playing" rail even before the session ends. If the
+    // backend later emits a game-exited event, the timestamp will be
+    // refined to the actual finish time.
+    setGames((prev) =>
+      prev.map((g) =>
+        g.id === game.id ? { ...g, lastPlayed: Date.now() } : g
+      )
+    );
 
     try {
       // ── Unified launch: single Tauri command for all game types ──────

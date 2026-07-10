@@ -37,7 +37,7 @@ type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads";
 export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
-  const { games, addGames } = useGames();
+  const { games, addGames, updateGame } = useGames();
   const { reloadCache } = useAchievements();
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
@@ -225,11 +225,24 @@ export default function SettingsPage() {
             sizeBytes: entry.sizeBytes,
             sizeRootPath: entry.sizeRootPath,
             sizeDetectedAt: entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+            lastPlayed: entry.rtimeLastPlayed ? entry.rtimeLastPlayed * 1000 : undefined,
           });
         }
 
         if (steamSettings.syncAchievements) {
           await reloadCache();
+        }
+
+        // Update lastPlayed for existing Steam games when Steam reports
+        // a more recent session, so the "Continue Playing" rail stays
+        // accurate after a sync.
+        for (const entry of result.syncedGames ?? []) {
+          if (!existingAppIds.has(entry.appid)) continue;
+          const game = games.find((g) => g.steamAppId === entry.appid);
+          const syncedLastPlayed = entry.rtimeLastPlayed ? entry.rtimeLastPlayed * 1000 : undefined;
+          if (game && syncedLastPlayed && (!game.lastPlayed || syncedLastPlayed > game.lastPlayed)) {
+            updateGame(game.id, { lastPlayed: syncedLastPlayed });
+          }
         }
 
         const achMsg = steamSettings.syncAchievements ? ` · ${a} games achievements synced` : "";
@@ -322,6 +335,7 @@ export default function SettingsPage() {
             sizeBytes: entry.sizeBytes,
             sizeRootPath: entry.sizeRootPath,
             sizeDetectedAt: entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+            lastPlayed: entry.lastPlayed ? entry.lastPlayed * 1000 : undefined,
           });
         }
         if (newGames.length > 0) {
@@ -330,6 +344,22 @@ export default function SettingsPage() {
         } else {
           showToast(`Synced ${result.gamesImported} Epic games (all already in library)`, "success");
         }
+
+        // Update lastPlayed for existing Epic games when Epic reports a
+        // more recent session, so the "Continue Playing" rail stays
+        // accurate after a sync.
+        for (const entry of result.syncedGames ?? []) {
+          const existingId = `${entry.namespace}-${entry.catalogItemId}`;
+          if (!existingEpicIds.has(existingId)) continue;
+          const game = games.find(
+            (g) => g.epicNamespace === entry.namespace && g.epicCatalogItemId === entry.catalogItemId
+          );
+          const syncedLastPlayed = entry.lastPlayed ? entry.lastPlayed * 1000 : undefined;
+          if (game && syncedLastPlayed && (!game.lastPlayed || syncedLastPlayed > game.lastPlayed)) {
+            updateGame(game.id, { lastPlayed: syncedLastPlayed });
+          }
+        }
+
         // Persist sync info
         setEpicAuth((prev) => ({ ...prev, lastSync: result.lastSync }));
         localStorage.setItem("gamelib-epic-sync-info", JSON.stringify({
