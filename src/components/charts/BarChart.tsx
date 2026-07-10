@@ -29,12 +29,48 @@ export default function BarChart({
     const barGap = Math.max(4, chartW / (data.length * 3));
     const barW = (chartW - barGap * (data.length - 1)) / data.length;
 
-    return { padding, chartW, chartH, maxVal, barGap, barW };
+    // Adaptive x-axis label density. With 30+ days, 90+ days, or "all time"
+    // the chart fans out to dozens or hundreds of bars; rendering a label
+    // for every one produces illegible, overlapping text. We stride the
+    // ticks so only ~ floor(chartW / labelBudgetPx) labels show, and we
+    // always pin the first and last tick so the time boundaries are clear.
+    const labelBudgetPx = 42;
+    const maxLabels = Math.max(2, Math.floor(chartW / labelBudgetPx));
+    const labelStride = Math.max(1, Math.ceil(data.length / maxLabels));
+    // Suppress the "1h / 0h" label printed above each bar when the bar is
+    // too narrow to hold any text legibly. In dense views this becomes a
+    // wall of repeated "0h" glyphs; the hover tooltip remains the channel
+    // for exact values.
+    const showValuesOnTop = barW >= 24;
+
+    return {
+      padding,
+      chartW,
+      chartH,
+      maxVal,
+      barGap,
+      barW,
+      labelStride,
+      showValuesOnTop,
+    };
   }, [data, width, height]);
 
-  const { padding, chartW, chartH, maxVal, barGap, barW } = chart;
+  const {
+    padding,
+    chartW,
+    chartH,
+    maxVal,
+    barGap,
+    barW,
+    labelStride,
+    showValuesOnTop,
+  } = chart;
 
   const gridLines = 5;
+  // Build y-axis tick values, then deduplicate. With tiny maxVal (e.g. 1
+  // hour) naive rounding produces "0,0,0,0,1,1" — duplicated labels stack
+  // at the top of the chart and visually saturate the y-axis. Drop dupes
+  // while keeping every gridline (so the dashed lines still draw).
   const gridValues = Array.from({ length: gridLines + 1 }, (_, i) =>
     Math.round((maxVal / gridLines) * i)
   );
@@ -56,32 +92,44 @@ export default function BarChart({
         style={{ fontFamily: "inherit" }}
       >
         {/* Grid lines */}
-        {gridValues.map((v, i) => {
-          const y = padding.top + chartH - (v / maxVal) * chartH;
-          return (
-            <g key={`grid-${i}`}>
-              <line
-                x1={padding.left}
-                y1={y}
-                x2={padding.left + chartW}
-                y2={y}
-                stroke="var(--color-border)"
-                strokeWidth="1"
-                strokeDasharray="4 4"
-                opacity={0.5}
-              />
-              <text
-                x={padding.left - 8}
-                y={y + 4}
-                textAnchor="end"
-                fill="var(--color-text-muted)"
-                fontSize="11"
-              >
-                {v}
-              </text>
-            </g>
-          );
-        })}
+        {(() => {
+          // Dedup adjacent same-valued labels so the axis never reads
+          // "0 \u00B7 0 \u00B7 0 \u00B7 0 \u00B7 1 \u00B7 1". We track which
+          // labels have been emitted in logical Y-order (top of chart \u2192
+          // bottom), so the first occurrence wins and lower duplicates are
+          // suppressed. The dashed gridlines still render at every position.
+          const seen = new Set<number>();
+          return gridValues.map((v, i) => {
+            const y = padding.top + chartH - (v / maxVal) * chartH;
+            const isDup = seen.has(v);
+            seen.add(v);
+            return (
+              <g key={`grid-${i}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + chartW}
+                  y2={y}
+                  stroke="var(--color-border)"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                  opacity={0.5}
+                />
+                {!isDup && (
+                  <text
+                    x={padding.left - 8}
+                    y={y + 4}
+                    textAnchor="end"
+                    fill="var(--color-text-muted)"
+                    fontSize="11"
+                  >
+                    {v}
+                  </text>
+                )}
+              </g>
+            );
+          });
+        })()}
 
         {/* Bars */}
         {data.map((value, i) => {
@@ -90,6 +138,27 @@ export default function BarChart({
           const y = padding.top + chartH - barH;
           const isHovered = hoverIndex === i;
           const isDimmed = hoverIndex !== null && hoverIndex !== i;
+
+          // Tick-stride logic for x-axis labels. Only render a label if this
+          // bar is on the stride, OR it's the last tick (so the right
+          // boundary is always visible), OR the user is hovering this bar
+          // (which "summons" the otherwise-culled label).
+          const isStrideTick = i % labelStride === 0;
+          const isLastTick = i === data.length - 1;
+          // If a stride tick sits within ~60% of a stride of the final tick,
+          // drop it — the final tick is always shown, and the two would
+          // visually crowd each other (e.g. when stride=8, ticks at 80
+          // and 88 with last at 89 are too close to bother rendering both).
+          const collapsesWithLast =
+            !isLastTick &&
+            data.length - 1 - i < Math.ceil(labelStride * 0.6);
+          const showXLabel =
+            ((isStrideTick && !collapsesWithLast) || isLastTick) || isHovered;
+          // Value-on-top is gated by bar width to prevent a wall of "0h"
+          // labels in dense views; we also suppress literal "0" labels for
+          // even cleaner rendering when the bar is empty.
+          const showTopValue =
+            (showValuesOnTop || isHovered) && value > 0;
 
           return (
             <g
@@ -124,31 +193,39 @@ export default function BarChart({
               >
                 {tooltip && <title>{labels[i]}: {formatValue(value)}</title>}
               </rect>
-              {/* Label */}
-              <text
-                x={x + barW / 2}
-                y={padding.top + chartH + 18}
-                textAnchor="middle"
-                fill={isHovered ? "var(--color-text-primary)" : "var(--color-text-muted)"}
-                fontSize={isHovered ? "11" : "10"}
-                fontWeight={isHovered ? "600" : "400"}
-                style={{ transition: "all 150ms" }}
-              >
-                {labels[i]}
-              </text>
-              {/* Value on top */}
-              <text
-                x={x + barW / 2}
-                y={y - 6}
-                textAnchor="middle"
-                fill={isHovered ? "var(--color-text-primary)" : "var(--color-text-secondary)"}
-                fontSize={isHovered ? "11" : "10"}
-                fontWeight={isHovered ? "700" : "600"}
-                opacity={isDimmed ? 0.4 : 1}
-                style={{ transition: "all 150ms" }}
-              >
-                {formatValue(value)}
-              </text>
+              {/* X-axis label only on stride ticks (and the last tick) so
+                  the date axis stays legible on 30d/90d/all-time views. */}
+              {showXLabel && (
+                <text
+                  x={x + barW / 2}
+                  y={padding.top + chartH + 18}
+                  textAnchor="middle"
+                  fill={isHovered ? "var(--color-text-primary)" : "var(--color-text-muted)"}
+                  fontSize={isHovered ? "11" : "10"}
+                  fontWeight={isHovered ? "600" : "400"}
+                  style={{ transition: "all 150ms" }}
+                >
+                  {labels[i]}
+                </text>
+              )}
+              {/* Value-on-top label only when bars are wide enough to hold
+                  readable text and the value is non-zero. The hover tooltip
+                  remains the source-of-truth for exact values on dense
+                  charts. */}
+              {showTopValue && (
+                <text
+                  x={x + barW / 2}
+                  y={y - 6}
+                  textAnchor="middle"
+                  fill={isHovered ? "var(--color-text-primary)" : "var(--color-text-secondary)"}
+                  fontSize={isHovered ? "11" : "10"}
+                  fontWeight={isHovered ? "700" : "600"}
+                  opacity={isDimmed ? 0.4 : 1}
+                  style={{ transition: "all 150ms" }}
+                >
+                  {formatValue(value)}
+                </text>
+              )}
             </g>
           );
         })}

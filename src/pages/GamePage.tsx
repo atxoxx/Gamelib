@@ -3138,7 +3138,7 @@ export function GameActivityTab({ game }: { game: Game }) {
                           className={`game-activity-agg-btn ${playtimeAgg === agg ? "active" : ""}`}
                           onClick={() => setPlaytimeAgg(agg)}
                         >
-                          {agg}
+                          {agg.replace(/^AGG_/, "").replace(/^./, (c) => c.toUpperCase())}
                         </button>
                       ))}
                     </div>
