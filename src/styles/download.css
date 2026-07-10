@@ -77,12 +77,12 @@
 }
 
 .dl-ownership.owned {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.35);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
 
 .dl-ownership.owned .dl-ownership-icon {
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .dl-ownership.checking {
@@ -134,7 +134,7 @@
 
 .dl-result-row.selected {
   border-color: var(--color-accent);
-  background: rgba(108, 92, 231, 0.08);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   box-shadow: 0 0 0 1px var(--color-accent);
 }
 
@@ -178,8 +178,8 @@
 }
 
 .dl-result-score.high {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
 }
 
 .dl-result-actions {
@@ -400,13 +400,13 @@
 }
 
 .dl-progress-card.error {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 5%, transparent);
 }
 
 .dl-progress-card.completed {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.05);
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 5%, transparent);
 }
 
 .dl-progress-card-header {
@@ -439,33 +439,33 @@
 }
 
 .dl-progress-card-status--downloading {
-  background: rgba(108, 92, 231, 0.18);
-  color: #8b7cf6;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
 }
 
 .dl-progress-card-status--fetchingMetadata {
-  background: rgba(99, 102, 241, 0.15);
-  color: #818cf8;
+  background: color-mix(in srgb, var(--color-info) 15%, transparent);
+  color: var(--color-info);
 }
 
 .dl-progress-card-status--queued {
-  background: rgba(148, 163, 184, 0.15);
-  color: #94a3b8;
+  background: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+  color: var(--color-text-muted);
 }
 
 .dl-progress-card-status--paused {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
 }
 
 .dl-progress-card-status--completed {
-  background: rgba(16, 185, 129, 0.18);
-  color: #10b981;
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
 }
 
 .dl-progress-card-status--error {
-  background: rgba(239, 68, 68, 0.18);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
 }
 
 .dl-progress-card-bar {
@@ -645,8 +645,8 @@
 }
 
 .dl-progress-card-btn.danger:hover {
-  border-color: #ef4444;
-  color: #ef4444;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 /* Mirrors the row's danger-fill style for use inside the top-nav
@@ -671,9 +671,9 @@
 
 .dl-progress-card-error {
   font-size: 10px;
-  color: #ef4444;
+  color: var(--color-danger);
   padding: 4px 6px;
-  background: rgba(239, 68, 68, 0.08);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
   border-radius: 3px;
   word-break: break-word;
 }
@@ -751,12 +751,12 @@
   padding: 6px 10px;
   margin-right: 4px;
   border-radius: var(--radius-md);
-  background: rgba(108, 92, 231, 0.12);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--color-accent);
   font-size: 11px;
   font-weight: 600;
   text-decoration: none;
-  border: 1px solid rgba(108, 92, 231, 0.25);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   transition: all var(--transition-fast);
   cursor: default;
 }
@@ -1477,13 +1477,13 @@
 }
 
 .dl-row.error {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.04);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 4%, transparent);
 }
 
 .dl-row.completed {
-  border-color: rgba(16, 185, 129, 0.45);
-  background: rgba(16, 185, 129, 0.04);
+  border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+  background: color-mix(in srgb, var(--color-success) 4%, transparent);
 }
 
 .dl-row.paused {
@@ -1508,33 +1508,33 @@
 }
 
 .dl-row-status--downloading {
-  background: rgba(108, 92, 231, 0.18);
-  color: #8b7cf6;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
 }
 
 .dl-row-status--fetchingMetadata {
-  background: rgba(99, 102, 241, 0.15);
-  color: #818cf8;
+  background: color-mix(in srgb, var(--color-info) 15%, transparent);
+  color: var(--color-info);
 }
 
 .dl-row-status--queued {
-  background: rgba(148, 163, 184, 0.15);
-  color: #94a3b8;
+  background: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+  color: var(--color-text-muted);
 }
 
 .dl-row-status--paused {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
 }
 
 .dl-row-status--completed {
-  background: rgba(16, 185, 129, 0.18);
-  color: #10b981;
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
 }
 
 .dl-row-status--error {
-  background: rgba(239, 68, 68, 0.18);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
 }
 
 .dl-row-main {

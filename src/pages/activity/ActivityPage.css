@@ -287,11 +287,11 @@
 }
 
 .activity-game-sidebar__item--selected {
-  background: rgba(16, 185, 129, 0.1); /* light brand teal overlay */
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent); /* theme accent overlay */
 }
 
 .activity-game-sidebar__item--selected:hover {
-  background: rgba(16, 185, 129, 0.15);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 .activity-game-sidebar__item--selected .activity-game-sidebar__name {
@@ -312,7 +312,7 @@
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: rgba(16, 185, 129, 0.12);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--color-brand-teal);
   flex-shrink: 0;
 }
@@ -439,8 +439,8 @@
 }
 
 .activity-stats-bar__pill--highlight {
-  border-color: rgba(16, 185, 129, 0.4);
-  background-color: rgba(16, 185, 129, 0.02);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  background-color: color-mix(in srgb, var(--color-accent) 2%, transparent);
 }
 
 .activity-stats-bar__pill-icon {
@@ -456,7 +456,7 @@
 }
 
 .activity-stats-bar__pill--highlight .activity-stats-bar__pill-icon {
-  background-color: rgba(16, 185, 129, 0.15);
+  background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--color-brand-teal);
 }
 
@@ -633,19 +633,19 @@
 }
 
 .weekly-heatmap__cell--low {
-  background-color: rgba(16, 185, 129, 0.25);
+  background-color: color-mix(in srgb, var(--color-accent) 25%, var(--color-bg-tertiary));
 }
 
 .weekly-heatmap__cell--medium {
-  background-color: rgba(16, 185, 129, 0.5);
+  background-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-bg-tertiary));
 }
 
 .weekly-heatmap__cell--high {
-  background-color: rgba(16, 185, 129, 0.75);
+  background-color: color-mix(in srgb, var(--color-accent) 75%, var(--color-bg-tertiary));
 }
 
 .weekly-heatmap__cell--peak {
-  background-color: var(--color-brand-teal);
+  background-color: var(--color-accent);
 }
 
 .weekly-heatmap__cell--padded {
@@ -874,7 +874,7 @@
 
 .activity-session-item__delete-btn:hover {
   color: var(--color-danger);
-  background: rgba(239, 68, 68, 0.1);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 .activity-session-item__collapsible {
@@ -1183,18 +1183,18 @@
 
 /* ── Gantt Floating Tooltip ── */
 .activity-gantt__tooltip {
-  background: #0d0d0d;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
   border-radius: 6px;
   padding: 8px 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .activity-gantt__tooltip-game {
-  color: #fff;
+  color: var(--color-text-primary);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1596,12 +1596,12 @@
 
 /* ── SVG Chart Tooltip Card ── */
 .chart-tooltip-card {
-  background: #0d0d0d;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-light);
   border-radius: 6px;
   padding: 8px 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   font-family: inherit;
   min-width: 120px;
 }
@@ -1640,7 +1640,7 @@
 
 .chart-tooltip-val {
   font-weight: 700;
-  color: #fff;
+  color: var(--color-text-primary);
 }
 
 /* ==========================================================================

@@ -257,7 +257,7 @@ export default function LineChart({
                 cy={pt.y}
                 r="5"
                 fill={series[si].color}
-                stroke="#fff"
+                stroke="var(--color-bg-primary)"
                 strokeWidth="2"
                 style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.3))" }}
               />

@@ -15,16 +15,16 @@ interface DonutChartProps {
 }
 
 const DONUT_COLORS = [
-  "#6c5ce7",
-  "#00c853",
-  "#ffab00",
-  "#ff5252",
-  "#448aff",
-  "#e040fb",
-  "#00bfa5",
-  "#ff6d00",
-  "#2979ff",
-  "#aa00ff",
+  "var(--color-accent)",
+  "var(--color-info)",
+  "var(--color-success)",
+  "var(--color-warning)",
+  "var(--color-danger)",
+  "var(--color-stale, var(--color-text-muted))",
+  "color-mix(in srgb, var(--color-accent) 60%, var(--color-info))",
+  "color-mix(in srgb, var(--color-info) 60%, var(--color-success))",
+  "color-mix(in srgb, var(--color-success) 60%, var(--color-warning))",
+  "color-mix(in srgb, var(--color-warning) 60%, var(--color-danger))",
 ];
 
 export default function DonutChart({
