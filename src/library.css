@@ -293,11 +293,17 @@
    Library Hero — greeting + stats + quick actions
    ════════════════════════════════════════════════════════════════════ */
 
+/* Compact hero — the original spec called for a tall, magazine-style
+   greeting + 4 stat tiles taking up nearly half the viewport. We've
+   tightened every dimension (~35% shorter vertical footprint) while
+   keeping the same hierarchy: greeting -> subtitle -> CTAs -> stats.
+   The slice-by-slice rationale lives inline on each rule so future
+   tweaks are local and obvious. */
 .library-hero {
   position: relative;
-  margin: 0 0 var(--space-xl) 0;
-  padding: var(--space-xl) var(--space-xl) var(--space-lg);
-  border-radius: var(--radius-xl);
+  margin: 0 0 var(--space-md) 0;
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-lg);
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)),
@@ -307,13 +313,13 @@
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   isolation: isolate;
-  animation: libraryHeroIn 480ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: libraryHeroIn 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes libraryHeroIn {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
@@ -321,12 +327,12 @@
   }
 }
 
-/* Subtle ambient glow at the top of the hero. Pure visual sugar —
-   gives the page a focal point without competing with the cards. */
+/* Subtle ambient glow at the top of the hero — height dropped from
+   220px to 130px so the gradient doesn't drown the slimmer hero. */
 .library-hero-glow {
   position: absolute;
-  inset: -40% -10% auto -10%;
-  height: 220px;
+  inset: -50% -10% auto -10%;
+  height: 130px;
   background: radial-gradient(
     ellipse at 50% 0%,
     color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
@@ -334,52 +340,55 @@
   );
   pointer-events: none;
   z-index: -1;
-  opacity: 0.85;
+  opacity: 0.75;
 }
 
 .library-hero-content {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-xl);
-  margin-bottom: var(--space-xl);
+  gap: var(--space-lg);
+  margin-bottom: var(--space-md);
   flex-wrap: wrap;
 }
 
 .library-hero-text {
   flex: 1;
-  min-width: 280px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .library-hero-greeting {
   display: flex;
   align-items: baseline;
   gap: 2px;
-  font-size: clamp(28px, 4vw, 40px);
+  font-size: clamp(22px, 2.8vw, 28px);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
-  margin: 0 0 var(--space-xs) 0;
-  letter-spacing: -0.5px;
-  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.3px;
+  line-height: 1.15;
 }
 
 .library-hero-greeting-dot {
   color: var(--color-accent);
-  text-shadow: 0 0 16px var(--color-accent-glow);
+  text-shadow: 0 0 14px var(--color-accent-glow);
 }
 
 .library-hero-subtitle {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin: 0;
-  line-height: 1.5;
-  max-width: 640px;
+  line-height: 1.4;
+  max-width: 520px;
 }
 
 .library-hero-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -387,8 +396,8 @@
 .library-hero-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: 10px var(--space-lg);
+  gap: 6px;
+  padding: 7px var(--space-md);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   font-family: inherit;
@@ -400,8 +409,8 @@
 }
 
 .library-hero-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   flex-shrink: 0;
 }
 
@@ -439,8 +448,13 @@
 
 .library-hero-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-md);
+  /* Tighter minmax (150 -> 180) lets all 4 tiles fit on one row above
+     ~1100px wide, giving the hero a single horizontal "info strip"
+     feeling instead of a 2x2 grid that wraps early on common laptop
+     widths. Combined with the gap shrink below, the bar reads as a
+     unified surface rather than 4 separate cards. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-sm);
 }
 
 /* ── Stat Card ─────────────────────────────────────────────────── */
@@ -448,9 +462,10 @@
 .library-stat-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
-  padding: var(--space-lg);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   background: var(--color-surface-glass);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -489,7 +504,7 @@
 @keyframes statCardIn {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -501,46 +516,75 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
-  margin-bottom: var(--space-xs);
+  flex-shrink: 0;
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
-  box-shadow: 0 0 12px var(--color-accent-glow);
-  flex-shrink: 0;
+  box-shadow: 0 0 10px var(--color-accent-glow);
 }
 
 .library-stat-card-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
 }
 
-.library-stat-card-value {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  line-height: 1.1;
-  letter-spacing: -0.4px;
-  font-variant-numeric: tabular-nums;
-  /* Prevent layout shift on the long value while still allowing
-     wrap for edge cases (e.g. a 7-figure playtime). */
-  word-break: break-word;
+/* Right-aligned column for the label/subtext below the value. Lives
+   directly under the icon in the horizontal card grid; sits to the
+   right of the value because the value gets `flex: 1` and pushes the
+   label group to the trailing edge — gives the row a clear
+   "metric → supporting copy" silhouette. */
+.library-stat-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .library-stat-card-label {
-  font-size: var(--font-size-xs);
+  font-size: 10px;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .library-stat-card-subtext {
-  font-size: var(--font-size-xs);
+  font-size: 10px;
   color: var(--color-text-muted);
-  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* Value size for the compact horizontal layout. Smaller than the
+   prior 2xl (24px) so it fits inside the now-thinner card without
+   line-wrapping on common playtime values like "1234h". Tailored to
+   align visually with the 30px icon — `var(--font-size-xl)` (20px)
+   reads as the right "next to" weight rather than competing with
+   the icon. `flex: 1` so the value takes the remaining horizontal
+   space inside the card and pushes the right-aligned label/subtext
+   column to the trailing edge; `min-width: 0` keeps a long numeric
+   value from stretching the parent flex item past its column. */
+.library-stat-card-value {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.05;
+  letter-spacing: -0.2px;
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+  min-width: 0;
+  /* `overflow: hidden` + `text-overflow: ellipsis` keeps a runaway value
+     (e.g. "1234567h") from blowing out the card width; the wrapped
+     `word-break: break-word` rule is gone now that the card has a
+     fixed single-line silhouette. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Tone variants — swap the icon badge hue without changing layout */
@@ -590,6 +634,10 @@
 .library-rail {
   margin: 0 0 var(--space-xl) 0;
   animation: libraryRailIn 500ms cubic-bezier(0.16, 1, 0.3, 1) 200ms backwards;
+  /* Sole source of truth for the rail icon's square dimension.
+   * `.library-rail-icon` reads it for width/height; `.library-rail-subtitle`
+   * reads it (+ `--space-sm`) for its padding-left so the two stay aligned. */
+  --library-rail-icon-size: 24px;
 }
 
 @keyframes libraryRailIn {
@@ -601,20 +649,60 @@
     opacity: 1;
     transform: translateY(0);
   }
-}
-
+}/* Rail header stacks the title row (icon + title + toggle) above the
+ * subtitle. The old "Scroll" hint badge + header-actions wrapper are
+ * gone — the rail's scrollbar + edge fades already advertise
+ * scrollability. */
 .library-rail-header {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-md);
+  flex-direction: column;
+  gap: 2px;
   margin-bottom: var(--space-md);
   padding: 0 var(--space-xs);
 }
 
-.library-rail-header-text {
-  flex: 1;
-  min-width: 0;
+/* Title row: [icon] [title ...] [toggle]. `flex: 1` on the title
+ * pushes the toggle flush-right; `min-width: 0` lets a long title
+ * shrink-wrap instead of pushing the toggle off-screen. */
+.library-rail-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Section icon badge (24×24 tinted pill). Smaller than the hero
+ * stat-card icons (30px) because the rail icon sits next to a small
+ * title + toggle and shouldn't compete with them. NOTE: no default
+ * tint on the base rule — every variant supplies its own color via
+ * a modifier (--continue / --recent) so adding a new rail forces an
+ * explicit hue choice instead of inheriting the accent default. */
+.library-rail-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--library-rail-icon-size);
+  height: var(--library-rail-icon-size);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.library-rail-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Continue Playing = success (active session). */
+.library-rail-icon--continue {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+/* Recently Added = warning (freshly imported). */
+.library-rail-icon--recent {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
 
 .library-rail-title {
@@ -626,58 +714,17 @@
   color: var(--color-text-primary);
   margin: 0;
   letter-spacing: -0.1px;
-}
-
-.library-rail-title::before {
-  content: "";
-  display: inline-block;
-  width: 4px;
-  height: 18px;
-  background: linear-gradient(180deg, var(--color-accent), var(--color-accent-hover));
-  border-radius: var(--radius-full);
-  box-shadow: 0 0 8px var(--color-accent-glow);
+  flex: 1;
+  min-width: 0;
 }
 
 .library-rail-subtitle {
+  /* `padding-left` matches `--library-rail-icon-size` + gap so the
+   * subtitle text sits under the title text, not under the icon. */
+  padding-left: calc(var(--library-rail-icon-size) + var(--space-sm));
+  margin: 2px 0 0 0;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  margin: 4px 0 0 0;
-  padding-left: calc(4px + var(--space-sm));
-}
-
-.library-rail-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  flex-shrink: 0;
-}
-
-.library-rail-hint svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* ── Rail header actions (hint + toggle) ──────────────────── */
-
-/* New flex wrapper on the right side of `.library-rail-header`.
- * Houses the optional "Scroll" hint badge AND the collapse toggle
- * button so the two align cleanly in a single row. Replaces the
- * previous single-child `.library-rail-hint` placement — both
- * children now share the `flex-shrink: 0` guarantee. */
-.library-rail-header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-shrink: 0;
 }
 
 /* ── Rail collapse toggle button ──────────────────────────── */
@@ -786,32 +833,49 @@
  * whole rail silently disappearing. The dashed border + tertiary
  * background differentiates it from a regular card — a solid border
  * would make it look like a broken card and confuse the user. */
+/* Empty state — column layout with a centered icon + caption so the
+ * surface reads as an intentional "nothing here yet" placeholder
+ * instead of a truncated row that looks like a broken card. */
 .library-rail-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  background: var(--color-bg-tertiary);
+  padding: var(--space-xl) var(--space-md);
+  text-align: center;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 50%, transparent);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
-  /* Generous left/right padding so the message doesn't feel cramped
-   * when the rail is wide. Vertically centred icon via `align-items`
-   * on the flex container above. */
+  color: var(--color-text-secondary);
 }
 
-.library-rail-empty svg {
-  width: 16px;
-  height: 16px;
-  opacity: 0.6;
+/* Circular icon badge above the caption. Visual rhyme with the
+ * populated-rail's `.library-rail-icon` so empty vs. populated
+ * reads as one UI surface in different states. */
+.library-rail-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
-.library-rail-empty span {
-  flex: 1;
-  min-width: 0;
+.library-rail-empty-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.library-rail-empty p {
+  margin: 0;
+  max-width: 400px;
 }
 
 .library-rail-viewport {
@@ -995,15 +1059,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* "Continue Playing" rail — variant on the base rail styles. Swaps the
- * title accent bar for a success-tinted gradient (the "active" signal)
- * and recolors the card meta line so the user can tell the two rails
- * apart at a glance. The base layout / scroll-snap / hover rules are
- * inherited from the un-suffixed selectors above. */
-.library-rail--continue .library-rail-title::before {
-  background: linear-gradient(180deg, var(--color-success), var(--color-info));
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 35%, transparent);
-}
+/* Continue Playing rail — recolors the "Xh ago" meta line so the
+ * user can tell the two rails apart at a glance. (The old bar-accent
+ * override for this variant is gone — that whole CSS path was
+ * removed when the title bar itself was replaced by `.library-rail-icon
+ * .library-rail-icon--continue`.) */
 
 .library-rail--continue .library-rail-card-meta--continue {
   display: inline-flex;

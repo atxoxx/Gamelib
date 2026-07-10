@@ -81,30 +81,28 @@ export default function RecentlyAddedRail({
       aria-label="Recently added games"
     >
       <div className="library-rail-header">
-        <div className="library-rail-header-text">
+        <div className="library-rail-title-row">
+          <div
+            className="library-rail-icon library-rail-icon--recent"
+            aria-hidden
+          >
+            {/* Plus icon — signals "newly added to your library".
+             * Matches the tinted-pill pattern used by the hero stat
+             * cards and the Continue Playing rail icon so the section
+             * hierarchy reads as one system. */}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </div>
           <h3 className="library-rail-title">Recently Added</h3>
-          <p className="library-rail-subtitle">
-            Your {recent.length} newest game{recent.length === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="library-rail-header-actions">
-          {/* Scroll hint is hidden on collapse — it makes no sense to
-           *  advertise scrolling when there's nothing to scroll. */}
-          {!collapsed && (
-            <div className="library-rail-hint" aria-hidden>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              Scroll
-            </div>
-          )}
           <button
             type="button"
             className="library-rail-toggle"
@@ -131,6 +129,13 @@ export default function RecentlyAddedRail({
             </svg>
           </button>
         </div>
+        <p className="library-rail-subtitle">
+          {recent.length === 0
+            ? "Latest additions"
+            : `Latest additions · ${recent.length} newest game${
+                recent.length === 1 ? "" : "s"
+              }`}
+        </p>
       </div>
 
       <div

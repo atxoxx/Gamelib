@@ -90,31 +90,19 @@ export default function ContinuePlayingRail({
       aria-label="Continue playing — recently played games"
     >
       <div className="library-rail-header">
-        <div className="library-rail-header-text">
+        <div className="library-rail-title-row">
+          <div
+            className="library-rail-icon library-rail-icon--continue"
+            aria-hidden
+          >
+            {/* Play triangle — signals "this rail is about active sessions".
+             * Reuses the same tinted-pill pattern as the hero stat-card
+             * icons so the page reads as one cohesive system. */}
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="6 4 20 12 6 20 6 4" />
+            </svg>
+          </div>
           <h3 className="library-rail-title">Continue Playing</h3>
-          <p className="library-rail-subtitle">
-            Your last {windowDays} days of gaming — pick up where you left off
-          </p>
-        </div>
-        <div className="library-rail-header-actions">
-          {/* Scroll hint only makes sense when the rail is both expanded
-           * AND has actual cards. We hide it on collapse AND on empty
-           * state to avoid dangling affordance. */}
-          {!collapsed && recent.length > 0 && (
-            <div className="library-rail-hint" aria-hidden>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              Scroll
-            </div>
-          )}
           <button
             type="button"
             className="library-rail-toggle"
@@ -141,6 +129,9 @@ export default function ContinuePlayingRail({
             </svg>
           </button>
         </div>
+        <p className="library-rail-subtitle">
+          Pick up where you left off
+        </p>
       </div>
 
       <div
@@ -151,25 +142,22 @@ export default function ContinuePlayingRail({
           {recent.length === 0 ? (
             /* Empty state — the rail stays visible so the user knows
              * the feature exists and where to look once they've played
-             * a game. Dashed border + tertiary bg differentiates it
-             * from the regular card track so it doesn't read as a
-             * broken card. */
+             * a game. Centered icon + caption reads as an intentional
+             * "nothing here yet" surface instead of a broken card. */
             <div className="library-rail-empty">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              <span>
+              <div className="library-rail-empty-icon" aria-hidden>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden
+                >
+                  <polygon points="6 4 20 12 6 20 6 4" />
+                </svg>
+              </div>
+              <p>
                 Play a game to start tracking your sessions — finished
                 sessions will show up here.
-              </span>
+              </p>
             </div>
           ) : (
             <>

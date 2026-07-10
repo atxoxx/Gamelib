@@ -21,6 +21,16 @@ interface StatCardProps {
  * backdrop-filter + subtle top border creates the modern "PS5 / Apple"
  * glass rim highlight without competing with the page content.
  *
+ * Layout (horizontal strip): [icon] [value, flex:1] [label / subtext
+ * column, right-aligned]. Reading top-to-bottom isn't possible any
+ * more — the row reads left-to-right instead, with the value as the
+ * visual anchor next to the icon and the label/subtext parked on the
+ * trailing edge. The CSS for `.library-stat-card` enforces the row
+ * direction; the `.library-stat-card-text` wrapper exists because the
+ * label + optional subtext need to share an alignment side WITHOUT
+ * sitting inline with the value (otherwise long values collide with
+ * long labels on narrow viewports).
+ *
  * The `tone` prop swaps the icon badge hue (the default accent color
  * is fine for most stats; success/info/warning let us semantically
  * differentiate cards like "Installed" (success) vs "Recently Added"
@@ -40,9 +50,11 @@ export default function StatCard({
       style={{ animationDelay: `${delayMs}ms` }}
     >
       <div className="library-stat-card-icon">{icon}</div>
-      <div className="library-stat-card-value">{value}</div>
-      <div className="library-stat-card-label">{label}</div>
-      {subtext && <div className="library-stat-card-subtext">{subtext}</div>}
+      <div className="library-stat-card-value" title={String(value)}>{value}</div>
+      <div className="library-stat-card-text">
+        <div className="library-stat-card-label">{label}</div>
+        {subtext && <div className="library-stat-card-subtext">{subtext}</div>}
+      </div>
     </div>
   );
 }
