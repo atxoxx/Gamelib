@@ -15,6 +15,7 @@ import WishlistPage from "./pages/WishlistPage";
 import NewsPage from "./pages/NewsPage";
 import DealsPage from "./pages/deals/DealsPage";
 import DownloadsPage from "./pages/DownloadsPage";
+import AchievementsPage from "./pages/AchievementsPage";
 import { GameProvider } from "./context/GameContext";
 import { ToastProvider } from "./context/ToastContext";
 import { ActivityProvider } from "./context/ActivityContext";
@@ -24,6 +25,7 @@ import { SplashProvider } from "./context/SplashContext";
 import { DownloadProvider } from "./context/DownloadContext";
 import { SourceProvider } from "./context/SourceContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { AchievementProvider } from "./context/AchievementContext";
 import Splashscreen from "./components/Splashscreen";
 import "./App.css";
 import "./store.css";
@@ -52,6 +54,7 @@ function App() {
         <SplashProvider>
           <GameProvider>
             <ActivityProvider>
+              <AchievementProvider>
               <DensityProvider>
                 <WishlistProvider>
                   <SourceProvider>
@@ -65,6 +68,7 @@ function App() {
                           <Route path="news" element={<NewsPage />} />
                           <Route path="deals" element={<DealsPage />} />
                           <Route path="activity" element={<ActivityPage />} />
+                          <Route path="achievements" element={<AchievementsPage />} />
                           <Route path="downloads" element={<DownloadsPage />} />
                           <Route path="storage" element={<StoragePage />} />
                           <Route path="store" element={<StorePage />} />
@@ -78,6 +82,7 @@ function App() {
                   </SourceProvider>
                 </WishlistProvider>
               </DensityProvider>
+              </AchievementProvider>
             </ActivityProvider>
           </GameProvider>
           {/* Splash overlay mounted INSIDE the SplashProvider subtree so

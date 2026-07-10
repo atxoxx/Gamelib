@@ -16,6 +16,7 @@ import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
+import AchievementsTab from "../components/AchievementsTab";
 import { Button } from "../components/ui";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 
@@ -345,7 +346,7 @@ function GameDetail({ game }: { game: Game }) {
   const isRunning = runningGameIds.includes(game.id);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks" | "achievements">("overview");
 
   // Metadata fetching state
   const [fetchingMetadata, setFetchingMetadata] = useState(false);
@@ -1176,7 +1177,7 @@ function GameDetail({ game }: { game: Game }) {
 
       {/* Tabs */}
       <div className="game-tabs">
-        {(["overview", "reviews", "activity", "weblinks"] as const).map((tab) => (
+        {(["overview", "reviews", "activity", "achievements", "weblinks"] as const).map((tab) => (
           <button
             key={tab}
             className={`game-tab ${activeTab === tab ? "active" : ""}`}
@@ -1810,6 +1811,8 @@ function GameDetail({ game }: { game: Game }) {
           visible={!editing && !showImageBrowser && !showIgdbMediaBrowser && !lightboxImage}
         />
       )}
+
+      {activeTab === "achievements" && <AchievementsTab game={game} />}
 
       {/* Edit Modal */}
       {editing && (

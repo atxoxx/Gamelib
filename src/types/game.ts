@@ -137,8 +137,70 @@ export interface SteamAchievement {
   icongray?: string;
 }
 
+// ─── Achievements / Success Story Types ─────────────────────────────────────
+
+/** A single achievement definition + user progress (from Steam API merge). */
+export interface Achievement {
+  apiName: string;
+  displayName: string;
+  description: string;
+  /** Icon URL when unlocked. */
+  icon: string;
+  /** Icon URL when locked. */
+  iconGray: string;
+  achieved: boolean;
+  /** Unix timestamp of unlock (0 if locked). */
+  unlockTime: number;
+  /** Global unlock percentage (0–100). */
+  percent: number;
+}
+
+/** Per-game achievement data returned from the backend. */
+export interface GameAchievementData {
+  steamAppId: number;
+  achievements: Achievement[];
+  total: number;
+  unlocked: number;
+  locked: number;
+  /** Timestamp (ms) when this data was last fetched. Set by the frontend. */
+  lastSynced?: number;
+}
+
+/** Whole-library achievements cache, keyed by game ID. */
+export interface AchievementsCache {
+  games: Record<string, GameAchievementData>;
+}
+
+/** Achievement rarity tier thresholds (based on global unlock %). */
+export type AchievementRarity = "common" | "uncommon" | "rare" | "ultra_rare";
+
+/** Determine the rarity tier from a global unlock percentage. */
+export function getAchievementRarity(percent: number): AchievementRarity {
+  if (percent >= 50) return "common";
+  if (percent >= 20) return "uncommon";
+  if (percent >= 5) return "rare";
+  return "ultra_rare";
+}
+
+/** Human-readable labels for rarity tiers. */
+export const RARITY_LABELS: Record<AchievementRarity, string> = {
+  common: "Common",
+  uncommon: "Uncommon",
+  rare: "Rare",
+  ultra_rare: "Ultra Rare",
+};
+
+/** Color codes for rarity tiers. */
+export const RARITY_COLORS: Record<AchievementRarity, string> = {
+  common: "#9ca3af",     // gray
+  uncommon: "#10b981",   // emerald
+  rare: "#3b82f6",       // blue
+  ultra_rare: "#f59e0b", // gold
+};
+
 /** Supported store sources for metadata enrichment. */
 export type StoreSource = "steam" | "igdb" | "launchbox" | "manual";
+
 
 /** All valid store source values for runtime validation. */
 export const STORE_SOURCES: readonly StoreSource[] = [

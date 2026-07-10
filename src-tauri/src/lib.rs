@@ -22,6 +22,7 @@ mod size;
 mod source_manager;
 mod store_checker;
 mod torrent_engine;
+mod achievements;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
@@ -654,7 +655,10 @@ pub fn run() {
             torrent_engine::torrent_start_selected,
             crackwatch::fetch_crackwatch_status,
             fetch_url,
-            rebuild_watcher_index])
+            rebuild_watcher_index,
+            achievements::fetch_achievements,
+            achievements::save_achievements_cache,
+            achievements::load_achievements_cache])
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).

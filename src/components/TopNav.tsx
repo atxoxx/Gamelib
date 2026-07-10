@@ -212,12 +212,30 @@ function DownloadIcon() {
   );
 }
 
+function AchievementsIcon() {
+  return (
+    <svg
+      className="topnav-tab-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="8" r="6" />
+      <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />
+    </svg>
+  );
+}
+
 const tabs: Tab[] = [
   { path: "/store", label: "Store", icon: <StoreIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
   { path: "/wishlist", label: "Wishlist", icon: <WishlistIcon /> },
   { path: "/deals", label: "Deals", icon: <DealsIcon /> },
   { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
+  { path: "/achievements", label: "Achievements", icon: <AchievementsIcon /> },
   { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
   { path: "/news", label: "News", icon: <NewsIcon /> },
