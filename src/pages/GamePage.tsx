@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -8,7 +9,7 @@ import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify, formatSize } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
@@ -371,6 +372,84 @@ function GameDetail({ game }: { game: Game }) {
   // detect_game_size command (see src-tauri/src/size.rs).
   const [editSizeBytes, setEditSizeBytes] = useState<number | undefined>(game.sizeBytes);
   const [editSizeRootPath, setEditSizeRootPath] = useState<string | undefined>(game.sizeRootPath);
+  const [editPlayStatus, setEditPlayStatus] = useState<PlayStatus>(game.playStatus || "backlog");
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const statusButtonRef = useRef<HTMLButtonElement>(null);
+  // Stores the dropdown menu's viewport coordinates. Recomputed when the
+  // dropdown opens and whenever scroll/resize shifts the button. Using a
+  // portal lets the menu escape the `.game-hero` overflow:hidden chunk.
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  // Recompute menu position from the button's bounding rect. Coalesced
+  // through requestAnimationFrame so a fast scroll does not cause more
+  // than one setState per animation frame, and skipped when the rect is
+  // unchanged so the toolbar doesn't re-render the entire GameDetail
+  // tree for pages that are not actively scrolling.
+  const positionRafRef = useRef<number | null>(null);
+  function recomputeMenuPosition() {
+    const btn = statusButtonRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setMenuPosition((prev) => {
+      const next = { top: rect.bottom + 4, left: rect.left, width: rect.width };
+      if (
+        prev &&
+        prev.top === next.top &&
+        prev.left === next.left &&
+        prev.width === next.width
+      ) {
+        return prev; // no-op: bail out of the re-render
+      }
+      return next;
+    });
+  }
+  function scheduleReposition() {
+    if (positionRafRef.current != null) return;
+    positionRafRef.current = requestAnimationFrame(() => {
+      positionRafRef.current = null;
+      recomputeMenuPosition();
+    });
+  }
+
+  // Esc closes, click-outside dismisses, viewport scroll/resize keeps
+  // the portaled menu pinned under the button. The effect depends only
+  // on `statusDropdownOpen`: the menu stops mousedown propagation (so
+  // the click handler does not read `menuPosition`) and Esc handling
+  // only fires while the menu is open. Narrow deps avoid re-binding the
+  // mousedown listener on every scroll/position tick. Position writes
+  // go through rAF + change-detection (see scheduleReposition /
+  // recomputeMenuPosition) so a fast scroll produces at most one
+  // position write per animation frame, and zero writes when the button
+  // is stationary.
+  useEffect(() => {
+    if (!statusDropdownOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      if (dropdownRef.current && dropdownRef.current.contains(target)) return;
+      setStatusDropdownOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setStatusDropdownOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    // Capture-phase scroll catches scrolls on any ancestor (the
+    // .app-main viewport scroller is the most common). Position
+    // writes are rAF-throttled.
+    window.addEventListener("scroll", scheduleReposition, true);
+    window.addEventListener("resize", scheduleReposition);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", scheduleReposition, true);
+      window.removeEventListener("resize", scheduleReposition);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (positionRafRef.current != null) {
+        cancelAnimationFrame(positionRafRef.current);
+        positionRafRef.current = null;
+      }
+    };
+  }, [statusDropdownOpen]);
   const [detectingSize, setDetectingSize] = useState(false);
   // Respects the user's GB/GiB preference from Settings > Hardware; persisted
   // across relaunches by the hook (localStorage key `gamelib_size_unit_v1`).
@@ -442,7 +521,16 @@ function GameDetail({ game }: { game: Game }) {
   // The per-mount  guards within a single lifecycle.
   // Sentinel  records a previous
   // failed IGDB lookup so we don't re-attempt on every GamePage visit.
-  const enrichmentStartedRef = useRef(false);
+  // Close the play-status dropdown whenever the underlying game id
+  // changes; otherwise the portaled menu would stay anchored to the
+  // previous game's button rect, floating in space pointing at the
+  // new game.
+  useEffect(() => {
+    setStatusDropdownOpen(false);
+    setMenuPosition(null);
+  }, [game.id]);
+
+    const enrichmentStartedRef = useRef(false);
   useEffect(() => {
     if (enrichmentStartedRef.current) return;
     if (game.metadataSource === NO_IGDB_MATCH_SOURCE) return;
@@ -528,6 +616,7 @@ function GameDetail({ game }: { game: Game }) {
     setEditPath(game.path || "");
     setEditLaunchArguments(game.launchArguments || "");
     setEditRunAsAdmin(game.runAsAdmin || false);
+    setEditPlayStatus(game.playStatus || "backlog");
     setEditTab("metadata");
     
     setEditing(true);
@@ -1004,6 +1093,7 @@ function GameDetail({ game }: { game: Game }) {
       path: editPath.trim() || undefined,
       launchArguments: editLaunchArguments.trim() || undefined,
       runAsAdmin: editRunAsAdmin || undefined,
+      playStatus: editPlayStatus,
     });
     setEditing(false);
     showToast("Game updated", "success");
@@ -1156,6 +1246,68 @@ function GameDetail({ game }: { game: Game }) {
               <span>Play time: {game.playTime}</span>
               <span className="game-hero-meta-dot" />
               <span>Added {addedDate}</span>
+              <span className="game-hero-meta-dot" />
+              
+              {/* Play Status interactive dropdown. The menu is portaled
+                  into document.body so it escapes the `overflow: hidden`
+                  clip applied to `.game-hero` for its rounded banner
+                  corners. Position is recomputed from the button's
+                  `getBoundingClientRect()` on open, scroll, and resize. */}
+              <div className="game-status-dropdown-container" ref={dropdownRef}>
+                <button
+                  ref={statusButtonRef}
+                  className="game-status-selector-btn"
+                  onClick={() => {
+                    if (!statusDropdownOpen) {
+                      recomputeMenuPosition();
+                      setStatusDropdownOpen(true);
+                    } else {
+                      setStatusDropdownOpen(false);
+                    }
+                  }}
+                  aria-expanded={statusDropdownOpen}
+                  aria-haspopup="listbox"
+                >
+                  <span className="status-dot" style={{ backgroundColor: PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color, boxShadow: `0 0 8px ${PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color}` }} />
+                  <span>{PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: statusDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform var(--transition-fast)' }}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              </div>
+              {statusDropdownOpen && menuPosition && createPortal(
+                <div
+                  className="game-status-dropdown-menu"
+                  role="listbox"
+                  style={{
+                    position: "fixed",
+                    top: menuPosition.top,
+                    left: menuPosition.left,
+                    minWidth: Math.max(menuPosition.width, 140),
+                    zIndex: 1100,
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {Object.entries(PLAY_STATUS_DETAILS).map(([key, details]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="option"
+                      aria-selected={game.playStatus === key || (!game.playStatus && key === 'backlog')}
+                      className={`game-status-dropdown-item ${game.playStatus === key || (!game.playStatus && key === 'backlog') ? 'active' : ''}`}
+                      onClick={() => {
+                        updateGame(game.id, { playStatus: key as PlayStatus });
+                        setStatusDropdownOpen(false);
+                        showToast(`Play status updated to ${details.label}`, "success");
+                      }}
+                    >
+                      <span className="status-dot" style={{ backgroundColor: details.color }} />
+                      {details.label}
+                    </button>
+                  ))}
+                </div>,
+                document.body
+              )}
             </div>
           </div>
           {!editing && (
@@ -1497,6 +1649,13 @@ function GameDetail({ game }: { game: Game }) {
                   <span className="info-label">Status</span>
                   <span className="info-value">
                     {game.installed ? "Installed" : "Not Installed"}
+                  </span>
+                </div>
+                <div className="info-item">
+                  <span className="info-label">Play Status</span>
+                  <span className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="status-dot" style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color, boxShadow: `0 0 6px ${PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color}` }} />
+                    {PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}
                   </span>
                 </div>
                 <div className="info-item">
@@ -1974,6 +2133,21 @@ function GameDetail({ game }: { game: Game }) {
                     <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-name">Name</label>
                       <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
+                    </div>
+                    <div className="edit-field">
+                      <label className="edit-label" htmlFor="edit-play-status">Play Status</label>
+                      <select
+                        id="edit-play-status"
+                        className="edit-input"
+                        value={editPlayStatus}
+                        onChange={(e) => setEditPlayStatus(e.target.value as PlayStatus)}
+                      >
+                        {Object.entries(PLAY_STATUS_DETAILS).map(([key, details]) => (
+                          <option key={key} value={key}>
+                            {details.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="edit-field">
                       <label className="edit-label" htmlFor="edit-platform">Platform</label>

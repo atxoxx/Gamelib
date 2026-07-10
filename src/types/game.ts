@@ -83,6 +83,7 @@ export interface Game {
   languageSupports?: LanguageSupportInfo[];
   launchArguments?: string;
   runAsAdmin?: boolean;
+  playStatus?: PlayStatus;
 }
 
 export interface TimeToBeat {
@@ -230,6 +231,23 @@ export const STORE_SOURCES: readonly StoreSource[] = [
  * origins (Steam sync, local imports, GOG, etc.).
  */
 export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic";
+
+export type PlayStatus = "backlog" | "playing" | "completed" | "abandoned" | "on_hold";
+
+export const PLAY_STATUS_DETAILS: Record<
+  PlayStatus,
+  {
+    label: string;
+    variant: "default" | "success" | "warning" | "danger" | "info" | "accent";
+    color: string;
+  }
+> = {
+  backlog: { label: "Backlog", variant: "default", color: "#64748b" },
+  playing: { label: "Playing", variant: "success", color: "#10b981" },
+  completed: { label: "Completed", variant: "info", color: "#3b82f6" },
+  on_hold: { label: "On Hold", variant: "warning", color: "#f59e0b" },
+  abandoned: { label: "Abandoned", variant: "danger", color: "#ef4444" },
+};
 
 /** Metadata returned from the backend scraper. */
 export interface GameMetadataResult {

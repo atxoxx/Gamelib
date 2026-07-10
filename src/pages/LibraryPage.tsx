@@ -13,6 +13,7 @@ import LibraryEmptyState from "../components/library/LibraryEmptyState";
 import DensityToggle from "../components/DensityToggle";
 import { Card, Badge, Button } from "../components/ui";
 import type { Game } from "../types/game";
+import { PLAY_STATUS_DETAILS } from "../types/game";
 
 export default function LibraryPage() {
   const navigate = useNavigate();
@@ -35,12 +36,14 @@ export default function LibraryPage() {
     setRatingMin,
     setStatus,
     setSource,
+    setPlayStatus,
     setSort,
     removeGenre,
     removePlatform,
     removeYear,
     removeRating,
     removeStatus,
+    removePlayStatus,
     removeSearch,
     removeSource,
     reset,
@@ -156,6 +159,7 @@ export default function LibraryPage() {
           onRemoveYear={removeYear}
           onRemoveRating={removeRating}
           onRemoveStatus={removeStatus}
+          onRemovePlayStatus={removePlayStatus}
           onRemoveSource={removeSource}
           onResetAll={reset}
         />
@@ -173,6 +177,7 @@ export default function LibraryPage() {
             yearMax={filters.yearMax}
             ratingMin={filters.ratingMin}
             status={filters.status}
+            playStatus={filters.playStatus}
             source={filters.source}
             sort={filters.sort}
             availableGenres={availableGenres}
@@ -183,6 +188,7 @@ export default function LibraryPage() {
             onYearRangeChange={setYearRange}
             onRatingMinChange={setRatingMin}
             onStatusChange={setStatus}
+            onPlayStatusChange={setPlayStatus}
             onSourceChange={setSource}
             onSortChange={setSort}
             onReset={reset}
@@ -459,6 +465,14 @@ function LibraryGameCard({
         <div className="library-card-meta-row">
           <Badge variant="info" size="sm" className={`library-card-platform platform-${platform}`}>
             {game.platform}
+          </Badge>
+          <Badge
+            variant={PLAY_STATUS_DETAILS[game.playStatus || "backlog"].variant}
+            size="sm"
+            dot
+            className={`library-card-play-status status-${game.playStatus || "backlog"}`}
+          >
+            {PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}
           </Badge>
           {(() => {
             const rating = game.igdbRating ?? game.criticRating;

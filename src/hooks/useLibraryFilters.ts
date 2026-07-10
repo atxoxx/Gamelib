@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Game } from "../types/game";
+import type { Game, PlayStatus } from "../types/game";
 import type { LibrarySource } from "../types/game";
 import { LIBRARY_FILTERS_STORAGE_KEY, parsePlayTime } from "../types/game";
 
@@ -48,6 +48,8 @@ export interface LibraryFilters {
   status: LibraryStatus;
   /** Source platform filter (all | steam | local | gog). */
   source: LibrarySource;
+  /** Play gameplay status filter (all | backlog | playing | completed | abandoned | on_hold). */
+  playStatus: PlayStatus | "all";
   /** Sort order for the filtered list. */
   sort: LibrarySort;
 }
@@ -62,6 +64,7 @@ export const EMPTY_LIBRARY_FILTERS: LibraryFilters = {
   ratingMin: null,
   status: "all",
   source: "all",
+  playStatus: "all",
   sort: "alphabetical",
 };
 
@@ -89,6 +92,12 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
   // Status
   if (filters.status === "installed" && !game.installed) return false;
   if (filters.status === "not_installed" && game.installed) return false;
+
+  // Play Status
+  if (filters.playStatus !== "all") {
+    const currentPlayStatus = game.playStatus || "backlog";
+    if (currentPlayStatus !== filters.playStatus) return false;
+  }
 
   // Source filter
   if (filters.source !== "all") {
@@ -148,6 +157,14 @@ function parseStoredFilters(raw: unknown): LibraryFilters {
     ratingMin: typeof obj.ratingMin === "number" && Number.isFinite(obj.ratingMin) ? obj.ratingMin : null,
     status: obj.status === "installed" || obj.status === "not_installed" ? obj.status : "all",
     source: obj.source === "steam" || obj.source === "local" || obj.source === "gog" || obj.source === "epic" ? obj.source : "all",
+    playStatus:
+      obj.playStatus === "backlog" ||
+      obj.playStatus === "playing" ||
+      obj.playStatus === "completed" ||
+      obj.playStatus === "abandoned" ||
+      obj.playStatus === "on_hold"
+        ? (obj.playStatus as PlayStatus)
+        : "all",
     sort: obj.sort === "date_added" || obj.sort === "most_played" || obj.sort === "rating" ? obj.sort : "alphabetical",
   };
 }
@@ -242,7 +259,8 @@ export function useLibraryFilters(games: Game[]) {
       filters.yearMax != null ||
       filters.ratingMin != null ||
       filters.status !== "all" ||
-      filters.source !== "all";
+      filters.source !== "all" ||
+      filters.playStatus !== "all";
 
     const narrowed = hasActiveFilters
       ? games.filter((g) => gameMatchesFilters(g, filters))
@@ -281,7 +299,8 @@ export function useLibraryFilters(games: Game[]) {
       filters.yearMax != null ||
       filters.ratingMin != null ||
       filters.status !== "all" ||
-      filters.source !== "all"
+      filters.source !== "all" ||
+      filters.playStatus !== "all"
     );
   }, [filters]);
 
@@ -315,6 +334,10 @@ export function useLibraryFilters(games: Game[]) {
     (s: LibrarySource) => setFilters((f) => ({ ...f, source: s })),
     []
   );
+  const setPlayStatus = useCallback(
+    (ps: PlayStatus | "all") => setFilters((f) => ({ ...f, playStatus: ps })),
+    []
+  );
   const setSort = useCallback(
     (s: LibrarySort) => setFilters((f) => ({ ...f, sort: s })),
     []
@@ -346,6 +369,10 @@ export function useLibraryFilters(games: Game[]) {
     () => setFilters((f) => ({ ...f, status: "all" })),
     []
   );
+  const removePlayStatus = useCallback(
+    () => setFilters((f) => ({ ...f, playStatus: "all" })),
+    []
+  );
   const removeSearch = useCallback(
     () => setFilters((f) => ({ ...f, search: "" })),
     []
@@ -369,12 +396,14 @@ export function useLibraryFilters(games: Game[]) {
     setRatingMin,
     setStatus,
     setSource,
+    setPlayStatus,
     setSort,
     removeGenre,
     removePlatform,
     removeYear,
     removeRating,
     removeStatus,
+    removePlayStatus,
     removeSearch,
     removeSource,
     reset,

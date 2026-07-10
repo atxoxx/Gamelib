@@ -1,6 +1,6 @@
 import type { LibraryStatus, LibrarySort } from "../../hooks/useLibraryFilters";
 import { SORT_LABELS, SORT_OPTIONS } from "../../hooks/useLibraryFilters";
-import type { LibrarySource } from "../../types/game";
+import type { LibrarySource, PlayStatus } from "../../types/game";
 
 /** Status radio options. Declared at module scope so TypeScript infers
  *  the literal `LibraryStatus` type for each `value` (instead of widening
@@ -18,6 +18,15 @@ const SOURCE_OPTIONS: readonly { value: LibrarySource; label: string }[] = [
   { value: "gog", label: "GOG" },
 ];
 
+const PLAY_STATUS_OPTIONS: readonly { value: PlayStatus | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "backlog", label: "Backlog" },
+  { value: "playing", label: "Playing" },
+  { value: "completed", label: "Completed" },
+  { value: "abandoned", label: "Abandoned" },
+  { value: "on_hold", label: "On Hold" },
+];
+
 interface LibraryFilterSidebarProps {
   search: string;
   selectedGenres: string[];
@@ -26,6 +35,7 @@ interface LibraryFilterSidebarProps {
   yearMax: number | null;
   ratingMin: number | null;
   status: LibraryStatus;
+  playStatus: PlayStatus | "all";
   /** Unique genre names present in the library, sorted alphabetically. */
   availableGenres: string[];
   /** Unique platform names present in the library, sorted alphabetically. */
@@ -40,6 +50,7 @@ interface LibraryFilterSidebarProps {
   onYearRangeChange: (min: number | null, max: number | null) => void;
   onRatingMinChange: (r: number | null) => void;
   onStatusChange: (s: LibraryStatus) => void;
+  onPlayStatusChange: (ps: PlayStatus | "all") => void;
   onSourceChange: (s: LibrarySource) => void;
   onSortChange: (s: LibrarySort) => void;
   onReset: () => void;
@@ -62,6 +73,7 @@ export default function LibraryFilterSidebar({
   yearMax,
   ratingMin,
   status,
+  playStatus,
   availableGenres,
   availablePlatforms,
   source,
@@ -72,6 +84,7 @@ export default function LibraryFilterSidebar({
   onYearRangeChange,
   onRatingMinChange,
   onStatusChange,
+  onPlayStatusChange,
   onSourceChange,
   onSortChange,
   onReset,
@@ -116,6 +129,24 @@ export default function LibraryFilterSidebar({
                 value={opt.value}
                 checked={status === opt.value}
                 onChange={() => onStatusChange(opt.value)}
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="library-filter-section">
+        <h4 className="library-filter-heading">Play Status</h4>
+        <div className="library-filter-radio-group">
+          {PLAY_STATUS_OPTIONS.map((opt) => (
+            <label key={opt.value} className="library-filter-radio">
+              <input
+                type="radio"
+                name="library-play-status"
+                value={opt.value}
+                checked={playStatus === opt.value}
+                onChange={() => onPlayStatusChange(opt.value)}
               />
               <span>{opt.label}</span>
             </label>

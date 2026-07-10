@@ -1,5 +1,6 @@
 import type { LibraryFilters, LibraryStatus } from "../../hooks/useLibraryFilters";
 import type { LibrarySource } from "../../types/game";
+import { PLAY_STATUS_DETAILS } from "../../types/game";
 
 interface LibraryFilterChipsProps {
   filters: LibraryFilters;
@@ -10,6 +11,7 @@ interface LibraryFilterChipsProps {
   onRemoveYear: () => void;
   onRemoveRating: () => void;
   onRemoveStatus: () => void;
+  onRemovePlayStatus: () => void;
   onRemoveSource: () => void;
   onResetAll: () => void;
 }
@@ -32,6 +34,7 @@ export default function LibraryFilterChips({
   onRemoveYear,
   onRemoveRating,
   onRemoveStatus,
+  onRemovePlayStatus,
   onRemoveSource,
   onResetAll,
 }: LibraryFilterChipsProps) {
@@ -57,7 +60,8 @@ export default function LibraryFilterChips({
     filters.yearMax != null ||
     filters.ratingMin != null ||
     filters.status !== "all" ||
-    filters.source !== "all";
+    filters.source !== "all" ||
+    filters.playStatus !== "all";
 
   if (!hasAny) return null;
 
@@ -83,6 +87,18 @@ export default function LibraryFilterChips({
         <span className="library-filter-chip">
           {statusLabel[filters.status]}
           <button type="button" onClick={onRemoveStatus} aria-label="Clear status filter">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </span>
+      )}
+
+      {filters.playStatus !== "all" && (
+        <span className="library-filter-chip">
+          {PLAY_STATUS_DETAILS[filters.playStatus].label}
+          <button type="button" onClick={onRemovePlayStatus} aria-label="Clear play status filter">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

@@ -145,6 +145,8 @@ struct GameData {
     /// (which predate this field) deserializing cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_played: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    play_status: Option<String>,
 }
 
 /// Serializable Steam achievement for the GameData struct.
