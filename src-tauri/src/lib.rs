@@ -187,6 +187,89 @@ fn detect_gpus() -> Vec<GpuInfo> {
     gpu_detector::detect_gpus()
 }
 
+/// Windows error code ERROR_ELEVATION_REQUIRED (740). Returned when a
+/// process needs to be launched with administrator privileges.
+#[cfg(windows)]
+const ERROR_ELEVATION_REQUIRED: i32 = 740;
+
+/// Launch an executable with elevated privileges using the Windows
+/// `runas` verb. Returns the PID of the newly created process so the
+/// GameWatcher can track it. Returns `Ok(None)` when the process was
+/// launched but no process handle could be obtained; the watcher will
+/// fall back to passive detection.
+///
+/// This triggers a UAC prompt. If the user cancels, an error is returned.
+#[cfg(windows)]
+fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path) -> Result<Option<u32>, String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
+    use windows::Win32::Foundation::{CloseHandle, HWND, ERROR_CANCELLED};
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Threading::GetProcessId;
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let file_wide: Vec<u16> = OsStr::new(path)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let cwd_wide: Vec<u16> = OsStr::new(cwd)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let runas_verb: Vec<u16> = OsStr::new("runas")
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        hwnd: HWND(ptr::null_mut()),
+        lpVerb: PCWSTR::from_raw(runas_verb.as_ptr()),
+        lpFile: PCWSTR::from_raw(file_wide.as_ptr()),
+        lpParameters: PCWSTR::null(),
+        lpDirectory: PCWSTR::from_raw(cwd_wide.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe {
+        ShellExecuteExW(&mut info).map_err(|e| {
+            // ERROR_CANCELLED (1223) is returned when the user declines the UAC prompt.
+            // ShellExecuteExW surfaces it as an HRESULT, so extract the Win32 code.
+            let win32_code = (e.code().0 as u32) & 0xFFFF;
+            if win32_code == ERROR_CANCELLED.0 {
+                format!("Failed to launch game with elevation: The operation was cancelled by the user")
+            } else {
+                format!("Failed to launch game with elevation: {}", e)
+            }
+        })?;
+    }
+
+    // hProcess may be null if ShellExecuteEx could not obtain a handle.
+    // The game may still have launched, so return None to let the watcher
+    // detect it passively instead of failing outright.
+    if info.hProcess.is_invalid() || info.hProcess.0.is_null() {
+        eprintln!("[launch_elevated] no process handle returned; falling back to passive detection");
+        return Ok(None);
+    }
+
+    let pid = unsafe { GetProcessId(info.hProcess) };
+
+    // Close the handle we received; the process keeps running.
+    unsafe {
+        let _ = CloseHandle(info.hProcess);
+    }
+
+    if pid == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(pid))
+}
+
 /// Launch a game executable with unified process tracking.
 ///
 /// Replaces the old split between `launch_game` (local, child.wait()),
@@ -202,6 +285,10 @@ fn detect_gpus() -> Vec<GpuInfo> {
 /// activates when a matching process appears.
 ///
 /// **Local games**: spawns the exe directly, registers with the watcher.
+///
+/// **Elevation**: On Windows, if the executable requires administrator
+/// privileges (ERROR_ELEVATION_REQUIRED), the launch is retried with a
+/// UAC elevation prompt.
 ///
 /// The watcher's background poll loop handles all session lifecycle:
 /// process detection → metrics collection → exit detection → game-exited event.
@@ -224,7 +311,7 @@ fn launch_game(
         w.set_gpu(gpu_id.clone(), gpu_name.clone());
     }
 
-    let initial_pid: u32;
+    let mut initial_pid: u32 = 0;
     let exe_path: Option<String>;
 
     // ── Determine launch strategy ──────────────────────────────────────
@@ -245,12 +332,35 @@ fn launch_game(
             return Err(format!("Game executable not found: {}", game_path));
         }
         let cwd = path.parent().unwrap_or_else(|| Path::new("."));
+
+        // Try a normal spawn first. On Windows, if the executable requires
+        // elevation, retry with a UAC prompt so the user isn't blocked.
         let child = std::process::Command::new(path)
             .current_dir(cwd)
-            .spawn()
-            .map_err(|e| format!("Failed to launch game: {}", e))?;
+            .spawn();
 
-        initial_pid = child.id();
+        let child = match child {
+            Ok(child) => Some(child),
+            Err(e) => {
+                #[cfg(windows)]
+                {
+                    if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) {
+                        initial_pid = launch_elevated(path, cwd)?.unwrap_or(0);
+                        None
+                    } else {
+                        return Err(format!("Failed to launch game: {}", e));
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    return Err(format!("Failed to launch game: {}", e));
+                }
+            }
+        };
+
+        if let Some(child) = child.as_ref() {
+            initial_pid = child.id();
+        }
         exe_path = Some(game_path.clone());
         // std::process::Child does not kill on drop, so we can safely
         // discard the handle — the watcher's WMI poll will track the

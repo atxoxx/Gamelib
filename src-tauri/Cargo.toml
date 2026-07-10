@@ -34,7 +34,10 @@ urlencoding = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
 wmi = "0.14"
-windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation"] }
+# Win32_UI_Shell/WindowsAndMessaging are used for UAC elevation when a game
+# executable requires administrator privileges. Win32_System_Registry is a
+# transitive feature required by Win32_UI_Shell in windows crate 0.58.
+windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry"] }
 # Torrent engine. Pure-Rust, no C++/Boost/MSVC build step on Windows.
 # Pinned to a major version (`8`) — librqbit's API moves fast and we
 # want `cargo update` to refuse silent breaking changes.

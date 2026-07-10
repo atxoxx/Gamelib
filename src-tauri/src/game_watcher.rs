@@ -64,8 +64,16 @@ struct ActiveSession {
     metrics_rx: Option<std::sync::mpsc::Receiver<Option<metrics_collector::SessionMetrics>>>,
     launched_by_app: bool,
     matched_exe: String,
-    pending_install_dir: Option<PathBuf>,
+    /// Install directory used to re-attach the session when the initial
+    /// process exits but a launcher has spawned the real game process, or
+    /// when the launch provided no PID (UAC elevation, Steam protocol).
+    install_dir: Option<PathBuf>,
 }
+
+/// How long a pending session (last_pid == 0) may exist before it is
+/// considered failed and ended. Steam updates / slow UAC prompts can
+/// take a while, so 10 minutes is generous without being infinite.
+const PENDING_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Serializable info about a candidate exe found during resolution.
 #[derive(Debug, Clone, Serialize)]
@@ -153,49 +161,90 @@ impl GameWatcher {
                 metrics_rx: Some(metrics_rx),
                 launched_by_app: true,
                 matched_exe: exe_path.unwrap_or("").to_string(),
-                pending_install_dir: if initial_pid == 0 { install_dir } else { None },
+                install_dir,
             },
         );
     }
 
-    /// Check if a pending session (Steam protocol launch) has spawned a
-    /// process yet. Returns the matching ProcessInfo if found.
-    fn check_pending_session(&self, session: &ActiveSession, processes: &[ProcessInfo]) -> Option<ProcessInfo> {
-        let pending_dir = session.pending_install_dir.as_ref()?;
-        let dir_lower = pending_dir.to_string_lossy().to_lowercase();
-        for proc in processes {
-            if proc.exe_path.to_lowercase().starts_with(&dir_lower) {
-                return Some(proc.clone());
-            }
-        }
-        None
-    }
-
-    /// Run one poll cycle. Returns game_ids that started and ended.
+    /// Run one poll cycle. Resolves pending sessions, re-attaches sessions
+    /// whose tracked process died to a still-running process in the install
+    /// directory, and detects new passively-launched games.
     pub fn poll(&mut self, app_handle: &AppHandle) {
         let processes = query_running_processes();
         if processes.is_empty() {
             return;
         }
 
-        // ── Collect which sessions need to end ────────────────────────
+        // ── Resolve pending sessions and re-attach dead sessions ───────
+        // Pending sessions (last_pid == 0) happen when a launch provides
+        // no PID: UAC elevation without a process handle, or Steam
+        // protocol launches. If the tracked PID dies (launcher exits
+        // after spawning the real game), we look for any still-running
+        // process inside the game's install directory and continue the
+        // same session.
         let running_pids: std::collections::HashSet<u32> =
             processes.iter().map(|p| p.pid).collect();
 
         let mut ended_ids: Vec<String> = Vec::new();
-        for (gid, session) in &self.active_sessions {
-            if !running_pids.contains(&session.last_pid) {
-                let still_running = if let Some(ref install_dir) = self.install_dir_for_game(gid) {
-                    let dir_lower = install_dir.to_string_lossy().to_lowercase();
-                    processes.iter().any(|p| {
-                        p.exe_path.to_lowercase().starts_with(&dir_lower)
-                    })
-                } else {
-                    false
-                };
+        let mut transitions: Vec<(String, ProcessInfo)> = Vec::new();
 
-                if !still_running {
+        for (gid, session) in &self.active_sessions {
+            let is_pending = session.last_pid == 0;
+            let is_dead = !is_pending && !running_pids.contains(&session.last_pid);
+
+            if is_pending || is_dead {
+                if let Some(ref install_dir) = session.install_dir {
+                    if let Some(proc) = find_best_process_in_dir(&processes, install_dir) {
+                        transitions.push((gid.clone(), proc));
+                        continue;
+                    }
+                }
+
+                if is_dead {
                     ended_ids.push(gid.clone());
+                } else if is_pending && session.started_at.elapsed() > PENDING_SESSION_TIMEOUT {
+                    ended_ids.push(gid.clone());
+                }
+            }
+        }
+
+        // Apply transitions before ending sessions so a session that
+        // just found a new process is not also finished.
+        for (gid, proc) in transitions {
+            if let Some(session) = self.active_sessions.get_mut(&gid) {
+                let was_pending = session.last_pid == 0;
+
+                // Stop metrics collection bound to the old (or dummy)
+                // PID. A new collector will be started for the real one.
+                let _ = session.stop_tx.send(());
+
+                session.last_pid = proc.pid;
+                session.matched_exe = proc.exe_path.clone();
+
+                eprintln!(
+                    "[game_watcher] {} transitioned to PID {} ({})",
+                    session.game_name, proc.pid, proc.exe_path
+                );
+
+                let (tx, rx) = metrics_collector::start_metrics_collection(
+                    5,
+                    proc.pid,
+                    self.gpu_id.clone(),
+                    self.gpu_name.clone(),
+                );
+                session.stop_tx = tx;
+                session.metrics_rx = Some(rx);
+
+                // Notify the frontend the first time a process is found.
+                if was_pending {
+                    let _ = app_handle.emit(
+                        "game-started",
+                        GameStartedPayload {
+                            game_id: session.game_id.clone(),
+                            game_name: session.game_name.clone(),
+                            detected_exe: Some(proc.exe_path),
+                        },
+                    );
                 }
             }
         }
@@ -249,17 +298,6 @@ impl GameWatcher {
         }
     }
 
-    fn install_dir_for_game(&self, game_id: &str) -> Option<PathBuf> {
-        for games in self.process_index.values() {
-            for g in games {
-                if g.game_id == game_id {
-                    return g.install_dir.clone();
-                }
-            }
-        }
-        None
-    }
-
     fn start_passive_session(
         &mut self,
         app_handle: &AppHandle,
@@ -285,7 +323,7 @@ impl GameWatcher {
                 metrics_rx: Some(metrics_rx),
                 launched_by_app: false,
                 matched_exe: proc.exe_path.clone(),
-                pending_install_dir: None,
+                install_dir: game.install_dir.clone(),
             },
         );
 
@@ -371,6 +409,9 @@ pub struct GameStartedPayload {
 struct ProcessInfo {
     pid: u32,
     exe_path: String,
+    /// Working set size in bytes; used to pick the dominant process
+    /// when multiple candidates live inside the same install directory.
+    working_set_size: u64,
 }
 
 /// Query Win32_Process via WMI for all running processes.
@@ -395,9 +436,10 @@ fn query_running_processes() -> Vec<ProcessInfo> {
     struct ProcRow {
         process_id: Option<u32>,
         executable_path: Option<String>,
+        working_set_size: Option<u64>,
     }
 
-    let query = "SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE ExecutablePath IS NOT NULL";
+    let query = "SELECT ProcessId, ExecutablePath, WorkingSetSize FROM Win32_Process WHERE ExecutablePath IS NOT NULL";
     let rows: Vec<ProcRow> = match wmi_con.raw_query::<ProcRow>(query) {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -408,6 +450,7 @@ fn query_running_processes() -> Vec<ProcessInfo> {
             Some(ProcessInfo {
                 pid: r.process_id?,
                 exe_path: r.executable_path?,
+                working_set_size: r.working_set_size.unwrap_or(0),
             })
         })
         .collect()
@@ -416,6 +459,64 @@ fn query_running_processes() -> Vec<ProcessInfo> {
 #[cfg(not(windows))]
 fn query_running_processes() -> Vec<ProcessInfo> {
     Vec::new()
+}
+
+/// Find the best running process inside an install directory. Prefers
+/// executables whose stem does not contain known non-game keywords
+/// (launchers, crash handlers, etc.) and, when multiple candidates
+/// remain, picks the one with the largest working set.
+fn find_best_process_in_dir(processes: &[ProcessInfo], install_dir: &Path) -> Option<ProcessInfo> {
+    let dir_lower = install_dir
+        .to_string_lossy()
+        .to_lowercase()
+        .trim_end_matches('\\')
+        .trim_end_matches('/')
+        .to_string();
+
+    if dir_lower.is_empty() {
+        return None;
+    }
+
+    let mut candidates: Vec<ProcessInfo> = processes
+        .iter()
+        .filter(|p| {
+            let path_lower = p.exe_path.to_lowercase();
+            if !path_lower.starts_with(&dir_lower) {
+                return false;
+            }
+            // Make sure the match is actually inside the directory, not a
+            // sibling path that happens to share the prefix (e.g. "FooBar"
+            // when looking for "Foo").
+            let remainder = &path_lower[dir_lower.len()..];
+            remainder.starts_with('\\') || remainder.starts_with('/') || remainder.is_empty()
+        })
+        .cloned()
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    // Prefer executables that are not launchers/crash handlers/etc.
+    let skip_filtered: Vec<ProcessInfo> = candidates
+        .iter()
+        .filter(|p| {
+            if let Some(stem) = Path::new(&p.exe_path).file_stem().and_then(|s| s.to_str()) {
+                let lower = stem.to_lowercase();
+                !SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw))
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    if !skip_filtered.is_empty() {
+        candidates = skip_filtered;
+    }
+
+    candidates.sort_by(|a, b| b.working_set_size.cmp(&a.working_set_size));
+    candidates.into_iter().next()
 }
 
 // ─── Background Poll Thread ───────────────────────────────────────────────────
