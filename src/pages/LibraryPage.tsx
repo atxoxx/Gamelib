@@ -6,6 +6,10 @@ import { useToast } from "../context/ToastContext";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import LibraryFilterChips from "../components/library/LibraryFilterChips";
 import LibraryFilterSidebar from "../components/library/LibraryFilterSidebar";
+import LibraryHero from "../components/library/LibraryHero";
+import RecentlyAddedRail from "../components/library/RecentlyAddedRail";
+import ContinuePlayingRail from "../components/library/ContinuePlayingRail";
+import LibraryEmptyState from "../components/library/LibraryEmptyState";
 import DensityToggle from "../components/DensityToggle";
 import { Card, Badge, Button } from "../components/ui";
 import type { Game } from "../types/game";
@@ -60,23 +64,11 @@ export default function LibraryPage() {
     };
   }, [contextMenu]);
 
-  // Truly empty: no games imported at all. Show the standard onboarding
-  // empty state without a filter sidebar (filters would be useless).
-  if (games.length === 0) {
-    return (
-      <div className="main-empty">
-        <svg className="main-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-          <line x1="8" y1="21" x2="16" y2="21" />
-          <line x1="12" y1="17" x2="12" y2="21" />
-        </svg>
-        <h2 className="main-empty-title">Your Game Library</h2>
-        <p className="main-empty-subtitle">
-          Import games using the + button in the sidebar to start building your collection.
-        </p>
-      </div>
-    );
-  }
+  // Truly empty: no games imported at all. Show the hero above and a
+  // rich 3-card empty state below. The hero still renders (with the
+  // "0 games" stats) because greeting + CTA buttons are still useful
+  // onboarding entry points.
+  const isLibraryEmpty = games.length === 0;
 
   function handleCardClick(game: Game) {
     setSelectedGameId(game.id);
@@ -112,93 +104,128 @@ export default function LibraryPage() {
 
   return (
     <div className="library-grid">
+      <LibraryHero games={games} />
+
+      {/* Recently Added rail: skipped entirely when the library is empty
+          (the rail would be blank) or when there are fewer than 4 games
+          (the rail duplicates the main grid). */}
+      {!isLibraryEmpty && games.length >= 4 && (
+        <RecentlyAddedRail
+          games={games}
+          onCardClick={handleCardClick}
+        />
+      )}
+
+      {/* Continue Playing rail: surfaces games the user has launched
+          in the last 14 days. Sits BELOW Recently Added per the spec.
+          The component self-gates on `recent.length >= 1` so we don't
+          need a length check here. */}
+      {!isLibraryEmpty && (
+        <ContinuePlayingRail
+          games={games}
+          onCardClick={handleCardClick}
+        />
+      )}
+
       <div className="library-header">
         <h2 className="library-heading">
-          Library ({hasFilters ? `${filteredGames.length} of ${games.length}` : games.length})
+          {isLibraryEmpty
+            ? "Your Games"
+            : `Library (${
+                hasFilters ? `${filteredGames.length} of ${games.length}` : games.length
+              })`}
         </h2>
-        <div className="library-density-toolbar" aria-label="Layout controls">
-          <span className="library-density-toolbar-label">Density</span>
-          <DensityToggle density={density} onChange={setDensity} />
-        </div>
+        {!isLibraryEmpty && (
+          <div className="library-density-toolbar" aria-label="Layout controls">
+            <span className="library-density-toolbar-label">Density</span>
+            <DensityToggle density={density} onChange={setDensity} />
+          </div>
+        )}
       </div>
 
-      <LibraryFilterChips
-        filters={filters}
-        resultCount={filteredGames.length}
-        onRemoveSearch={removeSearch}
-        onRemoveGenre={removeGenre}
-        onRemovePlatform={removePlatform}
-        onRemoveYear={removeYear}
-        onRemoveRating={removeRating}
-        onRemoveStatus={removeStatus}
-    onRemoveSource={removeSource}
-        onResetAll={reset}
-      />
-
-      <div className="library-layout">
-        <LibraryFilterSidebar
-          search={filters.search}
-          selectedGenres={filters.genres}
-          selectedPlatforms={filters.platforms}
-          yearMin={filters.yearMin}
-          yearMax={filters.yearMax}
-          ratingMin={filters.ratingMin}
-          status={filters.status}
-          source={filters.source}
-          sort={filters.sort}
-          availableGenres={availableGenres}
-          availablePlatforms={availablePlatforms}
-          onSearchChange={setSearch}
-          onGenresChange={setGenres}
-          onPlatformsChange={setPlatforms}
-          onYearRangeChange={setYearRange}
-          onRatingMinChange={setRatingMin}
-          onStatusChange={setStatus}
-          onSourceChange={setSource}
-          onSortChange={setSort}
-          onReset={reset}
+      {!isLibraryEmpty && (
+        <LibraryFilterChips
+          filters={filters}
+          resultCount={filteredGames.length}
+          onRemoveSearch={removeSearch}
+          onRemoveGenre={removeGenre}
+          onRemovePlatform={removePlatform}
+          onRemoveYear={removeYear}
+          onRemoveRating={removeRating}
+          onRemoveStatus={removeStatus}
+          onRemoveSource={removeSource}
+          onResetAll={reset}
         />
+      )}
 
-        <div className="library-main">
-          {filteredGames.length === 0 ? (
-            // Filters are active but the narrowed set is empty
-            <div className="library-empty-filtered">
-              <svg
-                className="library-empty-filtered-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                <line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-              <p className="library-empty-filtered-title">No games match your filters</p>
-              <p className="library-empty-filtered-subtitle">
-                Try removing a filter or broadening your search.
-              </p>
-              <Button variant="primary" onClick={reset}>
-                Clear all filters
-              </Button>
-            </div>
-          ) : (
-            <div className={`library-cards density-${density}`}>
-              {filteredGames.map((game, index) => (
-                <div key={game.id} className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}>
-                  <LibraryGameCard
-                    game={game}
-                    density={density}
-                    isRunning={runningGameIds.includes(game.id)}
-                    onClick={() => handleCardClick(game)}
-                    onContextMenu={(e) => handleGameContextMenu(e, game)}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+      {isLibraryEmpty ? (
+        <LibraryEmptyState />
+      ) : (
+        <div className="library-layout">
+          <LibraryFilterSidebar
+            search={filters.search}
+            selectedGenres={filters.genres}
+            selectedPlatforms={filters.platforms}
+            yearMin={filters.yearMin}
+            yearMax={filters.yearMax}
+            ratingMin={filters.ratingMin}
+            status={filters.status}
+            source={filters.source}
+            sort={filters.sort}
+            availableGenres={availableGenres}
+            availablePlatforms={availablePlatforms}
+            onSearchChange={setSearch}
+            onGenresChange={setGenres}
+            onPlatformsChange={setPlatforms}
+            onYearRangeChange={setYearRange}
+            onRatingMinChange={setRatingMin}
+            onStatusChange={setStatus}
+            onSourceChange={setSource}
+            onSortChange={setSort}
+            onReset={reset}
+          />
+
+          <div className="library-main">
+            {filteredGames.length === 0 ? (
+              // Filters are active but the narrowed set is empty
+              <div className="library-empty-filtered">
+                <svg
+                  className="library-empty-filtered-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  <line x1="8" y1="11" x2="14" y2="11" />
+                </svg>
+                <p className="library-empty-filtered-title">No games match your filters</p>
+                <p className="library-empty-filtered-subtitle">
+                  Try removing a filter or broadening your search.
+                </p>
+                <Button variant="primary" onClick={reset}>
+                  Clear all filters
+                </Button>
+              </div>
+            ) : (
+              <div className={`library-cards density-${density}`}>
+                {filteredGames.map((game, index) => (
+                  <div key={game.id} className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}>
+                    <LibraryGameCard
+                      game={game}
+                      density={density}
+                      isRunning={runningGameIds.includes(game.id)}
+                      onClick={() => handleCardClick(game)}
+                      onContextMenu={(e) => handleGameContextMenu(e, game)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {contextMenu && (
         <ContextMenu

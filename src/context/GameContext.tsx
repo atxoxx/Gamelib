@@ -49,6 +49,12 @@ function getLastPersistedSession(gameId: string): GameSession | null {
 interface GameExitEvent {
   gameId: string;
   elapsedSeconds: number;
+  /** Unix-millisecond timestamp captured at session-end by the Rust
+   *  `GameWatcher.finish_session` hook. Stamped onto the game as
+   *  `lastPlayed` so the "Continue Playing" rail can surface recently-
+   *  active titles. `0` is treated as "unknown" and skipped (an unset
+   *  system clock shouldn't burn the field with a poisoned value). */
+  finishedAt?: number;
 }
 
 /** Payload for the "game-started" event emitted by the watcher
@@ -183,18 +189,28 @@ export function GameProvider({ children }: { children: ReactNode }) {
   // Listen for game-exited events from the Rust backend
   useEffect(() => {
     const unlisten = listen<GameExitEvent>("game-exited", (event) => {
-      const { gameId, elapsedSeconds } = event.payload;
+      const { gameId, elapsedSeconds, finishedAt } = event.payload;
 
       // Remove from running games list
       setRunningGameIds((prev) => prev.filter((id) => id !== gameId));
 
-      // Update session playtime
+      // Update session playtime + lastPlayed (drives the "Continue
+      // Playing" rail). Only stamp `lastPlayed` when the Rust payload
+      // carries a real timestamp (`finishedAt > 0`) so an unset system
+      // clock on the backend never poisons the field with the unix
+      // epoch. Persistence is automatic — the `useEffect` watching
+      // `games` will fire `save_games` with the new value.
       setGames((prev) =>
-        prev.map((g) =>
-          g.id === gameId
-            ? { ...g, playTime: addSessionTime(g.playTime, elapsedSeconds) }
-            : g
-        )
+        prev.map((g) => {
+          if (g.id !== gameId) return g;
+          const updates: Partial<Game> = {
+            playTime: addSessionTime(g.playTime, elapsedSeconds),
+          };
+          if (finishedAt && finishedAt > 0) {
+            updates.lastPlayed = finishedAt;
+          }
+          return { ...g, ...updates };
+        })
       );
     });
     return () => {

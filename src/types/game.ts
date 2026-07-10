@@ -35,6 +35,19 @@ export interface Game {
   steamPlaytime?: number;
   /** Achievement completion data synced from Steam */
   steamAchievements?: SteamAchievement[];
+  /**
+   * Unix-millisecond timestamp of the most recent session exit for this
+   * game. Stamped by the Rust `GameWatcher.finish_session` hook when a
+   * game process terminates (whether launched through Gamelib or
+   * detected passively). Drives the Library page's "Continue Playing"
+   * rail — games with `lastPlayed` within the last 14 days surface in
+   * that section. Persisted automatically by the existing `save_games`
+   * round-trip; no separate write path needed.
+   *
+   * `undefined` until the first session ends (newly imported games
+   * won't have a value until they're launched and closed).
+   */
+  lastPlayed?: number;
   /** Store source for metadata; drives the GamePage store selector */
   storeSource?: StoreSource;
   /** Fetched metadata fields */

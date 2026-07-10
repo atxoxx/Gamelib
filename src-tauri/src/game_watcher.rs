@@ -308,11 +308,23 @@ impl GameWatcher {
                 .as_mut()
                 .and_then(|rx| rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or(None));
 
+            // Capture the wall-clock time at session-end (Unix ms). The
+            // frontend uses this to stamp `Game.lastPlayed`, which drives
+            // the "Continue Playing" rail on the Library page. We use the
+            // same clock the frontend reads via `Date.now()` (i.e. system
+            // time, not monotonic) so the value survives timezone shifts
+            // and clock corrections without a re-derivation step.
+            let finished_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+
             let _ = app_handle.emit(
                 "game-exited",
                 GameExitPayload {
                     game_id: session.game_id.clone(),
                     elapsed_seconds: elapsed,
+                    finished_at,
                     metrics,
                 },
             );
@@ -333,6 +345,13 @@ pub struct GameExitPayload {
     pub game_id: String,
     #[serde(rename = "elapsedSeconds")]
     pub elapsed_seconds: u64,
+    /// Unix-millisecond timestamp captured at session-end (when the
+    /// process actually exited). The frontend uses this to stamp
+    /// `Game.lastPlayed`, which drives the "Continue Playing" rail on
+    /// the Library page. `0` is treated as "unknown" and skipped
+    /// upstream so an unset system clock doesn't poison the value.
+    #[serde(rename = "finishedAt")]
+    pub finished_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<metrics_collector::SessionMetrics>,
 }

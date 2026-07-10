@@ -133,6 +133,14 @@ struct GameData {
     epic_namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     epic_catalog_item_id: Option<String>,
+    /// Unix-millisecond timestamp of when the user most recently exited a
+    /// session for this game. `None` until the first session ends. Used by
+    /// the Library page's "Continue Playing" rail to surface recently-active
+    /// titles. Persisted via the existing `save_games` round-trip — no
+    /// separate write path needed. `default` keeps older `games.json` files
+    /// (which predate this field) deserializing cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_played: Option<u64>,
 }
 
 /// Serializable Steam achievement for the GameData struct.

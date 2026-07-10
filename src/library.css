@@ -289,6 +289,870 @@
   align-items: flex-start;
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   Library Hero — greeting + stats + quick actions
+   ════════════════════════════════════════════════════════════════════ */
+
+.library-hero {
+  position: relative;
+  margin: 0 0 var(--space-xl) 0;
+  padding: var(--space-xl) var(--space-xl) var(--space-lg);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)),
+    var(--color-surface)
+  );
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  isolation: isolate;
+  animation: libraryHeroIn 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes libraryHeroIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Subtle ambient glow at the top of the hero. Pure visual sugar —
+   gives the page a focal point without competing with the cards. */
+.library-hero-glow {
+  position: absolute;
+  inset: -40% -10% auto -10%;
+  height: 220px;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
+    transparent 65%
+  );
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.85;
+}
+
+.library-hero-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  flex-wrap: wrap;
+}
+
+.library-hero-text {
+  flex: 1;
+  min-width: 280px;
+}
+
+.library-hero-greeting {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-xs) 0;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.library-hero-greeting-dot {
+  color: var(--color-accent);
+  text-shadow: 0 0 16px var(--color-accent-glow);
+}
+
+.library-hero-subtitle {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+  max-width: 640px;
+}
+
+.library-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.library-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px var(--space-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.library-hero-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.library-hero-btn--primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+.library-hero-btn--primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px var(--color-accent-glow);
+}
+
+.library-hero-btn--secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.library-hero-btn--secondary:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+.library-hero-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.library-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-md);
+}
+
+/* ── Stat Card ─────────────────────────────────────────────────── */
+
+.library-stat-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  padding: var(--space-lg);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-top-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  border-radius: var(--radius-md);
+  transition: all var(--transition-normal);
+  opacity: 0;
+  animation: statCardIn 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  overflow: hidden;
+}
+
+.library-stat-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 40%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.library-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+@keyframes statCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.library-stat-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-xs);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent-glow);
+  flex-shrink: 0;
+}
+
+.library-stat-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.library-stat-card-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
+  /* Prevent layout shift on the long value while still allowing
+     wrap for edge cases (e.g. a 7-figure playtime). */
+  word-break: break-word;
+}
+
+.library-stat-card-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.library-stat-card-subtext {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* Tone variants — swap the icon badge hue without changing layout */
+.library-stat-card--success .library-stat-card-icon {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.library-stat-card--success:hover {
+  border-color: color-mix(in srgb, var(--color-success) 40%, var(--color-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.library-stat-card--info .library-stat-card-icon {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-info) 25%, transparent);
+}
+
+.library-stat-card--info:hover {
+  border-color: color-mix(in srgb, var(--color-info) 40%, var(--color-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px color-mix(in srgb, var(--color-info) 25%, transparent);
+}
+
+.library-stat-card--warning .library-stat-card-icon {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-warning) 25%, transparent);
+}
+
+.library-stat-card--warning:hover {
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px color-mix(in srgb, var(--color-warning) 25%, transparent);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Recently Added Rail — horizontal scrolling row of recent games
+   ════════════════════════════════════════════════════════════════════ */
+
+.library-rail {
+  margin: 0 0 var(--space-xl) 0;
+  animation: libraryRailIn 500ms cubic-bezier(0.16, 1, 0.3, 1) 200ms backwards;
+}
+
+@keyframes libraryRailIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.library-rail-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding: 0 var(--space-xs);
+}
+
+.library-rail-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-rail-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  letter-spacing: -0.1px;
+}
+
+.library-rail-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  background: linear-gradient(180deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+.library-rail-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 4px 0 0 0;
+  padding-left: calc(4px + var(--space-sm));
+}
+
+.library-rail-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.library-rail-hint svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ── Rail empty state ─────────────────────────────────────────── */
+
+/* Friendly placeholder shown when a rail has no items to display.
+ * Stays inline with the rail's vertical rhythm so the user sees the
+ * section exists (and where new items will land) instead of the
+ * whole rail silently disappearing. The dashed border + tertiary
+ * background differentiates it from a regular card — a solid border
+ * would make it look like a broken card and confuse the user. */
+.library-rail-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  line-height: 1.5;
+  /* Generous left/right padding so the message doesn't feel cramped
+   * when the rail is wide. Vertically centred icon via `align-items`
+   * on the flex container above. */
+}
+
+.library-rail-empty svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.library-rail-empty span {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-rail-viewport {
+  position: relative;
+}
+
+.library-rail-track {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px var(--space-xs) var(--space-md);
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+  /* Remove the default scrollbar look in WebKit but keep functionality */
+}
+
+.library-rail-track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.library-rail-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.library-rail-track::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.library-rail-track::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-light);
+}
+
+.library-rail-item {
+  flex: 0 0 140px;
+  scroll-snap-align: start;
+}
+
+@media (min-width: 600px) {
+  .library-rail-item {
+    flex: 0 0 160px;
+  }
+}
+
+/* Rail card — compact, cover-forward */
+.library-rail-card {
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  transition: all var(--transition-normal);
+  /* The Card primitive renders its children inside a `.ui-card__body`
+   * wrapper that ships with a default padding. Without this override
+   * the rail cards would inherit that padding and the cover would no
+   * longer be flush against the card's top edge. Mirrors the same
+   * rule already applied to `.library-card` further down in this
+   * file. */
+}
+
+/* Same `.ui-card__body` padding override as `.library-card` — see the
+ * note in `src/App.css` for the rationale. Without this, the rail
+ * card's cover starts ~16px below the card's top edge and the body
+ * gets an extra ~16px gutter, which throws off the cover/body
+ * proportions and makes cards feel inconsistent across the row. */
+.library-rail-card .ui-card__body {
+  padding: 0;
+}
+
+.library-rail-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md), 0 0 20px var(--color-accent-glow);
+  border-color: var(--color-accent);
+}
+
+.library-rail-card-cover {
+  position: relative;
+  /* Fixed height (not aspect-ratio) so every card in the rail is
+   * guaranteed the same cover size regardless of the source image's
+   * intrinsic dimensions. `aspect-ratio: 3 / 4` looked correct in
+   * isolation but the underlying `<img>` could still stretch the
+   * wrapper when the image's natural aspect was tall (2:3 cover art
+   * vs 16:9 Steam library_hero), producing the inconsistent card
+   * heights you saw in the screenshot. `flex-shrink: 0` keeps the
+   * cover from collapsing if the body content ever gets long enough
+   * to compete for vertical space inside the Card flex container. */
+  height: 200px;
+  flex-shrink: 0;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.library-rail-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+}
+
+.library-rail-card:hover .library-rail-card-cover img {
+  transform: scale(1.06);
+}
+
+.library-rail-card-cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+.library-rail-card-cover-placeholder svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.4;
+}
+
+.library-rail-card-platform {
+  position: absolute;
+  top: var(--space-xs);
+  left: var(--space-xs);
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.library-rail-card-body {
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-rail-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.library-rail-card-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Continue Playing" rail — variant on the base rail styles. Swaps the
+ * title accent bar for a success-tinted gradient (the "active" signal)
+ * and recolors the card meta line so the user can tell the two rails
+ * apart at a glance. The base layout / scroll-snap / hover rules are
+ * inherited from the un-suffixed selectors above. */
+.library-rail--continue .library-rail-title::before {
+  background: linear-gradient(180deg, var(--color-success), var(--color-info));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.library-rail--continue .library-rail-card-meta--continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: color-mix(in srgb, var(--color-success) 75%, var(--color-text-primary));
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Tiny dot prefix on the "Xh ago" / "Xd ago" text so it reads as a
+ * status pill rather than a generic metadata line. The dot uses the
+ * success colour at low opacity so it doesn't compete with the card's
+ * hover glow. */
+.library-rail--continue .library-rail-card-meta--continue::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 60%, transparent);
+  flex-shrink: 0;
+}
+
+/* Edge fade masks — pure visual hint, never block input */
+.library-rail-fade {
+  position: absolute;
+  top: 0;
+  bottom: var(--space-md);
+  width: 36px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.library-rail-fade--left {
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-primary),
+    transparent
+  );
+}
+
+.library-rail-fade--right {
+  right: 0;
+  background: linear-gradient(
+    270deg,
+    var(--color-bg-primary),
+    transparent
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Library Empty State — 3-card quick-action grid
+   ════════════════════════════════════════════════════════════════════ */
+
+.library-empty-hero {
+  position: relative;
+  max-width: 720px;
+  margin: var(--space-xl) auto;
+  padding: var(--space-2xl) var(--space-xl);
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    var(--color-surface),
+    var(--color-bg-secondary)
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  isolation: isolate;
+  animation: libraryEmptyIn 460ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes libraryEmptyIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Decorative gradient orb behind the content */
+.library-empty-hero-orb {
+  position: absolute;
+  top: -120px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.9;
+}
+
+.library-empty-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--space-lg);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-accent);
+  box-shadow: 0 0 24px var(--color-accent-glow);
+}
+
+.library-empty-hero-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.library-empty-hero-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-sm) 0;
+  letter-spacing: -0.3px;
+}
+
+.library-empty-hero-subtitle {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-xl) 0;
+  line-height: 1.5;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.library-empty-hero-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+  text-align: left;
+}
+
+.library-empty-hero-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: all var(--transition-normal);
+  color: var(--color-text-primary);
+}
+
+.library-empty-hero-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: var(--shadow-md), 0 0 20px var(--color-accent-glow);
+}
+
+.library-empty-hero-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.library-empty-hero-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  color: var(--color-accent);
+  flex-shrink: 0;
+  box-shadow: 0 0 10px var(--color-accent-glow);
+  transition: transform var(--transition-fast);
+}
+
+.library-empty-hero-card:hover .library-empty-hero-card-icon {
+  transform: scale(1.08);
+}
+
+.library-empty-hero-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.library-empty-hero-card-icon--info {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 25%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-info) 25%, transparent);
+}
+
+.library-empty-hero-card-icon--success {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.library-empty-hero-card-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-empty-hero-card-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.library-empty-hero-card-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.library-empty-hero-card-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.library-empty-hero-card-cta svg {
+  width: 14px;
+  height: 14px;
+}
+
+.library-empty-hero-card:hover .library-empty-hero-card-cta {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+  transform: translateX(2px);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Library Card Polish — smoother hover, better transitions
+   ════════════════════════════════════════════════════════════════════ */
+
+.library-card {
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 240ms ease,
+    border-color var(--transition-fast);
+}
+
+.library-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent),
+    0 0 28px var(--color-accent-glow);
+}
+
+.library-card:active {
+  transform: translateY(-2px);
+}
+
 .library-main {
   flex: 1;
   min-width: 0;
