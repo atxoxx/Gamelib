@@ -388,24 +388,46 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  padding: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .dl-progress-card:hover {
-  border-color: var(--color-accent);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+.dl-progress-card:has(.dl-progress-card-status--downloading) {
+  border-left-color: var(--color-accent);
+}
+
+.dl-progress-card:has(.dl-progress-card-status--paused) {
+  border-left-color: var(--color-warning);
+}
+
+.dl-progress-card:has(.dl-progress-card-status--fetchingMetadata) {
+  border-left-color: var(--color-info);
+}
+
+.dl-progress-card:has(.dl-progress-card-status--completed) {
+  border-left-color: var(--color-success);
 }
 
 .dl-progress-card.error {
   border-color: var(--color-danger);
+  border-left-color: var(--color-danger);
   background: color-mix(in srgb, var(--color-danger) 5%, transparent);
 }
 
 .dl-progress-card.completed {
   border-color: var(--color-success);
+  border-left-color: var(--color-success);
   background: color-mix(in srgb, var(--color-success) 5%, transparent);
 }
 
@@ -481,7 +503,8 @@
   height: 100%;
   background: linear-gradient(90deg, var(--color-accent), #818cf8);
   border-radius: 3px;
-  transition: width 0.4s ease;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .dl-progress-card.indeterminate .dl-progress-card-bar-fill {
@@ -495,6 +518,7 @@
     transparent 100%
   );
   animation: dl-indeterminate 1.4s ease-in-out infinite;
+  box-shadow: none;
 }
 
 @keyframes dl-indeterminate {
@@ -854,18 +878,17 @@
   width: 380px;
   max-width: calc(100vw - var(--space-xl) * 2);
   max-height: min(560px, calc(100vh - var(--topnav-height) - var(--space-2xl)));
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-light);
+  background: rgba(18, 18, 24, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 9999;
-  animation: dl-popover-in 220ms var(--ease-bounce, ease);
-  /* Subtle accent glow at the top so the panel feels "anchored" to
-   * the button that opened it. */
-  box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in srgb, var(--color-accent) 25%, transparent);
+  animation: dl-popover-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 @keyframes dl-popover-in {
@@ -1224,11 +1247,12 @@
   align-items: stretch;
   gap: var(--space-lg);
   padding: var(--space-md) var(--space-lg);
-  background: var(--color-bg-secondary);
+  background: linear-gradient(145deg, var(--color-bg-secondary), color-mix(in srgb, var(--color-bg-secondary) 85%, #1e1e2d));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   position: relative;
   overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 /* Subtle accent strip at the top so the hero reads as the
@@ -1246,7 +1270,7 @@
     var(--color-accent),
     transparent
   );
-  opacity: 0.5;
+  opacity: 0.7;
 }
 
 .dl-hero-stat {
@@ -1254,13 +1278,14 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .dl-hero-divider {
   width: 1px;
   background: var(--color-border);
   flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .dl-hero-label {
@@ -1270,17 +1295,18 @@
   font-size: 10px;
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.8px;
   color: var(--color-text-muted);
 }
 
 .dl-hero-value {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.019em;
   line-height: 1.1;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 .dl-hero-value-down {
@@ -1293,7 +1319,7 @@
 
 .dl-hero-sub {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 .dl-hero-dot {
@@ -1307,7 +1333,8 @@
 
 .dl-hero-dot.pulse {
   background: var(--color-accent);
-  animation: dl-pulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 8px var(--color-accent);
+  animation: dl-pulse 1.8s ease-in-out infinite;
 }
 
 /* ─── Sections (Active / History) ───────────────────────────────── */
@@ -1464,30 +1491,52 @@
   grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) minmax(110px, 130px) minmax(70px, 90px) auto;
   align-items: center;
   gap: var(--space-md);
-  padding: 10px var(--space-md);
+  padding: 12px var(--space-md);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border);
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .dl-row:hover {
-  border-color: var(--color-accent);
+  border-color: rgba(255, 255, 255, 0.12);
   background: color-mix(in srgb, var(--color-accent) 3%, var(--color-bg-primary));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dl-row:has(.dl-row-status--downloading) {
+  border-left-color: var(--color-accent);
+}
+
+.dl-row:has(.dl-row-status--paused) {
+  border-left-color: var(--color-warning);
+}
+
+.dl-row:has(.dl-row-status--fetchingMetadata) {
+  border-left-color: var(--color-info);
+}
+
+.dl-row:has(.dl-row-status--completed) {
+  border-left-color: var(--color-success);
 }
 
 .dl-row.error {
   border-color: var(--color-danger);
+  border-left-color: var(--color-danger);
   background: color-mix(in srgb, var(--color-danger) 4%, transparent);
 }
 
 .dl-row.completed {
   border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+  border-left-color: var(--color-success);
   background: color-mix(in srgb, var(--color-success) 4%, transparent);
 }
 
 .dl-row.paused {
-  opacity: 0.78;
+  opacity: 0.85;
 }
 
 .dl-row-status {
@@ -1591,7 +1640,8 @@
   height: 100%;
   background: linear-gradient(90deg, var(--color-accent), #818cf8);
   border-radius: 2px;
-  transition: width 0.4s ease;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 .dl-row.indeterminate .dl-row-bar-fill {

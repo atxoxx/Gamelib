@@ -53,6 +53,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::OnceCell;
 use tokio::time::interval;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // ─── Public DTOs ────────────────────────────────────────────────────────────
 
@@ -148,6 +150,14 @@ pub struct TorrentEngine {
     state_dir: PathBuf,
     auto_paused_completed: std::collections::HashSet<String>,
     app: Option<AppHandle>,
+    /// Dirty flag — set by any mutation, cleared when the background
+    /// task flushes to disk. Prevents dozens of sync `fs::write`
+    /// calls per second when multiple torrents are active.
+    dirty: bool,
+    /// Hash of the last payload emitted via `download-progress`.
+    /// When the next tick computes the same hash, we skip the emit
+    /// entirely — saves the frontend from an unnecessary re-render.
+    last_emitted_hash: u64,
 }
 
 impl TorrentEngine {
@@ -158,14 +168,48 @@ impl TorrentEngine {
             state_dir,
             auto_paused_completed: std::collections::HashSet::new(),
             app: None,
+            dirty: false,
+            last_emitted_hash: 0,
         }
     }
 
-    /// Emit current downloads to the frontend immediately.
-    pub fn emit_progress(&self) {
+    /// Emit current downloads to the frontend, but only if the
+    /// payload actually changed since the last emission. Uses a
+    /// quick hash comparison to avoid serializing + sending an
+    /// identical JSON blob every 2 s when nothing is moving.
+    pub fn emit_progress(&mut self) {
         if let Some(app) = &self.app {
             let snapshot = self.list();
+            let hash = hash_downloads(&snapshot);
+            if hash != self.last_emitted_hash {
+                self.last_emitted_hash = hash;
+                let _ = app.emit("download-progress", &snapshot);
+            }
+        }
+    }
+
+    /// Force-emit regardless of hash (used after user-initiated
+    /// mutations where we want immediate UI feedback).
+    pub fn emit_progress_force(&mut self) {
+        if let Some(app) = &self.app {
+            let snapshot = self.list();
+            self.last_emitted_hash = hash_downloads(&snapshot);
             let _ = app.emit("download-progress", &snapshot);
+        }
+    }
+
+    /// Mark the metadata as needing a disk flush. The background
+    /// polling task will write to disk on its next tick.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// If dirty, flush metadata to disk and clear the flag.
+    /// Called by the background polling task every 2 s.
+    pub fn flush_if_dirty(&mut self) {
+        if self.dirty {
+            self.save_downloads_metadata();
+            self.dirty = false;
         }
     }
 
@@ -284,7 +328,7 @@ impl TorrentEngine {
 
     /// Walk the librqbit session and re-build our metadata map.
     fn sync_from_session(&mut self) {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.clone() else {
             return;
         };
 
@@ -450,7 +494,7 @@ impl TorrentEngine {
                 self.downloads.insert(d.id.clone(), d);
             }
         }
-        self.save_downloads_metadata();
+        self.mark_dirty();
 
         for (id, save_path, name, files) in to_extract_restored {
             let engine_clone = ENGINE.get().cloned();
@@ -471,11 +515,11 @@ impl TorrentEngine {
                     delete_archives_for_torrent(&save_path, &files);
                 }
                 if let Some(engine) = engine_clone {
-                    let mut guard = engine.lock().await;
+                    let mut guard = engine.write().await;
                     if let Some(d) = guard.downloads_mut().get_mut(&id) {
                         d.extracted = Some(true);
-                        guard.save_downloads_metadata();
-                        guard.emit_progress();
+                        guard.mark_dirty();
+                        guard.emit_progress_force();
                     }
                 }
             });
@@ -507,6 +551,9 @@ impl TorrentEngine {
                 status: Some(d.status.clone()),
             })
         }).collect();
+        // Serialize in memory, then write. The write itself is
+        // blocking but we only call this from the background task
+        // (via flush_if_dirty) or during critical mutations.
         if let Ok(content) = serde_json::to_string_pretty(&saved) {
             let _ = std::fs::write(&metadata_path, content);
         }
@@ -765,7 +812,7 @@ impl TorrentEngine {
             }
         }
         if save_needed {
-            self.save_downloads_metadata();
+            self.mark_dirty();
         }
         self.downloads
             .retain(|id, d| alive_set.contains_key(id) || matches!(d.status, DownloadStatus::Completed) || (matches!(d.status, DownloadStatus::Paused) && !d.files.is_empty() && !d.source_uri.is_empty() && id.starts_with("dl_")));
@@ -791,11 +838,11 @@ impl TorrentEngine {
                     delete_archives_for_torrent(&save_path, &files);
                 }
                 if let Some(engine) = engine_clone {
-                    let mut guard = engine.lock().await;
+                    let mut guard = engine.write().await;
                     if let Some(d) = guard.downloads_mut().get_mut(&id) {
                         d.extracted = Some(true);
-                        guard.save_downloads_metadata();
-                        guard.emit_progress();
+                        guard.mark_dirty();
+                        guard.emit_progress_force();
                     }
                 }
             });
@@ -835,6 +882,41 @@ fn unix_now() -> u64 {
 /// Build the frontend-facing id from a librqbit numeric torrent id.
 fn make_frontend_id(numeric_id: usize) -> String {
     format!("dl_{}", numeric_id)
+}
+
+/// Compute a quick hash of the download list for change detection.
+/// Used by `emit_progress` to skip duplicate emissions.
+fn hash_downloads(downloads: &[TorrentDownload]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for d in downloads {
+        d.id.hash(&mut hasher);
+        // Hash the fields that the frontend actually renders.
+        // Skipping serialization keeps this O(n) with no alloc.
+        d.downloaded.hash(&mut hasher);
+        d.total_size.hash(&mut hasher);
+        // progress is f32 — hash the bits
+        if let Some(p) = d.progress {
+            p.to_bits().hash(&mut hasher);
+        }
+        d.download_speed.hash(&mut hasher);
+        d.upload_speed.hash(&mut hasher);
+        d.peers.hash(&mut hasher);
+        d.seeds.hash(&mut hasher);
+        // status kind
+        match &d.status {
+            DownloadStatus::Queued => 0u8.hash(&mut hasher),
+            DownloadStatus::FetchingMetadata => 1u8.hash(&mut hasher),
+            DownloadStatus::Downloading => 2u8.hash(&mut hasher),
+            DownloadStatus::Paused => 3u8.hash(&mut hasher),
+            DownloadStatus::Completed => 4u8.hash(&mut hasher),
+            DownloadStatus::Error(msg) => {
+                5u8.hash(&mut hasher);
+                msg.hash(&mut hasher);
+            }
+        }
+        d.name.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Parse the `"dl_<n>"` frontend id into the librqbit numeric id.
@@ -950,11 +1032,11 @@ fn find_handle(
 
 // ─── Global singleton + background polling task ──────────────────────────────
 
-static ENGINE: OnceCell<Arc<tokio::sync::Mutex<TorrentEngine>>> =
+static ENGINE: OnceCell<Arc<tokio::sync::RwLock<TorrentEngine>>> =
     OnceCell::const_new();
 
 /// Accessor for the global engine.
-pub async fn engine() -> Option<Arc<tokio::sync::Mutex<TorrentEngine>>> {
+pub async fn engine() -> Option<Arc<tokio::sync::RwLock<TorrentEngine>>> {
     ENGINE.get().cloned()
 }
 
@@ -965,7 +1047,7 @@ pub async fn engine() -> Option<Arc<tokio::sync::Mutex<TorrentEngine>>> {
 /// grace period, a user who clicks Download within the first
 /// ~100 ms of app launch sees a spurious "engine not initialized"
 /// error and assumes the download failed.
-async fn wait_for_engine() -> Result<Arc<tokio::sync::Mutex<TorrentEngine>>, String> {
+async fn wait_for_engine() -> Result<Arc<tokio::sync::RwLock<TorrentEngine>>, String> {
     const MAX_ATTEMPTS: usize = 20;
     const DELAY_MS: u64 = 100;
     for _ in 0..MAX_ATTEMPTS {
@@ -986,7 +1068,7 @@ pub async fn initialize_engine(
     let mut engine = TorrentEngine::new(state_dir);
     engine.app = Some(app.clone());
     engine.initialize().await?;
-    let shared = Arc::new(tokio::sync::Mutex::new(engine));
+    let shared = Arc::new(tokio::sync::RwLock::new(engine));
     ENGINE
         .set(shared.clone())
         .map_err(|_| "Torrent engine already initialized".to_string())?;
@@ -996,9 +1078,12 @@ pub async fn initialize_engine(
         tick.tick().await; // skip immediate first tick
         loop {
             tick.tick().await;
-            let mut guard = shared.lock().await;
-            guard.refresh_stats().await;
-            guard.emit_progress();
+            {
+                let mut guard = shared.write().await;
+                guard.refresh_stats().await;
+                guard.flush_if_dirty();
+                guard.emit_progress();
+            }
         }
     });
     Ok(())
@@ -1036,7 +1121,7 @@ pub async fn torrent_add(
     // (pause, resume, remove, get_all, etc.) for the full timeout
     // and leave the user unable to cancel a stuck download.
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard
             .session()
             .ok_or_else(|| "Torrent engine not initialized".to_string())?
@@ -1155,7 +1240,7 @@ pub async fn torrent_add(
         }
     };
 
-    let mut guard = engine.lock().await;
+    let mut guard = engine.write().await;
     if guard.downloads_mut().contains_key(&id_str) {
         let updated = {
             let existing = guard.downloads_mut().get_mut(&id_str).unwrap();
@@ -1165,8 +1250,8 @@ pub async fn torrent_add(
             existing.auto_extract = Some(auto_extract.unwrap_or(false));
             existing.clone()
         };
-        guard.save_downloads_metadata();
-        guard.emit_progress();
+        guard.mark_dirty();
+        guard.emit_progress_force();
         return Ok(updated);
     }
 
@@ -1192,8 +1277,8 @@ pub async fn torrent_add(
         extracted: Some(false),
     };
     guard.downloads_mut().insert(key, download.clone());
-    guard.save_downloads_metadata();
-    guard.emit_progress();
+    guard.mark_dirty();
+    guard.emit_progress_force();
     Ok(download)
 }
 
@@ -1201,7 +1286,7 @@ pub async fn torrent_add(
 pub async fn torrent_pause(id: String) -> Result<(), String> {
     let engine = wait_for_engine().await?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1214,11 +1299,11 @@ pub async fn torrent_pause(id: String) -> Result<(), String> {
     })?;
 
     {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         if let Some(d) = guard.downloads_mut().get_mut(&id) {
             d.status = DownloadStatus::Paused;
-            guard.save_downloads_metadata();
-            guard.emit_progress();
+            guard.mark_dirty();
+            guard.emit_progress_force();
         }
     }
 
@@ -1229,7 +1314,7 @@ pub async fn torrent_pause(id: String) -> Result<(), String> {
 pub async fn torrent_resume(id: String) -> Result<(), String> {
     let engine = wait_for_engine().await?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1242,15 +1327,15 @@ pub async fn torrent_resume(id: String) -> Result<(), String> {
     })?;
 
     {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         if let Some(d) = guard.downloads_mut().get_mut(&id) {
             d.status = if d.total_size.unwrap_or(0) > 0 {
                 DownloadStatus::Downloading
             } else {
                 DownloadStatus::FetchingMetadata
             };
-            guard.save_downloads_metadata();
-            guard.emit_progress();
+            guard.mark_dirty();
+            guard.emit_progress_force();
         }
     }
 
@@ -1268,11 +1353,11 @@ pub async fn torrent_remove(
     kill_extraction(&id);
 
     let (session, download_opt) = {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         let session = guard.session().cloned();
         let download_opt = guard.downloads_mut().remove(&id);
-        guard.save_downloads_metadata();
-        guard.emit_progress();
+        guard.mark_dirty();
+        guard.emit_progress_force();
         (session, download_opt)
     };
 
@@ -1353,7 +1438,7 @@ pub async fn torrent_remove(
 pub async fn torrent_get_all() -> Result<Vec<TorrentDownload>, String> {
     let engine = wait_for_engine().await?;
     let result = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         Ok(guard.list())
     };
     result
@@ -1374,7 +1459,7 @@ pub async fn torrent_select_save_path(
 pub async fn torrent_pause_all() -> Result<usize, String> {
     let engine = wait_for_engine().await?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1410,15 +1495,15 @@ pub async fn torrent_pause_all() -> Result<usize, String> {
     }
 
     if affected > 0 {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         for handle in &to_pause {
             let fid = make_frontend_id(handle.id());
             if let Some(d) = guard.downloads_mut().get_mut(&fid) {
                 d.status = DownloadStatus::Paused;
             }
         }
-        guard.save_downloads_metadata();
-        guard.emit_progress();
+        guard.mark_dirty();
+        guard.emit_progress_force();
     }
 
     Ok(affected)
@@ -1432,7 +1517,7 @@ pub async fn torrent_set_speed_limits(
 ) -> Result<(), String> {
     let engine = wait_for_engine().await?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1460,7 +1545,7 @@ pub async fn torrent_set_speed_limits(
 pub async fn torrent_resume_all() -> Result<usize, String> {
     let engine = wait_for_engine().await?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1497,7 +1582,7 @@ pub async fn torrent_resume_all() -> Result<usize, String> {
     }
 
     if affected > 0 {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         for handle in &to_resume {
             let fid = make_frontend_id(handle.id());
             if let Some(d) = guard.downloads_mut().get_mut(&fid) {
@@ -1508,8 +1593,8 @@ pub async fn torrent_resume_all() -> Result<usize, String> {
                 };
             }
         }
-        guard.save_downloads_metadata();
-        guard.emit_progress();
+        guard.mark_dirty();
+        guard.emit_progress_force();
     }
 
     Ok(affected)
@@ -1523,7 +1608,7 @@ pub async fn torrent_update_only_files(
     let engine = wait_for_engine().await?;
     let numeric_id = parse_handle_id(&id)?;
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
     let handle = find_handle(&session, numeric_id)
@@ -1534,9 +1619,9 @@ pub async fn torrent_update_only_files(
     })?;
 
     {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         guard.refresh_stats().await;
-        guard.emit_progress();
+        guard.emit_progress_force();
     }
 
     Ok(())
@@ -1563,7 +1648,7 @@ pub async fn torrent_start_selected(
     let source_name;
     let existing_files: Vec<TorrentFile>;
     {
-        let mut guard = engine.lock().await;
+        let mut guard = engine.write().await;
         {
             let d = guard.downloads.get_mut(&id)
                 .ok_or_else(|| format!("Download not found in engine: {}", id))?;
@@ -1574,11 +1659,11 @@ pub async fn torrent_start_selected(
             source_name = d.source_name.clone();
             existing_files = d.files.clone();
         }
-        guard.emit_progress();
+        guard.emit_progress_force();
     }
 
     let session = {
-        let guard = engine.lock().await;
+        let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
@@ -1893,7 +1978,7 @@ pub async fn torrent_start_selected(
                         initial_status
                     };
 
-                    let mut guard = engine_clone.lock().await;
+                    let mut guard = engine_clone.write().await;
                     if new_id_str != id {
                         guard.downloads_mut().remove(&id);
                     }
@@ -1992,38 +2077,38 @@ pub async fn torrent_start_selected(
                         extracted: Some(false),
                     };
                     guard.downloads_mut().insert(new_id_str, download);
-                    guard.save_downloads_metadata();
-                    guard.emit_progress();
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
                 } else {
                     // No handle from `into_handle()` — surface as
                     // an Error status so the user gets feedback
                     // instead of a stuck FetchingMetadata row.
-                    let mut guard = engine_clone.lock().await;
+                    let mut guard = engine_clone.write().await;
                     if let Some(d) = guard.downloads_mut().get_mut(&id) {
                         d.status = DownloadStatus::Error(
                             "Failed to start torrent: no handle returned".to_string(),
                         );
-                        guard.save_downloads_metadata();
-                        guard.emit_progress();
+                        guard.mark_dirty();
+                        guard.emit_progress_force();
                     }
                 }
             }
             Ok(Err(e)) => {
                 eprintln!("[gamelib] Failed to add torrent in background: {}", e);
-                let mut guard = engine_clone.lock().await;
+                let mut guard = engine_clone.write().await;
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error(format!("Failed to start torrent: {}", e));
-                    guard.save_downloads_metadata();
-                    guard.emit_progress();
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
                 }
             }
             Err(_) => {
                 eprintln!("[gamelib] Timeout starting torrent in background");
-                let mut guard = engine_clone.lock().await;
+                let mut guard = engine_clone.write().await;
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error("Timeout starting torrent".to_string());
-                    guard.save_downloads_metadata();
-                    guard.emit_progress();
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
                 }
             }
         }

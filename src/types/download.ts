@@ -218,3 +218,28 @@ export function getStatusLabel(status: DownloadStatus): string {
 export function getStatusClassSuffix(status: DownloadStatus): string {
   return status.kind;
 }
+
+/** Calculate and format the estimated time until finish (ETA). */
+export function formatEta(downloaded: number, totalSize: number | null, speed: number): string {
+  if (totalSize === null || speed <= 0) return "";
+  const remaining = totalSize - downloaded;
+  if (remaining <= 0) return "";
+  const seconds = Math.ceil(remaining / speed);
+  
+  if (seconds < 60) {
+    return `${seconds}s remaining`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return `${minutes}m ${remainingSeconds}s remaining`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return `${hours}h ${remainingMinutes}m remaining`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return `${days}d ${remainingHours}h remaining`;
+}

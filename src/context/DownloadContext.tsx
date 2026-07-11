@@ -117,6 +117,47 @@ function sortDownloads(a: TorrentDownload, b: TorrentDownload): number {
   return b.addedAt - a.addedAt;
 }
 
+function areDownloadsEqual(a: TorrentDownload[], b: TorrentDownload[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const da = a[i];
+    const db = b[i];
+    if (
+      da.id !== db.id ||
+      da.name !== db.name ||
+      da.downloaded !== db.downloaded ||
+      da.totalSize !== db.totalSize ||
+      da.progress !== db.progress ||
+      da.downloadSpeed !== db.downloadSpeed ||
+      da.uploadSpeed !== db.uploadSpeed ||
+      da.peers !== db.peers ||
+      da.seeds !== db.seeds ||
+      da.status.kind !== db.status.kind
+    ) {
+      return false;
+    }
+    if (da.status.kind === "error" && db.status.kind === "error" && da.status.message !== db.status.message) {
+      return false;
+    }
+    if ((da.files?.length ?? 0) !== (db.files?.length ?? 0)) return false;
+    if (da.files && db.files) {
+      for (let j = 0; j < da.files.length; j++) {
+        const fa = da.files[j];
+        const fb = db.files[j];
+        if (
+          fa.name !== fb.name ||
+          fa.selected !== fb.selected ||
+          fa.progress !== fb.progress ||
+          fa.downloaded !== fb.downloaded
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 export function DownloadProvider({ children }: { children: ReactNode }) {
   const [downloads, setDownloads] = useState<TorrentDownload[]>(EMPTY_DOWNLOADS);
   const [loading, setLoading] = useState(true);
@@ -160,7 +201,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         //    any routes mount — but this ordering is still safer.)
         const unlistenFn = await listen<TorrentDownload[]>("download-progress", (event) => {
           if (Array.isArray(event.payload)) {
-            setDownloads(event.payload);
+            setDownloads((prev) => {
+              if (areDownloadsEqual(prev, event.payload)) {
+                return prev;
+              }
+              return event.payload;
+            });
             setLoading(false);
           }
         });

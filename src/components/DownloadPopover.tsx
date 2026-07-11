@@ -37,11 +37,22 @@ import {
   getStatusLabel,
   getStatusClassSuffix,
   isActiveStatus,
+  formatEta,
   type TorrentDownload,
 } from "../types/download";
 import { useToast } from "../context/ToastContext";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { ConfirmModal } from "./ui";
+
+import React from "react";
+import {
+  PlayIcon,
+  PauseIcon,
+  RemoveIcon,
+  TrashIcon,
+  PeersIcon,
+  SeedsIcon,
+} from "./downloads/DownloadIcons";
 
 interface DownloadPopoverProps {
   open: boolean;
@@ -64,7 +75,7 @@ type TabKey = "active" | "history";
  * Mirrors the layout of the old floating widget so anyone who used
  * that surface will recognise it instantly.
  */
-function DownloadCard({
+const DownloadCard = React.memo(({
   download,
   onPause,
   onResume,
@@ -79,7 +90,7 @@ function DownloadCard({
    * `removeDownload(id, true)` — we pass the whole record so the
    * dialog can render size / name / save path context. */
   onDeleteFiles: (download: TorrentDownload) => void;
-}) {
+}) => {
   const { unit } = useSizeUnit();
   const status = download.status;
   const errorMessage = getStatusError(status);
@@ -121,8 +132,10 @@ function DownloadCard({
           <div className="dl-progress-card-stats-row">
             <span>
               <strong>{formatProgress(download.progress)}</strong>
-              {download.totalSize != null && (
-                <> · {formatBytesShort(download.totalSize, unit)}</>
+              {download.totalSize != null ? (
+                <> · {formatBytesShort(download.downloaded, unit)} / {formatBytesShort(download.totalSize, unit)}</>
+              ) : (
+                download.downloaded > 0 && <> · {formatBytesShort(download.downloaded, unit)}</>
               )}
             </span>
             {isActiveStatus(status) && download.downloadSpeed > 0 && (
@@ -141,6 +154,11 @@ function DownloadCard({
               </span>
             )}
           </div>
+          {isActiveStatus(status) && download.downloadSpeed > 0 && download.totalSize != null && (
+            <div className="dl-progress-card-stats-row" style={{ fontSize: "9px", color: "var(--color-text-muted)", marginTop: "1px" }}>
+              <span>{formatEta(download.downloaded, download.totalSize, download.downloadSpeed)}</span>
+            </div>
+          )}
           {(() => {
             // Show the secondary row whenever the torrent is
             // active OR paused with a non-zero swarm. Paused
@@ -174,22 +192,7 @@ function DownloadCard({
                   title="Known peers in swarm (approximate; excludes those currently connected)"
                   aria-label={`${download.seeds} known peers in swarm`}
                 >
-                  <svg
-                    className="dl-progress-card-stat-svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    {/* Chevron-up (^) — distinct from the straight
-                        line+arrow used for the upload stat so the
-                        two up-pointing icons don't read as a
-                        duplicate. */}
-                    <polyline points="6 16 12 10 18 16" />
-                  </svg>
+                  <SeedsIcon className="dl-progress-card-stat-svg" />
                   {download.seeds}
                 </span>
                 <span
@@ -197,21 +200,7 @@ function DownloadCard({
                   title="Peers currently connected"
                   aria-label={`${download.peers} peers currently connected`}
                 >
-                  <svg
-                    className="dl-progress-card-stat-svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
+                  <PeersIcon className="dl-progress-card-stat-svg" />
                   {download.peers}
                 </span>
               </div>
@@ -226,10 +215,7 @@ function DownloadCard({
               title="Pause"
               aria-label="Pause download"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
+              <PauseIcon />
             </button>
           )}
           {isPaused && (
@@ -239,9 +225,7 @@ function DownloadCard({
               title="Resume"
               aria-label="Resume download"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
+              <PlayIcon />
             </button>
           )}
           <button
@@ -250,10 +234,7 @@ function DownloadCard({
             title={isCompleted ? "Remove from history" : "Remove"}
             aria-label="Remove download"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <RemoveIcon />
           </button>
           <button
             className="dl-progress-card-btn danger-fill"
@@ -261,12 +242,7 @@ function DownloadCard({
             title="Delete from disk"
             aria-label="Delete download from disk"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
+            <TrashIcon />
           </button>
         </div>
       </div>
@@ -278,7 +254,29 @@ function DownloadCard({
       )}
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  const a = prevProps.download;
+  const b = nextProps.download;
+  if (
+    a.id !== b.id ||
+    a.name !== b.name ||
+    a.downloaded !== b.downloaded ||
+    a.totalSize !== b.totalSize ||
+    a.progress !== b.progress ||
+    a.downloadSpeed !== b.downloadSpeed ||
+    a.uploadSpeed !== b.uploadSpeed ||
+    a.peers !== b.peers ||
+    a.seeds !== b.seeds ||
+    a.status.kind !== b.status.kind
+  ) {
+    return false;
+  }
+  if (a.status.kind === "error" && b.status.kind === "error") {
+    return a.status.message === b.status.message;
+  }
+  return true;
+});
+DownloadCard.displayName = "DownloadCard";
 
 export default function DownloadPopover({
   open,

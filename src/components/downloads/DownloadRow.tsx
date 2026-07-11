@@ -13,10 +13,19 @@
 // fill + indeterminate animation so the visual language stays
 // consistent.
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useSizeUnit } from "../../hooks/useSizeUnit";
 import { useDownloads } from "../../context/DownloadContext";
 import { useToast } from "../../context/ToastContext";
+import {
+  PlayIcon,
+  PauseIcon,
+  RemoveIcon,
+  TrashIcon,
+  ChevronIcon,
+  PeersIcon,
+  SeedsIcon,
+} from "./DownloadIcons";
 import {
   formatBytesPerSecond,
   formatBytesShort,
@@ -25,6 +34,7 @@ import {
   getStatusLabel,
   getStatusClassSuffix,
   isActiveStatus,
+  formatEta,
   type TorrentDownload,
 } from "../../types/download";
 
@@ -42,13 +52,13 @@ interface DownloadRowProps {
   onDeleteFiles: (download: TorrentDownload) => void;
 }
 
-export default function DownloadRow({
+const DownloadRow = React.memo(({
   download,
   onPause,
   onResume,
   onRemove,
   onDeleteFiles,
-}: DownloadRowProps) {
+}: DownloadRowProps) => {
   const { unit } = useSizeUnit();
   const { updateSelectedFiles } = useDownloads();
   const { showToast } = useToast();
@@ -129,10 +139,23 @@ export default function DownloadRow({
             </div>
             <span className="dl-row-progress">
               {formatProgress(download.progress)}
-              {download.totalSize != null && (
+              {download.totalSize != null ? (
                 <span className="dl-row-size">
                   {" · "}
-                  {formatBytesShort(download.totalSize, unit)}
+                  {formatBytesShort(download.downloaded, unit)} / {formatBytesShort(download.totalSize, unit)}
+                </span>
+              ) : (
+                download.downloaded > 0 && (
+                  <span className="dl-row-size">
+                    {" · "}
+                    {formatBytesShort(download.downloaded, unit)}
+                  </span>
+                )
+              )}
+              {isActiveStatus(status) && download.downloadSpeed > 0 && download.totalSize != null && (
+                <span className="dl-row-size" style={{ opacity: 0.8 }}>
+                  {" · "}
+                  {formatEta(download.downloaded, download.totalSize, download.downloadSpeed)}
                 </span>
               )}
             </span>
@@ -171,36 +194,11 @@ export default function DownloadRow({
           {download.peers > 0 || download.seeds > 0 ? (
             <>
               <span title="Known peers in swarm">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                  style={{ width: 11, height: 11 }}
-                >
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
+                <PeersIcon style={{ width: 11, height: 11 }} />
                 {download.peers}
               </span>
               <span title="Seeds in swarm" className="dl-row-swarm-seeds">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                  style={{ width: 11, height: 11 }}
-                >
-                  <polyline points="6 16 12 10 18 16" />
-                </svg>
+                <SeedsIcon style={{ width: 11, height: 11 }} />
                 {download.seeds}
               </span>
             </>
@@ -217,23 +215,14 @@ export default function DownloadRow({
               title={expanded ? "Hide files" : "Show files"}
               aria-label={expanded ? "Hide files" : "Show files"}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
+              <ChevronIcon
                 style={{
                   transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
                   transition: "transform 0.2s ease-out",
                   width: 14,
                   height: 14,
                 }}
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              />
             </button>
           )}
           {isActiveStatus(status) && !isPaused && (
@@ -243,10 +232,7 @@ export default function DownloadRow({
               title="Pause"
               aria-label="Pause download"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
+              <PauseIcon />
             </button>
           )}
           {isPaused && (
@@ -256,9 +242,7 @@ export default function DownloadRow({
               title="Resume"
               aria-label="Resume download"
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
+              <PlayIcon />
             </button>
           )}
           <button
@@ -267,17 +251,7 @@ export default function DownloadRow({
             title={isCompleted ? "Remove from history" : "Remove"}
             aria-label="Remove download"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              aria-hidden
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <RemoveIcon />
           </button>
           <button
             className="dl-row-btn danger-fill"
@@ -285,20 +259,7 @@ export default function DownloadRow({
             title="Delete from disk"
             aria-label="Delete download from disk"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
+            <TrashIcon />
           </button>
         </div>
       </div>
@@ -343,4 +304,48 @@ export default function DownloadRow({
       )}
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  const a = prevProps.download;
+  const b = nextProps.download;
+  
+  // Shallow structural comparison
+  if (
+    a.id !== b.id ||
+    a.name !== b.name ||
+    a.downloaded !== b.downloaded ||
+    a.totalSize !== b.totalSize ||
+    a.progress !== b.progress ||
+    a.downloadSpeed !== b.downloadSpeed ||
+    a.uploadSpeed !== b.uploadSpeed ||
+    a.peers !== b.peers ||
+    a.seeds !== b.seeds ||
+    a.status.kind !== b.status.kind
+  ) {
+    return false;
+  }
+  
+  if (a.status.kind === "error" && b.status.kind === "error" && a.status.message !== b.status.message) {
+    return false;
+  }
+  
+  if ((a.files?.length ?? 0) !== (b.files?.length ?? 0)) return false;
+  if (a.files && b.files) {
+    for (let j = 0; j < a.files.length; j++) {
+      const fa = a.files[j];
+      const fb = b.files[j];
+      if (
+        fa.name !== fb.name ||
+        fa.selected !== fb.selected ||
+        fa.progress !== fb.progress ||
+        fa.downloaded !== fb.downloaded
+      ) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+});
+
+DownloadRow.displayName = "DownloadRow";
+export default DownloadRow;
