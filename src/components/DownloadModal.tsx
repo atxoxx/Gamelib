@@ -50,7 +50,15 @@ export default function DownloadModal({
   steamAppId,
   onClose,
 }: DownloadModalProps) {
-  const { addDownload, selectSavePath, activeDownloads, startSelectedDownload, removeDownload } = useDownloads();
+  const {
+    addDownload,
+    addDirectDownload,
+    addDebridDownload,
+    selectSavePath,
+    activeDownloads,
+    startSelectedDownload,
+    removeDownload
+  } = useDownloads();
   const { searchSources } = useSources();
   const { games } = useGames();
   const { showToast } = useToast();
@@ -59,8 +67,16 @@ export default function DownloadModal({
   const [ownership, setOwnership] = useState<OwnershipResult | null>(null);
   const [matches, setMatches] = useState<MatchedDownload[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [savePath, setSavePath] = useState<string | null>(null);
+  const [selectedMirrorIdx, setSelectedMirrorIdx] = useState(0);
+  const [savePath, setSavePath] = useState<string | null>(() => {
+    return localStorage.getItem("gamelib-last-download-path") || null;
+  });
   const [error, setError] = useState<string | null>(null);
+
+  // Reset selected mirror when selected index changes
+  useEffect(() => {
+    setSelectedMirrorIdx(0);
+  }, [selectedIndex]);
 
   const [chooseFiles, setChooseFiles] = useState(false);
   const [autoExtract, setAutoExtract] = useState(false);
@@ -163,7 +179,10 @@ export default function DownloadModal({
   const handlePickSavePath = useCallback(async () => {
     try {
       const path = await selectSavePath();
-      if (path) setSavePath(path);
+      if (path) {
+        setSavePath(path);
+        localStorage.setItem("gamelib-last-download-path", path);
+      }
     } catch (err) {
       showToast(`Couldn't open folder picker: ${err}`, "error");
     }
@@ -183,10 +202,7 @@ export default function DownloadModal({
     setError(null);
     try {
       const match = matches[selectedIndex];
-      // Prefer the resolved magnet URI (the source provided it OR
-      // we found a magnet: link in the uris array). Fall back to
-      // the first URI which may be a .torrent URL.
-      const sourceUri = match.magnet || match.uris[0];
+      const sourceUri = match.uris[selectedMirrorIdx] || match.magnet || match.uris[0];
       if (!sourceUri) {
         throw new Error("Selected source has no downloadable URI");
       }
@@ -197,9 +213,88 @@ export default function DownloadModal({
         ? savePath
         : `${savePath}/${safeGameFolder}`.replace(/\\/g, "/");
 
+      const isMagnet = sourceUri.startsWith("magnet:");
+      const isTorrentFile = sourceUri.endsWith(".torrent") || sourceUri.includes(".torrent?");
+      const isDirect = !isMagnet && !isTorrentFile && (sourceUri.startsWith("http://") || sourceUri.startsWith("https://"));
+
+      if (isDirect) {
+        setStep("starting");
+        let targetFileName = "download";
+        try {
+          const urlObj = new URL(sourceUri);
+          const pathname = urlObj.pathname;
+          const lastSeg = pathname.substring(pathname.lastIndexOf('/') + 1);
+          if (lastSeg && lastSeg.includes('.')) {
+            targetFileName = lastSeg;
+          } else {
+            const titleMatch = match.title.match(/\.[a-zA-Z0-9]{2,4}$/);
+            if (titleMatch) {
+              targetFileName = match.title;
+            } else {
+              targetFileName = match.title + ".zip";
+            }
+          }
+        } catch {
+          targetFileName = match.title + ".zip";
+        }
+        
+        targetFileName = targetFileName.replace(/[:*?"<>|\\/]/g, "").trim();
+        const fullSavePath = `${finalSavePath}/${targetFileName}`.replace(/\\/g, "/");
+
+        await addDirectDownload(sourceUri, fullSavePath, gameId ?? null, match.sourceName, autoExtract, match.uris);
+        showToast(
+          `Downloading direct link "${targetFileName}" from ${match.sourceName}`,
+          "success",
+        );
+        onClose();
+        return;
+      }
+
+      const debridProvider = localStorage.getItem("gamelib-debrid-provider") || "none";
+      const debridApiKey = localStorage.getItem("gamelib-debrid-apikey") || "";
+      const fallbackTorrent = localStorage.getItem("gamelib-debrid-fallback-torrent") !== "false";
+
+      if (isMagnet && debridProvider !== "none" && debridApiKey) {
+        setStep("starting");
+        try {
+          const cacheCheck = await invoke<{ instant: boolean; provider: string }>("check_debrid_cache", {
+            provider: debridProvider,
+            apikey: debridApiKey,
+            magnet: sourceUri,
+          });
+
+          if (cacheCheck.instant || !fallbackTorrent) {
+            let targetFileName = match.title.replace(/[:*?"<>|\\/]/g, "").trim() + ".zip";
+            const fullSavePath = `${finalSavePath}/${targetFileName}`.replace(/\\/g, "/");
+
+            await addDebridDownload(
+              sourceUri,
+              fullSavePath,
+              gameId ?? null,
+              match.sourceName,
+              debridProvider,
+              debridApiKey,
+              autoExtract
+            );
+            showToast(
+              `Downloading "${match.title}" via ${debridProvider} (cached link)`,
+              "success",
+            );
+            onClose();
+            return;
+          } else {
+            showToast("Magnet not cached on Debrid. Falling back to P2P Torrent...", "info");
+          }
+        } catch (e) {
+          console.error("[DownloadModal] Debrid check failed:", e);
+          if (!fallbackTorrent) {
+            throw new Error(`Debrid error: ${e}`);
+          }
+        }
+      }
+
       if (chooseFiles) {
         setStep("fetching_metadata");
-        // Start the torrent with listOnly = true
         const newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
         if (cancelledRef.current) {
           invoke("torrent_remove", { id: newDl.id, deleteFiles: true }).catch((e) =>
@@ -219,11 +314,25 @@ export default function DownloadModal({
       }
     } catch (err) {
       if (cancelledRef.current) return;
-      console.error("[DownloadModal] torrent_add failed:", err);
+      console.error("[DownloadModal] download failed:", err);
       setError(String(err));
       setStep("results");
     }
-  }, [selectedIndex, savePath, matches, addDownload, gameId, showToast, onClose, chooseFiles, autoExtract, gameName]);
+  }, [
+    selectedIndex,
+    selectedMirrorIdx,
+    savePath,
+    matches,
+    addDownload,
+    addDirectDownload,
+    addDebridDownload,
+    gameId,
+    showToast,
+    onClose,
+    chooseFiles,
+    autoExtract,
+    gameName
+  ]);
 
   // Clear the inline error when the user actively changes their
   // selection or save path. Note: `step` is intentionally NOT in
@@ -364,26 +473,73 @@ export default function DownloadModal({
             />
           )}
 
-          {(step === "results" || step === "starting") && selectedIndex != null && (
-            <div className="dl-options-section" style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
-              <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={autoExtract}
-                  onChange={(e) => setAutoExtract(e.target.checked)}
-                />
-                <span>Auto extract archives and delete after extraction</span>
-              </label>
-              <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={chooseFiles}
-                  onChange={(e) => setChooseFiles(e.target.checked)}
-                />
-                <span>Choose files to download</span>
-              </label>
-            </div>
-          )}
+          {(step === "results" || step === "starting") && selectedIndex != null && (() => {
+            const match = matches[selectedIndex];
+            const sourceUri = match.uris[selectedMirrorIdx] || match.magnet || match.uris[0];
+            const isMagnet = sourceUri?.startsWith("magnet:");
+            const isTorrentFile = sourceUri?.endsWith(".torrent") || sourceUri?.includes(".torrent?");
+            const isDirect = !isMagnet && !isTorrentFile;
+
+            return (
+              <div className="dl-options-section" style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
+                {match.uris.length > 1 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "var(--space-xs)" }}>
+                    <span style={{ fontSize: "var(--font-size-xs)", fontWeight: "var(--font-weight-semibold)", color: "var(--color-text-secondary)" }}>
+                      Select Mirror / Hoster
+                    </span>
+                    <select
+                      value={selectedMirrorIdx}
+                      onChange={(e) => setSelectedMirrorIdx(parseInt(e.target.value, 10))}
+                      style={{
+                        padding: "8px 12px",
+                        background: "var(--color-bg-tertiary)",
+                        border: "1px solid var(--color-border)",
+                        borderRadius: "var(--radius-md)",
+                        color: "var(--color-text-primary)",
+                        fontFamily: "inherit",
+                        fontSize: "var(--font-size-sm)",
+                        cursor: "pointer",
+                        outline: "none"
+                      }}
+                    >
+                      {match.uris.map((uri, idx) => {
+                        let hoster = "Mirror " + (idx + 1);
+                        try {
+                          const parsed = new URL(uri);
+                          hoster = parsed.hostname.replace("www.", "");
+                        } catch {}
+                        return (
+                          <option key={idx} value={idx}>
+                            {hoster} ({uri.length > 45 ? uri.substring(0, 45) + "..." : uri})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
+                <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={autoExtract}
+                    onChange={(e) => setAutoExtract(e.target.checked)}
+                  />
+                  <span>Auto extract archives and delete after extraction</span>
+                </label>
+
+                {!isDirect && (
+                  <label className="settings-checkbox-label" style={{ userSelect: "none" }}>
+                    <input
+                      type="checkbox"
+                      checked={chooseFiles}
+                      onChange={(e) => setChooseFiles(e.target.checked)}
+                    />
+                    <span>Choose files to download</span>
+                  </label>
+                )}
+              </div>
+            );
+          })()}
 
           {step === "fetching_metadata" && (
             <div className="dl-search-loading" style={{ flexDirection: "column", gap: "var(--space-md)", padding: "var(--space-xl) 0" }}>

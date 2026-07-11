@@ -6,6 +6,68 @@ use tokio::io::AsyncWriteExt;
 use reqwest::header::RANGE;
 use crate::torrent_engine::{TorrentEngine, DownloadStatus};
 
+fn try_next_mirror_or_fail(
+    engine_weak: std::sync::Weak<tokio::sync::RwLock<TorrentEngine>>,
+    id: String,
+    err_msg: String,
+) -> bool {
+    if let Some(engine) = engine_weak.upgrade() {
+        let mut guard = match engine.try_write() {
+            Ok(g) => g,
+            Err(_) => engine.blocking_write(),
+        };
+        let mut transition_info = None;
+        if let Some(item) = guard.downloads_mut().get_mut(&id) {
+            if let Some(uris) = &item.uris {
+                if uris.len() > 1 {
+                    if let Some(current_idx) = uris.iter().position(|u| u == &item.source_uri) {
+                        let next_idx = current_idx + 1;
+                        if next_idx < uris.len() {
+                            let next_url = uris[next_idx].clone();
+                            println!(
+                                "[DirectDownloader] Download failed on mirror {} ({}). Trying next mirror {} ({})...",
+                                current_idx + 1,
+                                item.source_uri,
+                                next_idx + 1,
+                                next_url
+                            );
+                            item.source_uri = next_url.clone();
+                            transition_info = Some((next_url, item.save_path.clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((next_url, save_path)) = transition_info {
+            let bytes_counter = Arc::new(AtomicU64::new(0));
+            guard.direct_counters.insert(id.clone(), Arc::clone(&bytes_counter));
+            guard.mark_dirty();
+            guard.emit_progress_force();
+            
+            let engine_weak_clone = engine_weak.clone();
+            let id_clone = id.clone();
+            tokio::spawn(async move {
+                run_direct_download(
+                    id_clone,
+                    next_url,
+                    save_path,
+                    bytes_counter,
+                    engine_weak_clone,
+                ).await;
+            });
+            return true;
+        }
+
+        if let Some(item) = guard.downloads_mut().get_mut(&id) {
+            item.status = DownloadStatus::Error(err_msg);
+        }
+        guard.mark_dirty();
+        guard.emit_progress_force();
+    }
+    false
+}
+
 /// Runs a direct HTTP download in a background task.
 /// Updates the atomic bytes counter, and respects the status changes (pause/cancel).
 pub async fn run_direct_download(
@@ -15,7 +77,10 @@ pub async fn run_direct_download(
     bytes_counter: Arc<AtomicU64>,
     engine_weak: std::sync::Weak<tokio::sync::RwLock<TorrentEngine>>,
 ) {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .unwrap_or_default();
     
     // We download to a temporary file, then rename it upon completion.
     let path = Path::new(&save_path);
@@ -44,21 +109,35 @@ pub async fn run_direct_download(
     let mut resp = match resp_res {
         Ok(r) => {
             if !r.status().is_success() && r.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-                set_status_error(&engine_weak, &id, format!("HTTP Error: {}", r.status())).await;
+                let err = format!("HTTP Error: {}", r.status());
+                try_next_mirror_or_fail(engine_weak.clone(), id.clone(), err);
                 return;
             }
             r
         }
         Err(e) => {
-            set_status_error(&engine_weak, &id, format!("Connection failed: {}", e)).await;
+            let err = format!("Connection failed: {}", e);
+            try_next_mirror_or_fail(engine_weak.clone(), id.clone(), err);
             return;
         }
     };
 
-    // If we started from 0, try to fetch total size.
-    if current_size == 0 {
-        if let Some(content_length) = resp.content_length() {
-            set_total_size(&engine_weak, &id, content_length).await;
+    if let Some(content_length) = resp.content_length() {
+        let total = if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+            current_size + content_length
+        } else {
+            content_length
+        };
+        set_total_size(&engine_weak, &id, total).await;
+    }
+
+    // Ensure parent directories exist
+    if let Some(parent_dir) = temp_path.parent() {
+        if !parent_dir.exists() {
+            if let Err(e) = tokio::fs::create_dir_all(parent_dir).await {
+                set_status_error(&engine_weak, &id, format!("Failed to create parent directories: {}", e)).await;
+                return;
+            }
         }
     }
 
@@ -104,7 +183,8 @@ pub async fn run_direct_download(
             Ok(Some(c)) => c,
             Ok(None) => break, // Download complete!
             Err(e) => {
-                set_status_error(&engine_weak, &id, format!("Download interrupted: {}", e)).await;
+                let err = format!("Download interrupted: {}", e);
+                try_next_mirror_or_fail(engine_weak.clone(), id.clone(), err);
                 return;
             }
         };

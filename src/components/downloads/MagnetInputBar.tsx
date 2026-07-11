@@ -22,7 +22,7 @@ import { Button } from "../ui";
 const URI_PATTERN = /^(magnet:|https?:\/\/)/i;
 
 export default function MagnetInputBar() {
-  const { addDownload, selectSavePath } = useDownloads();
+  const { addDownload, addDirectDownload, selectSavePath } = useDownloads();
   const { showToast } = useToast();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -38,11 +38,29 @@ export default function MagnetInputBar() {
     try {
       const path = await selectSavePath();
       if (!path) {
-        // User cancelled the folder picker — treat as a soft cancel,
-        // don't toast (the picker already shows itself).
         return;
       }
-      await addDownload(trimmed, path, null, "Direct link");
+      
+      const isMagnet = trimmed.startsWith("magnet:");
+      const isTorrentFile = trimmed.endsWith(".torrent") || trimmed.includes(".torrent?");
+      const isDirect = !isMagnet && !isTorrentFile;
+
+      if (isDirect) {
+        let filename = "download.zip";
+        try {
+          const urlObj = new URL(trimmed);
+          const lastSeg = urlObj.pathname.substring(urlObj.pathname.lastIndexOf('/') + 1);
+          if (lastSeg && lastSeg.includes('.')) {
+            filename = lastSeg;
+          }
+        } catch {}
+        
+        const fullPath = `${path}/${filename}`.replace(/\\/g, "/");
+        await addDirectDownload(trimmed, fullPath, null, "Manual Direct Link");
+      } else {
+        await addDownload(trimmed, path, null, "Direct link");
+      }
+
       showToast("Download added", "success");
       setValue("");
     } catch (err) {

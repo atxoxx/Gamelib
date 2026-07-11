@@ -98,6 +98,7 @@ export interface TorrentDownload {
   files: TorrentFile[];
   autoExtract?: boolean;
   extracted?: boolean;
+  uris?: string[];
 }
 
 /**

@@ -818,6 +818,7 @@ pub fn run() {
             torrent_engine::torrent_update_only_files,
             torrent_engine::torrent_start_selected,
             torrent_engine::torrent_set_speed_limits,
+            torrent_engine::torrent_open_folder,
             crackwatch::fetch_crackwatch_status,
             fetch_url,
             rebuild_watcher_index,
@@ -827,7 +828,9 @@ pub fn run() {
             downloader::test_debrid_key,
             downloader::check_debrid_cache,
             downloader::direct_download_start,
-            downloader::debrid_download_start])
+            downloader::debrid_download_start,
+            downloader::direct_download_update_url,
+            downloader::debrid_unrestrict_link])
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).

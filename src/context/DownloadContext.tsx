@@ -74,6 +74,7 @@ interface DownloadContextValue {
     gameId?: string | null,
     sourceName?: string,
     autoExtract?: boolean,
+    uris?: string[],
   ) => Promise<TorrentDownload>;
   addDebridDownload: (
     magnet: string,
@@ -89,6 +90,7 @@ interface DownloadContextValue {
     onlyFiles: number[],
     autoExtract: boolean,
   ) => Promise<void>;
+  updateDirectDownloadUrl: (id: string, url: string) => Promise<void>;
   pauseDownload: (id: string) => Promise<void>;
   resumeDownload: (id: string) => Promise<void>;
   /**
@@ -112,6 +114,7 @@ interface DownloadContextValue {
     disableUpload: boolean,
   ) => Promise<void>;
   updateSelectedFiles: (id: string, onlyFiles: number[]) => Promise<void>;
+  openDownloadFolder: (id: string) => Promise<void>;
 }
 
 const DownloadContext = createContext<DownloadContextValue | null>(null);
@@ -148,12 +151,19 @@ function areDownloadsEqual(a: TorrentDownload[], b: TorrentDownload[]): boolean 
       da.uploadSpeed !== db.uploadSpeed ||
       da.peers !== db.peers ||
       da.seeds !== db.seeds ||
-      da.status.kind !== db.status.kind
+      da.status.kind !== db.status.kind ||
+      da.sourceUri !== db.sourceUri
     ) {
       return false;
     }
     if (da.status.kind === "error" && db.status.kind === "error" && da.status.message !== db.status.message) {
       return false;
+    }
+    if ((da.uris?.length ?? 0) !== (db.uris?.length ?? 0)) return false;
+    if (da.uris && db.uris) {
+      for (let j = 0; j < da.uris.length; j++) {
+        if (da.uris[j] !== db.uris[j]) return false;
+      }
     }
     if ((da.files?.length ?? 0) !== (db.files?.length ?? 0)) return false;
     if (da.files && db.files) {
@@ -302,15 +312,50 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       gameId: string | null = null,
       sourceName = "Direct Download",
       autoExtract = false,
+      uris: string[] = [],
     ): Promise<TorrentDownload> => {
       const id = `dd_${Math.random().toString(36).substring(2, 11)}`;
+      
+      let downloadUrl = url;
+      const debridProvider = localStorage.getItem("gamelib-debrid-provider") || "none";
+      const debridApiKey = localStorage.getItem("gamelib-debrid-apikey") || "";
+      
+      if (debridProvider !== "none" && debridApiKey) {
+        try {
+          downloadUrl = await invoke<string>("debrid_unrestrict_link", {
+            provider: debridProvider,
+            apikey: debridApiKey,
+            url,
+          });
+          console.log("[DownloadContext] Unrestricted link successfully:", downloadUrl);
+        } catch (e) {
+          console.error("[DownloadContext] Failed to unrestrict link via debrid:", e);
+        }
+      }
+
+      let finalSavePath = savePath;
+      if (downloadUrl !== url) {
+        try {
+          const urlObj = new URL(downloadUrl);
+          const lastSeg = urlObj.pathname.substring(urlObj.pathname.lastIndexOf('/') + 1);
+          if (lastSeg && lastSeg.includes('.')) {
+            const dir = savePath.substring(0, savePath.lastIndexOf('/'));
+            const safeFile = lastSeg.replace(/[:*?"<>|\\/]/g, "").trim();
+            finalSavePath = `${dir}/${safeFile}`;
+          }
+        } catch (err) {
+          console.error("Failed to parse unlocked URL filename:", err);
+        }
+      }
+
       const newDownload = await invoke<TorrentDownload>("direct_download_start", {
         id,
-        url,
-        savePath,
+        url: downloadUrl,
+        savePath: finalSavePath,
         gameId,
         sourceName,
         autoExtract,
+        uris,
       });
       setDownloads((prev) => {
         const without = prev.filter((d) => d.id !== newDownload.id);
@@ -354,6 +399,16 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   const startSelectedDownload = useCallback(
     async (id: string, onlyFiles: number[], autoExtract: boolean): Promise<void> => {
       await invoke("torrent_start_selected", { id, onlyFiles, autoExtract });
+    },
+    [],
+  );
+
+  const updateDirectDownloadUrl = useCallback(
+    async (id: string, url: string): Promise<void> => {
+      await invoke("direct_download_update_url", { id, newUrl: url });
+      setDownloads((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, sourceUri: url } : d))
+      );
     },
     [],
   );
@@ -415,6 +470,10 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const openDownloadFolder = useCallback(async (id: string) => {
+    await invoke("torrent_open_folder", { id });
+  }, []);
+
   // ── Derived state ──────────────────────────────────────────────────
   const sorted = useMemo(() => [...downloads].sort(sortDownloads), [downloads]);
   const activeDownloads = useMemo(
@@ -437,6 +496,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       addDirectDownload,
       addDebridDownload,
       startSelectedDownload,
+      updateDirectDownloadUrl,
       pauseDownload,
       resumeDownload,
       pauseAll,
@@ -446,6 +506,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       refresh,
       updateSpeedLimits,
       updateSelectedFiles,
+      openDownloadFolder,
     }),
     [
       sorted,
@@ -456,6 +517,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       addDirectDownload,
       addDebridDownload,
       startSelectedDownload,
+      updateDirectDownloadUrl,
       pauseDownload,
       resumeDownload,
       pauseAll,
@@ -465,6 +527,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       refresh,
       updateSpeedLimits,
       updateSelectedFiles,
+      openDownloadFolder,
     ],
   );
 

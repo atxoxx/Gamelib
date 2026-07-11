@@ -347,6 +347,36 @@ impl AllDebridClient {
             error_message,
         })
     }
+
+    pub async fn unrestrict_link(apikey: &str, url: &str) -> Result<String, String> {
+        let client = reqwest::Client::new();
+        let resp = ad_request(
+            &client,
+            Method::POST,
+            "/v4/link/unlock",
+            apikey,
+            Some(&[("link", url)]),
+        )
+        .await?;
+        
+        let status = resp.status();
+        let body: AllDebridResponse<AllDebridUnlockData> = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse AllDebrid unlock response: {}", e))?;
+
+        if !status.is_success() || body.status != "success" {
+            return Err(ad_err(body));
+        }
+
+        let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
+        Ok(data.link)
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct AllDebridUnlockData {
+    link: String,
 }
 
 // ─── TorBox Client ───────────────────────────────────────────────────────────
@@ -562,4 +592,36 @@ impl TorBoxClient {
         }
         "".to_string()
     }
+
+    pub async fn unrestrict_link(apikey: &str, url: &str) -> Result<String, String> {
+        let client = reqwest::Client::new();
+        let payload = serde_json::json!({
+            "link": url,
+        });
+
+        let resp = client
+            .post("https://api.torbox.app/v1/api/unrestrict/link")
+            .header("Authorization", format!("Bearer {}", apikey))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        let body: TorBoxResponse<TorBoxUnlockData> = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse TorBox unlock response: {}", e))?;
+
+        if !body.success {
+            return Err(body.detail.unwrap_or_else(|| "Failed to unlock link".to_string()));
+        }
+
+        let data = body.data.ok_or("Empty response data")?;
+        Ok(data.link)
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct TorBoxUnlockData {
+    link: String,
 }

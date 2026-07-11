@@ -25,6 +25,7 @@ import {
   ChevronIcon,
   PeersIcon,
   SeedsIcon,
+  FolderIcon,
 } from "./DownloadIcons";
 import {
   formatBytesPerSecond,
@@ -60,7 +61,7 @@ const DownloadRow = React.memo(({
   onDeleteFiles,
 }: DownloadRowProps) => {
   const { unit } = useSizeUnit();
-  const { updateSelectedFiles } = useDownloads();
+  const { updateSelectedFiles, updateDirectDownloadUrl, openDownloadFolder } = useDownloads();
   const { showToast } = useToast();
   const [expanded, setExpanded] = useState(false);
 
@@ -121,6 +122,12 @@ const DownloadRow = React.memo(({
           <div className="dl-row-name-row">
             <span className="dl-row-name" title={download.name}>
               {download.name}
+              {download.id.startsWith("dd_") && (
+                <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(124, 102, 255, 0.15)", color: "var(--color-accent)", borderRadius: "3px", fontWeight: "bold" }}>DIRECT</span>
+              )}
+              {download.id.startsWith("db_") && (
+                <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(0, 240, 255, 0.15)", color: "#00f0ff", borderRadius: "3px", fontWeight: "bold" }}>DEBRID</span>
+              )}
             </span>
             <span className="dl-row-source" title={`Source: ${download.sourceName}`}>
               {download.sourceName}
@@ -208,6 +215,62 @@ const DownloadRow = React.memo(({
         </div>
 
         <div className="dl-row-actions">
+          {download.uris && download.uris.length > 1 && (
+            <div className="dl-row-mirror-select-wrapper" style={{ position: "relative", display: "inline-flex", alignItems: "center", marginRight: "8px" }}>
+              <select
+                value={download.sourceUri}
+                onChange={async (e) => {
+                  try {
+                    await updateDirectDownloadUrl(download.id, e.target.value);
+                    showToast("Download mirror updated successfully", "success");
+                  } catch (err) {
+                    showToast(`Failed to update mirror: ${err}`, "error");
+                  }
+                }}
+                title="Switch mirror hoster"
+                style={{
+                  padding: "4px 24px 4px 8px",
+                  background: "var(--color-bg-secondary)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "var(--radius-sm)",
+                  color: "var(--color-text-secondary)",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  appearance: "none",
+                  fontWeight: "var(--font-weight-medium)",
+                  outline: "none",
+                }}
+              >
+                {download.uris.map((uri, idx) => {
+                  let hoster = "Mirror " + (idx + 1);
+                  try {
+                    const parsed = new URL(uri);
+                    hoster = parsed.hostname.replace("www.", "");
+                  } catch {}
+                  return (
+                    <option key={idx} value={uri}>
+                      {hoster}
+                    </option>
+                  );
+                })}
+              </select>
+              <span style={{ position: "absolute", right: "8px", pointerEvents: "none", fontSize: "9px", opacity: 0.6 }} aria-hidden>▼</span>
+            </div>
+          )}
+          <button
+            className="dl-row-btn"
+            onClick={async () => {
+              try {
+                await openDownloadFolder(download.id);
+              } catch (err) {
+                showToast(`Failed to open folder: ${err}`, "error");
+              }
+            }}
+            title="Open folder"
+            aria-label="Open download folder"
+          >
+            <FolderIcon />
+          </button>
           {download.files && download.files.length > 0 && (
             <button
               className={`dl-row-btn ${expanded ? "active" : ""}`}
@@ -319,7 +382,8 @@ const DownloadRow = React.memo(({
     a.uploadSpeed !== b.uploadSpeed ||
     a.peers !== b.peers ||
     a.seeds !== b.seeds ||
-    a.status.kind !== b.status.kind
+    a.status.kind !== b.status.kind ||
+    a.sourceUri !== b.sourceUri
   ) {
     return false;
   }
@@ -328,6 +392,13 @@ const DownloadRow = React.memo(({
     return false;
   }
   
+  if ((a.uris?.length ?? 0) !== (b.uris?.length ?? 0)) return false;
+  if (a.uris && b.uris) {
+    for (let j = 0; j < a.uris.length; j++) {
+      if (a.uris[j] !== b.uris[j]) return false;
+    }
+  }
+
   if ((a.files?.length ?? 0) !== (b.files?.length ?? 0)) return false;
   if (a.files && b.files) {
     for (let j = 0; j < a.files.length; j++) {
