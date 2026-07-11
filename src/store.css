@@ -771,3 +771,464 @@
     box-shadow: 0 0 6px var(--color-success);
   }
 }
+
+/* ===========================================================================
+   Steam player-count click-to-expand popover
+
+   - .steam-player-count--clickable : the badge gains cursor:pointer + a
+                                        subtle hover lift so the user
+                                        knows it's tappable
+   - .steam-stats-popover           : the portal-mounted card. Anchored
+                                        absolutely to the viewport (not
+                                        the banner) so the banner's
+                                        overflow:hidden never clips it
+   - header / body / footer sub-blocks compose the layout
+   - .steam-stats-popover-tone-{good,mid,bad,none} tints the review bar
+                                        and badge by Steam's score bucket
+
+   All colors are theme-aware (CSS variables) so the popover reads
+   cleanly in both light and dark themes.
+   ============================================================================ */
+
+.steam-player-count--clickable {
+  cursor: pointer;
+  transition: transform var(--transition-fast),
+              box-shadow var(--transition-fast),
+              border-color var(--transition-fast);
+}
+
+.steam-player-count--clickable:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--color-success) 50%, var(--color-border));
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 0 14px color-mix(in srgb, var(--color-success) 28%, transparent);
+}
+
+.steam-player-count--clickable:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.steam-player-count--clickable:active {
+  transform: translateY(0);
+}
+
+.steam-stats-popover {
+  position: fixed;
+  z-index: 10000;
+  width: var(--steam-stats-popover-width, 320px);
+  max-width: calc(100vw - 24px);
+  background: var(--color-bg-elevated, color-mix(in srgb, var(--color-bg-primary) 92%, transparent));
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 18px 48px -12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 8%, transparent),
+    0 0 24px color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: steam-stats-popover-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.steam-stats-popover.from-left {
+  transform-origin: top right;
+}
+.steam-stats-popover.from-right {
+  transform-origin: top left;
+}
+
+@keyframes steam-stats-popover-in {
+  0%   { opacity: 0; transform: scale(0.94) translateY(-4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .steam-stats-popover {
+    animation: none;
+  }
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+
+.steam-stats-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+
+.steam-stats-popover-header-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.steam-stats-popover-header-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent);
+}
+
+.steam-stats-popover-header-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.steam-stats-popover-header-title {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.steam-stats-popover-header-subtitle {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: var(--font-weight-medium);
+}
+
+.steam-stats-popover-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.steam-stats-popover-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.steam-stats-popover-close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Body ─────────────────────────────────────────────────────── */
+
+.steam-stats-popover-body {
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 12px;
+}
+
+/* ── Current players (headline) ──────────────────────────────── */
+
+.steam-stats-popover-stat--current {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 8px 0 4px;
+}
+
+.steam-stats-popover-stat-value {
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg,
+    var(--color-text-primary) 0%,
+    color-mix(in srgb, var(--color-success) 65%, var(--color-text-primary)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.steam-stats-popover-stat-label {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── Divider ─────────────────────────────────────────────────── */
+
+.steam-stats-popover-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0;
+}
+
+/* ── Sections (Reviews) ──────────────────────────────────────── */
+
+.steam-stats-popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.steam-stats-popover-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.steam-stats-popover-section-title {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.steam-stats-popover-section-badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.2px;
+}
+
+.steam-stats-popover-tone-good {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, transparent);
+}
+
+.steam-stats-popover-tone-mid {
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  color: #f59e0b;
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+}
+
+.steam-stats-popover-tone-bad {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #ef4444;
+  border: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
+}
+
+.steam-stats-popover-tone-none {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.steam-stats-popover-section-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.steam-stats-popover-section-error {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Reviews bar ─────────────────────────────────────────────── */
+
+.steam-stats-popover-reviews-bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 80%, transparent);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.steam-stats-popover-reviews-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--radius-full);
+  transition: width 350ms cubic-bezier(0.16, 1, 0.3, 1),
+              background-color var(--transition-fast);
+}
+
+.steam-stats-popover-tone-good .steam-stats-popover-reviews-bar-fill {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--color-success) 70%, var(--color-accent)) 0%,
+    var(--color-success) 100%);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 50%, transparent);
+}
+
+.steam-stats-popover-tone-mid .steam-stats-popover-reviews-bar-fill {
+  background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 0 8px color-mix(in srgb, #f59e0b 50%, transparent);
+}
+
+.steam-stats-popover-tone-bad .steam-stats-popover-reviews-bar-fill {
+  background: linear-gradient(90deg, #f87171 0%, #ef4444 100%);
+  box-shadow: 0 0 8px color-mix(in srgb, #ef4444 50%, transparent);
+}
+
+.steam-stats-popover-tone-none .steam-stats-popover-reviews-bar-fill {
+  background: var(--color-text-muted);
+  box-shadow: none;
+}
+
+.steam-stats-popover-reviews-count {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.steam-stats-popover-reviews-count strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.steam-stats-popover-reviews-count-sep {
+  margin: 0 5px;
+  opacity: 0.5;
+}
+
+/* ── Details grid (2x2 dev/publisher/release/price) ──────────── */
+
+.steam-stats-popover-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+
+.steam-stats-popover-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.steam-stats-popover-grid-label {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.steam-stats-popover-grid-value {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Whole-fetch failure ─────────────────────────────────────── */
+
+.steam-stats-popover-fetch-error {
+  font-size: 11px;
+  color: color-mix(in srgb, #ef4444 85%, var(--color-text-primary));
+  text-align: center;
+  padding: 8px 0 0;
+  border-top: 1px solid color-mix(in srgb, #ef4444 25%, transparent);
+  margin-top: 4px;
+}
+
+/* ── Skeleton placeholders ───────────────────────────────────── */
+
+.steam-stats-popover-skeleton-pill {
+  width: 70px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg,
+    var(--color-bg-tertiary) 0%,
+    color-mix(in srgb, var(--color-text-muted) 18%, var(--color-bg-tertiary)) 50%,
+    var(--color-bg-tertiary) 100%);
+  background-size: 200% 100%;
+  animation: steam-stats-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.steam-stats-popover-skeleton-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  animation: steam-stats-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.steam-stats-popover-skeleton-line {
+  display: block;
+  width: 100%;
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  animation: steam-stats-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.steam-stats-popover-skeleton-line.short {
+  width: 60%;
+}
+
+@keyframes steam-stats-skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
+
+@keyframes steam-stats-skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+
+.steam-stats-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-primary) 50%, transparent);
+}
+
+.steam-stats-popover-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  text-decoration: none;
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.steam-stats-popover-footer-link:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accent-hover);
+}
+
+.steam-stats-popover-footer-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}

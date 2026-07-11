@@ -16,6 +16,7 @@ import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
+import PlayerCountSparklineCard from "../components/PlayerCountSparklineCard";
 import CrackWatchCard from "../components/CrackWatchCard";
 import AchievementsTab from "../components/AchievementsTab";
 import SteamPlayerCount from "../components/SteamPlayerCount";
@@ -3247,6 +3248,10 @@ export function GameActivityTab({ game }: { game: Game }) {
 
   if (sessions.length === 0) {
     return (
+    <>
+    {/* Live Steam concurrent-player count history (24h sparkline).
+        Sourced from PlayerCountHistoryCache on the Rust side. */}
+    <PlayerCountSparklineCard appId={game.steamAppId} />
       <div className="game-activity-empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="12" cy="12" r="10" />
@@ -3254,6 +3259,7 @@ export function GameActivityTab({ game }: { game: Game }) {
         </svg>
         <p>No sessions recorded for this game. Launch the game to start tracking activity.</p>
       </div>
+    </>
     );
   }
 

@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant, SystemTime};
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -817,11 +818,7 @@ async fn get_steam_player_count(
         app_id
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .user_agent("GameLib/0.1 (player-count)")
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let client = shared_steam_client();
 
     let resp = client
         .get(&url)
@@ -871,11 +868,693 @@ async fn get_steam_player_count(
         }
     }
 
+    // Record the fresh fetch to the history ring buffer. Only valid
+    // (`result == 1`, `count > 0`) readings are recorded: a
+    // "no players right now" response (count = 0) would just clutter
+    // the chart with a flat zero line on every poll, and a "Steam
+    // doesn't track this appid" response is a permanent state we
+    // don't want to re-record forever.
+    //
+    // The history cache is a separate `tauri::State` from the live
+    // count cache (split to avoid lock contention: the activity-tab
+    // sparkline polls every 60s even when the badge isn't visible,
+    // so the history read path is hotter than the live cache). Two
+    // independent `app.state()` calls return independent references
+    // — both shared (immutable) borrows of the AppHandle, so the
+    // borrow checker is happy.
+    if result_ok {
+        if let Some(count) = player_count {
+            if count > 0 {
+                let history: tauri::State<'_, PlayerCountHistoryCache> = app.state();
+                record_player_count_sample(&history, app_id, count);
+            }
+        }
+    }
+
     if result_ok {
         Ok(player_count)
     } else {
         Ok(None)
     }
+}
+
+// === Player Count History (ring buffer for activity-tab sparkline) =========
+//
+// Per-appid ring buffer of successful player-count fetches. Powers the
+// activity-tab sparkline showing the last 24h of concurrent players.
+//
+// Each successful `get_steam_player_count` (post-cache-miss fetch) records
+// a sample. Dedupe is by 5s: if the latest entry is within 5s of now, we
+// OVERWRITE its count rather than appending. This handles the multi-banner
+// case where the Store hero, Store detail, and Library detail all fire
+// `get_steam_player_count` within milliseconds of each other — without
+// dedupe, three identical samples would land in the buffer per poll.
+//
+// Cap: 1440 entries/appid (24h × 60s polling). Eviction is FIFO via
+// VecDeque::push_back + pop_front when the cap is hit. We deliberately
+// trust the cap and don't run a separate age-based eviction pass: if the
+// user has been away long enough that 1440 entries have rotated through,
+// the oldest are stale and dropping them silently is the right behavior.
+//
+// All in-memory. No disk persistence — the history is ephemeral by
+// design (a fresh install starts a new history; the OS restart is the
+// cleanest reset point for a UI like this).
+//
+// Storage: `VecDeque<(SystemTime, u32)>`. `SystemTime` gives us the
+// wall-clock timestamp directly, which the frontend renders against
+// the user's clock. We don't use `Instant` here because the response
+// to the frontend wants wall-clock time (ms-since-epoch) and `Instant`
+// has no defined epoch.
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PlayerCountPoint {
+    /// Unix-millisecond timestamp of the sample. Sourced from
+    /// `SystemTime::UNIX_EPOCH + duration` so the value is directly
+    /// renderable in the frontend without conversion.
+    timestamp: u64,
+    count: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PlayerCountHistory {
+    app_id: u32,
+    /// Time-series points within the requested window, oldest first.
+    /// Backend filters to `max_age_ms` before returning so the
+    /// frontend never has to do its own age check.
+    points: Vec<PlayerCountPoint>,
+    /// Most recent reading, or `None` if the buffer is empty.
+    current: Option<u32>,
+    /// Maximum count observed within the window, or `None` if empty.
+    peak: Option<u32>,
+    /// Arithmetic mean of the window, or `None` if empty.
+    average: Option<f64>,
+    /// Number of points in the returned window. Lets the frontend
+    /// distinguish "no data ever" from "very few samples" without
+    /// re-counting the array.
+    sample_count: u32,
+    /// Wall-clock start of the returned window (ms). 0 when empty.
+    window_start_ms: u64,
+    /// Wall-clock end of the returned window (ms). 0 when empty.
+    window_end_ms: u64,
+}
+
+struct PlayerCountHistoryCache {
+    /// appid -> ring buffer of (timestamp, count) samples.
+    /// Bounded at `PLAYER_COUNT_HISTORY_CAP` per appid via FIFO eviction
+    /// inside `record_player_count_sample`. The map itself is
+    /// unbounded in `len()` but bounded by how many distinct Steam
+    /// appids the user actually opens (single-digit hundreds at worst).
+    buffers: std::sync::Mutex<HashMap<u32, VecDeque<(SystemTime, u32)>>>,
+}
+
+impl Default for PlayerCountHistoryCache {
+    fn default() -> Self {
+        Self {
+            buffers: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+const PLAYER_COUNT_HISTORY_CAP: usize = 1_440; // 24h × 60s polling
+const PLAYER_COUNT_HISTORY_DEDUPE_MS: u64 = 5_000;
+
+/// Append (or overwrite) one sample to a per-appid ring buffer.
+///
+/// Fire-and-forget: the caller never sees the result. We swallow
+/// mutex-poisoning errors so a poisoned lock can't crash the badge
+/// fetch path — a missed sample is harmless (the next 60s tick will
+/// record a fresh one).
+///
+/// Dedupe rule: if the latest existing entry is within
+/// `PLAYER_COUNT_HISTORY_DEDUPE_MS` of `now`, we OVERWRITE that entry's
+/// count in place (pop_back + push_back) rather than appending. This
+/// collapses the multi-banner case (3 banners firing within
+/// milliseconds) to a single sample, keeping the chart's x-axis
+/// resolution at ~1 sample per polling tick rather than 3× that.
+fn record_player_count_sample(
+    cache: &PlayerCountHistoryCache,
+    app_id: u32,
+    count: u32,
+) {
+    let now = SystemTime::now();
+    let mut buffers = match cache.buffers.lock() {
+        Ok(b) => b,
+        Err(_) => return, // poisoned; the next tick will recover
+    };
+    let buffer = buffers
+        .entry(app_id)
+        .or_insert_with(|| VecDeque::with_capacity(PLAYER_COUNT_HISTORY_CAP));
+
+    // Dedupe check: if the last sample landed within the dedupe window,
+    // replace it rather than appending. Crucial for the multi-banner
+    // case where the Store hero, Store detail, and Library detail all
+    // share a single 60s polling tick.
+    if let Some((last_t, _last_count)) = buffer.back() {
+        if let Ok(elapsed) = now.duration_since(*last_t) {
+            if (elapsed.as_millis() as u64) <= PLAYER_COUNT_HISTORY_DEDUPE_MS {
+                buffer.pop_back();
+                buffer.push_back((now, count));
+                return;
+            }
+        }
+    }
+
+    // Cap-based eviction: when the buffer is at its limit, drop the
+    // oldest entry to make room. Trusting the cap means we don't need
+    // a separate age-based eviction pass — a steady 60s polling rate
+    // keeps the buffer at exactly 1440 entries, and any gap in polling
+    // (user away, network down) just means the oldest entry is older
+    // than 24h, which the frontend can't render anyway.
+    if buffer.len() >= PLAYER_COUNT_HISTORY_CAP {
+        buffer.pop_front();
+    }
+    buffer.push_back((now, count));
+}
+
+/// Read the per-appid history ring buffer and return a windowed slice
+/// plus server-computed aggregates.
+///
+/// `max_age_ms` defaults to 24h. The backend filters points to the
+/// window and computes `current` / `peak` / `average` so the frontend
+/// can render a complete summary card in one IPC round-trip. The
+/// points array is always oldest-first so the sparkline renders in
+/// chronological order without re-sorting.
+#[tauri::command]
+async fn get_player_count_history(
+    app: tauri::AppHandle,
+    app_id: u32,
+    max_age_ms: Option<u64>,
+) -> Result<PlayerCountHistory, String> {
+    // Default 24h. We accept any positive value; the cap is the
+    // ring buffer itself (1440 entries ≈ 24h at 60s polling), so
+    // asking for more than that is harmless — we'll just return
+    // everything we have.
+    let max_age = Duration::from_millis(max_age_ms.unwrap_or(24 * 60 * 60 * 1_000));
+    let cache: tauri::State<'_, PlayerCountHistoryCache> = app.state();
+
+    let buffers = cache.buffers.lock().map_err(|e| e.to_string())?;
+    let buffer = match buffers.get(&app_id) {
+        Some(b) if !b.is_empty() => b,
+        _ => {
+            return Ok(PlayerCountHistory {
+                app_id,
+                points: Vec::new(),
+                current: None,
+                peak: None,
+                average: None,
+                sample_count: 0,
+                window_start_ms: 0,
+                window_end_ms: 0,
+            });
+        }
+    };
+
+    let now = SystemTime::now();
+    // `checked_sub` returns `None` if `max_age` would push us before
+    // the UNIX_EPOCH (i.e. the caller asked for an absurdly large
+    // window). Fall back to EPOCH so we return everything rather than
+    // failing the command.
+    let cutoff = now
+        .checked_sub(max_age)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+
+    // Single pass over the (already-evicted) buffer: filter to the
+    // window, convert SystemTime -> unix-ms, and accumulate peak/total
+    // for the average. Done in one loop so we don't pay three O(N)
+    // passes.
+    let mut points: Vec<PlayerCountPoint> = Vec::new();
+    let mut peak: u32 = 0;
+    let mut total: u64 = 0;
+    for (t, count) in buffer.iter() {
+        if *t < cutoff {
+            continue;
+        }
+        // `duration_since(UNIX_EPOCH)` is non-negative by definition
+        // for `SystemTime` values that came from our own `now()` calls,
+        // so this `unwrap_or(0)` only fires on the (impossible) case
+        // where a sample was timestamped before 1970.
+        let ms = t
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        points.push(PlayerCountPoint {
+            timestamp: ms,
+            count: *count,
+        });
+        if *count > peak {
+            peak = *count;
+        }
+        total += *count as u64;
+    }
+
+    let sample_count = points.len() as u32;
+    if sample_count == 0 {
+        return Ok(PlayerCountHistory {
+            app_id,
+            points: Vec::new(),
+            current: None,
+            peak: None,
+            average: None,
+            sample_count: 0,
+            window_start_ms: 0,
+            window_end_ms: 0,
+        });
+    }
+
+    let first = points.first().unwrap();
+    let last = points.last().unwrap();
+    Ok(PlayerCountHistory {
+        app_id,
+        sample_count,
+        peak: Some(peak),
+        average: Some(total as f64 / sample_count as f64),
+        current: Some(last.count),
+        window_start_ms: first.timestamp,
+        window_end_ms: last.timestamp,
+        points,
+    })
+}
+
+// === Steam Game Stats (popover payload) =====================================
+//
+// The player-count popover (click the badge to expand) needs a small bundle
+// of related stats: developer, publisher, release date, price, and recent
+// review breakdown. We expose all of them as a single Tauri command so the
+// frontend pays one IPC round-trip per open and we can fan out the two HTTP
+// fetches (`appdetails` + `appreviews`) in parallel from Rust.
+//
+// Caching strategy
+// ────────────────
+// Each section has its own TTL keyed by appid. Static-looking fields
+// (dev / publisher / release date / genres) almost never change, so we
+// cache appdetails for 24h. Reviews change slowly, so 1h. Errors get a
+// short negative cache (5 min) to stop a flapping endpoint from
+// hammering Steam while a transient issue resolves itself.
+//
+// All caches are `std::sync::Mutex<HashMap<…>>` — the critical sections
+// are short (HashMap reads/writes + cloning a small payload) and never
+// held across an `.await`, so we don't need the async-aware mutex.
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SteamGameDetails {
+    name: String,
+    developer: Option<String>,
+    publisher: Option<String>,
+    release_date: Option<String>,
+    is_free: bool,
+    price_cents: Option<u32>,
+    currency: Option<String>,
+    genres: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct SteamGameReviews {
+    total_positive: u32,
+    total_negative: u32,
+    total_reviews: u32,
+    score: Option<u8>,
+    score_desc: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct SteamGameStats {
+    app_id: u32,
+    details: Option<SteamGameDetails>,
+    reviews: Option<SteamGameReviews>,
+    /// Per-section error message so the frontend can render a clean
+    /// "—" in place of the failed field rather than blanking the whole
+    /// popover. The field is `None` on success or when the request
+    /// returned `success: false` (which we treat as "no data", not as
+    /// an error worth surfacing).
+    details_error: Option<String>,
+    reviews_error: Option<String>,
+}
+
+struct SteamGameStatsCache {
+    details: std::sync::Mutex<HashMap<u32, (Option<SteamGameDetails>, Instant)>>,
+    reviews: std::sync::Mutex<HashMap<u32, (Option<SteamGameReviews>, Instant)>>,
+    details_neg: std::sync::Mutex<HashMap<u32, Instant>>,
+    reviews_neg: std::sync::Mutex<HashMap<u32, Instant>>,
+}
+
+impl Default for SteamGameStatsCache {
+    fn default() -> Self {
+        Self {
+            details: std::sync::Mutex::new(HashMap::new()),
+            reviews: std::sync::Mutex::new(HashMap::new()),
+            details_neg: std::sync::Mutex::new(HashMap::new()),
+            reviews_neg: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+const STEAM_DETAILS_TTL: Duration = Duration::from_secs(86_400); // 24h
+const STEAM_REVIEWS_TTL: Duration = Duration::from_secs(3_600); //  1h
+const STEAM_NEG_TTL: Duration = Duration::from_secs(300); //  5 min
+
+/// Shared HTTP client for every Steam API call (`get_steam_player_count`,
+/// the appdetails/reviews stats helpers, and any future endpoint).
+///
+/// Building a `reqwest::Client` is expensive — TLS config + connection
+/// pool init runs every time and adds 50–200ms cold. The pre-existing
+/// `get_steam_player_count` and the new stats helpers were each
+/// rebuilding a fresh client per call (and `get_steam_game_stats` did
+/// it twice via `tokio::join!`), so a single popover open could
+/// rebuild up to 3 clients in a frame. `OnceLock` gives us zero-cost
+/// lazy init: the client is built on the first call, then every
+/// subsequent caller gets the same pooled client for free.
+///
+/// `OnceLock::get_or_init` takes a closure that must be infallible
+/// on retry; the only realistic failure for `Client::builder().timeout
+/// (...).user_agent(...).build()` is "the system is so broken we
+/// can't even configure TLS", in which case panicking is correct
+/// (the rest of the app can't function either).
+fn shared_steam_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("GameLib/0.1 (steam-api)")
+            .build()
+            .expect("steam HTTP client builder is infallible with these options")
+    })
+}
+
+/// Internal: appdetails fetch + cache + parse. Stays private to this
+/// module — the public surface is `get_steam_game_stats`, which
+/// orchestrates the parallel fetch.
+async fn fetch_steam_game_details_impl(
+    cache: &SteamGameStatsCache,
+    app_id: u32,
+) -> Result<Option<SteamGameDetails>, String> {
+    // ── 1. Positive cache ─────────────────────────────────────────────
+    {
+        let map = cache.details.lock().map_err(|e| e.to_string())?;
+        if let Some((payload, fetched_at)) = map.get(&app_id) {
+            if fetched_at.elapsed() < STEAM_DETAILS_TTL {
+                return Ok(payload.clone());
+            }
+        }
+    }
+
+    // ── 2. Negative cache (recent transport error → bail early) ─────
+    {
+        let neg = cache.details_neg.lock().map_err(|e| e.to_string())?;
+        if let Some(ts) = neg.get(&app_id) {
+            if ts.elapsed() < STEAM_NEG_TTL {
+                return Err("Recent appdetails fetch failed; backed off".to_string());
+            }
+        }
+    }
+
+    // ── 3. Fetch from store.steampowered.com/api/appdetails ──────────
+    // Response shape: `{ "<appid>": { "success": bool, "data": {...} } }`.
+    // On `success: false` we treat it as "Steam has no data for this
+    // appid" and surface a clean error (no negative cache, since
+    // success:false for an untracked appid is permanent).
+    let url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={}&cc=us&l=en",
+        app_id
+    );
+    let client = shared_steam_client();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("appdetails request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let err = format!("appdetails returned HTTP {}", resp.status());
+        let mut neg = cache.details_neg.lock().map_err(|e| e.to_string())?;
+        neg.insert(app_id, Instant::now());
+        return Err(err);
+    }
+
+    // Steam returns the appid as a string key (e.g. "730" not 730).
+    // Pull the entry out by its stringified id, since we can't index
+    // the HashMap with a numeric key.
+    #[derive(Deserialize)]
+    struct AppDetailsWrapper {
+        success: bool,
+        #[serde(default)]
+        data: Option<AppDetailsData>,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct AppDetailsData {
+        name: String,
+        developers: Vec<String>,
+        publishers: Vec<String>,
+        release_date: Option<AppReleaseDate>,
+        is_free: bool,
+        price_overview: Option<AppPrice>,
+        genres: Vec<AppGenre>,
+    }
+    #[derive(Deserialize)]
+    struct AppReleaseDate {
+        date: String,
+        #[serde(default)]
+        coming_soon: bool,
+    }
+    #[derive(Deserialize)]
+    struct AppPrice {
+        currency: String,
+        /// `final` is a Rust reserved keyword; rename it on the way in.
+        #[serde(default, rename = "final")]
+        final_cents: u32,
+    }
+    #[derive(Deserialize)]
+    struct AppGenre {
+        description: String,
+    }
+
+    let mut map: HashMap<String, AppDetailsWrapper> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse appdetails JSON: {}", e))?;
+
+    let wrapper = map
+        .remove(&app_id.to_string())
+        .ok_or_else(|| format!("appdetails missing key for appid {}", app_id))?;
+
+    if !wrapper.success {
+        // `success: false` means Steam has no store page for this
+        // appid (unlisted tools, demos, soundtracks, removed games,
+        // unreleased test apps). This is a legitimate "no metadata"
+        // answer, not a transport failure — surface it as `Ok(None)`
+        // so the popover renders the empty-state message instead of
+        // flagging the title as broken. We also do NOT write a
+        // negative-cache entry, since the answer is permanent for
+        // this appid.
+        return Ok(None);
+    }
+
+    let data = wrapper.data.ok_or_else(|| {
+        // success=true but no data block — treat as no data.
+        "appdetails returned no data block".to_string()
+    })?;
+
+    // Skip "coming soon" entries with no fixed date so the popover
+    // doesn't display an empty `Release date: ""` row.
+    let release_date = data
+        .release_date
+        .as_ref()
+        .filter(|r| !r.date.trim().is_empty())
+        .map(|r| r.date.clone());
+
+    let price_cents = data
+        .price_overview
+        .as_ref()
+        .map(|p| p.final_cents)
+        .filter(|c| *c > 0);
+    let currency = data
+        .price_overview
+        .as_ref()
+        .map(|p| p.currency.clone());
+
+    let details = SteamGameDetails {
+        name: data.name,
+        developer: data.developers.into_iter().next(),
+        publisher: data.publishers.into_iter().next(),
+        release_date,
+        is_free: data.is_free,
+        price_cents,
+        currency,
+        genres: data.genres.into_iter().map(|g| g.description).collect(),
+    };
+
+    // ── 4. Cache positive ─────────────────────────────────────────────
+    {
+        let mut map = cache.details.lock().map_err(|e| e.to_string())?;
+        map.insert(app_id, (Some(details.clone()), Instant::now()));
+    }
+
+    Ok(Some(details))
+}
+
+async fn fetch_steam_game_reviews_impl(
+    cache: &SteamGameStatsCache,
+    app_id: u32,
+) -> Result<Option<SteamGameReviews>, String> {
+    // ── 1. Positive cache ─────────────────────────────────────────────
+    {
+        let map = cache.reviews.lock().map_err(|e| e.to_string())?;
+        if let Some((payload, fetched_at)) = map.get(&app_id) {
+            if fetched_at.elapsed() < STEAM_REVIEWS_TTL {
+                return Ok(payload.clone());
+            }
+        }
+    }
+
+    // ── 2. Negative cache ─────────────────────────────────────────────
+    {
+        let neg = cache.reviews_neg.lock().map_err(|e| e.to_string())?;
+        if let Some(ts) = neg.get(&app_id) {
+            if ts.elapsed() < STEAM_NEG_TTL {
+                return Err("Recent appreviews fetch failed; backed off".to_string());
+            }
+        }
+    }
+
+    // ── 3. Fetch from store.steampowered.com/appreviews ──────────────
+    // `num_per_page=0` skips the heavy `reviews[]` array — we only
+    // want the aggregate counts in `query_summary`. This makes the
+    // response dramatically smaller for popular games (e.g. CS2 has
+    // 1M+ reviews; the per-review list would be a multi-MB payload
+    // for nothing).
+    let url = format!(
+        "https://store.steampowered.com/appreviews/{}?json=1&filter=all&language=all&num_per_page=0",
+        app_id
+    );
+    let client = shared_steam_client();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("appreviews request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let err = format!("appreviews returned HTTP {}", resp.status());
+        let mut neg = cache.reviews_neg.lock().map_err(|e| e.to_string())?;
+        neg.insert(app_id, Instant::now());
+        return Err(err);
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ReviewsQuerySummary {
+        num_reviews: u32,
+        review_score: u8,
+        review_score_desc: String,
+        total_positive: u32,
+        total_negative: u32,
+        total_reviews: u32,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ReviewsResponse {
+        success: u8,
+        query_summary: Option<ReviewsQuerySummary>,
+    }
+
+    let payload: ReviewsResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse appreviews JSON: {}", e))?;
+
+    if payload.success != 1 {
+        // Steam returns `success: 2` (or higher) when the appid has
+        // no reviews page — same "legitimate no data" case as
+        // appdetails' `success: false`. Map it to `Ok(None)` so the
+        // popover renders the empty-state message instead of
+        // flagging the title as broken. No negative-cache write:
+        // the answer is permanent for this appid.
+        return Ok(None);
+    }
+
+    let summary = payload
+        .query_summary
+        .ok_or_else(|| "appreviews returned no query_summary".to_string())?;
+
+    // An empty `total_reviews` means Steam has no reviews at all for
+    // this title — represent that as `Some(empty)` so the popover
+    // shows "No reviews" rather than the generic "—".
+    let score_desc = if summary.review_score_desc.trim().is_empty() {
+        None
+    } else {
+        Some(summary.review_score_desc)
+    };
+
+    let reviews = SteamGameReviews {
+        total_positive: summary.total_positive,
+        total_negative: summary.total_negative,
+        total_reviews: summary.total_reviews,
+        score: Some(summary.review_score),
+        score_desc,
+    };
+
+    // ── 4. Cache positive ─────────────────────────────────────────────
+    {
+        let mut map = cache.reviews.lock().map_err(|e| e.to_string())?;
+        map.insert(app_id, (Some(reviews.clone()), Instant::now()));
+    }
+
+    Ok(Some(reviews))
+}
+
+/// Aggregate all per-game Steam stats the popover renders in one IPC
+/// call. Internally fans out the two HTTP fetches via `tokio::join!`
+/// so the popover opens in roughly the time of the slowest endpoint
+/// (typically ~400ms cold, ~30ms warm from the backend cache) rather
+/// than the sum.
+///
+/// The `current_players` field is sourced from the existing
+/// `get_steam_player_count` command rather than fetched again, so
+/// the badge count and the popover header count are guaranteed to
+/// agree at the moment of click. The badge still keeps its own 60s
+/// polling loop, so by the time the user reopens the popover the
+/// number may have ticked up — that's expected.
+///
+/// Each section is returned independently with its own `*_error`
+/// field, so a Steam hiccup on `appdetails` doesn't blank the
+/// popover if reviews came back fine.
+#[tauri::command]
+async fn get_steam_game_stats(
+    app: tauri::AppHandle,
+    app_id: u32,
+) -> Result<SteamGameStats, String> {
+    // Details + reviews in parallel. The State guard is local to this
+    // function and the references handed to `tokio::join!` are tied to
+    // its lifetime — the await points are inside the helper functions,
+    // never in the outer scope, so the borrow checker is happy.
+    //
+    // The current concurrent-player count is intentionally NOT fetched
+    // here: the frontend's `<SteamPlayerCount>` already polls it on a
+    // 60s loop and passes the latest value down to the popover as a
+    // prop. Re-fetching it from the backend would (a) burn a Steam API
+    // call we just made, and (b) introduce a small window where the
+    // badge and the popover header disagree (the badge polled at T=0,
+    // the popover opens at T=2s, the backend returns the count from
+    // T=0 + a fresh round-trip = T=0.1 — a different snapshot than
+    // what's painted on the badge).
+    let cache: tauri::State<'_, SteamGameStatsCache> = app.state();
+    let (details_res, reviews_res) = tokio::join!(
+        fetch_steam_game_details_impl(&cache, app_id),
+        fetch_steam_game_reviews_impl(&cache, app_id),
+    );
+
+    Ok(SteamGameStats {
+        app_id,
+        details: details_res.as_ref().ok().and_then(|r| r.clone()),
+        reviews: reviews_res.as_ref().ok().and_then(|r| r.clone()),
+        details_error: details_res.err(),
+        reviews_error: reviews_res.err(),
+    })
 }
 
 /// Resolve the main game executable for a Steam AppID.
@@ -976,7 +1655,15 @@ pub fn run() {
             // Live Steam concurrent-player count. Powers the player
             // badges on the store hero, store detail, and game detail
             // banners — see PlayerCountCache above for caching policy.
-            get_steam_player_count])
+            get_steam_player_count,
+            // Popover payload: developer/publisher/release/price + reviews.
+            // See SteamGameStatsCache above for per-section caching policy.
+            get_steam_game_stats,
+            // Per-appid history ring buffer of concurrent-player
+            // counts, with server-computed peak/average. Powers the
+            // activity-tab sparkline — see PlayerCountHistoryCache
+            // above for the 24h cap + 5s dedupe policy.
+            get_player_count_history])
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).
@@ -1037,6 +1724,19 @@ pub fn run() {
             // few hundred, and skipping the cleanup avoids dropping
             // a user's just-fetched count behind their back.
             app.manage(PlayerCountCache::default());
+
+            // Steam game-stats cache (appdetails + appreviews, used by
+            // the player-count popover). Same growth model as
+            // PlayerCountCache: 0 entries on startup, bounded by the
+            // number of distinct Steam appids the user actually opens.
+            app.manage(SteamGameStatsCache::default());
+
+            // Player-count history ring buffer (per-appid, 1440
+            // samples cap = 24h at 60s polling). Powers the
+            // activity-tab sparkline. Same growth model as the
+            // sibling caches: 0 entries on startup, grows on first
+            // successful fetch per appid.
+            app.manage(PlayerCountHistoryCache::default());
 
             // Spin the torrent engine up on the async runtime.
             // We use `spawn` (fire-and-forget) rather than

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import SteamPlayerCountPopover from "./SteamPlayerCountPopover";
 
 /**
  * Compact, pulsing "X playing now" badge powered by the official Steam
@@ -7,6 +8,13 @@ import { invoke } from "@tauri-apps/api/core";
  * key required, returns the count of players currently in-game for a
  * given Steam appid. Used on the Store hero, Store game detail, and
  * Library game detail banners.
+ *
+ * Click-to-expand
+ * ───────────────
+ * The badge is now a button that opens `<SteamPlayerCountPopover>`
+ * next to itself, showing review breakdown, dev/publisher/release
+ * date, and price. The popover is portaled into `document.body` so
+ * it is never clipped by the banner's `overflow: hidden`.
  *
  * Behavior:
  *  - Polls every 60s while mounted (matches the Rust-side cache TTL so
@@ -56,6 +64,18 @@ export default function SteamPlayerCount({
   // The boolean second arg tracks "is this a real zero or just nothing?";
   // we only render the badge after a successful fetch.
   const [count, setCount] = useState<number | null>(null);
+
+  // Popover open/close state. Clicking the badge toggles it; the
+  // popover itself dismisses on Escape / click-outside / X and
+  // calls `setPopoverOpen(false)` to close.
+  const [popoverOpen, setPopoverOpen] = useState(false);
+
+  // Ref to the badge element. The popover uses this for anchoring
+  // and click-outside exclusion, so a click on the badge is
+  // correctly treated as "toggle" (close if open) rather than
+  // "outside click" (would also close, but only after the toggle
+  // fires and only by accident).
+  const badgeRef = useRef<HTMLDivElement>(null);
 
   // Stable ref so the polling / focus handlers always see the latest
   // `appId` without forcing a re-register of window listeners.
@@ -118,28 +138,54 @@ export default function SteamPlayerCount({
   if (count === null) return null;
 
   return (
-    <div
-      className={`steam-player-count ${className}`.trim()}
-      title={`${count.toLocaleString()} playing on Steam right now`}
-      aria-label={`${count.toLocaleString()} players currently in this game on Steam`}
-      // `data-count` lets the dev tools surface the underlying integer
-      // when debugging the compact formatting without a round-trip.
-      data-count={count}
-    >
-      <span className="steam-player-count-dot" aria-hidden="true" />
-      <span
-        className="steam-player-count-text"
-        // `aria-live="polite"` announces count updates without
-        // interrupting the screen reader. `aria-atomic="true"`
-        // forces the whole "1.2K playing" string to re-read on
-        // every tick rather than partial diffs ("1.2K" → "2.4K"
-        // would otherwise just announce "K").
-        aria-live="polite"
-        aria-atomic="true"
+    <>
+      <div
+        ref={badgeRef}
+        // `steam-player-count--clickable` swaps the cursor and adds
+        // a hover lift; the per-banner `className` (e.g. "hero-player-count")
+        // stays untouched so positioning across Store / Game page
+        // banners is unchanged.
+        className={`steam-player-count steam-player-count--clickable ${className}`.trim()}
+        title={`${count.toLocaleString()} playing on Steam right now — click for more stats`}
+        role="button"
+        tabIndex={0}
+        aria-label={`${count.toLocaleString()} players currently in this game on Steam. Click for reviews, developer, and more.`}
+        aria-haspopup="dialog"
+        aria-expanded={popoverOpen}
+        onClick={() => setPopoverOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setPopoverOpen((o) => !o);
+          }
+        }}
+        // `data-count` lets the dev tools surface the underlying integer
+        // when debugging the compact formatting without a round-trip.
+        data-count={count}
       >
-        {formatCompactPlayerCount(count)}
-        <span className="steam-player-count-suffix"> playing</span>
-      </span>
-    </div>
+        <span className="steam-player-count-dot" aria-hidden="true" />
+        <span
+          className="steam-player-count-text"
+          // `aria-live="polite"` announces count updates without
+          // interrupting the screen reader. `aria-atomic="true"`
+          // forces the whole "1.2K playing" string to re-read on
+          // every tick rather than partial diffs ("1.2K" → "2.4K"
+          // would otherwise just announce "K").
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {formatCompactPlayerCount(count)}
+          <span className="steam-player-count-suffix"> playing</span>
+        </span>
+      </div>
+      {popoverOpen && appId && (
+        <SteamPlayerCountPopover
+          appId={appId}
+          anchorRef={badgeRef}
+          currentCount={count}
+          onClose={() => setPopoverOpen(false)}
+        />
+      )}
+    </>
   );
 }

@@ -298,6 +298,123 @@ export interface LaunchBoxImageResult {
   url: string;
 }
 
+// ─── Steam Game Stats (popover payload) ────────────────────────────────────
+
+/**
+ * Per-game metadata returned by Steam's `appdetails` endpoint. Used
+ * by the click-to-expand player-count popover alongside the review
+ * breakdown. All fields are optional except `name` so the renderer
+ * can degrade gracefully when Steam returns a partial record.
+ */
+export interface SteamGameDetails {
+  /** Display name from the Steam store (e.g. "Counter-Strike 2"). */
+  name: string;
+  /** First-listed developer. Multi-developer games keep the lead dev. */
+  developer: string | null;
+  /** First-listed publisher. */
+  publisher: string | null;
+  /** Pre-formatted release date string from Steam (e.g. "Mar 21, 2024").
+   *  Already locale-formatted on the Rust side. */
+  releaseDate: string | null;
+  /** Steam's `is_free` flag. When true, `priceCents` is `null`. */
+  isFree: boolean;
+  /** Price in minor units (cents) after any current discount. `null`
+   *  when the game is free-to-play or no price is published. */
+  priceCents: number | null;
+  /** ISO 4217 currency code from the price overview (e.g. "USD"). */
+  currency: string | null;
+  /** Genre descriptions as Steam surfaces them (e.g. ["Action", "FPS"]). */
+  genres: string[];
+}
+
+/**
+ * Aggregate review breakdown for a Steam app, sourced from
+ * `appreviews?json=1&filter=all&num_per_page=0`. We request zero per-page
+ * results so the response stays small regardless of how many reviews the
+ * title has accumulated.
+ */
+export interface SteamGameReviews {
+  /** Cumulative count of positive reviews over the lifetime of the title. */
+  totalPositive: number;
+  /** Cumulative count of negative reviews. */
+  totalNegative: number;
+  /** Sum of `totalPositive + totalNegative`. */
+  totalReviews: number;
+  /** Steam's 1-9 review score bucket (1 = "Overwhelmingly Negative",
+   *  9 = "Overwhelmingly Positive"). `null` when Steam hasn't bucketed
+   *  this title yet (very few reviews). */
+  score: number | null;
+  /** Human-readable bucket label (e.g. "Very Positive", "Mixed"). */
+  scoreDesc: string | null;
+}
+
+/**
+ * Combined popover payload from `get_steam_game_stats`. Each section is
+ * returned independently so a partial failure on `appdetails` doesn't
+ * blank the popover if reviews came back fine.
+ *
+ * Note: the current concurrent-player count is intentionally absent.
+ * The badge's own 60s poll already has the freshest value and passes
+ * it down to the popover as a prop; re-fetching it from the backend
+ * would burn a Steam call we just made and introduce a small window
+ * where the badge number and the popover header disagree.
+ */
+export interface SteamGameStats {
+  appId: number;
+  details: SteamGameDetails | null;
+  reviews: SteamGameReviews | null;
+  /** Per-section error string, present only on failure. Renderers
+   *  should show "—" (or a friendly fallback) for the failed field
+   *  rather than blanking the whole popover. */
+  detailsError: string | null;
+  reviewsError: string | null;
+}
+
+// ─── Player Count History (activity-tab sparkline) ──────────────────────────
+
+/**
+ * One sample in the per-appid player-count history ring buffer.
+ * Sourced from the Rust `PlayerCountPoint` struct, which itself
+ * records every successful `get_steam_player_count` fetch.
+ */
+export interface PlayerCountPoint {
+  /** Unix-millisecond timestamp of the sample. Sourced from
+   *  `SystemTime::now()` on the Rust side so the value is
+   *  renderable in the user's local time without conversion. */
+  timestamp: number;
+  /** Concurrent-player count at sample time. Always > 0 — zero
+   *  readings are filtered at the source (a flat zero line on
+   *  every poll would be visual noise). */
+  count: number;
+}
+
+/**
+ * Per-appid history slice returned by `get_player_count_history`.
+ * Backend filters the ring buffer to the requested `max_age_ms`
+ * window (default 24h) and computes the aggregates so the
+ * frontend renders a complete summary card in one IPC round-trip.
+ */
+export interface PlayerCountHistory {
+  appId: number;
+  /** Time-series points within the requested window, oldest first.
+   *  Empty when the appid has no recorded samples yet. */
+  points: PlayerCountPoint[];
+  /** Most recent reading, or `null` when `points` is empty. */
+  current: number | null;
+  /** Maximum count observed in the window, or `null` when empty. */
+  peak: number | null;
+  /** Arithmetic mean of the window, or `null` when empty. */
+  average: number | null;
+  /** Number of points in the returned window. Lets the renderer
+   *  distinguish "no data ever" from "very few samples" without
+   *  re-counting the array. */
+  sampleCount: number;
+  /** Wall-clock start of the returned window (unix-ms). 0 when empty. */
+  windowStartMs: number;
+  /** Wall-clock end of the returned window (unix-ms). 0 when empty. */
+  windowEndMs: number;
+}
+
 // ─── View Density ──────────────────────────────────────────────────────────────
 
 /**

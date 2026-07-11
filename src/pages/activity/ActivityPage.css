@@ -1782,3 +1782,235 @@
   background: var(--color-bg-secondary);
   color: var(--color-text-primary);
 }
+
+
+/* ==========================================================================
+   Player-Count Sparkline Card
+   (lives on the Game page's per-game Activity tab; reads from
+   PlayerCountHistoryCache on the Rust side via the
+   `get_player_count_history` Tauri command)
+   ========================================================================== */
+
+.player-sparkline-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: calc(var(--spacing-unit) * 2.5);
+  box-sizing: border-box;
+  /* Subtle accent-tinted border so the card reads as "external
+   * community data" against the rest of the gameplay-activity UI. */
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 70%, var(--color-border));
+}
+
+.player-sparkline-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-unit);
+  margin-bottom: calc(var(--spacing-unit) * 1.5);
+}
+
+.player-sparkline-card__title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.player-sparkline-card__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.player-sparkline-card__title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  min-width: 0;
+}
+
+.player-sparkline-card__title > :first-child {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  line-height: 1.1;
+}
+
+.player-sparkline-card__subtitle {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.2px;
+}
+
+.player-sparkline-card__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.player-sparkline-card__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 50%, transparent);
+  animation: player-sparkline-card-pulse 2s ease-in-out infinite;
+}
+
+@keyframes player-sparkline-card-pulse {
+  0%, 100% { opacity: 0.7; transform: scale(0.92); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+.player-sparkline-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing-unit) * 1.5);
+  margin-bottom: calc(var(--spacing-unit) * 1.5);
+}
+
+.player-sparkline-card__current {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.player-sparkline-card__current-value {
+  color: var(--color-text-primary);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.player-sparkline-card__current-label {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.player-sparkline-card__chart {
+  height: 80px;
+  width: 100%;
+  position: relative;
+}
+
+.player-sparkline-card__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.player-sparkline-card__baseline {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+.player-sparkline-card__line {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.player-sparkline-card__now-dot {
+  fill: var(--color-accent);
+  stroke: var(--color-bg-secondary);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-accent) 60%, transparent));
+}
+
+.player-sparkline-card__empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.player-sparkline-card__empty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  animation: player-sparkline-card-pulse 2s ease-in-out infinite;
+}
+
+.player-sparkline-card__footer {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing-unit) * 1.5);
+  padding-top: calc(var(--spacing-unit) * 1.5);
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.player-sparkline-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.player-sparkline-card__stat-label {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.player-sparkline-card__stat-value {
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.player-sparkline-card__stat-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
+}
+
+.player-sparkline-card__updated {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-sparkline-card__status-dot,
+  .player-sparkline-card__empty-dot {
+    animation: none;
+    transform: scale(1);
+  }
+}
