@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../../types/game";
+import SteamPlayerCount from "../SteamPlayerCount";
 
 interface HeroFeatureProps {
   /** Called when the user clicks "View" on a featured game. */
@@ -91,6 +92,21 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
 
   const active = pool[activeIdx];
 
+  // Extract the Steam appid from the active title's IGDB website list
+  // so we can show the live concurrent-player badge on the rotating
+  // hero. Mirrors the URL-matching pattern used in StoreGameDetail.
+  const steamAppId = useMemo(() => {
+    if (!active?.websites) return undefined;
+    for (const url of active.websites) {
+      const match = url.match(/store\.steampowered\.com\/app\/(\d+)/i);
+      if (match) {
+        const id = parseInt(match[1], 10);
+        if (Number.isFinite(id)) return id;
+      }
+    }
+    return undefined;
+  }, [active]);
+
   const year = useMemo(() => {
     if (!active?.firstReleaseDate) return null;
     const d = new Date(active.firstReleaseDate);
@@ -148,6 +164,13 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
         aria-hidden="true"
       />
       <div className="store-hero-veil" aria-hidden="true" />
+
+      {/* Live Steam concurrent-player badge. Anchored absolute in the
+          top-right of the hero so it doesn't fight the dot indicators
+          (which sit bottom-right) for the same corner. */}
+      <div className="store-hero-player-count">
+        <SteamPlayerCount appId={steamAppId} />
+      </div>
 
       {/* Sharp foreground cover so the actual game art is visible.
           Sits on top of the blurred backdrop + veil; positioned absolute

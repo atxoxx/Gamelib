@@ -18,6 +18,7 @@ import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
 import AchievementsTab from "../components/AchievementsTab";
+import SteamPlayerCount from "../components/SteamPlayerCount";
 import { Button } from "../components/ui";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
 
@@ -1193,6 +1194,15 @@ function GameDetail({ game }: { game: Game }) {
             style={{ backgroundImage: `url(${game.bannerUrl})` }}
           />
         )}
+
+        {/* Live Steam concurrent-player badge. For library games it is
+            shown only when we know the game's Steam appid (synced from
+            Steam, extracted from a steam://run/... path, or matched from
+            an IGDB listing). Non-Steam library entries hide the badge
+            cleanly via the component's null-return branch. */}
+        <div className="hero-player-count">
+          <SteamPlayerCount appId={game.steamAppId} />
+        </div>
         <div className="game-banner">
           {(game.bannerUrl || displayCover) ? (
             <img

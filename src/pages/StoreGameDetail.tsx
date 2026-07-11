@@ -11,6 +11,7 @@ import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
+import SteamPlayerCount from "../components/SteamPlayerCount";
 import type { Game } from "../types/game";
 
 
@@ -353,6 +354,14 @@ export default function StoreGameDetail() {
         {(data.images.hero || data.images.banner) && (
           <div className="game-banner-bg" style={{ backgroundImage: `url(${data.images.hero ?? data.images.banner})` }} />
         )}
+
+        {/* Live Steam concurrent-player badge. Anchored absolute in
+            the top-right of the hero so it doesn't collide with the
+            Add-to-Library / View-in-Library buttons (which sit in
+            the overlay at the bottom of the hero). */}
+        <div className="hero-player-count">
+          <SteamPlayerCount appId={steamAppId} />
+        </div>
         <div className="game-banner">
           {(data.images.hero ?? data.images.banner ?? data.images.cover) ? (
             <img

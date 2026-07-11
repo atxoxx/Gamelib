@@ -157,6 +157,12 @@ pub struct StoreGameSummary {
     pub first_release_date: Option<String>,
     pub total_rating_count: u64,
     pub hypes: u64,
+    /// External URLs associated with the title on IGDB (Steam store page,
+    /// Epic, official site, etc.). Populated for the store hero so it
+    /// can render the live Steam concurrent-player badge on rotating
+    /// IGDB listings without an extra round-trip per slide change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websites: Option<Vec<String>>,
 }
 
 /// Internal IGDB deserialization type for store game listings.
@@ -174,6 +180,12 @@ struct IgdbGameSummary {
     first_release_date: Option<i64>,
     total_rating_count: Option<u64>,
     hypes: Option<u64>,
+    /// `websites.url` field shipped from the IGDB Apicalypse body.
+    /// We only care about the URL string (the `category` enum is
+    /// discarded — Steam fronts are the only category we act on,
+    /// and we identify them by URL pattern, not enum value).
+    #[serde(default)]
+    websites: Option<Vec<IgdbWebsite>>,
 }
 
 // ─── Steam API Types (internal) ───────────────────────────────────────────────
@@ -1875,15 +1887,18 @@ pub async fn fetch_store_games(
     };
 
     // Compose the IGDB Apicalypse body. The field list mirrors what
-    // the Store UI surfaces (cover, genres, platforms, etc.).
+    // the Store UI surfaces (cover, genres, platforms, etc.). We also
+    // request `websites.url` so the Store hero can render the live
+    // Steam concurrent-player badge without an extra round-trip; this
+    // adds a few extra bytes per response and zero extra API calls.
     let body = if where_clause.is_empty() {
         format!(
-            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; sort {}; limit {}; offset {};",
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; sort {}; limit {}; offset {};",
             base_sort, limit.min(50), offset
         )
     } else {
         format!(
-            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows; where {}; sort {}; limit {}; offset {};",
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; where {}; sort {}; limit {}; offset {};",
             where_clause, base_sort, limit.min(50), offset
         )
     };
@@ -1927,6 +1942,24 @@ pub async fn fetch_store_games(
 
             let release_date = g.first_release_date.map(format_unix_timestamp);
 
+            // De-duped via an inline HashSet so duplicate IGDB entries
+            // (rare but observed in the API) don't pollute the JSON
+            // payload or the React map over `websites`. Identical
+            // query → identical dedupe performance to the GameMetadata
+            // path in `search_igdb()` above.
+            let websites = g.websites.and_then(|list| {
+                let mut unique = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for w in list {
+                    if let Some(url) = w.url {
+                        if seen.insert(url.clone()) {
+                            unique.push(url);
+                        }
+                    }
+                }
+                if unique.is_empty() { None } else { Some(unique) }
+            });
+
             StoreGameSummary {
                 id: g.id,
                 name: g.name,
@@ -1950,6 +1983,7 @@ pub async fn fetch_store_games(
                 first_release_date: release_date,
                 total_rating_count: g.total_rating_count.unwrap_or(0),
                 hypes: g.hypes.unwrap_or(0),
+                websites,
             }
         })
         .collect();
@@ -1970,7 +2004,7 @@ pub async fn search_store_games(
 
     let escaped = query.replace('"', "\\\"");
     let body = format!(
-        r#"search "{}"; fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes; limit {}; offset {};"#,
+        r#"search "{}"; fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,websites.url; limit {}; offset {};"#,
         escaped,
         limit.min(50),
         offset
@@ -2015,6 +2049,19 @@ pub async fn search_store_games(
 
             let release_date = g.first_release_date.map(format_unix_timestamp);
 
+            let websites = g.websites.and_then(|list| {
+                let mut unique = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for w in list {
+                    if let Some(url) = w.url {
+                        if seen.insert(url.clone()) {
+                            unique.push(url);
+                        }
+                    }
+                }
+                if unique.is_empty() { None } else { Some(unique) }
+            });
+
             StoreGameSummary {
                 id: g.id,
                 name: g.name,
@@ -2038,6 +2085,7 @@ pub async fn search_store_games(
                 first_release_date: release_date,
                 total_rating_count: g.total_rating_count.unwrap_or(0),
                 hypes: g.hypes.unwrap_or(0),
+                websites,
             }
         })
         .collect();

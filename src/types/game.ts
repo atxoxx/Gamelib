@@ -402,6 +402,11 @@ export interface StoreGameSummary {
   firstReleaseDate: string | null;
   totalRatingCount: number;
   hypes: number;
+  /** External URLs for the title (Steam store page, Epic, official site,
+   *  etc.). Populated from IGDB's `websites.url` field so the Store Hero
+   *  (and any other card rendering a Steam concurrent-player badge)
+   *  can extract the Steam appid without an extra round-trip. */
+  websites?: string[];
 }
 
 /** Cache entry wrapper with a fetchedAt timestamp for TTL checks. */

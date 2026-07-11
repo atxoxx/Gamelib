@@ -1,5 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tokio::sync::Mutex;
@@ -736,6 +738,146 @@ fn debug_mahm_entries() -> Vec<(String, String, f32)> {
     mahm_reader::dump_mahm_entries().unwrap_or_default()
 }
 
+// === Steam Player Count ======================================================
+//
+// In-memory cache for live concurrent-player counts. Multiple banners
+// (Store hero, Store detail, Library detail) may all want the same appid
+// in the same render frame; without a cache, each would round-trip to
+// Steam's API and we'd burn through Valve's voluntary rate limit.
+//
+// We deliberately cache per-appid rather than globally:
+//  - Different games have wildly different popularity, so a short global
+//    TTL would either over-fetch for niche titles or under-fetch for
+//    popular ones.
+//  - A badge on a single rendered page is a single user looking at a
+//    single game, so a 60s per-appid cooldown is plenty.
+//
+// `CacheEntry` stores `(instant_frozen, count)`. `Instant::elapsed()`
+// returns zero on platforms where the system clock jumps backwards
+// (rare, but it can cause `elapsed >= TTL` to spuriously fail), so
+// reads use saturating semantics.
+struct PlayerCountCache {
+    cache: std::sync::Mutex<HashMap<u32, (u32, Instant)>>,
+}
+
+impl Default for PlayerCountCache {
+    fn default() -> Self {
+        Self {
+            cache: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+const PLAYER_COUNT_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Fetch the number of players currently in-game on Steam for `app_id`.
+///
+/// Source: Steam Web API `ISteamUserStats/GetNumberOfCurrentPlayers/v1/`.
+/// Verified reliable & free — no API key required for this endpoint.
+///
+/// Returns:
+///   - `Ok(Some(count))` on success
+///   - `Ok(None)` when the API responded but reported no current players
+///     (e.g. extremely niche titles with a `result != 1`, which the
+///     Steam API uses to signal "no data") — we map that to a clean
+///     "no players right now" so the badge hides silently rather than
+///   - `Err` on transport / parse failures (e.g. offline, timeout)
+///     surfacing an error.
+#[tauri::command]
+async fn get_steam_player_count(
+    app: tauri::AppHandle,
+    app_id: u32,
+) -> Result<Option<u32>, String> {
+    let state: tauri::State<'_, PlayerCountCache> = app.state();
+
+    // ── 1. Return cached value if still fresh ──────────────────────────
+    {
+        let cache = state.cache.lock().map_err(|e| e.to_string())?;
+        if let Some((count, fetched_at)) = cache.get(&app_id) {
+            // `Instant::elapsed` is monotonic, so a backward clock jump
+            // won't make this negative; the `>=` check is safe on all
+            // platforms Rust supports.
+            if fetched_at.elapsed() < PLAYER_COUNT_CACHE_TTL {
+                return Ok(Some(*count));
+            }
+        }
+    }
+
+    // ── 2. Hit the Steam Web API ───────────────────────────────────────
+    // Endpoint: ISteamUserStats/GetNumberOfCurrentPlayers/v1/
+    // Format:
+    //   { "response": { "player_count": <int>, "result": <int> } }
+    //
+    // `result == 1` ⇒ success
+    // `result == 8` ⇒ Steam is returning "no data" for this appid (very
+    //   rare; usually means an appid Steam never tracked). We map that
+    //   to `Ok(None)` so the badge cleanly hides.
+    let url = format!(
+        "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={}",
+        app_id
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("GameLib/0.1 (player-count)")
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Steam player count request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Steam Web API returned HTTP {} for appid {}",
+            resp.status(),
+            app_id
+        ));
+    }
+
+    #[derive(Deserialize)]
+    struct SteamResponseInner {
+        #[serde(default)]
+        player_count: Option<u32>,
+        #[serde(default)]
+        result: u32,
+    }
+    #[derive(Deserialize)]
+    struct SteamResponse {
+        response: SteamResponseInner,
+    }
+
+    let payload: SteamResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Steam player count JSON: {}", e))?;
+
+    // Cache + return — even on `result != 1` we want to avoid hitting
+    // the API again within the TTL window, so we store `None` to mean
+    // "not currently tracked" (the frontend hides the badge either way).
+    let result_ok = payload.response.result == 1;
+    let player_count = payload.response.player_count;
+
+    {
+        let mut cache = state.cache.lock().map_err(|e| e.to_string())?;
+        // Only cache positive results so a transient Steam hiccup
+        // doesn't poison the TTL with a zero count.
+        if let Some(count) = player_count {
+            if result_ok {
+                cache.insert(app_id, (count, Instant::now()));
+            }
+        }
+    }
+
+    if result_ok {
+        Ok(player_count)
+    } else {
+        Ok(None)
+    }
+}
+
 /// Resolve the main game executable for a Steam AppID.
 /// Uses the smart resolver in `game_watcher` (PE header analysis,
 /// name scoring, depth heuristics) instead of the old
@@ -830,7 +972,11 @@ pub fn run() {
             downloader::direct_download_start,
             downloader::debrid_download_start,
             downloader::direct_download_update_url,
-            downloader::debrid_unrestrict_link])
+            downloader::debrid_unrestrict_link,
+            // Live Steam concurrent-player count. Powers the player
+            // badges on the store hero, store detail, and game detail
+            // banners — see PlayerCountCache above for caching policy.
+            get_steam_player_count])
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).
@@ -881,6 +1027,16 @@ pub fn run() {
 
             let store_checker = Arc::new(Mutex::new(store_checker::StoreChecker::new()));
             app.manage(store_checker);
+
+            // Live Steam concurrent-player count cache. Sized at 0
+            // entries on startup — grows on first miss per-appid and
+            // is bounded by how many distinct Steam appids the user
+            // actually opens (single-digit hundreds at worst for a
+            // large library). We never expire old entries: a long-lived
+            // map with O(N) work per banner refresh is fine for N ≤ a
+            // few hundred, and skipping the cleanup avoids dropping
+            // a user's just-fetched count behind their back.
+            app.manage(PlayerCountCache::default());
 
             // Spin the torrent engine up on the async runtime.
             // We use `spawn` (fire-and-forget) rather than
