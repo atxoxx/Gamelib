@@ -48,7 +48,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::OnceCell;
@@ -147,6 +147,7 @@ pub struct TorrentEngine {
     downloads: HashMap<String, TorrentDownload>,
     state_dir: PathBuf,
     auto_paused_completed: std::collections::HashSet<String>,
+    app: Option<AppHandle>,
 }
 
 impl TorrentEngine {
@@ -156,6 +157,15 @@ impl TorrentEngine {
             downloads: HashMap::new(),
             state_dir,
             auto_paused_completed: std::collections::HashSet::new(),
+            app: None,
+        }
+    }
+
+    /// Emit current downloads to the frontend immediately.
+    pub fn emit_progress(&self) {
+        if let Some(app) = &self.app {
+            let snapshot = self.list();
+            let _ = app.emit("download-progress", &snapshot);
         }
     }
 
@@ -446,7 +456,16 @@ impl TorrentEngine {
             let engine_clone = ENGINE.get().cloned();
             tokio::spawn(async move {
                 println!("[TorrentEngine] Restored completed download {} with pending auto-extraction. Extracting...", name);
-                let success = extract_archives_for_torrent(&save_path, &files).is_ok();
+                let id_clone = id.clone();
+                let files_clone = files.clone();
+                let save_path_clone = save_path.clone();
+                let success = tokio::task::spawn_blocking(move || {
+                    extract_archives_for_torrent(&id_clone, &save_path_clone, &files_clone)
+                })
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+
                 if success {
                     println!("[TorrentEngine] Extraction complete for {}. Deleting archives.", name);
                     delete_archives_for_torrent(&save_path, &files);
@@ -456,6 +475,7 @@ impl TorrentEngine {
                     if let Some(d) = guard.downloads_mut().get_mut(&id) {
                         d.extracted = Some(true);
                         guard.save_downloads_metadata();
+                        guard.emit_progress();
                     }
                 }
             });
@@ -538,173 +558,12 @@ impl TorrentEngine {
 ///   (most home routers idle mappings at 60–120 s), so we
 ///   keep more of our peer connections alive between
 ///   piece bursts.
-///
-/// Method (not a free function) so the impl-block callers can
-/// write it without `Self::`; the `torrent_add` command calls
-/// it as `Self::build_peer_opts()`. AddTorrentOptions inherits
-/// the session's `peer_opts` automatically — no need to repeat
-/// the same struct on every add.
     fn build_peer_opts() -> Option<librqbit::PeerConnectionOptions> {
         Some(librqbit::PeerConnectionOptions {
-            connect_timeout: Some(Duration::from_secs(15)),
-            read_write_timeout: Some(Duration::from_secs(45)),
-            keep_alive_interval: Some(Duration::from_secs(60)),
+            connect_timeout: Some(Duration::from_secs(2)),
+            read_write_timeout: Some(Duration::from_secs(20)),
+            keep_alive_interval: Some(Duration::from_secs(30)),
         })
-    }
-
-    /// Pause a download. No-op on already-paused / completed torrents.
-    pub async fn pause(&self, id: &str) -> Result<(), String> {
-        let numeric_id = parse_handle_id(id)?;
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        let handle = find_handle(session, numeric_id)
-            .ok_or_else(|| format!("Download not found: {}", id))?;
-        session.pause(&handle).await.map_err(|e| {
-            format!("Failed to pause: {}", e)
-        })?;
-        Ok(())
-    }
-
-    /// Resume a paused download. No-op on already-downloading / completed.
-    pub async fn resume(&self, id: &str) -> Result<(), String> {
-        let numeric_id = parse_handle_id(id)?;
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        let handle = find_handle(session, numeric_id)
-            .ok_or_else(|| format!("Download not found: {}", id))?;
-        session.unpause(&handle).await.map_err(|e| {
-            format!("Failed to resume: {}", e)
-        })?;
-        Ok(())
-    }
-
-    /// Remove a download and optionally its downloaded files.
-    pub async fn remove(&mut self, id: &str, delete_files: bool) -> Result<(), String> {
-        let numeric_id = parse_handle_id(id)?;
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        // Find the handle to verify it exists, then delete by id.
-        if find_handle(session, numeric_id).is_some() {
-            // Use the numeric id directly — `TorrentIdOrHash` should
-            // accept `usize` via `From` or be constructable from it.
-            session
-                .delete(
-                    librqbit::api::TorrentIdOrHash::Id(numeric_id),
-                    delete_files,
-                )
-                .await
-                .map_err(|e| format!("Failed to remove: {}", e))?;
-        }
-        self.downloads.remove(id);
-        self.save_downloads_metadata();
-        Ok(())
-    }
-
-    /// Pause every active (non-completed) torrent. Used by the
-    /// "Pause all" toolbar action on the Downloads page. Already-paused
-    /// and already-completed torrents are no-ops at the librqbit
-    /// level, so we just iterate every entry and skip the ones
-    /// that are neither Downloading / FetchingMetadata / Queued.
-    ///
-    /// Returns the number of torrents that actually transitioned
-    /// (or were already in the target state) so the frontend can
-    /// surface a sensible toast.
-    pub async fn pause_all(&self) -> Result<usize, String> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        // We must collect `Arc<ManagedTorrent>` under the
-        // `with_torrents` lock and release it before any
-        // `session.pause(...).await` call — the closure runs while
-        // holding the session's internal mutex, so a cross-await
-        // would deadlock. Cloning the Arc is just a refcount bump
-        // and lets us avoid a second O(N) `find_handle` scan per
-        // id (which would make the whole pass O(N²)).
-        //
-        // We also call `mt.stats()` exactly once per torrent and
-        // bind the result: librqbit updates stats continuously, so
-        // calling it 3× (once for state, once for total_bytes,
-        // once for progress_bytes) could observe inconsistent
-        // values and mis-classify a torrent.
-        let to_pause: Vec<Arc<librqbit::ManagedTorrent>> =
-            session.with_torrents(|iter| {
-                iter.filter_map(|(_id, mt)| {
-                    let stats = mt.stats();
-                    let state = &stats.state;
-                    let status = map_state_to_status(
-                        state,
-                        stats.total_bytes,
-                        stats.progress_bytes,
-                        stats.error.as_deref(),
-                    );
-                    let should_pause = matches!(
-                        state,
-                        librqbit::TorrentStatsState::Live
-                            | librqbit::TorrentStatsState::Initializing
-                    ) && !matches!(status, DownloadStatus::Completed);
-                    if should_pause {
-                        Some(Arc::clone(mt))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-            });
-        let mut affected = 0usize;
-        for handle in to_pause {
-            if session.pause(&handle).await.is_ok() {
-                affected += 1;
-            }
-        }
-        Ok(affected)
-    }
-
-    /// Resume every paused / not-yet-started torrent. Mirror of
-    /// `pause_all`. Completed torrents are skipped.
-    pub async fn resume_all(&self) -> Result<usize, String> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| "Torrent engine not initialized".to_string())?;
-        let to_resume: Vec<Arc<librqbit::ManagedTorrent>> =
-            session.with_torrents(|iter| {
-                iter.filter_map(|(_id, mt)| {
-                    let stats = mt.stats();
-                    let state = &stats.state;
-                    let pausable = matches!(
-                        state,
-                        librqbit::TorrentStatsState::Paused
-                    ) || matches!(
-                        map_state_to_status(
-                            state,
-                            stats.total_bytes,
-                            stats.progress_bytes,
-                            stats.error.as_deref(),
-                        ),
-                        DownloadStatus::Paused
-                    );
-                    if pausable {
-                        Some(Arc::clone(mt))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-            });
-        let mut affected = 0usize;
-        for handle in to_resume {
-            if session.unpause(&handle).await.is_ok() {
-                affected += 1;
-            }
-        }
-        Ok(affected)
     }
 
     /// Snapshot of all current downloads, sorted active-first.
@@ -917,7 +776,16 @@ impl TorrentEngine {
             let engine_clone = ENGINE.get().cloned();
             tokio::spawn(async move {
                 println!("[TorrentEngine] Starting auto-extraction for {}", name);
-                let success = extract_archives_for_torrent(&save_path, &files).is_ok();
+                let id_clone = id.clone();
+                let files_clone = files.clone();
+                let save_path_clone = save_path.clone();
+                let success = tokio::task::spawn_blocking(move || {
+                    extract_archives_for_torrent(&id_clone, &save_path_clone, &files_clone)
+                })
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+
                 if success {
                     println!("[TorrentEngine] Extraction complete for {}. Deleting archives.", name);
                     delete_archives_for_torrent(&save_path, &files);
@@ -927,6 +795,7 @@ impl TorrentEngine {
                     if let Some(d) = guard.downloads_mut().get_mut(&id) {
                         d.extracted = Some(true);
                         guard.save_downloads_metadata();
+                        guard.emit_progress();
                     }
                 }
             });
@@ -1115,24 +984,21 @@ pub async fn initialize_engine(
 ) -> Result<(), String> {
     let state_dir = app_data_dir.join("torrent-engine");
     let mut engine = TorrentEngine::new(state_dir);
+    engine.app = Some(app.clone());
     engine.initialize().await?;
     let shared = Arc::new(tokio::sync::Mutex::new(engine));
     ENGINE
         .set(shared.clone())
         .map_err(|_| "Torrent engine already initialized".to_string())?;
 
-    let app_for_task = app.clone();
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(2));
         tick.tick().await; // skip immediate first tick
         loop {
             tick.tick().await;
-            let snapshot = {
-                let mut guard = shared.lock().await;
-                guard.refresh_stats().await;
-                guard.list()
-            };
-            let _ = app_for_task.emit("download-progress", &snapshot);
+            let mut guard = shared.lock().await;
+            guard.refresh_stats().await;
+            guard.emit_progress();
         }
     });
     Ok(())
@@ -1300,6 +1166,7 @@ pub async fn torrent_add(
             existing.clone()
         };
         guard.save_downloads_metadata();
+        guard.emit_progress();
         return Ok(updated);
     }
 
@@ -1326,27 +1193,68 @@ pub async fn torrent_add(
     };
     guard.downloads_mut().insert(key, download.clone());
     guard.save_downloads_metadata();
+    guard.emit_progress();
     Ok(download)
 }
 
 #[tauri::command]
 pub async fn torrent_pause(id: String) -> Result<(), String> {
     let engine = wait_for_engine().await?;
-    let result = {
+    let session = {
         let guard = engine.lock().await;
-        guard.pause(&id).await
+        guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
-    result
+
+    let numeric_id = parse_handle_id(&id)?;
+    let handle = find_handle(&session, numeric_id)
+        .ok_or_else(|| format!("Download not found: {}", id))?;
+
+    session.pause(&handle).await.map_err(|e| {
+        format!("Failed to pause: {}", e)
+    })?;
+
+    {
+        let mut guard = engine.lock().await;
+        if let Some(d) = guard.downloads_mut().get_mut(&id) {
+            d.status = DownloadStatus::Paused;
+            guard.save_downloads_metadata();
+            guard.emit_progress();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn torrent_resume(id: String) -> Result<(), String> {
     let engine = wait_for_engine().await?;
-    let result = {
+    let session = {
         let guard = engine.lock().await;
-        guard.resume(&id).await
+        guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
-    result
+
+    let numeric_id = parse_handle_id(&id)?;
+    let handle = find_handle(&session, numeric_id)
+        .ok_or_else(|| format!("Download not found: {}", id))?;
+
+    session.unpause(&handle).await.map_err(|e| {
+        format!("Failed to resume: {}", e)
+    })?;
+
+    {
+        let mut guard = engine.lock().await;
+        if let Some(d) = guard.downloads_mut().get_mut(&id) {
+            d.status = if d.total_size.unwrap_or(0) > 0 {
+                DownloadStatus::Downloading
+            } else {
+                DownloadStatus::FetchingMetadata
+            };
+            guard.save_downloads_metadata();
+            guard.emit_progress();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1355,11 +1263,90 @@ pub async fn torrent_remove(
     delete_files: Option<bool>,
 ) -> Result<(), String> {
     let engine = wait_for_engine().await?;
-    let result = {
+    let delete_files = delete_files.unwrap_or(false);
+
+    kill_extraction(&id);
+
+    let (session, download_opt) = {
         let mut guard = engine.lock().await;
-        guard.remove(&id, delete_files.unwrap_or(false)).await
+        let session = guard.session().cloned();
+        let download_opt = guard.downloads_mut().remove(&id);
+        guard.save_downloads_metadata();
+        guard.emit_progress();
+        (session, download_opt)
     };
-    result
+
+    tokio::spawn(async move {
+        if let Some(session) = session {
+            if let Ok(numeric_id) = parse_handle_id(&id) {
+                let in_session = find_handle(&session, numeric_id).is_some();
+                if in_session {
+                    let _ = session
+                        .delete(
+                            librqbit::api::TorrentIdOrHash::Id(numeric_id),
+                            delete_files,
+                        )
+                        .await;
+                }
+            }
+        }
+
+        if delete_files {
+            if let Some(download) = download_opt {
+                let _ = tokio::task::spawn_blocking(move || {
+                    let save_path_buf = std::path::PathBuf::from(&download.save_path);
+                    
+                    // 1. Delete each downloaded file
+                    for file in &download.files {
+                        let file_path = save_path_buf.join(&file.name);
+                        if file_path.exists() && file_path.is_file() {
+                            let _ = std::fs::remove_file(&file_path);
+                        }
+                    }
+                    
+                    // 2. Delete empty parent subdirectories recursively (excluding root save_path)
+                    let mut dirs_to_check = Vec::new();
+                    for file in &download.files {
+                        let file_path = save_path_buf.join(&file.name);
+                        let mut parent = file_path.parent();
+                        while let Some(p) = parent {
+                            if p.starts_with(&save_path_buf) && p != save_path_buf {
+                                dirs_to_check.push(p.to_path_buf());
+                                parent = p.parent();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    
+                    dirs_to_check.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+                    dirs_to_check.dedup();
+                    
+                    for dir in dirs_to_check {
+                        if dir.exists() && dir.is_dir() {
+                            if let Ok(entries) = std::fs::read_dir(&dir) {
+                                if entries.count() == 0 {
+                                    let _ = std::fs::remove_dir(&dir);
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Remove torrent folder if empty
+                    let torrent_dir = save_path_buf.join(&download.name);
+                    if torrent_dir.exists() && torrent_dir.is_dir() {
+                        if let Ok(entries) = std::fs::read_dir(&torrent_dir) {
+                            if entries.count() == 0 {
+                                let _ = std::fs::remove_dir(&torrent_dir);
+                            }
+                        }
+                    }
+                }).await;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1386,11 +1373,55 @@ pub async fn torrent_select_save_path(
 #[tauri::command]
 pub async fn torrent_pause_all() -> Result<usize, String> {
     let engine = wait_for_engine().await?;
-    let result = {
+    let session = {
         let guard = engine.lock().await;
-        guard.pause_all().await
+        guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
-    result
+
+    let to_pause: Vec<Arc<librqbit::ManagedTorrent>> = session.with_torrents(|iter| {
+        iter.filter_map(|(_id, mt)| {
+            let stats = mt.stats();
+            let state = &stats.state;
+            let status = map_state_to_status(
+                state,
+                stats.total_bytes,
+                stats.progress_bytes,
+                stats.error.as_deref(),
+            );
+            let should_pause = matches!(
+                state,
+                librqbit::TorrentStatsState::Live
+                    | librqbit::TorrentStatsState::Initializing
+            ) && !matches!(status, DownloadStatus::Completed);
+            if should_pause {
+                Some(Arc::clone(mt))
+            } else {
+                None
+            }
+        })
+        .collect()
+    });
+
+    let mut affected = 0usize;
+    for handle in &to_pause {
+        if session.pause(handle).await.is_ok() {
+            affected += 1;
+        }
+    }
+
+    if affected > 0 {
+        let mut guard = engine.lock().await;
+        for handle in &to_pause {
+            let fid = make_frontend_id(handle.id());
+            if let Some(d) = guard.downloads_mut().get_mut(&fid) {
+                d.status = DownloadStatus::Paused;
+            }
+        }
+        guard.save_downloads_metadata();
+        guard.emit_progress();
+    }
+
+    Ok(affected)
 }
 
 #[tauri::command]
@@ -1428,11 +1459,60 @@ pub async fn torrent_set_speed_limits(
 #[tauri::command]
 pub async fn torrent_resume_all() -> Result<usize, String> {
     let engine = wait_for_engine().await?;
-    let result = {
+    let session = {
         let guard = engine.lock().await;
-        guard.resume_all().await
+        guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
-    result
+
+    let to_resume: Vec<Arc<librqbit::ManagedTorrent>> = session.with_torrents(|iter| {
+        iter.filter_map(|(_id, mt)| {
+            let stats = mt.stats();
+            let state = &stats.state;
+            let pausable = matches!(
+                state,
+                librqbit::TorrentStatsState::Paused
+            ) || matches!(
+                map_state_to_status(
+                    state,
+                    stats.total_bytes,
+                    stats.progress_bytes,
+                    stats.error.as_deref(),
+                ),
+                DownloadStatus::Paused
+            );
+            if pausable {
+                Some(Arc::clone(mt))
+            } else {
+                None
+            }
+        })
+        .collect()
+    });
+
+    let mut affected = 0usize;
+    for handle in &to_resume {
+        if session.unpause(handle).await.is_ok() {
+            affected += 1;
+        }
+    }
+
+    if affected > 0 {
+        let mut guard = engine.lock().await;
+        for handle in &to_resume {
+            let fid = make_frontend_id(handle.id());
+            if let Some(d) = guard.downloads_mut().get_mut(&fid) {
+                d.status = if d.total_size.unwrap_or(0) > 0 {
+                    DownloadStatus::Downloading
+                } else {
+                    DownloadStatus::FetchingMetadata
+                };
+            }
+        }
+        guard.save_downloads_metadata();
+        guard.emit_progress();
+    }
+
+    Ok(affected)
 }
 
 #[tauri::command]
@@ -1452,6 +1532,13 @@ pub async fn torrent_update_only_files(
     session.update_only_files(&handle, &only_files_set).await.map_err(|e| {
         format!("Failed to update files: {}", e)
     })?;
+
+    {
+        let mut guard = engine.lock().await;
+        guard.refresh_stats().await;
+        guard.emit_progress();
+    }
+
     Ok(())
 }
 
@@ -1477,14 +1564,17 @@ pub async fn torrent_start_selected(
     let existing_files: Vec<TorrentFile>;
     {
         let mut guard = engine.lock().await;
-        let d = guard.downloads.get_mut(&id)
-            .ok_or_else(|| format!("Download not found in engine: {}", id))?;
-        d.status = DownloadStatus::FetchingMetadata;
-        source_uri = d.source_uri.clone();
-        save_path = normalize_path(&d.save_path);
-        game_id = d.game_id.clone();
-        source_name = d.source_name.clone();
-        existing_files = d.files.clone();
+        {
+            let d = guard.downloads.get_mut(&id)
+                .ok_or_else(|| format!("Download not found in engine: {}", id))?;
+            d.status = DownloadStatus::FetchingMetadata;
+            source_uri = d.source_uri.clone();
+            save_path = normalize_path(&d.save_path);
+            game_id = d.game_id.clone();
+            source_name = d.source_name.clone();
+            existing_files = d.files.clone();
+        }
+        guard.emit_progress();
     }
 
     let session = {
@@ -1540,7 +1630,7 @@ pub async fn torrent_start_selected(
                 if handle_opt.is_none() {
                     eprintln!("[gamelib] torrent_start_selected: add_torrent returned a response with no handle (unexpected for list_only=false); surfacing as Error.");
                 }
-                if let Some(handle) = handle_opt {
+                if let Some(mut handle) = handle_opt {
                     let only_files_set: std::collections::HashSet<usize> =
                         only_files.into_iter().collect();
 
@@ -1595,6 +1685,174 @@ pub async fn torrent_start_selected(
                         eprintln!("[gamelib] torrent_start_selected: unpause failed: {}", e);
                     }
 
+                    // SAFETY NET (librqbit session-state restore quirk):
+                    //
+                    // The "Choose Files" flow added this infohash with
+                    // `list_only=true` *before* calling this command. That
+                    // list_only add left a `finished=true` marker in
+                    // librqbit's on-disk session-state JSON under
+                    // `state_dir`. When we then `delete` + re-add the same
+                    // infohash with `list_only=false` + `unpause`, the
+                    // on-disk cache can be restored before librqbit has
+                    // had a chance to re-check the pieces — yielding
+                    // `stats.progress_bytes == stats.total_bytes > 0` on
+                    // the very first `handle.stats()` call, even though
+                    // no piece has been transferred on disk. Without
+                    // this guard, `map_state_to_status` would mark the
+                    // download `Completed` immediately and the user
+                    // would see "Finished" with empty save_path bytes.
+                    //
+                    // Force one more clean delete + re-add cycle if the
+                    // first cycle's stats report the torrent as already
+                    // complete. The re-add bypasses the cached row and
+                    // starts fresh. Two attempts is enough in practice:
+                    // either the first one dislodges the cache, or the
+                    // second one does (the effective working set has
+                    // shrunk by then and librqbit won't re-restore the
+                    // same virtual-completed entry).
+                    let mut retry_attempted = false;
+                    for stale_attempt in 0..2 {
+                        let snapshot = handle.stats();
+                        if snapshot.progress_bytes < snapshot.total_bytes
+                            || snapshot.total_bytes == 0
+                        {
+                            break;
+                        }
+                        retry_attempted = true;
+                        eprintln!(
+                            "[gamelib] torrent_start_selected: stale \"completed\" state \
+                             detected (progress_bytes={}, total_bytes={}) — forcing clean \
+                             re-add (attempt {}/2)",
+                            snapshot.progress_bytes,
+                            snapshot.total_bytes,
+                            stale_attempt + 1
+                        );
+                        if let Err(e) = session
+                            .delete(
+                                librqbit::api::TorrentIdOrHash::Id(handle.id()),
+                                false,
+                            )
+                            .await
+                        {
+                            eprintln!(
+                                "[gamelib] torrent_start_selected: stale-retry delete \
+                                 failed (will continue): {}",
+                                e
+                            );
+                        }
+                        let retry = librqbit::AddTorrent::from_url(source_uri.clone());
+                        let retry_opts = librqbit::AddTorrentOptions {
+                            output_folder: Some(save_path.clone().into()),
+                            overwrite: true,
+                            list_only: false,
+                            only_files: Some(
+                                only_files_set.iter().copied().collect(),
+                            ),
+                            ..Default::default()
+                        };
+                        // 120s matches the original `add_torrent` budget so a slow
+                        // tracker (the very thing that just finished a 2-minute
+                        // fetch) doesn't get aborted earlier on the retry than
+                        // on the first attempt.
+                        let retry_response = tokio::time::timeout(
+                            Duration::from_secs(120),
+                            session.add_torrent(retry, Some(retry_opts)),
+                        )
+                        .await;
+                        match retry_response {
+                            Ok(Ok(resp)) => {
+                                if let Some(new_handle) = resp.into_handle() {
+                                    // CRITICAL: apply only_files BEFORE unpause,
+                                    // and wait for metadata to load first. Without
+                                    // this wait the call silently fails (librqbit
+                                    // hasn't parsed metadata yet) and the torrent
+                                    // downloads ALL files — ballooning the
+                                    // transfer to many× the user's selection and
+                                    // making the user perceive a "very slow" rate
+                                    // relative to what they expected to download.
+                                    // Mirror the outer update_only_files retry
+                                    // loop's pattern so file selection sticks.
+                                    let mut update_ok = false;
+                                    for attempt in 0..30 {
+                                        if new_handle.with_metadata(|_| ()).is_ok() {
+                                            match session
+                                                .update_only_files(
+                                                    &new_handle,
+                                                    &only_files_set,
+                                                )
+                                                .await
+                                            {
+                                                Ok(()) => {
+                                                    update_ok = true;
+                                                    break;
+                                                }
+                                                Err(e) => {
+                                                    eprintln!(
+                                                        "[gamelib] torrent_start_selected: \
+                                                         stale-retry update_only_files \
+                                                         failed (will retry): {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        } else if attempt == 9 {
+                                            eprintln!(
+                                                "[gamelib] torrent_start_selected: \
+                                                 stale-retry metadata not parsed \
+                                                 after 10s; continuing to wait \
+                                                 for file selection to apply..."
+                                            );
+                                        }
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    }
+                                    if !update_ok {
+                                        eprintln!(
+                                            "[gamelib] torrent_start_selected: stale-retry \
+                                             gave up waiting for metadata; file selection \
+                                             may not be applied and torrent may \
+                                             download ALL files."
+                                        );
+                                    }
+                                    let _ = session.unpause(&new_handle).await;
+                                    handle = new_handle;
+                                } else {
+                                    // Unexpected — `list_only=false`
+                                    // should always yield a handle.
+                                    // Log so ops can see why the
+                                    // retry didn't dislodge the
+                                    // stale state. The post-retry
+                                    // demotion below will then
+                                    // demote `initial_status` so the
+                                    // user sees `Downloading` (the
+                                    // honest state matching the
+                                    // still-empty save folder) rather
+                                    // than the bogus `Completed`.
+                                    eprintln!(
+                                        "[gamelib] torrent_start_selected: stale-retry \
+                                         returned a response with no handle \
+                                         (unexpected for list_only=false)."
+                                    );
+                                    break;
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!(
+                                    "[gamelib] torrent_start_selected: stale-retry \
+                                     add_torrent failed (will abort retry): {}",
+                                    e
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                eprintln!(
+                                    "[gamelib] torrent_start_selected: stale-retry \
+                                     add_torrent timed out (will abort retry)."
+                                );
+                                break;
+                            }
+                        }
+                    }
+
                     let handle_id = handle.id();
                     let new_id_str = make_frontend_id(handle_id);
 
@@ -1606,6 +1864,34 @@ pub async fn torrent_start_selected(
                         stats.progress_bytes,
                         stats.error.as_deref(),
                     );
+
+                    // FINAL SAFETY NET: only fires when the retry loop
+                    // above actually entered (i.e. the pre-retry stats
+                    // looked stale) AND the post-retry stats STILL report
+                    // `progress_bytes == total_bytes > 0`. Without the
+                    // `retry_attempted` gate, an honestly-fast tiny
+                    // torrent that genuinely completes in ~1s would be
+                    // unnecessarily demoted to `Downloading` for one poll
+                    // cycle (visible status flicker on the popover); with
+                    // it, the demotion is reserved for cases where the
+                    // retry loop confirmed a real librqbit quirk and
+                    // still couldn't shake it loose.
+                    let initial_status = if retry_attempted
+                        && matches!(initial_status, DownloadStatus::Completed)
+                        && total_bytes > 0
+                        && stats.progress_bytes == total_bytes
+                    {
+                        eprintln!(
+                            "[gamelib] torrent_start_selected: retry couldn't \
+                             dislodge stale completed state; demoting \
+                             initial Completed to Downloading \
+                             (progress={}, total={}).",
+                            stats.progress_bytes, total_bytes
+                        );
+                        DownloadStatus::Downloading
+                    } else {
+                        initial_status
+                    };
 
                     let mut guard = engine_clone.lock().await;
                     if new_id_str != id {
@@ -1707,6 +1993,7 @@ pub async fn torrent_start_selected(
                     };
                     guard.downloads_mut().insert(new_id_str, download);
                     guard.save_downloads_metadata();
+                    guard.emit_progress();
                 } else {
                     // No handle from `into_handle()` — surface as
                     // an Error status so the user gets feedback
@@ -1717,6 +2004,7 @@ pub async fn torrent_start_selected(
                             "Failed to start torrent: no handle returned".to_string(),
                         );
                         guard.save_downloads_metadata();
+                        guard.emit_progress();
                     }
                 }
             }
@@ -1726,6 +2014,7 @@ pub async fn torrent_start_selected(
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error(format!("Failed to start torrent: {}", e));
                     guard.save_downloads_metadata();
+                    guard.emit_progress();
                 }
             }
             Err(_) => {
@@ -1734,6 +2023,7 @@ pub async fn torrent_start_selected(
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error("Timeout starting torrent".to_string());
                     guard.save_downloads_metadata();
+                    guard.emit_progress();
                 }
             }
         }
@@ -1742,7 +2032,73 @@ pub async fn torrent_start_selected(
     Ok(())
 }
 
-fn extract_archives_for_torrent(save_path: &str, files: &[TorrentFile]) -> Result<(), String> {
+static RUNNING_EXTRACTIONS: OnceLock<Arc<StdMutex<HashMap<String, u32>>>> = OnceLock::new();
+
+fn running_extractions() -> Arc<StdMutex<HashMap<String, u32>>> {
+    RUNNING_EXTRACTIONS.get_or_init(|| Arc::new(StdMutex::new(HashMap::new()))).clone()
+}
+
+#[cfg(windows)]
+fn kill_pid(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(&["/F", "/PID", &pid.to_string()])
+        .output();
+}
+
+#[cfg(not(windows))]
+fn kill_pid(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(&["-9", &pid.to_string()])
+        .output();
+}
+
+pub fn kill_extraction(id: &str) {
+    let map = running_extractions();
+    let pid_opt = {
+        let mut guard = map.lock().unwrap();
+        guard.remove(id)
+    };
+    if let Some(pid) = pid_opt {
+        println!("[TorrentEngine] Killing extraction process (PID {}) for torrent {}", pid, id);
+        kill_pid(pid);
+    }
+}
+
+pub fn cleanup_extractions() {
+    let map = running_extractions();
+    let mut guard = map.lock().unwrap();
+    for (id, pid) in guard.drain() {
+        println!("[TorrentEngine] App exit: killing extraction process (PID {}) for torrent {}", pid, id);
+        kill_pid(pid);
+    }
+}
+
+fn run_command_tracked(id: &str, mut cmd: std::process::Command) -> Result<(), String> {
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn process: {}", e))?;
+    let pid = child.id();
+    
+    {
+        let map = running_extractions();
+        let mut guard = map.lock().unwrap();
+        guard.insert(id.to_string(), pid);
+    }
+    
+    let status = child.wait().map_err(|e| format!("Failed to wait for process (PID {}): {}", pid, e))?;
+    
+    {
+        let map = running_extractions();
+        let mut guard = map.lock().unwrap();
+        guard.remove(id);
+    }
+    
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Process (PID {}) exited with error status: {}", pid, status))
+    }
+}
+
+fn extract_archives_for_torrent(id: &str, save_path: &str, files: &[TorrentFile]) -> Result<(), String> {
     let save_path_buf = PathBuf::from(save_path);
     let mut extracted_any = false;
     let mut last_err = None;
@@ -1775,7 +2131,7 @@ fn extract_archives_for_torrent(save_path: &str, files: &[TorrentFile]) -> Resul
         if is_archive {
             let dest_dir = file_path.parent().unwrap_or(&save_path_buf);
             println!("[TorrentEngine] Extracting {:?} to {:?}", file_path, dest_dir);
-            match extract_archive(&file_path, dest_dir) {
+            match extract_archive(id, &file_path, dest_dir) {
                 Ok(_) => {
                     extracted_any = true;
                 }
@@ -1828,7 +2184,7 @@ fn delete_archives_for_torrent(save_path: &str, files: &[TorrentFile]) {
     }
 }
 
-pub fn extract_archive(archive_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
+pub fn extract_archive(id: &str, archive_path: &std::path::Path, dest_dir: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
     let paths_to_try = [
         PathBuf::from("7z"),
@@ -1860,14 +2216,7 @@ pub fn extract_archive(archive_path: &std::path::Path, dest_dir: &std::path::Pat
            .arg(format!("-o{}", dest_dir.to_string_lossy()))
            .arg("-y");
         
-        let output = cmd.output()
-            .map_err(|e| format!("Failed to run 7z: {}", e))?;
-        
-        if output.status.success() {
-            return Ok(());
-        } else {
-            return Err(format!("7z extraction failed: {}", String::from_utf8_lossy(&output.stderr)));
-        }
+        return run_command_tracked(id, cmd);
     }
 
     let ext = archive_path.extension()
@@ -1882,10 +2231,7 @@ pub fn extract_archive(archive_path: &std::path::Path, dest_dir: &std::path::Pat
            .arg("-C")
            .arg(dest_dir);
         
-        let output = cmd.output()
-            .map_err(|e| format!("Failed to run tar: {}", e))?;
-        
-        if output.status.success() {
+        if run_command_tracked(id, cmd).is_ok() {
             return Ok(());
         }
     }
@@ -1899,17 +2245,7 @@ pub fn extract_archive(archive_path: &std::path::Path, dest_dir: &std::path::Pat
                dest_dir.to_string_lossy()
            ));
         
-        let output = cmd.output()
-            .map_err(|e| format!("Failed to run powershell Expand-Archive: {}", e))?;
-        
-        if output.status.success() {
-            return Ok(());
-        } else {
-            return Err(format!(
-                "PowerShell Expand-Archive failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
+        return run_command_tracked(id, cmd);
     }
 
     Err(format!(
