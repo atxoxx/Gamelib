@@ -1,4 +1,7 @@
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+// ─── Shared response types (consumed by mod.rs) ──────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DebridCacheResult {
@@ -22,6 +25,17 @@ pub struct DebridUserInfo {
 }
 
 // ─── AllDebrid Client ────────────────────────────────────────────────────────
+//
+// AllDebrid migrated to `Authorization: Bearer <apikey>` headers and POST-form
+// requests in late 2024 / early 2025 (the old `?agent=gamelib&apikey=…` query
+// approach now returns `404 Endpoint doesn't exist`). Endpoints used here:
+// - GET  /v4/user                 → user info
+// - POST /v4/magnet/upload        → upload & instant-cache check (instant flag)
+// - POST /v4/magnet/delete        → cleanup when an instant check isn't cached
+// - POST /v4.1/magnet/status      → progress / ready status
+// - POST /v4/magnet/files         → per-file download links (moved out of status)
+//
+// Live docs: https://docs.alldebrid.com/
 
 pub struct AllDebridClient;
 
@@ -46,18 +60,10 @@ struct AllDebridUserResponse {
 #[derive(Deserialize, Debug)]
 struct AllDebridUser {
     username: String,
+    #[serde(default)]
+    isPremium: bool,
+    #[serde(default)]
     premiumUntil: u64,
-}
-
-#[derive(Deserialize, Debug)]
-struct AllDebridInstantResponse {
-    magnets: Vec<AllDebridMagnetInstant>,
-}
-
-#[derive(Deserialize, Debug)]
-struct AllDebridMagnetInstant {
-    magnet: String,
-    instant: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -68,100 +74,157 @@ struct AllDebridUploadResponse {
 #[derive(Deserialize, Debug)]
 struct AllDebridMagnetUpload {
     id: u64,
+    #[serde(default)]
     name: String,
+    #[serde(default)]
     magnet: String,
+    /// `instant` is true when the magnet can be served immediately from the
+    /// AllDebrid cache; false means it has to be downloaded by their servers.
+    #[serde(default)]
+    instant: bool,
 }
 
 #[derive(Deserialize, Debug)]
 struct AllDebridStatusResponse {
-    magnets: AllDebridMagnetStatus,
+    magnets: Vec<AllDebridMagnetStatus>,
 }
 
 #[derive(Deserialize, Debug)]
 struct AllDebridMagnetStatus {
     id: u64,
+    #[serde(default)]
     filename: String,
+    #[serde(default)]
     size: u64,
+    #[serde(default)]
     status: String,
+    #[serde(default)]
     statusCode: u8,
+    #[serde(default)]
     statusCodeDescription: String,
+    #[serde(default)]
     downloaded: u64,
-    speed: u64,
-    seeders: u32,
+    /// `links` may be empty (or missing) under /v4.1/magnet/status — the API
+    /// moved file-level information to the dedicated /v4/magnet/files endpoint.
+    #[serde(default)]
+    links: Vec<AllDebridLink>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AllDebridFilesResponse {
+    magnets: Vec<AllDebridFilesEntry>,
+}
+
+#[derive(Deserialize, Debug)]
+struct AllDebridFilesEntry {
+    #[serde(default)]
     links: Vec<AllDebridLink>,
 }
 
 #[derive(Deserialize, Debug)]
 struct AllDebridLink {
     link: String,
-    filename: String,
-    size: u64,
+}
+
+/// Send a request to api.alldebrid.com with the standard Bearer auth header.
+/// `form` selects POST form-encoded parameters (used by every magnet endpoint).
+async fn ad_request(
+    client: &reqwest::Client,
+    method: Method,
+    path: &str,
+    apikey: &str,
+    form: Option<&[(&str, &str)]>,
+) -> Result<reqwest::Response, String> {
+    let url = format!("https://api.alldebrid.com{}", path);
+    let mut req = client
+        .request(method, &url)
+        .header("Authorization", format!("Bearer {}", apikey));
+    if let Some(params) = form {
+        req = req.form(params);
+    }
+    req.send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))
+}
+
+fn ad_err<T>(body: AllDebridResponse<T>) -> String {
+    body.error
+        .map(|e| e.message)
+        .unwrap_or_else(|| "Unknown AllDebrid error".to_string())
 }
 
 impl AllDebridClient {
     pub async fn test_key(apikey: &str) -> Result<DebridUserInfo, String> {
         let client = reqwest::Client::new();
-        let url = format!(
-            "https://api.alldebrid.com/v4/user/infos?agent=gamelib&apikey={}",
-            apikey
-        );
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
+        let resp = ad_request(&client, Method::GET, "/v4/user", apikey, None).await?;
+        let status = resp.status();
         let body: AllDebridResponse<AllDebridUserResponse> = resp
             .json()
             .await
             .map_err(|e| format!("Failed to parse user info response: {}", e))?;
 
-        if body.status != "success" {
-            let err_msg = body
-                .error
-                .map(|e| e.message)
-                .unwrap_or_else(|| "Unknown error".to_string());
-            return Err(err_msg);
+        if !status.is_success() || body.status != "success" {
+            return Err(ad_err(body));
         }
 
-        let data = body.data.ok_or("Empty response data")?;
+        let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
+        // premiumUntil is documented as 0 for non-premium accounts. Treat 0 as
+        // "no expiry" so the UI doesn't surface a meaningless epoch timestamp.
+        let premium_until = if data.user.isPremium && data.user.premiumUntil > 0 {
+            Some(data.user.premiumUntil)
+        } else {
+            None
+        };
         Ok(DebridUserInfo {
             username: data.user.username,
-            premium_until: Some(data.user.premiumUntil),
+            premium_until,
         })
     }
 
     pub async fn check_cache(apikey: &str, magnet: &str) -> Result<DebridCacheResult, String> {
+        // AllDebrid doesn't expose a dedicated cache-check endpoint. The cleanest
+        // approach is to upload the magnet and inspect the returned `instant`
+        // flag. We then delete the magnet on AllDebrid's side when it isn't
+        // cached so we don't leave behind a stranded, queued download.
         let client = reqwest::Client::new();
-        let url = format!(
-            "https://api.alldebrid.com/v4/magnet/instant?agent=gamelib&apikey={}&magnets[]={}",
+        let resp = ad_request(
+            &client,
+            Method::POST,
+            "/v4/magnet/upload",
             apikey,
-            urlencoding::encode(magnet)
-        );
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        let body: AllDebridResponse<AllDebridInstantResponse> = resp
+            Some(&[("magnets[]", magnet)]),
+        )
+        .await?;
+        let status = resp.status();
+        let body: AllDebridResponse<AllDebridUploadResponse> = resp
             .json()
             .await
-            .map_err(|e| format!("Failed to parse instant cache check response: {}", e))?;
+            .map_err(|e| format!("Failed to parse magnet upload response: {}", e))?;
 
-        if body.status != "success" {
-            return Ok(DebridCacheResult {
-                instant: false,
-                provider: "alldebrid".to_string(),
-            });
+        if !status.is_success() || body.status != "success" {
+            return Err(ad_err(body));
         }
 
-        let data = body.data.ok_or("Empty response data")?;
-        let instant = data
+        let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
+        let mag = data
             .magnets
             .first()
-            .map(|m| m.instant)
-            .unwrap_or(false);
+            .ok_or_else(|| "No magnet entry returned by AllDebrid".to_string())?;
+        let instant = mag.instant;
+
+        // Best-effort cleanup. `check_cache` is a query — we don't want to
+        // leave the magnet registered on the user's AllDebrid account, whether
+        // or not it ended up being cached. Errors here don't affect the cache
+        // verdict we return to the caller.
+        let id_str = mag.id.to_string();
+        let _ = ad_request(
+            &client,
+            Method::POST,
+            "/v4/magnet/delete",
+            apikey,
+            Some(&[("id[]", id_str.as_str())]),
+        )
+        .await;
 
         Ok(DebridCacheResult {
             instant,
@@ -171,70 +234,63 @@ impl AllDebridClient {
 
     pub async fn upload_magnet(apikey: &str, magnet: &str) -> Result<String, String> {
         let client = reqwest::Client::new();
-        let url = format!(
-            "https://api.alldebrid.com/v4/magnet/upload?agent=gamelib&apikey={}&magnets[]={}",
+        let resp = ad_request(
+            &client,
+            Method::POST,
+            "/v4/magnet/upload",
             apikey,
-            urlencoding::encode(magnet)
-        );
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
+            Some(&[("magnets[]", magnet)]),
+        )
+        .await?;
+        let status = resp.status();
         let body: AllDebridResponse<AllDebridUploadResponse> = resp
             .json()
             .await
             .map_err(|e| format!("Failed to parse upload response: {}", e))?;
 
-        if body.status != "success" {
-            let err_msg = body
-                .error
-                .map(|e| e.message)
-                .unwrap_or_else(|| "Failed to upload magnet".to_string());
-            return Err(err_msg);
+        if !status.is_success() || body.status != "success" {
+            return Err(ad_err(body));
         }
 
-        let data = body.data.ok_or("Empty response data")?;
+        let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
         let mag = data
             .magnets
             .first()
-            .ok_or("No upload results returned")?;
-
+            .ok_or_else(|| "No magnet entry returned by AllDebrid".to_string())?;
         Ok(mag.id.to_string())
     }
 
     pub async fn get_status(apikey: &str, id: &str) -> Result<DebridStatusResult, String> {
         let client = reqwest::Client::new();
-        let url = format!(
-            "https://api.alldebrid.com/v4/magnet/status?agent=gamelib&apikey={}&id={}",
-            apikey, id
-        );
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
+        let id_str = id.to_string();
+        let resp = ad_request(
+            &client,
+            Method::POST,
+            "/v4.1/magnet/status",
+            apikey,
+            Some(&[("id[]", id_str.as_str())]),
+        )
+        .await?;
+        let status = resp.status();
         let body: AllDebridResponse<AllDebridStatusResponse> = resp
             .json()
             .await
             .map_err(|e| format!("Failed to parse status response: {}", e))?;
 
-        if body.status != "success" {
-            let err_msg = body
-                .error
-                .map(|e| e.message)
-                .unwrap_or_else(|| "Failed to fetch status".to_string());
-            return Err(err_msg);
+        if !status.is_success() || body.status != "success" {
+            return Err(ad_err(body));
         }
 
-        let data = body.data.ok_or("Empty response data")?;
-        let mag = data.magnets;
+        let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
+        let mag = data
+            .magnets
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Magnet not found in status response".to_string())?;
 
-        let status = match mag.statusCode {
-            4 => "ready".to_string(), // Ready/completed
-            0..=3 => "downloading".to_string(), // In queue, processing, downloading
+        let normalized_status = match mag.statusCode {
+            4 => "ready".to_string(),       // Ready/cache complete
+            0..=3 => "downloading".to_string(), // Queued → downloading
             _ => "error".to_string(),
         };
 
@@ -244,18 +300,51 @@ impl AllDebridClient {
             0.0
         };
 
-        let links = mag.links.iter().map(|l| l.link.clone()).collect();
+        let mut links: Vec<String> = mag.links.into_iter().map(|l| l.link).collect();
+
+        // /v4.1/magnet/status no longer embeds the file list inline; fetch it
+        // from the dedicated files endpoint once the transfer is ready.
+        if normalized_status == "ready" && links.is_empty() {
+            if let Ok(files_resp) = ad_request(
+                &client,
+                Method::POST,
+                "/v4/magnet/files",
+                apikey,
+                Some(&[("id[]", id_str.as_str())]),
+            )
+            .await
+            {
+                if let Ok(parsed) = files_resp
+                    .json::<AllDebridResponse<AllDebridFilesResponse>>()
+                    .await
+                {
+                    if let Some(payload) = parsed.data {
+                        for entry in payload.magnets {
+                            for link in entry.links {
+                                links.push(link.link);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let error_message = if mag.statusCode > 4 {
+            Some(if mag.statusCodeDescription.is_empty() {
+                format!("AllDebrid error code {}", mag.statusCode)
+            } else {
+                mag.statusCodeDescription
+            })
+        } else {
+            None
+        };
 
         Ok(DebridStatusResult {
             id: id.to_string(),
             progress,
-            status,
+            status: normalized_status,
             links,
-            error_message: if mag.statusCode > 4 {
-                Some(mag.statusCodeDescription)
-            } else {
-                None
-            },
+            error_message,
         })
     }
 }
