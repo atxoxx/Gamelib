@@ -8955,3 +8955,362 @@
   border-color: rgba(239, 68, 68, 0.15);
 }
 
+/* ==============================
+   ReviewsTab — Feature additions
+   (Context badges, hardware specs, BB code, playtime range, etc.)
+   Appended by the Steam-review-upgrade rollout.
+   ============================== */
+
+.rv-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+/* ── Reviewer context badges (Early Access / Free / Steam Purchase / Deck) ─ */
+
+.rv-context-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.rv-context-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-full);
+  border: 1px solid;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.rv-context-badge svg {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+}
+
+.rv-context-badge-info {
+  background: color-mix(in srgb, var(--color-info) 12%, transparent);
+  color: var(--color-info);
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+}
+
+.rv-context-badge-warning {
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.rv-context-badge-success {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+/* ── Hardware specs panel (OS / CPU / GPU / RAM / VRAM) ──────────────── */
+
+.rv-hw-specs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-xs);
+}
+
+.rv-hw-specs-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+
+.rv-hw-specs ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rv-hw-specs li {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 11px;
+  line-height: 1.4;
+  align-items: baseline;
+}
+
+.rv-hw-specs-key {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  min-width: 38px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-hw-specs-value {
+  color: var(--color-text-primary);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Playtime pills (at review, total, deck) ──────────────────────── */
+
+.rv-playtime-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: var(--space-xs);
+}
+
+.rv-playtime-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+.rv-playtime-pill-muted {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+/* ── Show-more button for reactions ─────────────────────────────────── */
+
+.rv-reaction-show-more {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.rv-reaction-show-more:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-hover);
+}
+
+/* ── Comment count deep link ─────────────────────────────────────────── */
+
+.rv-card-comments-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.rv-card-comments-link:hover {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.rv-card-comments-link svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+/* ── BB code renderer (Steam review markup) ─────────────────────────── */
+
+.rv-bbcode {
+  background: var(--color-bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.rv-bbcode-h1,
+.rv-bbcode-h2,
+.rv-bbcode-h3 {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 6px 0 4px 0;
+  line-height: 1.3;
+}
+
+.rv-bbcode-h2 {
+  font-size: 15px;
+}
+
+.rv-bbcode-h3 {
+  font-size: 13px;
+}
+
+.rv-bbcode-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  text-underline-offset: 2px;
+  transition: text-decoration-color var(--transition-fast);
+}
+
+.rv-bbcode-link:hover {
+  text-decoration-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+
+.rv-bbcode-list {
+  margin: 4px 0;
+  padding-left: 22px;
+  list-style-type: disc;
+}
+
+.rv-bbcode-list li {
+  margin: 2px 0;
+  line-height: 1.6;
+}
+
+ol.rv-bbcode-list {
+  list-style-type: decimal;
+}
+
+.rv-bbcode-spoiler {
+  background: var(--color-text-primary);
+  color: var(--color-text-primary);
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  user-select: none;
+  display: inline;
+}
+
+.rv-bbcode-spoiler:hover {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.rv-bbcode-spoiler.revealed {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  cursor: text;
+  user-select: text;
+}
+
+.rv-bbcode-spoiler-mask {
+  color: var(--color-bg-primary);
+  font-style: italic;
+  font-weight: var(--font-weight-medium);
+}
+
+.rv-bbcode-spoiler.revealed .rv-bbcode-spoiler-mask {
+  display: none;
+}
+
+.rv-bbcode-quote {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-bg-tertiary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.rv-bbcode-quote-author {
+  display: block;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  font-style: normal;
+  color: var(--color-accent);
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── Custom playtime range input row ─────────────────────────────────── */
+
+.rv-playtime-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.rv-playtime-range-sep {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+}
+
+.rv-playtime-range-hint {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rv-input {
+  width: 50px;
+  padding: 4px 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.rv-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.rv-input::-webkit-outer-spin-button,
+.rv-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.rv-input[type="number"] {
+  -moz-appearance: textfield;
+}

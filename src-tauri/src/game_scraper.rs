@@ -109,7 +109,7 @@ pub struct ReleaseDateInfo {
     pub region: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IgdbReview {
     pub title: Option<String>,
@@ -2498,6 +2498,10 @@ pub async fn fetch_game_reviews(
     steam_app_id: Option<u64>,
     cursor: Option<String>,
     language: Option<String>,
+    filter_type: Option<String>,
+    purchase_type: Option<String>,
+    _playtime_min_hours: Option<u32>,
+    _playtime_max_hours: Option<u32>,
 ) -> ReviewFetchResult {
     // ── 1. Steam ──────────────────────────────────────────────────────────
     let app_id_to_try: Option<u64> = match steam_app_id {
@@ -2506,7 +2510,15 @@ pub async fn fetch_game_reviews(
     };
 
     if let Some(app_id) = app_id_to_try {
-        match fetch_steam_reviews(app_id, &cursor.unwrap_or_default(), language.as_deref()).await {
+        match fetch_steam_reviews(
+            app_id,
+            &cursor.unwrap_or_default(),
+            language.as_deref(),
+            filter_type.as_deref(),
+            purchase_type.as_deref(),
+        )
+        .await
+        {
             Ok((reviews, total, next_cursor, summary)) if !reviews.is_empty() => {
                 return ReviewFetchResult {
                     reviews,
@@ -2651,6 +2663,8 @@ async fn fetch_steam_reviews(
     app_id: u64,
     cursor: &str,
     language: Option<&str>,
+    filter_type: Option<&str>,
+    purchase_type: Option<&str>,
 ) -> Result<(Vec<IgdbReview>, u64, Option<String>, Option<SteamQuerySummary>), String> {
     let client = http_client();
 
@@ -2732,6 +2746,7 @@ async fn fetch_steam_reviews(
                 votes_funny: r.votes_funny,
                 timestamp_created: r.timestamp_created,
                 username: display_name,
+                ..Default::default()
             })
         })
         .collect();
@@ -2837,6 +2852,7 @@ async fn fetch_igdb_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
             votes_up: None,
             votes_funny: None,
             timestamp_created: None,
+            ..Default::default()
         })
         .collect();
 
@@ -3142,6 +3158,7 @@ async fn fetch_metacritic_reviews(game_name: &str) -> Result<Vec<IgdbReview>, St
             votes_up: None,
             votes_funny: None,
             timestamp_created,
+            ..Default::default()
         });
     }
 
@@ -3354,6 +3371,7 @@ async fn fetch_opencritic_via_rapidapi(
             votes_up: None,
             votes_funny: None,
             timestamp_created: None,
+            ..Default::default()
         });
     }
 
@@ -3377,6 +3395,7 @@ async fn fetch_opencritic_via_rapidapi(
                 votes_up: Some(ratings.count as u32),
                 votes_funny: None,
                 timestamp_created: None,
+                ..Default::default()
             });
         }
     }
@@ -3528,6 +3547,7 @@ async fn fetch_opencritic_reviews(game_name: &str) -> Result<Vec<IgdbReview>, St
             votes_up: None,
             votes_funny: None,
             timestamp_created,
+            ..Default::default()
         });
     }
 
@@ -3608,6 +3628,7 @@ fn extract_opencritic_json_reviews(doc: &scraper::Html) -> Option<Vec<IgdbReview
             votes_up: None,
             votes_funny: None,
             timestamp_created,
+            ..Default::default()
         });
     }
 
@@ -3797,6 +3818,7 @@ async fn fetch_rawg_reviews(game_name: &str) -> Result<Vec<IgdbReview>, String> 
             votes_up: None,
             votes_funny: None,
             timestamp_created,
+            ..Default::default()
         });
     }
 

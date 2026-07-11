@@ -649,14 +649,34 @@ async fn get_store_game_detail(slug: String) -> Option<GameMetadataResult> {
 /// Fetch reviews for a game from the best available source (Steam first, IGDB fallback).
 /// Returns the reviews and a `source` string ("steam" | "igdb" | "none") so the UI
 /// can label them correctly.
+///
+/// New (post-ReviewViewer-parity) optional filter args, all `None` for "no filter":
+///   - `filter_type`        — "all" (default) | "recent" | "funny"
+///   - `purchase_type`      — "all" (default) | "steam" | "other"
+///   - `playtime_min_hours` — minimum author playtime (client-side filter)
+///   - `playtime_max_hours` — maximum author playtime (client-side filter)
 #[tauri::command]
 async fn fetch_game_reviews(
     game_name: String,
     steam_app_id: Option<u64>,
     cursor: Option<String>,
     language: Option<String>,
+    filter_type: Option<String>,
+    purchase_type: Option<String>,
+    playtime_min_hours: Option<u32>,
+    playtime_max_hours: Option<u32>,
 ) -> ReviewFetchResult {
-    game_scraper::fetch_game_reviews(&game_name, steam_app_id, cursor, language).await
+    game_scraper::fetch_game_reviews(
+        &game_name,
+        steam_app_id,
+        cursor,
+        language,
+        filter_type,
+        purchase_type,
+        playtime_min_hours,
+        playtime_max_hours,
+    )
+    .await
 }
 
 /// Fetch reviews from an external source (metacritic, opencritic, or rawg).

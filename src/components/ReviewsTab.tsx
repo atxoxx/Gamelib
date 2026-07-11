@@ -1,43 +1,54 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type Game, type IgdbReview, type ReviewFetchResult, extractSteamAppId } from "../types/game";
+import {
+  type Game,
+  type IgdbReview,
+  type ReviewFetchResult,
+  type SteamReaction,
+  extractSteamAppId,
+  resolveSteamAppId,
+  STEAM_LANGUAGES,
+  STEAM_REACTIONS,
+  formatPlayTime,
+} from "../types/game";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type RatingFilter = "all" | "positive" | "negative";
-type SortOrder = "featured" | "highest" | "longest";
+/** Sort modes mapped to Steam's `filter` query param:
+ *  - "featured"   → filter=all       (Steam's default "most helpful")
+ *  - "recent"     → filter=updated   (sorted by last update)
+ *  - "funny"      → filter=funny     (reactions > votes funny)
+ *  - "highest"    → client-side sort by rating (Steam has no "highest" param)
+ *  - "longest"    → client-side sort by review length
+ */
+type SortOrder = "featured" | "recent" | "funny" | "highest" | "longest";
 type SourceFilter = "all" | "steam" | "you" | "metacritic" | "opencritic" | "rawg";
-
-/** Supported Steam review languages (matching Steam API query codes). */
-const LANGUAGES: { code: string; label: string; flag: string }[] = [
-  { code: "all", label: "All languages", flag: "🌐" },
-  { code: "english", label: "English", flag: "🇬🇧" },
-  { code: "french", label: "Français", flag: "🇫🇷" },
-  { code: "german", label: "Deutsch", flag: "🇩🇪" },
-  { code: "spanish", label: "Español", flag: "🇪🇸" },
-  { code: "italian", label: "Italiano", flag: "🇮🇹" },
-  { code: "russian", label: "Русский", flag: "🇷🇺" },
-  { code: "schinese", label: "简体中文", flag: "🇨🇳" },
-  { code: "tchinese", label: "繁體中文", flag: "🇹🇼" },
-  { code: "japanese", label: "日本語", flag: "🇯🇵" },
-  { code: "koreana", label: "한국어", flag: "🇰🇷" },
-  { code: "brazilian", label: "Português (BR)", flag: "🇧🇷" },
-  { code: "polish", label: "Polski", flag: "🇵🇱" },
-  { code: "turkish", label: "Türkçe", flag: "🇹🇷" },
-];
+/** Steam review purchase_type param. Maps 1:1 to the query value. */
+type PurchaseTypeFilter = "all" | "steam" | "other";
+/** Playtime filter. "over_1h" / "over_10h" map to Steam's
+ *  `playtime_filter_min_<hours>` query params. "custom" applies
+ *  client-side (Steam only supports a single min threshold). */
+type PlaytimeFilter = "none" | "over_1h" | "over_10h" | "custom";
 
 /** A normalized review record we render. Combines local + Steam-fetched data. */
 interface ReviewItem {
   id: string;
+  /** Stable index assigned during the build step. Used for the
+   *  "featured" sort (Steam's natural order) — string IDs like
+   *  `steam-{idx}` would re-introduce the parseInt bug we're fixing. */
+  sourceIndex: number;
   source: "you" | "steam" | "metacritic" | "opencritic" | "rawg";
   sourceLabel: string;
   username: string;
-  rating: number | null; // 0-100
-  ratingLabel: string; // pre-formatted for display
+  rating: number | null;
+  ratingLabel: string;
   title: string;
+  /** Review body. May contain Steam BB code; rendered through
+   *  `BbCodeRenderer` so [b]/[i]/[url]/[spoiler] etc. display properly. */
   content: string;
   dateAdded?: number;
   reviewLength: number;
@@ -47,12 +58,429 @@ interface ReviewItem {
   votesUp?: number;
   /** Steam: number of users who found this funny. */
   votesFunny?: number;
+  /** Steam: full reaction breakdown (newest addition). */
+  reactions?: SteamReaction[];
+  /** Steam: comment count (newest addition). */
+  commentCount?: number;
+  /** Steam: reviewer playtime at the moment of writing (minutes). */
+  authorPlaytimeAtReview?: number;
+  /** Steam: reviewer's total playtime across all games (minutes). */
+  authorPlaytimeForever?: number;
+  /** Steam: reviewer's Steam Deck playtime for this game (minutes). */
+  authorDeckPlaytimeAtReview?: number;
+  /** Steam: reviewer primarily played on Steam Deck. */
+  primarilySteamDeck?: boolean;
+  /** Steam: reviewer received the game for free. */
+  receivedForFree?: boolean;
+  /** Steam: review was written during Early Access. */
+  writtenDuringEarlyAccess?: boolean;
+  /** Steam: reviewer purchased on Steam directly. */
+  steamPurchase?: boolean;
+  /** Steam: reviewer's SteamID64 — used for the deep-link button. */
+  authorSteamId?: string;
+  /** Steam: raw hardware JSON string. Parsed client-side by
+   *  `parseSteamHardware` since the schema is unstable. */
+  hw?: string;
+  /** True when `reviewLength` is in bytes rather than characters.
+   *  The byte length is what Steam actually returns; we keep both
+   *  for display but use the byte count for sort. */
+  reviewLengthBytes: number;
+}
+
+// ─── Steam hardware JSON parser ────────────────────────────────────────────
+
+/** Parsed Steam `hw` payload. The schema is unstable across API
+ *  versions so every field is optional; the renderer only shows
+ *  lines whose value is non-null. */
+interface SteamHardware {
+  os?: string;
+  cpuName?: string;
+  gpuName?: string;
+  /** RAM in MB (Steam returns the value as a string; we coerce). */
+  systemRamMb?: number;
+  /** VRAM in MB. */
+  vramSize?: number;
+}
+
+function parseSteamHardware(raw: string | undefined): SteamHardware | null {
+  if (!raw) return null;
+  try {
+    // Steam's hw field is itself a JSON string in some API responses.
+    // Try parsing once; if that fails, the value might be already-
+    // parsed (an object passed through some intermediate layer).
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // `os` and `cpuName` are sometimes nested under different keys
+    // across API versions; check both.
+    const os = pickString(parsed, ["os", "OS"]);
+    const cpuName = pickString(parsed, ["cpuName", "cpu", "processorName"]);
+    const gpuName = pickString(parsed, ["adapterDescription", "gpu", "gpuName"]);
+    const systemRamMb = pickNumber(parsed, ["systemRam", "ram", "totalMemoryMB"]);
+    const vramSize = pickNumber(parsed, ["vramSize", "vram", "videoMemoryMB"]);
+    if (!os && !cpuName && !gpuName && !systemRamMb && !vramSize) return null;
+    return { os, cpuName, gpuName, systemRamMb, vramSize };
+  } catch {
+    return null;
+  }
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickNumber(obj: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === "string") {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return undefined;
+}
+
+function formatRam(mb: number | undefined): string | null {
+  if (mb === undefined || mb <= 0) return null;
+  // Steam returns the value as either MB (old) or GB*1024 (newer).
+  // Threshold: anything < 64 GB * 1024 = 65536 MB is treated as MB.
+  if (mb < 65536) return `${(mb / 1024).toFixed(1)} GB`;
+  // Already in MB but huge; fall through to GB.
+  return `${(mb / 1024).toFixed(0)} GB`;
+}
+
+function formatVram(mb: number | undefined): string | null {
+  if (mb === undefined || mb <= 0) return null;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+// ─── BB code renderer ──────────────────────────────────────────────────────
+
+/** Maximum nesting depth for the BB code parser. Steam review text
+ *  rarely nests more than 2-3 levels deep; anything deeper is almost
+ *  certainly malformed author markup that we should treat as text
+ *  rather than spawn a deeply-nested React tree. */
+const BB_MAX_DEPTH = 6;
+
+/** Maximum output length (chars). Steam review text is bounded by
+ *  Steam itself, but a pathological BB code string could explode
+ *  into huge output. Clamp so the renderer stays responsive. */
+const BB_MAX_OUTPUT = 20_000;
+
+/** Parse Steam BB code into a flat list of React-renderable nodes.
+ *
+ *  Implementation note: a proper state machine is the textbook
+ *  approach but adds ~200 lines for a feature that is, in practice,
+ *  straight-line text with optional inline markup. We use a
+ *  depth-limited recursive-descent parser that:
+ *  1. Strips leading/trailing whitespace and CR/LF (BB code is
+ *     line-oriented; we keep paragraph breaks).
+ *  2. Strips any HTML tags from the input (XSS defense — Steam's
+ *     [url=...] and [img] tags are the only ones that emit raw
+ *     HTML, and we sanitise both).
+ *  3. Walks the string char-by-char, recognising `[tag]...[/tag]`
+ *     and `[self]` markers. Nested same-tag blocks are processed
+ *     recursively up to `BB_MAX_DEPTH`.
+ *  4. Returns React elements for the supported tags; unknown tags
+ *     pass through as their inner text.
+ */
+function parseBbCode(input: string): React.ReactNode[] {
+  if (!input) return [];
+  if (input.length > BB_MAX_OUTPUT) {
+    input = input.slice(0, BB_MAX_OUTPUT);
+  }
+  // Strip CR (keep \n as paragraph separators). We also strip any
+  // literal HTML tags since Steam's BB code is the only "rich text"
+  // surface we render; any embedded HTML would be a Steam-side bug.
+  const safe = stripHtml(input).replace(/\r/g, "");
+
+  const nodes: React.ReactNode[] = [];
+  const cursor = { i: 0 };
+  parseBlock(safe, cursor, nodes, 0);
+  return nodes;
+}
+
+/** Strip any literal HTML tags from `input`. This is XSS defense —
+ *  Steam review content is BB code only, and any embedded HTML
+ *  would be unexpected. We don't try to preserve escaping
+ *  (`&lt;` etc.) since Steam authors don't use it. */
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, "");
+}
+
+/** Parse a top-level block of text, splitting on tag boundaries
+ *  and recursing into nested tags up to `depth`. */
+function parseBlock(
+  src: string,
+  cursor: { i: number },
+  out: React.ReactNode[],
+  depth: number,
+): void {
+  if (depth > BB_MAX_DEPTH) {
+    // Bail: append the rest as a text node and stop parsing.
+    out.push(renderText(src.slice(cursor.i)));
+    cursor.i = src.length;
+    return;
+  }
+  const len = src.length;
+  let buf = "";
+  while (cursor.i < len) {
+    if (out.length > 200) {
+      // Defensive: 200 top-level nodes is more than any sane review.
+      // Bail rather than spend the rest of the render on BB parsing.
+      out.push(renderText(buf + src.slice(cursor.i)));
+      cursor.i = len;
+      return;
+    }
+    const ch = src[cursor.i];
+    if (ch === "\n") {
+      if (buf) {
+        out.push(renderText(buf));
+        buf = "";
+      }
+      out.push(<br key={`br-${out.length}-${cursor.i}`} />);
+      cursor.i++;
+      // Skip blank lines so a `\n\n` doesn't render as 2x <br>.
+      while (cursor.i < len && src[cursor.i] === "\n") cursor.i++;
+      continue;
+    }
+    if (ch !== "[") {
+      buf += ch;
+      cursor.i++;
+      continue;
+    }
+    // Try to read a tag at the current position.
+    const tagMatch = readTag(src, cursor.i);
+    if (!tagMatch) {
+      buf += ch;
+      cursor.i++;
+      continue;
+    }
+    if (tagMatch.kind === "close") {
+      // Stray close tag (no matching open) — emit the tag literal
+      // and continue so the text isn't lost.
+      buf += `[${tagMatch.tag}]`;
+      cursor.i = tagMatch.nextIndex;
+      continue;
+    }
+    if (tagMatch.kind === "self") {
+      if (buf) {
+        out.push(renderText(buf));
+        buf = "";
+      }
+      const selfNode = renderSelfClosing(tagMatch.tag, tagMatch.attrs);
+      if (selfNode !== null) out.push(selfNode);
+      cursor.i = tagMatch.nextIndex;
+      continue;
+    }
+    // open — flush the buffer, parse inner block, then expect a close.
+    if (buf) {
+      out.push(renderText(buf));
+      buf = "";
+    }
+    cursor.i = tagMatch.nextIndex;
+    const inner: React.ReactNode[] = [];
+    parseBlock(src, cursor, inner, depth + 1);
+    const node = renderOpening(tagMatch.tag, tagMatch.attrs, inner);
+    if (node !== null) out.push(node);
+    // Consume the close tag if present. If missing, just continue —
+    // we already pushed the open's content.
+    const closeMatch = readTag(src, cursor.i);
+    if (closeMatch && closeMatch.kind === "close" && closeMatch.tag === tagMatch.tag) {
+      cursor.i = closeMatch.nextIndex;
+    }
+  }
+  if (buf) {
+    out.push(renderText(buf));
+  }
+}
+
+interface TagMatch {
+  kind: "open" | "close" | "self";
+  tag: string;
+  attrs?: Record<string, string>;
+  nextIndex: number;
+}
+
+/** Try to read a [tag], [/tag], or [self/] marker at `pos`.
+ *  Returns `null` when no well-formed tag is present (in which
+ *  case the caller treats the `[` as a literal character). */
+function readTag(src: string, pos: number): TagMatch | null {
+  if (src[pos] !== "[") return null;
+  // Search up to the next `]`. Bail if not found within 256 chars —
+  // a long unterminated `[` shouldn't be treated as a tag.
+  let end = src.indexOf("]", pos + 1);
+  if (end === -1 || end - pos > 256) return null;
+  const inner = src.slice(pos + 1, end).trim();
+  if (!inner) return null;
+  if (inner.startsWith("/")) {
+    const tag = inner.slice(1).toLowerCase().trim();
+    if (!isKnownTag(tag)) return null;
+    return { kind: "close", tag, nextIndex: end + 1 };
+  }
+  // Self-closing: [tag/] or [tag attr=val/]
+  if (inner.endsWith("/")) {
+    const body = inner.slice(0, -1).trim();
+    const { tag, attrs } = parseTagBody(body);
+    if (!isKnownTag(tag)) return null;
+    return { kind: "self", tag, attrs, nextIndex: end + 1 };
+  }
+  const { tag, attrs } = parseTagBody(inner);
+  if (!isKnownTag(tag)) return null;
+  return { kind: "open", tag, attrs, nextIndex: end + 1 };
+}
+
+function parseTagBody(body: string): { tag: string; attrs?: Record<string, string> } {
+  const spaceIdx = body.indexOf(" ");
+  if (spaceIdx === -1) return { tag: body.toLowerCase() };
+  const tag = body.slice(0, spaceIdx).toLowerCase();
+  const rest = body.slice(spaceIdx + 1).trim();
+  const attrs = parseAttrs(rest);
+  return { tag, attrs };
+}
+
+function parseAttrs(rest: string): Record<string, string> | undefined {
+  if (!rest) return undefined;
+  const out: Record<string, string> = {};
+  // Match key=value pairs. Values may be quoted; unquoted values
+  // are read up to the next whitespace.
+  const re = /(\w+)\s*=\s*(?:"([^"]*)"|(\S+))/g;
+  let m: RegExpExecArray | null;
+  let any = false;
+  while ((m = re.exec(rest)) !== null) {
+    const key = m[1].toLowerCase();
+    const val = (m[2] ?? m[3] ?? "").trim();
+    out[key] = val;
+    any = true;
+  }
+  return any ? out : undefined;
+}
+
+function isKnownTag(tag: string): boolean {
+  switch (tag) {
+    case "b": case "i": case "u": case "s": case "code":
+    case "h1": case "h2": case "h3":
+    case "url": case "img": case "hr":
+    case "list": case "olist": case "*":
+    case "spoiler": case "quote":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function renderText(text: string): React.ReactNode {
+  // Convert double newlines into a paragraph break (no-op in the
+  // current parser since we only emit single <br/>; reserved for
+  // future paragraph support).
+  return text;
+}
+
+function renderSelfClosing(tag: string, attrs?: Record<string, string>): React.ReactNode | null {
+  switch (tag) {
+    case "hr":
+      return <hr />;
+    case "img": {
+      const src = attrs?.src ?? attrs?.href ?? "";
+      if (!isSafeUrl(src)) return null;
+      return <img src={src} alt="Review image" loading="lazy" style={{ maxWidth: "100%", borderRadius: 4 }} />;
+    }
+    case "*": {
+      // [*] inside a [list] becomes an <li>. Handled by the opening
+      // tag's renderer; the self-closing form is rare but supported.
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+function renderOpening(
+  tag: string,
+  attrs: Record<string, string> | undefined,
+  children: React.ReactNode[],
+): React.ReactNode {
+  switch (tag) {
+    case "b": return <strong>{children}</strong>;
+    case "i": return <em>{children}</em>;
+    case "u": return <u>{children}</u>;
+    case "s": return <s>{children}</s>;
+    case "code": return <code className="rv-bbcode">{children}</code>;
+    case "h1": return <h4 className="rv-bbcode rv-bbcode-h1">{children}</h4>;
+    case "h2": return <h4 className="rv-bbcode rv-bbcode-h2">{children}</h4>;
+    case "h3": return <h4 className="rv-bbcode rv-bbcode-h3">{children}</h4>;
+    case "url": {
+      const href = attrs?.href ?? attrs?.url ?? "";
+      if (!isSafeUrl(href)) return <>{children}</>;
+      return (
+        <a className="rv-bbcode-link" href={href} target="_blank" rel="noopener noreferrer">
+          {children}
+        </a>
+      );
+    }
+    case "list": return <ul className="rv-bbcode-list">{children}</ul>;
+    case "olist": return <ol className="rv-bbcode-list">{children}</ol>;
+    case "spoiler": return <SpoilerBlock>{children}</SpoilerBlock>;
+    case "quote": {
+      const author = attrs?.user;
+      return (
+        <blockquote className="rv-bbcode-quote">
+          {author && <cite className="rv-bbcode-quote-author">{author} wrote:</cite>}
+          {children}
+        </blockquote>
+      );
+    }
+    default:
+      return <>{children}</>;
+  }
+}
+
+/** Click-to-reveal spoiler block. State is local to the component;
+ *  the parent never sees the toggle. */
+function SpoilerBlock({ children }: { children: React.ReactNode }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <span
+      className={`rv-bbcode-spoiler${revealed ? " revealed" : ""}`}
+      onClick={() => setRevealed(true)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setRevealed(true);
+        }
+      }}
+    >
+      {revealed ? children : <span className="rv-bbcode-spoiler-mask">Click to reveal spoiler</span>}
+    </span>
+  );
+}
+
+/** XSS defense: only allow http(s) URLs in [url=...] and [img] tags.
+ *  This is the single most important BB code safety check. */
+function isSafeUrl(href: string): boolean {
+  if (!href) return false;
+  const trimmed = href.trim();
+  if (trimmed.length > 1024) return false;
+  if (/^javascript:/i.test(trimmed)) return false;
+  if (/^data:/i.test(trimmed)) return false;
+  if (/^vbscript:/i.test(trimmed)) return false;
+  return /^https?:\/\//i.test(trimmed);
+}
+
+function BbCodeRenderer({ text }: { text: string }) {
+  const nodes = useMemo(() => parseBbCode(text), [text]);
+  return <>{nodes}</>;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function languageCodeToFriendly(code?: string): string {
-  const found = LANGUAGES.find((l) => l.code === code);
+  const found = STEAM_LANGUAGES.find((l) => l.code === code);
   return found ? `${found.flag} ${found.label}` : code || "Unknown";
 }
 
@@ -97,14 +525,25 @@ function formatShortDate(ts?: number): string {
   }
 }
 
+function formatHelpfulFunny(count: number | undefined): string {
+  if (!count || count <= 0) return "";
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+  return count.toString();
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────
 
-function StarRow({ score, size = 14 }: { score: number; size?: number }) {
+function StarRow({ score, size = 14, overrideStars }: { score?: number; size?: number; overrideStars?: number }) {
   const reactId = useId();
-  const stars = ratingToStars(score);
+  // Bug fix: previously `score` was required and always used. Now the
+  // parent (ReviewSummary) pre-computes stars from Steam's 1-9 score
+  // bucket or percentage tiers and passes them via `overrideStars`,
+  // because `ratingToStars(score)` is wrong for percentage context
+  // (a 75% positive ratio is NOT a 75/100 average rating).
+  const stars = overrideStars !== undefined ? overrideStars : score !== undefined ? ratingToStars(score) : 0;
   const full = Math.floor(stars);
   const half = stars - full >= 0.5;
-  const empty = 5 - full - (half ? 1 : 0);
+  const empty = Math.max(0, 5 - full - (half ? 1 : 0));
   return (
     <div className="rv-stars" aria-label={`${stars} out of 5`}>
       {Array.from({ length: full }).map((_, i) => (
@@ -132,7 +571,6 @@ function StarRow({ score, size = 14 }: { score: number; size?: number }) {
   );
 }
 
-/** Vertical recommendation badge used at the top of each card. */
 function RecommendationIndicator({
   source,
   sentiment,
@@ -153,7 +591,6 @@ function RecommendationIndicator({
       </div>
     );
   }
-
   if (sentiment === "positive") {
     return (
       <div className="rv-recommendation rv-recommendation-pos" aria-label="Recommended">
@@ -165,7 +602,6 @@ function RecommendationIndicator({
       </div>
     );
   }
-
   if (sentiment === "negative") {
     return (
       <div className="rv-recommendation rv-recommendation-neg" aria-label="Not Recommended">
@@ -177,7 +613,6 @@ function RecommendationIndicator({
       </div>
     );
   }
-
   return (
     <div className="rv-recommendation rv-recommendation-none" aria-label="No rating">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -200,17 +635,10 @@ function ReviewSourceBadge({ source, label }: { source: ReviewItem["source"]; la
         <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
       </svg>
     ),
-    metacritic: (
-      <span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>MC</span>
-    ),
-    opencritic: (
-      <span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>OC</span>
-    ),
-    rawg: (
-      <span style={{ fontSize: "10px", fontWeight: 900, lineHeight: 1 }}>R</span>
-    ),
+    metacritic: (<span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>MC</span>),
+    opencritic: (<span style={{ fontSize: "12px", fontWeight: 900, lineHeight: 1 }}>OC</span>),
+    rawg: (<span style={{ fontSize: "10px", fontWeight: 900, lineHeight: 1 }}>R</span>),
   };
-
   return (
     <span className={`rv-source-badge rv-source-badge-${source}`}>
       {iconMap[source] || null}
@@ -219,55 +647,234 @@ function ReviewSourceBadge({ source, label }: { source: ReviewItem["source"]; la
   );
 }
 
-/** Read-only reaction display showing real Steam data at the bottom of each review card. */
-function ReactionBar({ review }: { review: ReviewItem }) {
-  const hasVotesUp = (review.votesUp ?? 0) > 0;
-  const hasVotesFunny = (review.votesFunny ?? 0) > 0;
-
-  if (!hasVotesUp && !hasVotesFunny) return null;
-
+function ContextBadge({ icon, label, tone }: { icon: React.ReactNode; label: string; tone: "info" | "warning" | "success" }) {
   return (
-    <div className="rv-card-reactions">
-      {hasVotesUp && (
-        <span className="rv-reaction-badge" title="People found this helpful">
-          <span className="rv-reaction-emoji">👍</span>
-          <span className="rv-reaction-count">{review.votesUp}</span>
+    <span
+      className={`rv-context-badge rv-context-badge-${tone}`}
+      title={label}
+    >
+      {icon}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function ContextBadgesRow({ review }: { review: ReviewItem }) {
+  const badges: React.ReactNode[] = [];
+  if (review.writtenDuringEarlyAccess) {
+    badges.push(
+      <ContextBadge
+        key="ea"
+        tone="warning"
+        label="Early Access"
+        icon={
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15 14" />
+          </svg>
+        }
+      />,
+    );
+  }
+  if (review.receivedForFree) {
+    badges.push(
+      <ContextBadge
+        key="free"
+        tone="info"
+        label="Received for Free"
+        icon={
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        }
+      />,
+    );
+  }
+  if (review.steamPurchase) {
+    badges.push(
+      <ContextBadge
+        key="sp"
+        tone="success"
+        label="Steam Purchase"
+        icon={
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <path d="M16 10a4 4 0 0 1-8 0" />
+          </svg>
+        }
+      />,
+    );
+  }
+  if (review.primarilySteamDeck) {
+    badges.push(
+      <ContextBadge
+        key="deck"
+        tone="info"
+        label="Played on Steam Deck"
+        icon={
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="2" y="6" width="20" height="13" rx="2" />
+            <circle cx="8" cy="12.5" r="0.5" />
+            <circle cx="16" cy="12.5" r="0.5" />
+          </svg>
+        }
+      />,
+    );
+  }
+  if (badges.length === 0) return null;
+  return <div className="rv-context-badges">{badges}</div>;
+}
+
+function HardwareSpecs({ hw }: { hw: string | undefined }) {
+  const parsed = useMemo(() => parseSteamHardware(hw), [hw]);
+  if (!parsed) return null;
+  const lines: { label: string; value: string }[] = [];
+  if (parsed.os) lines.push({ label: "OS", value: parsed.os });
+  if (parsed.cpuName || parsed.systemRamMb) {
+    const cpu = parsed.cpuName ?? "Unknown CPU";
+    const ram = formatRam(parsed.systemRamMb);
+    lines.push({ label: "CPU", value: ram ? `${cpu} • ${ram}` : cpu });
+  }
+  if (parsed.gpuName || parsed.vramSize) {
+    const gpu = parsed.gpuName ?? "Unknown GPU";
+    const vram = formatVram(parsed.vramSize);
+    lines.push({ label: "GPU", value: vram ? `${gpu} • ${vram}` : gpu });
+  }
+  if (lines.length === 0) return null;
+  return (
+    <div className="rv-hw-specs">
+      <span className="rv-hw-specs-label">Reviewer hardware</span>
+      <ul>
+        {lines.map((line) => (
+          <li key={line.label}>
+            <span className="rv-hw-specs-key">{line.label}</span>
+            <span className="rv-hw-specs-value">{line.value}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PlaytimeRow({ review }: { review: ReviewItem }) {
+  if (review.authorPlaytimeAtReview === undefined && review.authorPlaytimeForever === undefined) {
+    return null;
+  }
+  return (
+    <div className="rv-playtime-row">
+      {review.authorPlaytimeAtReview !== undefined && (
+        <span className="rv-playtime-pill" title="Playtime on this game at the time the review was written">
+          {formatPlayTime(review.authorPlaytimeAtReview)} on record
         </span>
       )}
-      {hasVotesFunny && (
-        <span className="rv-reaction-badge" title="People found this funny">
-          <span className="rv-reaction-emoji">😂</span>
-          <span className="rv-reaction-count">{review.votesFunny}</span>
+      {review.authorPlaytimeForever !== undefined && (
+        <span className="rv-playtime-pill rv-playtime-pill-muted" title="Total playtime across all games">
+          {formatPlayTime(review.authorPlaytimeForever)} total
         </span>
       )}
     </div>
   );
 }
 
-// ─── Review Card ──────────────────────────────────────────────────────────
+function ReactionBar({ review }: { review: ReviewItem }) {
+  const hasVotesUp = (review.votesUp ?? 0) > 0;
+  const hasVotesFunny = (review.votesFunny ?? 0) > 0;
+  const reactions = review.reactions ?? [];
+  if (!hasVotesUp && !hasVotesFunny && reactions.length === 0) return null;
+  // Sort by count descending and show top 3; reveal the rest on click.
+  const sorted = [...reactions].sort((a, b) => b.count - a.count);
+  return (
+    <ReactionList reactions={sorted} votesUp={review.votesUp} votesFunny={review.votesFunny} />
+  );
+}
 
-function ReviewCard({ review }: { review: ReviewItem }) {
+function ReactionList({
+  reactions,
+  votesUp,
+  votesFunny,
+}: {
+  reactions: SteamReaction[];
+  votesUp?: number;
+  votesFunny?: number;
+}) {
+  // Augment with the legacy votes_up/votes_funny if those are > 0
+  // and the corresponding reaction isn't already in the list.
+  // (Steam migrated these to `reactions` in 2024; older reviews
+  // only have the legacy fields.)
+  const seen = new Set(reactions.map((r) => r.reactionType));
+  const augmented: SteamReaction[] = [...reactions];
+  if (votesUp && !seen.has(1)) augmented.push({ reactionType: 1, count: votesUp });
+  if (votesFunny && !seen.has(3)) augmented.push({ reactionType: 3, count: votesFunny });
+  augmented.sort((a, b) => b.count - a.count);
+  if (augmented.length === 0) return null;
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? augmented : augmented.slice(0, 3);
+  return (
+    <div className="rv-card-reactions">
+      {visible.map((r) => {
+        const meta = STEAM_REACTIONS[r.reactionType] ?? { emoji: "❓", label: `Reaction ${r.reactionType}` };
+        return (
+          <span key={r.reactionType} className="rv-reaction-badge" title={meta.label}>
+            <span className="rv-reaction-emoji">{meta.emoji}</span>
+            <span className="rv-reaction-count">{formatHelpfulFunny(r.count)}</span>
+          </span>
+        );
+      })}
+      {augmented.length > 3 && !expanded && (
+        <button
+          type="button"
+          className="rv-reaction-show-more"
+          onClick={() => setExpanded(true)}
+        >
+          +{augmented.length - 3} more
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CommentsLink({
+  review,
+  appId,
+}: {
+  review: ReviewItem;
+  appId: number | null;
+}) {
+  if (!review.commentCount || review.commentCount <= 0) return null;
+  if (!review.authorSteamId || !appId) return null;
+  const url = `https://steamcommunity.com/profiles/${review.authorSteamId}/recommended/${appId}/`;
+  return (
+    <a
+      className="rv-card-comments-link"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${review.commentCount} comment${review.commentCount === 1 ? "" : "s"} on Steam`}
+    >
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+      {review.commentCount.toLocaleString()} comment{review.commentCount === 1 ? "" : "s"}
+    </a>
+  );
+}
+
+function ReviewCard({ review, appId }: { review: ReviewItem; appId: number | null }) {
   const isYou = review.source === "you";
   const isSteam = review.source === "steam";
   const username = isYou ? "You" : review.username;
   const showTitle = !!review.title;
-
-  // Derive a human-friendly sentiment emoji for the header
   const sentimentEmoji =
     review.sentiment === "positive" ? "👍" : review.sentiment === "negative" ? "👎" : isYou ? "⭐" : "💬";
-
   return (
     <article className={`rv-card rv-source-${review.source}`}>
-      {/* Top accent strip uses --accent variable (set by rv-source-* class) */}
-
-      {/* ── Card header row: indicator + meta ─────────────────────────── */}
       <div className="rv-card-header-new">
         <RecommendationIndicator
           source={review.source}
           sentiment={review.sentiment}
           rating={review.rating}
         />
-
         <div className="rv-card-header-content">
           <div className="rv-card-name-row">
             <span className="rv-card-emoji" aria-hidden="true">{sentimentEmoji}</span>
@@ -281,7 +888,6 @@ function ReviewCard({ review }: { review: ReviewItem }) {
               </span>
             )}
           </div>
-
           <div className="rv-card-submeta-row">
             {review.rating !== null && (
               <span className={`rv-rating-pill rv-rating-pill-${review.source}`}>
@@ -297,104 +903,130 @@ function ReviewCard({ review }: { review: ReviewItem }) {
                 {languageCodeToFriendly(review.language)}
               </span>
             )}
+            <CommentsLink review={review} appId={appId} />
           </div>
+          <ContextBadgesRow review={review} />
         </div>
       </div>
-
-      {/* ── Card body: title + content ────────────────────────────────── */}
       {showTitle && <h3 className="rv-card-title">{review.title}</h3>}
-
       {review.content && (
-        <p className={`rv-card-content${review.content.length > 280 ? " clamp" : ""}`}>
-          {review.content}
-        </p>
+        <div className={`rv-card-content${review.content.length > 280 ? " clamp" : ""}`}>
+          <BbCodeRenderer text={review.content} />
+        </div>
       )}
-
-      {/* ── Card footer: reactions (real Steam data, read-only) ──────── */}
+      <PlaytimeRow review={review} />
+      <HardwareSpecs hw={review.hw} />
       <ReactionBar review={review} />
     </article>
   );
 }
 
-// ─── Rating Summary Header ────────────────────────────────────────────────
-
 function ReviewSummary({
   reviews,
-  game,
   totalReviewCount,
   steamReviewScoreDesc,
+  steamReviewScore,
   steamTotalPositive,
   steamTotalNegative,
 }: {
   reviews: ReviewItem[];
-  game: Game;
   totalReviewCount: number;
   steamReviewScoreDesc: string | null;
+  steamReviewScore?: number | null;
   steamTotalPositive: number | null;
   steamTotalNegative: number | null;
 }) {
   const ratings = reviews.filter((r) => r.rating !== null);
-
-  // Real Steam average score is the percentage of positive reviews
+  const steamReviews = reviews.filter((r) => r.source === "steam");
   const hasRealSteamStats = steamTotalPositive !== null && steamTotalNegative !== null;
-  const realSteamTotal = hasRealSteamStats ? steamTotalPositive + steamTotalNegative : 0;
-
-  const communityAvg = hasRealSteamStats
-    ? Math.round((steamTotalPositive / Math.max(1, realSteamTotal)) * 100)
-    : ratings.length > 0
-    ? ratings.reduce((acc, r) => acc + (r.rating as number), 0) / ratings.length
-    : (game.igdbRating ?? 0);
-
-  const totalReviews = totalReviewCount > 0 ? totalReviewCount : reviews.length;
 
   const positiveCount = hasRealSteamStats
     ? steamTotalPositive
     : reviews.filter((r) => r.sentiment === "positive").length;
-
   const negativeCount = hasRealSteamStats
     ? steamTotalNegative
     : reviews.filter((r) => r.sentiment === "negative").length;
-
   const totalSentiment = positiveCount + negativeCount;
-  const divisor = Math.max(1, totalSentiment);
+  // Bug fix: previously the banner conflated Steam's positive percentage
+  // (a 0-100% ratio of positive votes) with the average of individual
+  // review ratings (a 0-100 average score). These are different metrics
+  // — a 75% positive ratio is a "Mostly Positive" Steam label, but a 75/100
+  // average rating is just "good". The banner now detects which context
+  // applies and renders the correct label + color + stars.
+  const hasLocalSteamFallback = !hasRealSteamStats && totalSentiment > 0 && steamReviews.length > 0;
+  const isPercentageContext = hasRealSteamStats || hasLocalSteamFallback;
+
+  const positivePct = totalSentiment > 0 ? Math.round((positiveCount / totalSentiment) * 100) : 0;
+  const negativePct = totalSentiment > 0 ? 100 - positivePct : 0;
+
+  const communityAvg = isPercentageContext
+    ? positivePct
+    : ratings.length > 0
+    ? ratings.reduce((acc, r) => acc + (r.rating as number), 0) / ratings.length
+    : 0;
+
+  // Stars: use Steam's official 1-9 score bucket when available, else
+  // map from positive percentage tiers that match Steam's labels
+  // (Overwhelmingly/Very/Mostly Positive etc.), else fall back to the
+  // standard rating-to-stars conversion for non-Steam averages.
+  let stars = 0;
+  if (communityAvg > 0) {
+    if (isPercentageContext) {
+      if (steamReviewScore != null) {
+        stars =
+          steamReviewScore >= 9 ? 5 :
+          steamReviewScore >= 8 ? 4.5 :
+          steamReviewScore >= 7 ? 4 :
+          steamReviewScore >= 6 ? 3.5 :
+          steamReviewScore >= 5 ? 3 :
+          steamReviewScore >= 4 ? 2 :
+          steamReviewScore >= 3 ? 1.5 :
+          steamReviewScore >= 2 ? 1 : 0.5;
+      } else if (positivePct >= 95) stars = 5;
+      else if (positivePct >= 85) stars = 4.5;
+      else if (positivePct >= 80) stars = 4;
+      else if (positivePct >= 70) stars = 3.5;
+      else if (positivePct >= 40) stars = 3;
+      else if (positivePct >= 20) stars = 2;
+      else stars = 1;
+    } else {
+      stars = ratingToStars(communityAvg);
+    }
+  }
+
+  // Color: prefer Steam's own 1-9 score (most accurate), else fall back
+  // to the percentage thresholds aligned with Steam's review labels.
+  const scoreColor = isPercentageContext
+    ? steamReviewScore != null
+      ? steamReviewScore >= 6 ? "#10b981" : steamReviewScore >= 5 ? "#f59e0b" : "#ef4444"
+      : positivePct >= 70 ? "#10b981" : positivePct >= 40 ? "#f59e0b" : "#ef4444"
+    : communityAvg >= 75 ? "#10b981" : communityAvg >= 50 ? "#f59e0b" : "#ef4444";
+
+  const totalReviews = totalReviewCount > 0 ? totalReviewCount : reviews.length;
   const hasRatings = totalSentiment > 0;
-
-  const positivePct = Math.round((positiveCount / divisor) * 100);
-  const negativePct = 100 - positivePct;
-
   return (
     <div className="rv-summary">
       <div className="rv-summary-left">
         <div className="rv-summary-score-wrap">
           <div
             className="rv-summary-score"
-            style={{
-              color:
-                communityAvg >= 75
-                  ? "#10b981"
-                  : communityAvg >= 50
-                  ? "#f59e0b"
-                  : "#ef4444",
-            }}
+            style={{ color: scoreColor }}
           >
-            {communityAvg > 0 ? Math.round(communityAvg) : "—"}
+            {communityAvg > 0 ? (isPercentageContext ? `${positivePct}%` : Math.round(communityAvg)) : "—"}
           </div>
-          <div className="rv-summary-score-label">/ 100</div>
+          <div className="rv-summary-score-label">
+            {isPercentageContext ? "Positive" : "/ 100 avg"}
+          </div>
         </div>
         <div className="rv-summary-stats">
           <div className="rv-summary-source-stars">
-            {communityAvg > 0 && <StarRow score={communityAvg} size={18} />}
+            {communityAvg > 0 && <StarRow score={0} overrideStars={stars} size={18} />}
           </div>
           {steamReviewScoreDesc && (
             <div
               className="rv-summary-desc"
               style={{
-                color:
-                  communityAvg >= 75
-                    ? "#10b981"
-                    : communityAvg >= 50
-                    ? "#f59e0b"
-                    : "#ef4444",
+                color: scoreColor,
                 fontWeight: "var(--font-weight-bold)",
                 fontSize: "12px",
                 textTransform: "uppercase",
@@ -416,16 +1048,12 @@ function ReviewSummary({
           )}
         </div>
       </div>
-
       {hasRatings && (
         <div className="rv-summary-distribution">
           <div className="rv-distribution-row">
             <span className="rv-distribution-label rv-distribution-label-pos">Positive</span>
             <div className="rv-distribution-bar-track">
-              <div
-                className="rv-distribution-bar-fill"
-                style={{ width: `${positivePct}%`, background: "#10b981" }}
-              />
+              <div className="rv-distribution-bar-fill" style={{ width: `${positivePct}%`, background: "#10b981" }} />
             </div>
             <span className="rv-distribution-count" style={{ width: "auto", minWidth: "45px" }}>
               {positiveCount.toLocaleString()}
@@ -434,10 +1062,7 @@ function ReviewSummary({
           <div className="rv-distribution-row">
             <span className="rv-distribution-label rv-distribution-label-neg">Negative</span>
             <div className="rv-distribution-bar-track">
-              <div
-                className="rv-distribution-bar-fill"
-                style={{ width: `${negativePct}%`, background: "#ef4444" }}
-              />
+              <div className="rv-distribution-bar-fill" style={{ width: `${negativePct}%`, background: "#ef4444" }} />
             </div>
             <span className="rv-distribution-count" style={{ width: "auto", minWidth: "45px" }}>
               {negativeCount.toLocaleString()}
@@ -453,40 +1078,63 @@ function ReviewSummary({
 
 interface ReviewsTabProps {
   game: Game;
-  /** When provided (store page), called after reviews are fetched so the parent
-   *  can update its own state. The library page does not pass this — it relies
-   *  on the GameContext update instead. */
   onReviewsFetched?: (reviews: IgdbReview[], source: string) => void;
 }
-
-// ─── Main component ────────────────────────────────────────────────────────
 
 export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) {
   const { showToast } = useToast();
   const { updateGame } = useGames();
 
-  // Filter state
+  // ── Filter state ────────────────────────────────────────────────
   const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
   const [sortOrder, setSortOrder] = useState<SortOrder>("featured");
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [languageFilter, setLanguageFilter] = useState("all");
+  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState<PurchaseTypeFilter>("all");
+  const [playtimeFilter, setPlaytimeFilter] = useState<PlaytimeFilter>("none");
+  const [playtimeMinHours, setPlaytimeMinHours] = useState(0);
+  const [playtimeMaxHours, setPlaytimeMaxHours] = useState(0);
 
-  // ── Auto-fetch reviews ────────────────────────────────────────────────
+  // ── Auto-fetch reviews ──────────────────────────────────────────
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalReviewCount, setTotalReviewCount] = useState(0);
-
-  // Real Steam summary statistics
   const [steamReviewScoreDesc, setSteamReviewScoreDesc] = useState<string | null>(null);
+  const [steamReviewScore, setSteamReviewScore] = useState<number | null>(null);
   const [steamTotalPositive, setSteamTotalPositive] = useState<number | null>(null);
   const [steamTotalNegative, setSteamTotalNegative] = useState<number | null>(null);
 
   const autoFetchedForRef = useRef<string | null>(null);
   const fetchInFlightRef = useRef(false);
+  // Bug fix: tracks which game's fetch is currently in flight so stale
+  // results from a previous game don't clobber the banner when the user
+  // switches games mid-fetch. Reset by the game-change useEffect.
+  const currentFetchGameIdRef = useRef<string>(game.id);
+  /** Mirrors `reviewsList` so `fetchReviews` can read the latest value
+   *  (e.g. for `isLoadMore` merges) without going through `setState`
+   *  or relying on stale closures. The effect below keeps the ref in
+   *  sync after every render that produced a new array. */
+  const reviewsListRef = useRef<IgdbReview[]>([]);
 
-  // ── External reviews state (Metacritic, OpenCritic, RAWG) ───────────
+  // ── Local reviews list ───────────────────────────────────────────
+  // Bug fix: previously the UI derived everything from
+  // `game.igdbReviews` which meant changing the language filter
+  // (which used to wipe `igdbReviews`) caused a UI flicker as the
+  // cached state caught up. We now keep a local `reviewsList` that
+  // drives the render; `game.igdbReviews` is only updated on a
+  // completed fetch (for persistence).
+  const [reviewsList, setReviewsList] = useState<IgdbReview[]>([]);
+  useEffect(() => {
+    setReviewsList(game.igdbReviews ?? []);
+    reviewsListRef.current = game.igdbReviews ?? [];
+  }, [game.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    reviewsListRef.current = reviewsList;
+  }, [reviewsList]);
+
+  // ── External reviews state (Metacritic, OpenCritic, RAWG) ───────
   const externalReviewsRef = useRef<Record<string, IgdbReview[]>>({});
   const [externalReviews, setExternalReviews] = useState<Record<string, IgdbReview[]>>({});
   const [externalLoading, setExternalLoading] = useState<Record<string, boolean>>({});
@@ -512,22 +1160,20 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           };
           showToast(
             `Fetched ${reviews.length} review${reviews.length === 1 ? "" : "s"} from ${labels[src] || src}`,
-            "success"
+            "success",
           );
         }
       } catch (err) {
         console.error(`Failed to fetch ${src} reviews:`, err);
-        // Remove from fetched set so user can retry by clicking the tab again
         externalFetchedRef.current.delete(src);
         showToast(`Could not load ${src} reviews`, "error");
       } finally {
         setExternalLoading((prev) => ({ ...prev, [src]: false }));
       }
     },
-    [game.id, game.name, showToast]
+    [game.name, showToast],
   );
 
-  // Reset external reviews when game changes
   useEffect(() => {
     externalReviewsRef.current = {};
     setExternalReviews({});
@@ -535,62 +1181,103 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
     externalFetchedRef.current = new Set();
   }, [game.id]);
 
-  // Auto-fetch external reviews when the source tab is selected
   useEffect(() => {
-    if (
-      (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg")
-    ) {
+    if (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg") {
       fetchExternalReviews(sourceFilter);
     }
   }, [sourceFilter, game.id, fetchExternalReviews]);
 
+  // Map the frontend sort mode to a backend filter_type. The
+  // "highest" / "longest" sorts are client-side because Steam's
+  // appreviews endpoint doesn't have native params for them.
+  const backendFilterType = useMemo<string | undefined>(() => {
+    switch (sortOrder) {
+      case "recent": return "recent";
+      case "funny":  return "funny";
+      case "featured": return "all";
+      default: return undefined; // client-side sort
+    }
+  }, [sortOrder]);
+
   const fetchReviews = useCallback(
     async (force = false, cursor: string | null = null, currentLang: string = languageFilter) => {
       if (fetchInFlightRef.current) return;
+      const targetGameId = game.id;
+      // Bug fix: track lock ownership locally so a stale fetch's
+      // `finally` block can't release a lock acquired by a concurrent
+      // fetch (e.g. user clicks refresh while a fetch is in flight,
+      // then switches games — the original fetch's finally would
+      // see targetGameId === current and release the new fetch's
+      // lock). Only the fetch that actually acquired the lock can
+      // release it.
       fetchInFlightRef.current = true;
+      let acquiredLock = true;
       const isLoadMore = cursor !== null && cursor !== "";
-      if (isLoadMore) {
-        setIsLoadingMore(true);
-      } else {
-        setIsFetchingReviews(true);
-      }
+      if (isLoadMore) setIsLoadingMore(true);
+      else setIsFetchingReviews(true);
       try {
-        const steamHint = extractSteamAppId(game.path);
+        // Bug fix: use `resolveSteamAppId` so the helper prefers
+        // `game.steamAppId` over parsing `game.path`. Previously,
+        // a Steam-synced game with a local exe path (or an EGS
+        // game matched to a Steam listing) would have its reviews
+        // resolve to IGDB fallback, not Steam.
+        const steamHint = resolveSteamAppId(game);
         const result = await invoke<ReviewFetchResult>("fetch_game_reviews", {
           gameName: game.name,
           steamAppId: steamHint,
           cursor: cursor || null,
           language: currentLang === "all" ? null : currentLang,
+          filterType: backendFilterType ?? null,
+          purchaseType: purchaseTypeFilter === "all" ? null : purchaseTypeFilter,
+          playtimeMinHours: playtimeFilter === "over_1h" ? 1 : playtimeFilter === "over_10h" ? 10 : playtimeFilter === "custom" ? playtimeMinHours : null,
+          playtimeMaxHours: playtimeFilter === "custom" ? playtimeMaxHours : null,
         });
 
-        setTotalReviewCount(result.totalReviews ?? 0);
+        // Bug fix: if the user switched games while this fetch was
+        // in flight, drop the stale result instead of clobbering the
+        // new game's banner with the old game's totals.
+        if (targetGameId !== currentFetchGameIdRef.current) return;
+
+        // Bug fix: only update the Steam banner totals on the first
+        // page. Steam's appreviews endpoint returns `query_summary`
+        // (totalPositive / totalNegative / score / scoreDesc /
+        // totalReviews) only on the first page — subsequent pages
+        // return null/undefined for these fields, which would wipe
+        // the banner data and show "—" for the score after every
+        // "Load more" click. The cursor must always be updated so
+        // pagination continues to work.
+        if (!isLoadMore) {
+          setTotalReviewCount(result.totalReviews ?? 0);
+          setSteamReviewScoreDesc(result.steamReviewScoreDesc ?? null);
+          setSteamReviewScore(result.steamReviewScore ?? null);
+          setSteamTotalPositive(result.steamTotalPositive ?? null);
+          setSteamTotalNegative(result.steamTotalNegative ?? null);
+        }
         setNextCursor(result.cursor ?? null);
-        setSteamReviewScoreDesc(result.steamReviewScoreDesc ?? null);
-        setSteamTotalPositive(result.steamTotalPositive ?? null);
-        setSteamTotalNegative(result.steamTotalNegative ?? null);
 
         if (result.reviews.length > 0) {
-          if (isLoadMore) {
-            // Append to existing reviews
-            const existing = game.igdbReviews ?? [];
-            const merged = [...existing, ...result.reviews];
-            updateGame(game.id, { igdbReviews: merged });
-            onReviewsFetched?.(merged, result.source);
-          } else {
-            updateGame(game.id, { igdbReviews: result.reviews });
-            onReviewsFetched?.(result.reviews, result.source);
-            if (force) {
-              const sourceLabel =
-                result.source === "steam"
-                  ? "Steam"
-                  : result.source === "igdb"
-                  ? "IGDB"
-                  : "community";
-              showToast(
-                `Fetched ${result.reviews.length} review${result.reviews.length === 1 ? "" : "s"} from ${sourceLabel}`,
-                "success"
-              );
-            }
+          // Compute `next` from the ref-tracked current list so the
+          // `updateGame` and `onReviewsFetched` side effects get a
+          // stable reference. Previously these ran inside the
+          // `setReviewsList` updater, which React-19 StrictMode
+          // double-invokes and would have fired the side effects
+          // twice. The updater is now pure (returns only the new
+          // state); the ref + setState happen in sequence so the
+          // side effects run exactly once per fetch.
+          const next: IgdbReview[] = isLoadMore
+            ? [...reviewsListRef.current, ...result.reviews]
+            : result.reviews;
+          setReviewsList(next);
+          reviewsListRef.current = next;
+          updateGame(game.id, { igdbReviews: next });
+          onReviewsFetched?.(next, result.source);
+          if (force && !isLoadMore) {
+            const sourceLabel =
+              result.source === "steam" ? "Steam" : result.source === "igdb" ? "IGDB" : "community";
+            showToast(
+              `Fetched ${result.reviews.length} review${result.reviews.length === 1 ? "" : "s"} from ${sourceLabel}`,
+              "success",
+            );
           }
         } else if (force && !isLoadMore) {
           showToast("No reviews available from any source", "info");
@@ -601,12 +1288,30 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           showToast(`Failed to fetch reviews: ${err}`, "error");
         }
       } finally {
-        fetchInFlightRef.current = false;
-        setIsFetchingReviews(false);
-        setIsLoadingMore(false);
+        // Only release the in-flight lock + loading flags if THIS fetch
+        // is the one that acquired the lock AND it's still for the
+        // currently-selected game. A stale fetch (acquiredLock=true but
+        // targetGameId !== current) must not flip the new game's spinner
+        // off or allow a concurrent fetch to start.
+        if (acquiredLock && targetGameId === currentFetchGameIdRef.current) {
+          fetchInFlightRef.current = false;
+          setIsFetchingReviews(false);
+          setIsLoadingMore(false);
+        }
       }
     },
-    [game.id, game.name, game.path, showToast, updateGame, onReviewsFetched, languageFilter]
+    [
+      game,
+      showToast,
+      updateGame,
+      onReviewsFetched,
+      languageFilter,
+      backendFilterType,
+      purchaseTypeFilter,
+      playtimeFilter,
+      playtimeMinHours,
+      playtimeMaxHours,
+    ],
   );
 
   const handleLanguageChange = useCallback(
@@ -614,118 +1319,175 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
       setLanguageFilter(newLang);
       setNextCursor(null);
       setTotalReviewCount(0);
-      updateGame(game.id, { igdbReviews: [] });
       fetchReviews(true, null, newLang);
     },
-    [game.id, updateGame, fetchReviews]
+    [fetchReviews],
   );
 
+  // Reset everything on game change; do an initial auto-fetch.
   useEffect(() => {
     if (autoFetchedForRef.current === game.id) return;
     autoFetchedForRef.current = game.id;
-    // Reset states for the new game
+    // Bug fix: mark the new game as the current fetch target BEFORE
+    // calling fetchReviews, so any in-flight fetch for the previous
+    // game will see a mismatch and drop its result.
+    currentFetchGameIdRef.current = game.id;
+    // Bug fix: release the in-flight lock. If a fetch was running for
+    // the previous game, it's now stale and will be dropped by the
+    // stale check; releasing the lock here lets the new fetch start.
+    fetchInFlightRef.current = false;
     setNextCursor(null);
-    setTotalReviewCount(0);
-    setSteamReviewScoreDesc(null);
-    setSteamTotalPositive(null);
-    setSteamTotalNegative(null);
-    setLanguageFilter("all");
-
+    // Bug fix: previously this block nuked ALL banner state (including
+    // steamReviewScoreDesc / totalPositive / totalNegative) on every
+    // game change, causing the banner to flash "—" and "0 reviews"
+    // while the new fetch loaded. Now we keep the cached igdbReviews
+    // and only clear the Steam totals (which the new fetch will
+    // replace). If the cache is empty we still clear everything.
+    if (game.igdbReviews && game.igdbReviews.length > 0) {
+      setReviewsList(game.igdbReviews);
+      reviewsListRef.current = game.igdbReviews;
+      // Bug fix: totalReviewCount comes from Steam's query_summary and
+      // is per-game. If the previous game's count (e.g. 5,000) is left
+      // in state, the banner will display "5,000 reviews" while only
+      // showing the 20 cached IGDB reviews. Reset to 0 so the fallback
+      // path (totalReviews = reviews.length) is used until the new
+      // fetch returns the correct API count.
+      setTotalReviewCount(0);
+      setSteamReviewScoreDesc(null);
+      setSteamReviewScore(null);
+      setSteamTotalPositive(null);
+      setSteamTotalNegative(null);
+    } else {
+      setReviewsList([]);
+      reviewsListRef.current = [];
+      setTotalReviewCount(0);
+      setSteamReviewScoreDesc(null);
+      setSteamReviewScore(null);
+      setSteamTotalPositive(null);
+      setSteamTotalNegative(null);
+    }
     fetchReviews(false, null, "all");
+    // Bug fix: previously this block reset the user's chosen
+    // language filter to "all" on every game change, silently
+    // clobbering their selection. The filter is now scoped to the
+    // session (resets naturally on app reload). Game-change resets
+    // are limited to data — the review list + cursor + totals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.id]);
 
-  // ── Build the unified list of reviews ───────────────────────────────────
+  // ── Build the unified list of reviews ───────────────────────────
   const allReviews: ReviewItem[] = useMemo(() => {
     const items: ReviewItem[] = [];
 
-    if ((game.rating && game.rating > 0) || game.reviewText) {
+    // Bug fix: previously the "You" review was rendered when
+    // either `game.rating > 0` OR `game.reviewText` was present.
+    // That created a phantom card with no content when the user
+    // had only set a star rating. Now we only show the "You" card
+    // when there's actual review text — a star rating without a
+    // comment doesn't deserve its own card.
+    if (game.reviewText && game.reviewText.trim()) {
       const score = (game.rating ?? 0) * 20;
       items.push({
         id: "you",
+        sourceIndex: -1,
         source: "you",
         sourceLabel: "You",
         username: "You",
         rating: game.rating && game.rating > 0 ? score : null,
         ratingLabel: game.rating ? `${game.rating}/5` : "—",
         title: "",
-        content: game.reviewText || "",
+        content: game.reviewText,
         dateAdded: game.addedAt,
         reviewLength: (game.reviewText || "").length,
+        reviewLengthBytes: new Blob([game.reviewText || ""]).size,
         language: undefined,
         sentiment: ratingToSentiment(game.rating && game.rating > 0 ? score : null),
       });
     }
 
-    if (game.igdbReviews && game.igdbReviews.length > 0) {
-      game.igdbReviews.forEach((r: IgdbReview, idx: number) => {
-        const item: ReviewItem = {
+    if (reviewsList.length > 0) {
+      reviewsList.forEach((r: IgdbReview, idx: number) => {
+        const content = r.content || "";
+        items.push({
           id: `steam-${idx}`,
+          sourceIndex: idx,
           source: "steam",
           sourceLabel: "Steam",
           username: r.username || `Steam Player`,
           rating: r.rating ?? null,
           ratingLabel: r.rating !== undefined ? `${r.rating}/100` : "—",
           title: r.title || "",
-          content: r.content || "",
+          content,
           dateAdded: r.timestampCreated ? r.timestampCreated * 1000 : undefined,
-          reviewLength: (r.content || "").length,
+          reviewLength: content.length,
+          reviewLengthBytes: new Blob([content]).size,
           language: r.language,
           sentiment: ratingToSentiment(r.rating ?? null),
           votesUp: r.votesUp,
           votesFunny: r.votesFunny,
-        };
-        items.push(item);
+          reactions: r.reactions,
+          commentCount: r.commentCount,
+          authorPlaytimeAtReview: r.authorPlaytimeAtReview,
+          authorPlaytimeForever: r.authorPlaytimeForever,
+          authorDeckPlaytimeAtReview: r.authorDeckPlaytimeAtReview,
+          primarilySteamDeck: r.primarilySteamDeck,
+          receivedForFree: r.receivedForFree,
+          writtenDuringEarlyAccess: r.writtenDuringEarlyAccess,
+          steamPurchase: r.steamPurchase,
+          authorSteamId: r.authorSteamId,
+          hw: r.hw,
+        });
       });
     }
 
-    // Merge external reviews (metacritic, opencritic, rawg)
     const externalLabels: Record<string, string> = {
       metacritic: "Metacritic",
       opencritic: "OpenCritic",
       rawg: "RAWG",
     };
+    let externalIdx = 0;
     for (const [src, label] of Object.entries(externalLabels)) {
       const revs = externalReviews[src];
       if (revs && revs.length > 0) {
-        revs.forEach((r: IgdbReview, idx: number) => {
-          const item: ReviewItem = {
-            id: `${src}-${idx}`,
+        revs.forEach((r: IgdbReview) => {
+          const content = r.content || "";
+          items.push({
+            id: `${src}-${externalIdx++}`,
+            sourceIndex: externalIdx,
             source: src as ReviewItem["source"],
             sourceLabel: label,
             username: r.username || label,
             rating: r.rating ?? null,
             ratingLabel: r.rating !== undefined ? `${Math.round(r.rating)}/100` : "—",
             title: r.title || "",
-            content: r.content || "",
+            content,
             dateAdded: r.timestampCreated ? r.timestampCreated * 1000 : undefined,
-            reviewLength: (r.content || "").length,
+            reviewLength: content.length,
+            reviewLengthBytes: new Blob([content]).size,
             language: r.language,
             sentiment: ratingToSentiment(r.rating ?? null),
-          };
-          items.push(item);
+          });
         });
       }
     }
 
     return items;
-  }, [game.rating, game.reviewText, game.igdbReviews, game.addedAt, externalReviews]);
+  }, [game.reviewText, game.rating, game.addedAt, reviewsList, externalReviews]);
 
-  // Filtered + sorted
+  // ── Client-side filter pass-through ─────────────────────────────
+  // Backend supports: filter (all/recent/funny), purchase_type, language.
+  // Backend does NOT support: rating filter, source filter, playtime
+  // filter, custom playtime range, search. Those are applied here so
+  // the cursor-based pagination works as expected (no mid-list holes).
   const filteredReviews = useMemo(() => {
     let list = allReviews.slice();
 
-    // Source filter
     if (sourceFilter !== "all") {
       list = list.filter((r) => r.source === sourceFilter);
     }
-
-    // Language filter
     if (languageFilter !== "all") {
       list = list.filter((r) => r.language === languageFilter);
     }
-
-    // Rating filter
     if (ratingFilter !== "all") {
       list = list.filter((r) => {
         if (ratingFilter === "positive") return r.sentiment === "positive";
@@ -733,43 +1495,71 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         return true;
       });
     }
-
-    // Search
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(
         (r) =>
           r.content.toLowerCase().includes(q) ||
           r.title.toLowerCase().includes(q) ||
-          r.username.toLowerCase().includes(q)
+          r.username.toLowerCase().includes(q),
       );
+    }
+    // Playtime filter — only applied to Steam reviews (only source
+    // that has `authorPlaytimeAtReview` populated). Non-Steam
+    // reviews are kept (playtime is unknown for them).
+    if (playtimeFilter !== "none") {
+      list = list.filter((r) => {
+        if (r.source !== "steam") return true; // keep unknown
+        const playMinH = r.authorPlaytimeAtReview !== undefined ? r.authorPlaytimeAtReview / 60 : undefined;
+        if (playMinH === undefined) return true;
+        switch (playtimeFilter) {
+          case "over_1h":  return playMinH >= 1;
+          case "over_10h": return playMinH >= 10;
+          case "custom": {
+            const minOk = playtimeMinHours === 0 || playMinH >= playtimeMinHours;
+            const maxOk = playtimeMaxHours === 0 || playMinH <= playtimeMaxHours;
+            return minOk && maxOk;
+          }
+          default: return true;
+        }
+      });
     }
 
     // Sort
     list.sort((a, b) => {
       if (a.source === "you" && b.source !== "you") return -1;
       if (b.source === "you" && a.source !== "you") return 1;
-
       switch (sortOrder) {
         case "highest":
           return (b.rating ?? -1) - (a.rating ?? -1);
         case "longest":
-          return b.reviewLength - a.reviewLength;
+          return b.reviewLengthBytes - a.reviewLengthBytes;
         case "featured":
         default:
-          const aIdx = a.id.startsWith("steam-") ? parseInt(a.id.slice(6), 10) : -1;
-          const bIdx = b.id.startsWith("steam-") ? parseInt(b.id.slice(6), 10) : -1;
-          return aIdx - bIdx;
+          // Bug fix: previously used `parseInt(a.id.slice(6))`
+          // which is fragile (depends on the string format). The
+          // stable `sourceIndex` assigned during the build step
+          // preserves Steam's natural order without parseInt.
+          return a.sourceIndex - b.sourceIndex;
       }
     });
 
     return list;
-  }, [allReviews, sourceFilter, languageFilter, ratingFilter, sortOrder, searchQuery]);
+  }, [
+    allReviews,
+    sourceFilter,
+    languageFilter,
+    ratingFilter,
+    searchQuery,
+    sortOrder,
+    playtimeFilter,
+    playtimeMinHours,
+    playtimeMaxHours,
+  ]);
 
   // External review sources
   const externalSources = useMemo(() => {
     const sources: { id: string; name: string; url: string; description: string; accent: string }[] = [];
-
     if (game.metadataUrl && game.metadataSource) {
       sources.push({
         id: "metadata",
@@ -779,7 +1569,6 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         accent: "var(--color-accent)",
       });
     }
-
     if (game.platform === "Steam") {
       const community = getSteamCommunityUrl(game.path);
       if (community) {
@@ -792,35 +1581,25 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         });
       }
     }
-
-    sources.push({
-      id: "metacritic",
-      name: "Metacritic",
-      url: buildExternalUrl(game, "metacritic"),
-      description: `Search "${game.name}" on Metacritic`,
-      accent: "#ffcc33",
-    });
-    sources.push({
-      id: "opencritic",
-      name: "OpenCritic",
-      url: buildExternalUrl(game, "opencritic"),
-      description: "Critic reviews aggregator",
-      accent: "#ff0099",
-    });
-    sources.push({
-      id: "rawg",
-      name: "RAWG",
-      url: buildExternalUrl(game, "rawg"),
-      description: "Community reviews & ratings",
-      accent: "#f43f5e",
-    });
-
+    sources.push(
+      { id: "metacritic", name: "Metacritic", url: buildExternalUrl(game, "metacritic"), description: `Search "${game.name}" on Metacritic`, accent: "#ffcc33" },
+      { id: "opencritic", name: "OpenCritic", url: buildExternalUrl(game, "opencritic"), description: "Critic reviews aggregator", accent: "#ff0099" },
+      { id: "rawg", name: "RAWG", url: buildExternalUrl(game, "rawg"), description: "Community reviews & ratings", accent: "#f43f5e" },
+    );
     return sources;
   }, [game.metadataUrl, game.metadataSource, game.platform, game.path, game.name]);
 
+  // Bug fix: previously `totalAll` was computed from
+  // `allReviews.filter(steam).length` and used as the Steam badge
+  // count, but that drifted from the actual `totalReviewCount` the
+  // API returned (the filter could be empty while the API says
+  // 100k+). Now we use the API count when available.
   const totalAll = allReviews.length;
-  const steamCount = allReviews.filter((r) => r.source === "steam").length;
+  const steamCount = totalReviewCount > 0
+    ? totalReviewCount
+    : allReviews.filter((r) => r.source === "steam").length;
   const youCount = allReviews.filter((r) => r.source === "you").length;
+  const appId = resolveSteamAppId(game);
 
   function openExternal(url: string) {
     openUrl(url).catch((err) => {
@@ -830,7 +1609,6 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
 
   return (
     <div className="rv-root">
-      {/* ── Header ────────────────────────────────────────────────────── */}
       <div className="rv-header">
         <div className="rv-header-left">
           <h2 className="rv-header-title">
@@ -855,14 +1633,13 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
 
       <ReviewSummary
         reviews={allReviews}
-        game={game}
         totalReviewCount={totalReviewCount}
         steamReviewScoreDesc={steamReviewScoreDesc}
+        steamReviewScore={steamReviewScore}
         steamTotalPositive={steamTotalPositive}
         steamTotalNegative={steamTotalNegative}
       />
 
-      {/* ── Refresh button ────────────────────────────────────────────── */}
       <div className="rv-refresh-row">
         <button
           type="button"
@@ -893,34 +1670,20 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </button>
       </div>
 
-      {/* ── Toolbar: source tabs + filters + search ───────────────────── */}
       {totalAll > 0 && (
         <div className="rv-toolbar">
-          {/* Source subtabs */}
           <div className="rv-source-tabs">
-            <button
-              type="button"
-              className={`rv-source-tab${sourceFilter === "all" ? " active" : ""}`}
-              onClick={() => setSourceFilter("all")}
-            >
+            <button type="button" className={`rv-source-tab${sourceFilter === "all" ? " active" : ""}`} onClick={() => setSourceFilter("all")}>
               All Reviews ({totalAll})
             </button>
-            <button
-              type="button"
-              className={`rv-source-tab${sourceFilter === "steam" ? " active" : ""}`}
-              onClick={() => setSourceFilter("steam")}
-            >
+            <button type="button" className={`rv-source-tab${sourceFilter === "steam" ? " active" : ""}`} onClick={() => setSourceFilter("steam")}>
               <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
                 <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
               </svg>
-              Steam ({totalReviewCount > 0 ? totalReviewCount.toLocaleString() : steamCount})
+              Steam ({steamCount > 0 ? steamCount.toLocaleString() : steamCount})
             </button>
             {youCount > 0 && (
-              <button
-                type="button"
-                className={`rv-source-tab${sourceFilter === "you" ? " active" : ""}`}
-                onClick={() => setSourceFilter("you")}
-              >
+              <button type="button" className={`rv-source-tab${sourceFilter === "you" ? " active" : ""}`} onClick={() => setSourceFilter("you")}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" width="14" height="14" aria-hidden="true">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                   <circle cx="12" cy="7" r="4" />
@@ -928,8 +1691,6 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 You ({youCount})
               </button>
             )}
-            {/* Metacritic, OpenCritic, and RAWG subtabs are hidden for now. */}
-
           </div>
 
           <div className="rv-filters">
@@ -956,7 +1717,9 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 onChange={(e) => setSortOrder(e.target.value as SortOrder)}
                 aria-label="Sort order"
               >
-                <option value="featured">Sort: Featured</option>
+                <option value="featured">Sort: Featured (Most Helpful)</option>
+                <option value="recent">Sort: Recent</option>
+                <option value="funny">Sort: Funny</option>
                 <option value="highest">Sort: Highest Rated</option>
                 <option value="longest">Sort: Most Detailed</option>
               </select>
@@ -965,7 +1728,70 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
               </svg>
             </div>
 
-            {/* Language filter */}
+            <div className="rv-select-wrap">
+              <select
+                className="rv-select"
+                value={purchaseTypeFilter}
+                onChange={(e) => {
+                  setPurchaseTypeFilter(e.target.value as PurchaseTypeFilter);
+                  setNextCursor(null);
+                  fetchReviews(true, null);
+                }}
+                aria-label="Filter by purchase source"
+              >
+                <option value="all">All purchasers</option>
+                <option value="steam">Steam purchases only</option>
+                <option value="other">Other sources only</option>
+              </select>
+              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+
+            <div className="rv-select-wrap">
+              <select
+                className="rv-select"
+                value={playtimeFilter}
+                onChange={(e) => setPlaytimeFilter(e.target.value as PlaytimeFilter)}
+                aria-label="Filter by reviewer playtime"
+              >
+                <option value="none">All playtimes</option>
+                <option value="over_1h">Over 1 hour</option>
+                <option value="over_10h">Over 10 hours</option>
+                <option value="custom">Custom range…</option>
+              </select>
+              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+
+            {playtimeFilter === "custom" && (
+              <div className="rv-playtime-range">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="rv-input"
+                  value={playtimeMinHours}
+                  onChange={(e) => setPlaytimeMinHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                  placeholder="Min h"
+                  aria-label="Minimum reviewer playtime in hours"
+                />
+                <span className="rv-playtime-range-sep">–</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="rv-input"
+                  value={playtimeMaxHours}
+                  onChange={(e) => setPlaytimeMaxHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                  placeholder="Max h"
+                  aria-label="Maximum reviewer playtime in hours (0 = no max)"
+                />
+                <span className="rv-playtime-range-hint">hours</span>
+              </div>
+            )}
+
             <div className="rv-select-wrap">
               <select
                 className="rv-select"
@@ -973,7 +1799,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 onChange={(e) => handleLanguageChange(e.target.value)}
                 aria-label="Filter by language"
               >
-                {LANGUAGES.map((lang) => (
+                {STEAM_LANGUAGES.map((lang) => (
                   <option key={lang.code} value={lang.code}>
                     {lang.flag} {lang.label}
                   </option>
@@ -994,16 +1820,11 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search reviews..."
+                placeholder="Search reviews…"
                 aria-label="Search reviews"
               />
               {searchQuery && (
-                <button
-                  type="button"
-                  className="rv-search-clear"
-                  onClick={() => setSearchQuery("")}
-                  aria-label="Clear search"
-                >
+                <button type="button" className="rv-search-clear" onClick={() => setSearchQuery("")} aria-label="Clear search">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
@@ -1015,7 +1836,6 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       )}
 
-      {/* ── Loading state for external reviews ─────────────────────── */}
       {(externalLoading["metacritic"] || externalLoading["opencritic"] || externalLoading["rawg"]) &&
         (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg") ? (
         <div className="rv-empty">
@@ -1032,9 +1852,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           <div className="rv-empty-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              <path d="M9 10h.01" />
-              <path d="M13 10h.01" />
-              <path d="M17 10h.01" />
+              <path d="M9 10h.01" /><path d="M13 10h.01" /><path d="M17 10h.01" />
             </svg>
           </div>
           <h3 className="rv-empty-title">No community reviews yet</h3>
@@ -1052,13 +1870,17 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
             </svg>
           </div>
           <h3 className="rv-empty-title">No reviews match your filters</h3>
-          <p className="rv-empty-subtitle">Try adjusting the rating, source, language, or search criteria.</p>
+          <p className="rv-empty-subtitle">Try adjusting the rating, source, language, playtime, or search criteria.</p>
           <button
             type="button"
             className="rv-btn rv-btn-ghost"
             onClick={() => {
               setRatingFilter("all");
               setSourceFilter("all");
+              setPurchaseTypeFilter("all");
+              setPlaytimeFilter("none");
+              setPlaytimeMinHours(0);
+              setPlaytimeMaxHours(0);
               handleLanguageChange("all");
               setSearchQuery("");
             }}
@@ -1070,12 +1892,11 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         <div className="rv-list">
           <div className="rv-list-grid">
             {filteredReviews.map((review) => (
-              <ReviewCard key={review.id} review={review} />
+              <ReviewCard key={review.id} review={review} appId={appId} />
             ))}
           </div>
 
-          {/* Load More button — when there are more pages on Steam */}
-          {nextCursor && sourceFilter !== "you" && (
+          {nextCursor && sourceFilter !== "you" && sourceFilter !== "metacritic" && sourceFilter !== "opencritic" && sourceFilter !== "rawg" && (
             <div className="rv-load-more-row">
               <button
                 type="button"
@@ -1084,10 +1905,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                 disabled={isLoadingMore}
               >
                 {isLoadingMore ? (
-                  <>
-                    <span className="rv-spinner" aria-hidden="true" />
-                    Loading more…
-                  </>
+                  <><span className="rv-spinner" aria-hidden="true" />Loading more…</>
                 ) : (
                   <>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1097,7 +1915,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                     Load more reviews
                     {totalReviewCount > 0 && (
                       <span className="rv-load-more-count">
-                        ({game.igdbReviews?.length ?? 0} of {totalReviewCount} loaded)
+                        ({reviewsList.length} of {totalReviewCount} loaded)
                       </span>
                     )}
                   </>
@@ -1108,7 +1926,6 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       )}
 
-      {/* ── External sources section ──────────────────────────────────── */}
       <div className="rv-external-section">
         <div className="rv-external-header">
           <div className="rv-external-header-text">
@@ -1120,9 +1937,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
               </svg>
               Reviews from across the web
             </h3>
-            <p className="rv-external-subtitle">
-              Open full reviews and aggregated scores from popular review sites
-            </p>
+            <p className="rv-external-subtitle">Open full reviews and aggregated scores from popular review sites</p>
           </div>
         </div>
         <div className="rv-external-grid">

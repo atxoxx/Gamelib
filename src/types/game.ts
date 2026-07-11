@@ -106,7 +106,22 @@ export interface ReleaseDateInfo {
   region: string;
 }
 
+/** A single Steam reaction (👍 / ❤️ / 😂 / etc.) with its count.
+ *  The integer `reactionType` is mapped to an emoji via the static
+ *  `STEAM_REACTIONS` table in `ReviewsTab.tsx`. */
+export interface SteamReaction {
+  /** Steam's numeric reaction type (1-22). */
+  reactionType: number;
+  /** Number of users who reacted with this type. */
+  count: number;
+}
+
+/** A review record sourced from Steam, IGDB, or external review sites.
+ *  Every field is optional so the same shape works across all three
+ *  sources and so older `games.json` payloads (where most fields are
+ *  absent) deserialize cleanly. */
 export interface IgdbReview {
+  // ── Core content ─────────────────────────────────────────────
   title?: string;
   content?: string;
   rating?: number;
@@ -120,6 +135,53 @@ export interface IgdbReview {
   votesFunny?: number;
   /** Unix timestamp when this review was created (Steam). */
   timestampCreated?: number;
+  /** Unix timestamp when this review was last updated (Steam). */
+  timestampUpdated?: number;
+
+  // ── Author context (Steam) ──────────────────────────────────
+  /** Reviewer's SteamID64 — used to deep-link to the individual
+   *  review on steamcommunity.com. */
+  authorSteamId?: string;
+  /** Reviewer's total playtime in minutes across all games (Steam). */
+  authorPlaytimeForever?: number;
+  /** Reviewer's playtime (minutes) in THIS game at the moment the
+   *  review was written (Steam). */
+  authorPlaytimeAtReview?: number;
+  /** Reviewer's playtime (minutes) on Steam Deck for THIS game at
+   *  the moment the review was written (Steam). */
+  authorDeckPlaytimeAtReview?: number;
+
+  // ── Reviewer badges (Steam) ──────────────────────────────────
+  /** True when Steam marks the review as written primarily on a
+   *  Steam Deck. Renders a "Steam Deck Played" pill. */
+  primarilySteamDeck?: boolean;
+  /** True when the reviewer received the game for free. Renders a
+   *  "Received for Free" pill. */
+  receivedForFree?: boolean;
+  /** True when the review was written while the game was in Early
+   *  Access. Renders an "Early Access" pill. */
+  writtenDuringEarlyAccess?: boolean;
+  /** True when the reviewer purchased the game directly on Steam.
+   *  Renders a "Steam Purchase" pill. */
+  steamPurchase?: boolean;
+
+  // ── Engagement (Steam) ───────────────────────────────────────
+  /** Number of comments on this review (Steam). When > 0 the
+   *  frontend renders a "💬 N comments" link to the reviewer's
+   *  Steam community profile. */
+  commentCount?: number;
+  /** Full reaction breakdown. Sorted by count descending by the
+   *  frontend; only reactions with `count > 0` are returned. */
+  reactions?: SteamReaction[];
+  /** Steam's recommendation confidence percentage (0-100). */
+  weightVoteUpPercentage?: number;
+
+  // ── Reviewer hardware (Steam) ─────────────────────────────────
+  /** Raw JSON-encoded hardware string from the Steam `hw` field.
+   *  Format is unstable across Steam API versions; the frontend
+   *  parses it leniently with `JSON.parse` + per-key try/catch
+   *  rather than relying on a fixed schema. */
+  hw?: string;
 }
 
 export interface ReviewFetchResult {
@@ -152,6 +214,68 @@ export interface SteamAchievement {
   icon?: string;
   icongray?: string;
 }
+
+// ─── Steam Reactions (reviewer-applied emoji reactions) ────────────────────
+
+/** Steam's reaction emoji table. The `type` integer is the same
+ *  value Steam returns in `reactions[].reactionType`; we map it to
+ *  an emoji + label here so the renderer doesn't need to know
+ *  the integer semantics. The label is used in tooltips and the
+ *  "Show more" expanded view. */
+export const STEAM_REACTIONS: Record<number, { emoji: string; label: string }> = {
+  1: { emoji: "👍", label: "Helpful" },
+  2: { emoji: "❤️", label: "Love" },
+  3: { emoji: "😂", label: "Funny" },
+  4: { emoji: "😢", label: "Sad" },
+  5: { emoji: "😡", label: "Angry" },
+  6: { emoji: "🤬", label: "Rage" },
+  7: { emoji: "👎", label: "Disagree" },
+  8: { emoji: "🎉", label: "Celebrate" },
+  9: { emoji: "🤩", label: "Star-struck" },
+  10: { emoji: "🤯", label: "Mind-blown" },
+  11: { emoji: "😱", label: "Shocked" },
+  12: { emoji: "🥺", label: "Pleading" },
+  13: { emoji: "💯", label: "100%" },
+  14: { emoji: "🤔", label: "Thinking" },
+  15: { emoji: "👏", label: "Applause" },
+  16: { emoji: "🙌", label: "Praise" },
+};
+
+/** Steam language codes accepted by the appreviews `language=` param.
+ *  Each entry is a tuple of (Steam code, display label, flag emoji).
+ *  The order matches Playnite's `SteamLanguage.cs` enum. */
+export const STEAM_LANGUAGES: { code: string; label: string; flag: string }[] = [
+  { code: "all",        label: "All languages",          flag: "🌐" },
+  { code: "english",    label: "English",                flag: "🇬🇧" },
+  { code: "schinese",   label: "简体中文",              flag: "🇨🇳" },
+  { code: "tchinese",   label: "繁體中文",              flag: "🇹🇼" },
+  { code: "japanese",   label: "日本語",                flag: "🇯🇵" },
+  { code: "koreana",    label: "한국어",                flag: "🇰🇷" },
+  { code: "russian",    label: "Русский",              flag: "🇷🇺" },
+  { code: "ukrainian",  label: "Українська",           flag: "🇺🇦" },
+  { code: "german",     label: "Deutsch",                flag: "🇩🇪" },
+  { code: "french",     label: "Français",               flag: "🇫🇷" },
+  { code: "italian",    label: "Italiano",               flag: "🇮🇹" },
+  { code: "spanish",    label: "Español (España)",       flag: "🇪🇸" },
+  { code: "latam",      label: "Español (Latinoamérica)", flag: "🇲🇽" },
+  { code: "portuguese", label: "Português (Portugal)",   flag: "🇵🇹" },
+  { code: "brazilian",  label: "Português (Brasil)",     flag: "🇧🇷" },
+  { code: "polish",     label: "Polski",                 flag: "🇵🇱" },
+  { code: "czech",      label: "Čeština",                flag: "🇨🇿" },
+  { code: "hungarian",  label: "Magyar",                 flag: "🇭🇺" },
+  { code: "romanian",   label: "Română",                 flag: "🇷🇴" },
+  { code: "bulgarian",  label: "Български",              flag: "🇧🇬" },
+  { code: "greek",      label: "Ελληνικά",              flag: "🇬🇷" },
+  { code: "turkish",    label: "Türkçe",                 flag: "🇹🇷" },
+  { code: "thai",       label: "ไทย",                    flag: "🇹🇭" },
+  { code: "vietnamese", label: "Tiếng Việt",             flag: "🇻🇳" },
+  { code: "indonesian", label: "Bahasa Indonesia",       flag: "🇮🇩" },
+  { code: "finnish",    label: "Suomi",                  flag: "🇫🇮" },
+  { code: "swedish",    label: "Svenska",                flag: "🇸🇪" },
+  { code: "danish",     label: "Dansk",                  flag: "🇩🇰" },
+  { code: "norwegian",  label: "Norsk",                  flag: "🇳🇴" },
+  { code: "dutch",      label: "Nederlands",             flag: "🇳🇱" },
+];
 
 // ─── Achievements / Success Story Types ─────────────────────────────────────
 
@@ -589,6 +713,24 @@ export function extractSteamAppId(path: string): number | null {
     return Number.isFinite(id) ? id : null;
   }
   return null;
+}
+
+/** Resolve the Steam app id for a Game, preferring the explicit
+ *  `game.steamAppId` field over parsing the (often-empty) `path`.
+ *  Returns `null` when neither source yields a valid id.
+ *
+ *  This is the canonical "give me the Steam app id" helper — the
+ *  ReviewsTab previously called `extractSteamAppId(game.path)`, which
+ *  only worked for Steam games launched via the `steam://run/<id>`
+ *  protocol and silently returned null for every other case (Steam
+ *  games with a local exe path, EGS/GOG games with a Steam listing
+ *  we matched via IGDB, etc.). Preferring `game.steamAppId` makes
+ *  reviews + deep links work for the entire library. */
+export function resolveSteamAppId(game: Game): number | null {
+  if (typeof game.steamAppId === "number" && Number.isFinite(game.steamAppId)) {
+    return game.steamAppId;
+  }
+  return extractSteamAppId(game.path);
 }
 
 /** Parse a play-time string like "142h" or "3h 15m" into total minutes. */
