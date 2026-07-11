@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
+import { GameThumbnail } from "./GameThumbnail";
 import * as Icons from "./Icons";
 
 export interface ActivitySessionsProps {
@@ -152,11 +153,13 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
             {isExpanded ? <Icons.ChevronUp size={14} /> : <Icons.ChevronDown size={14} />}
           </span>
           <div className="activity-session-item__game-icon-container">
-            {game?.iconUrl ? (
-              <img className="activity-session-item__game-icon" src={game.iconUrl} alt="" />
-            ) : (
-              <div className="activity-session-item__game-icon-placeholder" />
-            )}
+            <GameThumbnail
+              iconUrl={game?.iconUrl}
+              coverArtUrl={game?.coverArtUrl}
+              steamAppId={game?.steamAppId}
+              name={session.gameName}
+              className="activity-session-item__game-icon"
+            />
           </div>
           <div className="activity-session-item__info">
             <span className="activity-session-item__date">{session.gameName}</span>

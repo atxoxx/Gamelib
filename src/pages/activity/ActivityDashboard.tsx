@@ -3,6 +3,7 @@ import { formatPlayTime } from "../../types/game";
 import BarChart from "../../components/charts/BarChart";
 import LineChart from "../../components/charts/LineChart";
 import DonutChart from "../../components/charts/DonutChart";
+import { GameThumbnail } from "./GameThumbnail";
 import * as Icons from "./Icons";
 
 export interface ActivityDashboardProps {
@@ -64,6 +65,8 @@ export function ActivityDashboard({
           title: game?.name || "Unknown Game",
           platform: game?.platform || "Local",
           iconUrl: game?.iconUrl || null,
+          coverArtUrl: game?.coverArtUrl || null,
+          steamAppId: game?.steamAppId || null,
           minutes,
         };
       })
@@ -422,11 +425,13 @@ export function ActivityDashboard({
                   }`}
                   onClick={() => setSelectedGameId(g.id)}
                 >
-                  {g.iconUrl ? (
-                    <img className="activity-game-sidebar__icon" src={g.iconUrl} alt={g.title} />
-                  ) : (
-                    <span className="activity-game-sidebar__icon-placeholder" />
-                  )}
+                  <GameThumbnail
+                    iconUrl={g.iconUrl}
+                    coverArtUrl={g.coverArtUrl}
+                    steamAppId={g.steamAppId}
+                    name={g.title}
+                    className="activity-game-sidebar__icon"
+                  />
                   <div className="activity-game-sidebar__info">
                     <span className="activity-game-sidebar__name">{g.title}</span>
                     <div className="activity-game-sidebar__bar">

@@ -334,6 +334,50 @@
   flex-shrink: 0;
 }
 
+/* Gradient letter placeholder for missing/broken game icons. The
+ * GameThumbnail component sets one of `--g0`..`--g7` based on a hash
+ * of the game name, so each game keeps a stable color across sessions. */
+.game-thumbnail__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* Sit above any explicit background-color declared by the
+   * `*-icon-placeholder` class on the same element so the gradient is
+   * always visible. */
+  background: var(--color-bg-tertiary);
+  color: #fff;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.game-thumbnail__letter {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+/* Slightly smaller letter for the session-row container so it doesn't
+ * crowd the 28x28 cell. */
+.activity-session-item__game-icon.game-thumbnail__placeholder .game-thumbnail__letter {
+  font-size: 12px;
+}
+
+/* Eight stable gradient slots. Picked to stay readable in both light
+ * and dark themes with white text. */
+.game-thumbnail__placeholder--g0 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+.game-thumbnail__placeholder--g1 { background: linear-gradient(135deg, #06b6d4, #3b82f6); }
+.game-thumbnail__placeholder--g2 { background: linear-gradient(135deg, #10b981, #06b6d4); }
+.game-thumbnail__placeholder--g3 { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+.game-thumbnail__placeholder--g4 { background: linear-gradient(135deg, #ec4899, #f43f5e); }
+.game-thumbnail__placeholder--g5 { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.game-thumbnail__placeholder--g6 { background: linear-gradient(135deg, #14b8a6, #22c55e); }
+.game-thumbnail__placeholder--g7 { background: linear-gradient(135deg, #f97316, #facc15); }
+
 .activity-game-sidebar__info {
   flex: 1;
   min-width: 0;
