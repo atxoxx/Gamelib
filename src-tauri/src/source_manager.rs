@@ -1327,6 +1327,10 @@ struct HydraSearchResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HydraRepack {
+    /// Hydra-assigned repack ID. Mirrors the external schema so
+    /// deserialized payloads round-trip cleanly; reserved for future
+    /// per-repack notifications (download events, removed repacks).
+    #[allow(dead_code)]
     id: String,
     title: String,
     file_size: Option<String>,

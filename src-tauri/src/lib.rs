@@ -842,8 +842,6 @@ pub fn run() {
                 app.handle().clone(),
             );
 
-            let app_data_dir = app.path().app_data_dir()?;
-
             // Initialize the source manager + store checker state.
             //
             // The source manager uses `std::sync::Mutex` (NOT

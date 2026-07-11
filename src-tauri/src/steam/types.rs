@@ -30,19 +30,6 @@ pub struct SteamSession {
     pub display_name: Option<String>,
 }
 
-/// A single game from Steam's GetOwnedGames API response.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SteamGame {
-    pub appid: u32,
-    pub name: String,
-    /// Total playtime in minutes (from playtime_forever)
-    pub playtime_forever: u32,
-    /// Windows-specific playtime in minutes
-    pub playtime_windows_forever: u32,
-    pub has_community_visible_stats: bool,
-    pub rtime_last_played: Option<u64>,
-}
-
 /// Result of a Steam library sync operation.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +55,7 @@ pub struct SyncedGameEntry {
     /// Resolved path to the main game executable (if installed locally).
     pub exe_path: Option<String>,
     /// Total disk footprint of the install dir, measured by
-    /// `size::measure_install_size` after `resolve_main_exe` returns.
+    /// `size::measure_folder_size` after the smart exe resolver returns.
     /// `None` when the game is uninstalled, exe resolution failed, or
     /// the disk walk errored out (folder gone, permission denied, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]

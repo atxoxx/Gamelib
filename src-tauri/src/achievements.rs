@@ -91,7 +91,13 @@ struct PlayerAchievementsResponse {
 struct PlayerStats {
     #[serde(default)]
     achievements: Vec<PlayerAchievement>,
+    /// Steam API's `success` flag — `true` when
+    /// `GetPlayerAchievements` returned a valid response. We treat the
+    /// absence of `playerstats` as "no data" and don't currently
+    /// branch on this; kept for schema fidelity so future error paths
+    /// can distinguish "API call failed" from "no achievements yet".
     #[serde(default)]
+    #[allow(dead_code)]
     success: bool,
 }
 

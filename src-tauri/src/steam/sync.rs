@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use reqwest::Client;
 use serde::Deserialize;
@@ -131,8 +131,9 @@ pub async fn steam_sync_games(
         // NOT derived from the exe's parent — that would under-count
         // UE/Unity/Source games where the largest .exe lives in a bin
         // subfolder). exe_path is then derived from the install dir
-        // via resolve_main_exe, and the size is measured on the install
-        // dir directly.
+        // via `game_watcher::resolve_steam_game_exe` (PE header +
+        // name scoring + depth), and the size is measured on the
+        // install dir directly.
         let install_dir = if installed_set.contains(&game.appid) {
             steam_game_watcher::game_install_path(game.appid)
         } else {
@@ -323,16 +324,4 @@ fn find_steam_library_folders() -> Vec<PathBuf> {
     folders
 }
 
-/// Resolve the main game executable for a Steam AppID.
-/// Delegates to the smart resolver in `game_watcher` which uses
-/// PE header analysis, name scoring, depth, and keyword exclusion
-/// — much more accurate than the old "largest .exe" heuristic.
-pub fn resolve_main_exe(app_id: u32) -> Option<String> {
-    let install_dir = steam_game_watcher::game_install_path(app_id)?;
-    if !install_dir.exists() {
-        return None;
-    }
-    // Read game name from appmanifest for the name-matching scorer
-    let manifest = steam_game_watcher::find_app_install_dir(app_id)?;
-    game_watcher::resolve_game_exe(&install_dir, &manifest.name)
-}
+

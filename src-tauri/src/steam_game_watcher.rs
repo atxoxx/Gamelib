@@ -1,26 +1,17 @@
-//! Steam session watcher.
+//! Steam install-dir resolution helpers.
 //!
-//! When GameContext.launchGame dispatches `steam://run/<appid>` via the
-//! opener plugin it loses its handle to the game — there's no PID, no
-//! child process, no waitable handle. This module reattaches the same
-//! "monitor until exit" pipeline that `launch_game` provides for local
-//! executables:
+//! Process watching for Steam games now lives in `game_watcher.rs`'s
+//! unified `GameWatcher`; this module is responsible purely for
+//! resolving where a Steam AppID is installed on disk so the watcher
+//! can build a `GameRef`:
 //!
 //! 1. Resolve the Steam install root (`<root>\steam.exe`).
 //! 2. Parse `steamapps\libraryfolders.vdf` to learn every secondary
 //!    library disk (Steam's standard system, since 2014).
 //! 3. For each library, attempt to read
 //!    `steamapps\appmanifest_<appid>.acf` and lift the `installdir`.
-//! 4. Bulk-query `Win32_Process` via WMI on each poll; if any process's
-//!    `ExecutablePath` starts with the resolved game install dir, mark
-//!    the session alive and use the dominant (highest-memory) matching
-//!    process as the metrics target so RTSS hooks the right PID.
-//! 5. When the match disappears, return the elapsed time + averaged
-//!    metrics to `lib::run` which emits `game-exited`.
-//!
-//! The frontend's ActivityContext already filters sub-1-minute sessions
-//! so we deliberately emit raw seconds and don't filter here — keeps
-//! the boundary between detection and presentation clean.
+//! 4. Compose `<lib_root>\steamapps\common\<installdir>` via
+//!    `game_install_path`.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -228,100 +219,6 @@ pub struct AppManifestFields {
     pub app_id: u32,
     pub name: String,
     pub install_dir: String,
-}
-
-/// Result of a single `is_game_process_running` poll.
-#[derive(Debug, Clone, Default)]
-pub struct ProcessMatch {
-    /// Is at least one process running whose executable lives under
-    /// the game's install directory?
-    pub running: bool,
-    /// PID of the dominant matching process (highest WorkingSetSize).
-    /// `None` if no process matched — ActivityContext doesn't care
-    /// about this, only `metrics_collector::start_metrics_collection`
-    /// does, for RTSS hooking.
-    pub dominant_pid: Option<u32>,
-}
-
-/// Windows-only: enumerate Win32_Process once and filter in Rust. We
-/// pull every process in one WMI query — the WMI server caches the
-/// underlying snapshot and a single round-trip is much cheaper than
-/// running one query per execution path.
-#[cfg(windows)]
-pub fn is_game_process_running(install_dir: &Path) -> ProcessMatch {
-    use wmi::{COMLibrary, WMIConnection};
-
-    // Case-insensitive path comparison: Windows paths are
-    // case-insensitive but WMI preserves whatever case the EXE was
-    // registered with, which is not always our normalised form.
-    let needle = install_dir.to_string_lossy().to_lowercase();
-    // Trim trailing separator for prefix matching.
-    let needle = needle.trim_end_matches('\\').trim_end_matches('/').to_string();
-
-    // See metrics_collector::collect_metrics_loop: CoInitializeSecurity
-    // is process-wide, so once it has been claimed (e.g. by
-    // get_system_ram_gb during app start) every subsequent
-    // COMLibrary::new() on a different thread fails. We poll WMI
-    // from a background thread inside watch_steam_game, so without
-    // the without_security() fallback every poll returns
-    // ProcessMatch::default() { running: false } and Phase 1
-    // times out, even for a real running game. Fall back so the
-    // detection actually works.
-    let com_lib = match COMLibrary::new() {
-        Ok(lib) => lib,
-        Err(_) => match COMLibrary::without_security() {
-            Ok(lib) => lib,
-            Err(_) => return ProcessMatch::default(),
-        },
-    };
-    let wmi_con = match WMIConnection::new(com_lib) {
-        Ok(con) => con,
-        Err(_) => return ProcessMatch::default(),
-    };
-
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct ProcRow {
-        process_id: Option<u32>,
-        executable_path: Option<String>,
-        working_set_size: Option<u64>,
-    }
-
-    let query = "SELECT ProcessId, ExecutablePath, WorkingSetSize FROM Win32_Process WHERE ExecutablePath IS NOT NULL";
-    let rows: Vec<ProcRow> = match wmi_con.raw_query::<ProcRow>(query) {
-        Ok(r) => r,
-        Err(_) => return ProcessMatch::default(),
-    };
-
-    // Pick the matching process with the largest working set. Steam
-    // launches the primary game EXE large (hundreds of MB) and any
-    // helper launchers are typically tens of MB. Memory is a
-    // reliable distinguishing signal without needing to enumerate the
-    // install dir's EXE files up front.
-    let mut best_pid: Option<u32> = None;
-    let mut best_size: u64 = 0;
-    for row in rows {
-        let Some(path) = row.executable_path else { continue };
-        let path_lc = path.to_lowercase();
-        if !path_lc.starts_with(&needle) {
-            continue;
-        }
-        let size = row.working_set_size.unwrap_or(0);
-        if size >= best_size {
-            best_size = size;
-            best_pid = row.process_id;
-        }
-    }
-
-    ProcessMatch {
-        running: best_pid.is_some(),
-        dominant_pid: best_pid,
-    }
-}
-
-#[cfg(not(windows))]
-pub fn is_game_process_running(_install_dir: &Path) -> ProcessMatch {
-    ProcessMatch::default()
 }
 
 #[cfg(test)]

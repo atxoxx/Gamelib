@@ -48,9 +48,17 @@ use crate::steam_game_watcher;
 pub struct GameRef {
     pub game_id: String,
     pub game_name: String,
+    /// Platform tag (e.g. "Steam", "Epic", "Manual"). Stored for
+    /// upcoming Steam-specific features (rich presence, overlay
+    /// hooks) and multi-store integrations.
+    #[allow(dead_code)]
     pub platform: String,
     pub exe_path: Option<String>,        // known exe path (from sync or manual import)
     pub install_dir: Option<PathBuf>,    // for prefix-matching Steam/Epic games
+    /// Steam AppID when known. Used by `register_launched_session` to
+    /// resolve the install dir; see comment on that method for the
+    /// Steam protocol-launch flow that benefits from this carry-over.
+    #[allow(dead_code)]
     pub steam_app_id: Option<u32>,
 }
 
@@ -62,6 +70,12 @@ struct ActiveSession {
     last_pid: u32,
     stop_tx: std::sync::mpsc::Sender<()>,
     metrics_rx: Option<std::sync::mpsc::Receiver<Option<metrics_collector::SessionMetrics>>>,
+    /// `true` if the session was started by `register_launched_session`
+    /// (user clicked Launch); `false` if detected passively by
+    /// `start_passive_session`. Wired up so future telemetry and
+    /// Activity-page filters can distinguish manual launches from
+    /// games the user started outside the app.
+    #[allow(dead_code)]
     launched_by_app: bool,
     matched_exe: String,
     /// Install directory used to re-attach the session when the initial
@@ -405,6 +419,10 @@ impl GameWatcher {
         }
     }
 
+    /// Returns whether the watcher currently tracks a session for
+    /// the given `game_id`. Exposed as a public API for upcoming
+    /// frontend status checks (e.g. "Stop download if game is running").
+    #[allow(dead_code)]
     pub fn is_running(&self, game_id: &str) -> bool {
         self.active_sessions.contains_key(game_id)
     }
