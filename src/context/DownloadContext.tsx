@@ -68,6 +68,22 @@ interface DownloadContextValue {
     autoExtract?: boolean,
     listOnly?: boolean,
   ) => Promise<TorrentDownload>;
+  addDirectDownload: (
+    url: string,
+    savePath: string,
+    gameId?: string | null,
+    sourceName?: string,
+    autoExtract?: boolean,
+  ) => Promise<TorrentDownload>;
+  addDebridDownload: (
+    magnet: string,
+    savePath: string,
+    gameId?: string | null,
+    sourceName?: string,
+    provider?: string,
+    apikey?: string,
+    autoExtract?: boolean,
+  ) => Promise<TorrentDownload>;
   startSelectedDownload: (
     id: string,
     onlyFiles: number[],
@@ -279,6 +295,62 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const addDirectDownload = useCallback(
+    async (
+      url: string,
+      savePath: string,
+      gameId: string | null = null,
+      sourceName = "Direct Download",
+      autoExtract = false,
+    ): Promise<TorrentDownload> => {
+      const id = `dd_${Math.random().toString(36).substring(2, 11)}`;
+      const newDownload = await invoke<TorrentDownload>("direct_download_start", {
+        id,
+        url,
+        savePath,
+        gameId,
+        sourceName,
+        autoExtract,
+      });
+      setDownloads((prev) => {
+        const without = prev.filter((d) => d.id !== newDownload.id);
+        return [newDownload, ...without];
+      });
+      return newDownload;
+    },
+    [],
+  );
+
+  const addDebridDownload = useCallback(
+    async (
+      magnet: string,
+      savePath: string,
+      gameId: string | null = null,
+      sourceName = "Debrid Download",
+      provider = "alldebrid",
+      apikey = "",
+      autoExtract = false,
+    ): Promise<TorrentDownload> => {
+      const id = `db_${Math.random().toString(36).substring(2, 11)}`;
+      const newDownload = await invoke<TorrentDownload>("debrid_download_start", {
+        id,
+        magnet,
+        savePath,
+        gameId,
+        sourceName,
+        provider,
+        apikey,
+        autoExtract,
+      });
+      setDownloads((prev) => {
+        const without = prev.filter((d) => d.id !== newDownload.id);
+        return [newDownload, ...without];
+      });
+      return newDownload;
+    },
+    [],
+  );
+
   const startSelectedDownload = useCallback(
     async (id: string, onlyFiles: number[], autoExtract: boolean): Promise<void> => {
       await invoke("torrent_start_selected", { id, onlyFiles, autoExtract });
@@ -362,6 +434,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       activeCount: activeDownloads.length,
       loading,
       addDownload,
+      addDirectDownload,
+      addDebridDownload,
       startSelectedDownload,
       pauseDownload,
       resumeDownload,
@@ -379,6 +453,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       completedDownloads,
       loading,
       addDownload,
+      addDirectDownload,
+      addDebridDownload,
       startSelectedDownload,
       pauseDownload,
       resumeDownload,

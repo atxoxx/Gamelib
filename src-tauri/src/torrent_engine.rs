@@ -569,6 +569,10 @@ impl TorrentEngine {
         self.session.as_ref()
     }
 
+    pub fn downloads_map(&self) -> &HashMap<String, TorrentDownload> {
+        &self.downloads
+    }
+
     /// Mutable accessor for the downloads metadata map. The caller
     /// must hold the engine mutex. Used by `torrent_add` to insert
     /// the new `TorrentDownload` record after `add_torrent`
@@ -872,7 +876,7 @@ impl TorrentEngine {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-fn unix_now() -> u64 {
+pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -2183,7 +2187,7 @@ fn run_command_tracked(id: &str, mut cmd: std::process::Command) -> Result<(), S
     }
 }
 
-fn extract_archives_for_torrent(id: &str, save_path: &str, files: &[TorrentFile]) -> Result<(), String> {
+pub fn extract_archives_for_torrent(id: &str, save_path: &str, files: &[TorrentFile]) -> Result<(), String> {
     let save_path_buf = PathBuf::from(save_path);
     let mut extracted_any = false;
     let mut last_err = None;

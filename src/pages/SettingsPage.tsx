@@ -66,6 +66,35 @@ export default function SettingsPage() {
     }
   }, []);
 
+  // Debrid Settings State
+  const [debridProvider, setDebridProvider] = useState("none");
+  const [debridApiKey, setDebridApiKey] = useState("");
+  const [fallbackTorrent, setFallbackTorrent] = useState(true);
+  const [testingDebrid, setTestingDebrid] = useState(false);
+
+  // Load Debrid on mount
+  useEffect(() => {
+    setDebridProvider(localStorage.getItem("gamelib-debrid-provider") || "none");
+    setDebridApiKey(localStorage.getItem("gamelib-debrid-apikey") || "");
+    setFallbackTorrent(localStorage.getItem("gamelib-debrid-fallback-torrent") !== "false");
+  }, []);
+
+  const handleTestDebrid = async () => {
+    if (!debridApiKey) return;
+    setTestingDebrid(true);
+    try {
+      const res = await invoke<{ username: string; premium_until: number | null }>("test_debrid_key", {
+        provider: debridProvider,
+        apikey: debridApiKey,
+      });
+      showToast(`Success! Logged in as ${res.username}`, "success");
+    } catch (e) {
+      showToast(`Connection failed: ${e}`, "error");
+    } finally {
+      setTestingDebrid(false);
+    }
+  };
+
   const saveAndApplyLimits = async (
     dlEnabled: boolean,
     dlVal: number,
@@ -1010,6 +1039,95 @@ export default function SettingsPage() {
               </div>
             </header>
             <SourceManager />
+          </section>
+
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Debrid Integration</h2>
+                <p className="settings-section-desc">
+                  Configure a debrid service (AllDebrid or TorBox) to download torrent magnet links via high-speed direct HTTP connections.
+                </p>
+              </div>
+            </header>
+            
+            <div className="settings-card" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+              <div className="settings-limit-row" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label className="settings-label" style={{ fontSize: "var(--font-size-sm)", fontWeight: "var(--font-weight-semibold)" }}>Debrid Provider</label>
+                <select
+                  value={debridProvider}
+                  onChange={(e) => {
+                    setDebridProvider(e.target.value);
+                    localStorage.setItem("gamelib-debrid-provider", e.target.value);
+                  }}
+                  className="settings-select"
+                  style={{
+                    padding: "8px 12px",
+                    background: "var(--color-bg-tertiary)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "var(--radius-md)",
+                    color: "var(--color-text-primary)",
+                    fontFamily: "inherit",
+                    width: "100%",
+                    maxWidth: "320px"
+                  }}
+                >
+                  <option value="none">Disabled</option>
+                  <option value="alldebrid">AllDebrid</option>
+                  <option value="torbox">TorBox</option>
+                </select>
+              </div>
+
+              {debridProvider !== "none" && (
+                <>
+                  <div className="settings-limit-row" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <label className="settings-label" style={{ fontSize: "var(--font-size-sm)", fontWeight: "var(--font-weight-semibold)" }}>API Key / Token</label>
+                    <div style={{ display: "flex", gap: "8px", maxWidth: "480px" }}>
+                      <input
+                        type="password"
+                        value={debridApiKey}
+                        onChange={(e) => {
+                          setDebridApiKey(e.target.value);
+                          localStorage.setItem("gamelib-debrid-apikey", e.target.value);
+                        }}
+                        placeholder="Paste your API key here..."
+                        style={{
+                          flex: 1,
+                          padding: "8px 12px",
+                          background: "var(--color-bg-tertiary)",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: "var(--radius-md)",
+                          color: "var(--color-text-primary)",
+                          fontFamily: "inherit",
+                        }}
+                      />
+                      <Button
+                        variant="primary"
+                        onClick={handleTestDebrid}
+                        disabled={testingDebrid || !debridApiKey}
+                      >
+                        {testingDebrid ? "Testing..." : "Test Connection"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="settings-limit-row">
+                    <label className="settings-checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={fallbackTorrent}
+                        onChange={(e) => {
+                          setFallbackTorrent(e.target.checked);
+                          localStorage.setItem("gamelib-debrid-fallback-torrent", String(e.target.checked));
+                        }}
+                      />
+                      <span>Fallback to standard torrent download if magnet is not cached</span>
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
           </section>
         </>
       )}
