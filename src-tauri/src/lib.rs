@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 
 mod config;
 mod crackwatch;
+mod db;
 mod game_scraper;
 mod game_watcher;
 mod gpu_detector;
@@ -33,8 +34,7 @@ use gpu_detector::GpuInfo;
 use epic::auth::{epic_start_login, epic_finish_login, epic_is_authenticated, epic_logout};
 use epic::sync::{epic_sync_library, epic_get_filters};
 use steam::auth::{
-    steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout,
-    steam_get_session, steam_save_config, steam_load_config, steam_clear_config,
+    steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
 };
 use steam::sync::steam_sync_games;
 use size::{detect_game_size, check_paths_exist};
@@ -168,27 +168,53 @@ struct SteamAchievementSerde {
     icongray: Option<String>,
 }
 
-/// Persist the game library to the app's data directory.
+/// Persist the game library.
+///
+/// Phase 3: writes every row to the `games` SQLite table in a single
+/// transaction. `GameRow` mirrors the camelCase `GameData` shape, so
+/// we round-trip each entry through compact JSON rather than maintain
+/// a hand-rolled field-by-field converter.
 #[tauri::command]
 fn save_games(app: tauri::AppHandle, games: Vec<GameData>) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("games.json");
-    let json = serde_json::to_string_pretty(&games).map_err(|e| e.to_string())?;
-    std::fs::write(&file_path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let mut rows: Vec<db::games::GameRow> = Vec::with_capacity(games.len());
+    for g in games {
+        let value = serde_json::to_value(&g).map_err(|e| format!("to_value: {e}"))?;
+        let row: db::games::GameRow = serde_json::from_value(value)
+            .map_err(|e| format!("to GameRow: {e}"))?;
+        rows.push(row);
+    }
+    db::games::upsert_all(db_state.inner(), &rows)
 }
 
-/// Load the game library from the app's data directory.
+/// Load the game library. Returns every row in Continue-Playing order
+/// (most recent `last_played` first, then alpha by name).
 #[tauri::command]
 fn load_games(app: tauri::AppHandle) -> Result<Vec<GameData>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("games.json");
-    if !file_path.exists() {
-        return Ok(Vec::new());
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let rows = db::games::list_all(db_state.inner()).map_err(|e| e.to_string())?;
+    let mut out: Vec<GameData> = Vec::with_capacity(rows.len());
+    for r in rows {
+        let value = serde_json::to_value(&r).map_err(|e| format!("to_value: {e}"))?;
+        let g: GameData = serde_json::from_value(value)
+            .map_err(|e| format!("to GameData: {e}"))?;
+        out.push(g);
     }
-    let json = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| e.to_string())
+    Ok(out)
+}
+
+/// Phase-3 hot path: bump one game's `last_played` without rewriting
+/// the rest of the row or the whole library. Called by the
+/// `game-exited` event path; replaces what used to be a
+/// `save_games(round_trip)` on every session-end.
+#[tauri::command]
+fn update_game_last_played(
+    app: tauri::AppHandle,
+    game_id: String,
+    last_played_ms: u64,
+) -> Result<(), String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::games::update_last_played(db_state.inner(), &game_id, last_played_ms)
 }
 
 /// Detect GPUs on the system using WMI.
@@ -555,51 +581,157 @@ async fn search_launchbox_images(game_name: String) -> Result<Vec<LaunchBoxImage
     game_scraper::search_launchbox_images(&game_name).await
 }
 
-/// Save the store browser cache to disk (6-hour TTL for IGDB catalog data).
+/// Phase-1 wrapper around the store_cache DAO. The frontend used to
+/// ship a single JSON blob under `<app_data_dir>/store_cache.json`
+/// for the IGDB catalog cache; that data now lives in the
+/// `store_cache` + `store_detail` SQLite tables. To preserve the
+/// existing Tauri command shape (the React hook invokes
+/// `save_store_cache` with a pre-serialized payload), we round-trip
+/// the JSON into rows here.
 #[tauri::command]
 fn save_store_cache(app: tauri::AppHandle, data: String) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("store_cache.json");
-    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&data).map_err(|e| format!("parse: {e}"))?;
+    // Old shape: `{ "categories": { "<category>": <obj> },
+    //   "detailCache": { "<slug>": <obj> } }`.
+    if let Some(cats) = parsed.get("categories").and_then(|v| v.as_object()) {
+        for (category, payload) in cats {
+            let wrapped =
+                serde_json::to_string(payload).map_err(|e| format!("wrap category: {e}"))?;
+            db::store_cache::upsert_category_page(
+                db_state.inner(),
+                category,
+                0,
+                &wrapped,
+            )?;
+        }
+    }
+    if let Some(detail) = parsed.get("detailCache").and_then(|v| v.as_object()) {
+        for (slug, payload) in detail {
+            let wrapped =
+                serde_json::to_string(payload).map_err(|e| format!("wrap detail: {e}"))?;
+            db::store_cache::upsert_detail(db_state.inner(), slug, &wrapped)?;
+        }
+    }
     Ok(())
 }
 
-/// Load the store browser cache from disk. Returns empty string if no cache or expired.
+/// Read the most recent store cache blob. Combines all known
+/// `(category, page=0)` rows plus every `store_detail` row into the
+/// same JSON shape the React frontend already understands.
 #[tauri::command]
 fn load_store_cache(app: tauri::AppHandle) -> Result<String, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("store_cache.json");
-    if !file_path.exists() {
-        return Ok(String::new());
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "categories".to_string(),
+        serde_json::Value::Object(serde_json::Map::new()),
+    );
+    out.insert(
+        "detailCache".to_string(),
+        serde_json::Value::Object(serde_json::Map::new()),
+    );
+
+    // Categories — list every (category, page=0) row. We don't currently
+    // paginate beyond 0; if future code adds higher pages this JSON
+    // shape will need a `pages` sub-object.
+    let conn = db_state.conn().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT category, payload_json FROM store_cache WHERE page = 0")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    let cats = out
+        .get_mut("categories")
+        .and_then(|v| v.as_object_mut())
+        .unwrap();
+    for row in rows {
+        let (cat, payload) = row.map_err(|e| e.to_string())?;
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null);
+        cats.insert(cat, value);
     }
-    std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+    let mut stmt = conn
+        .prepare("SELECT slug, payload_json FROM store_detail")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    let details = out
+        .get_mut("detailCache")
+        .and_then(|v| v.as_object_mut())
+        .unwrap();
+    for row in rows {
+        let (slug, payload) = row.map_err(|e| e.to_string())?;
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null);
+        details.insert(slug, value);
+    }
+
+    serde_json::to_string(&out).map_err(|e| e.to_string())
 }
 
-/// Save the wishlist cache to disk as JSON. Mirrors `save_store_cache`.
-/// Reads/writes `<app_data_dir>/wishlist_cache.json`; the React frontend
-/// owns the canonical state (see `src/hooks/useWishlist.ts`) and debounces
-/// writes here to coalesce rapid toggles.
+/// Phase-1 wrapper around the wishlist DAO. The frontend sends a
+/// serialised `{entries: {<slug>: <entry>}}` blob; we split it into
+/// one row per slug.
 #[tauri::command]
 fn save_wishlist(app: tauri::AppHandle, data: String) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("wishlist_cache.json");
-    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let parsed: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("parse wishlist: {e}"))?;
+    let entries = parsed
+        .get("entries")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    for (slug, entry) in &entries {
+        let payload =
+            serde_json::to_string(entry).map_err(|e| format!("serialize entry: {e}"))?;
+        let added_at = entry
+            .get("addedAt")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(now_ms);
+        db::wishlist::upsert(db_state.inner(), slug, &payload, added_at)?;
+    }
     Ok(())
 }
 
-/// Load the wishlist cache from disk. Returns empty string when no
-/// wishlist has been saved yet — the frontend treats that as an
-/// empty wishlist and proceeds to write one when the user toggles a heart.
+/// Read the wishlist back as the same `{entries: {<slug>: <entry>}}`
+/// shape the frontend expects.
 #[tauri::command]
 fn load_wishlist(app: tauri::AppHandle) -> Result<String, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("wishlist_cache.json");
-    if !file_path.exists() {
-        return Ok(String::new());
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let rows = db::wishlist::list(db_state.inner()).map_err(|e| e.to_string())?;
+    let mut entries = serde_json::Map::new();
+    for (slug, payload, _added_at) in rows {
+        let value: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null);
+        entries.insert(slug, value);
     }
-    std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+    Ok(serde_json::json!({ "entries": entries }).to_string())
+}
+
+/// Phase-3 sessions: read recent finished sessions for the
+/// Activity dashboard. The frontend still maintains its own
+/// `localStorage`-backed session list (Phase 5 will switch that
+/// over); this is the backend's mirror for stats / future exports.
+#[tauri::command]
+fn list_recent_sessions(
+    app: tauri::AppHandle,
+    limit: u32,
+) -> Result<Vec<db::sessions::SessionRecord>, String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::sessions::list_recent(db_state.inner(), limit)
 }
 
 /// Fetch a page of store games from IGDB, optionally narrowed by genre /
@@ -1645,8 +1777,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
-            steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout, steam_get_session,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+            steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             // Download-feature commands. The torrent engine manages
             // its own global session; the source manager and store
@@ -1703,47 +1835,55 @@ pub fn run() {
             // credentials baked in at compile time via option_env!()).
             config::load_env_file();
 
+            // ── Initialize the SQLite database ─────────────────────
+            // Phase 1–4 storage layer. opened & migrated before
+            // every other state so commands can take a `Db` via
+            // `tauri::State`. We register `Db` directly (NOT wrapped
+            // in an `Arc`) because the inner `r2d2::Pool` is already
+            // `Arc`-backed internally; `Db: Clone` because the pool
+            // field is Clone. The previous `Arc::new(db)` wrapping
+            // registered a TypeId of `Arc<Db>` while the commands
+            // declared `state::<db::Db>()` (different TypeIds),
+            // causing "state() called before manage()" panics on
+            // every command invocation.
+            let app_data_dir = app.path().app_data_dir()?;
+            let db = match db::init(&app_data_dir) {
+                Ok(db) => db,
+                Err(e) => {
+                    eprintln!("[gamelib] db::init failed: {e}");
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("db::init: {e}"),
+                    )) as Box<dyn std::error::Error>);
+                }
+            };
+            app.manage(db.clone());
+
             // ── Initialize the GameWatcher ──────────────────────────
             // Long-lived background service that polls WMI for running
             // game processes. Handles both app-launched sessions and
             // passive detection (games launched outside Gamelib).
-            let game_watcher = Arc::new(std::sync::Mutex::new(GameWatcher::new()));
+            //
+            // Phase 3: the watcher now holds an Arc<Db> so its
+            // background poller thread can write session rows to the
+            // `sessions` table on every session-end before emitting
+            // the `game-exited` event.
+            let game_watcher = Arc::new(std::sync::Mutex::new(GameWatcher::new(db.clone())));
             app.manage(game_watcher.clone());
 
             // Start the background poll loop (every 5s, picks up
-            // running processes and tracks sessions)
+            // running processes and tracks sessions).
             game_watcher::start_background_poll(
                 game_watcher,
                 app.handle().clone(),
             );
 
-            // Initialize the source manager + store checker state.
-            //
-            // The source manager uses `std::sync::Mutex` (NOT
-            // `tokio::sync::Mutex`) so the sync `setup` closure
-            // can `lock().unwrap()` it without blocking on a
-            // runtime worker. The async Tauri commands also take
-            // this type; they hold the guard across the await,
-            // which ties up one runtime worker per concurrent
-            // command — acceptable because source operations are
-            // user-driven and infrequent.
-            //
-            // The store checker keeps `tokio::sync::Mutex` since
-            // its Tauri commands are all short critical sections
-            // that benefit from the async-aware lock.
-            let app_data_dir = app.path().app_data_dir()?;
-            let source_manager = Arc::new(tokio::sync::Mutex::new(
-                source_manager::SourceManager::new(app_data_dir.clone()),
-            ));
-            {
-                // `blocking_lock` is the sync-context entry point for
-                // a tokio mutex. Setup runs before the async runtime
-                // is fully active so we can't `lock().await` here.
-                let mut mgr = source_manager.blocking_lock();
-                if let Err(e) = mgr.load_sources() {
-                    eprintln!("[gamelib] source_manager::load_sources failed: {}", e);
-                }
-            }
+            // ── Source manager ────────────────────────────────────
+            // Phase 2: the in-memory state maps are gone. All reads
+            // and writes go through the SQLite pool. The
+            // `Arc<SourceManager>` (no Mutex) is shared across
+            // commands; concurrency is provided by SQLite WAL.
+            let source_manager = Arc::new(source_manager::SourceManager::new(db.clone()));
             app.manage(source_manager);
 
             let store_checker = Arc::new(Mutex::new(store_checker::StoreChecker::new()));

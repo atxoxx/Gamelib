@@ -1,294 +1,246 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
-use std::time::Duration;
+//! Steam authentication.
+//!
+//! Phase 5 model: paste-in Steam Web API key + SteamID64.
+//!
+//! The user obtains the API key from
+//! <https://steamcommunity.com/dev/apikey> (linked from the Settings
+//! UI), copies their SteamID64 from their Steam profile, and pastes
+//! both into the Settings UI. `steam_connect` validates the pair
+//! against `ISteamUser/GetPlayerSummaries/v2/` — HTTP 403 marks the
+//! key as invalid, HTTP 200 + an empty `players` array marks the
+//! key as valid against a fully private profile. The verified
+//! `SteamSession` (SteamSession type from `super::types`) is stored
+//! in the OS keychain under `steam_session`.
+//!
+//! There is intentionally no in-app Webview against Steam anymore.
+//! Steam Guard 2FA, mobile authenticator prompts, and the password
+//! round-trip are all sidestepped because the user logs in to Steam
+//! directly on their browser to obtain the key, and we never see
+//! their password.
+//!
+//! Phase 4 keeps the `SteamSession` blob inside the OS keychain
+//! under `service=gamelib/gamelib-app, accounts steam_session`. The
+//! non-sensitive `kv_store` SQLite entry `steam_last_login_unix`
+//! gets stamped on success.
 
-use base64::{Engine as _, engine::general_purpose};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager};
+use serde_json::Value;
 
-use super::types::SteamSession;
+use crate::db;
 
-/// Steam store login page.  After login Steam redirects to the store
-/// home, where the page HTML embeds `steamid` and `webapi_token` — we
-/// extract those to authenticate against the Steam Web API.
-const STEAM_LOGIN_URL: &str = "https://store.steampowered.com/login/";
+// `SteamSession` is defined in `super::types` (single source of
+// truth for the wire shape consumed by both `steam_sync_games`
+// and the React frontend's `SteamSession` interface).
+// Re-exporting unifies the JSON keys that flow through the IPC.
+pub use super::types::SteamSession;
 
-/// Chrome-mimicking user-agent.  Without this Steam detects the default
-/// WebView2 header and refuses to render the login page (blank window).
-pub const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+/// User-agent for outbound HTTP to Steam. A standard Chrome UA is
+/// accepted by both `api.steampowered.com` and `store.steampowered.com`.
+pub(crate) const USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-/// ── Tauri commands ──────────────────────────────────────────────────
+/// URL for the `GetPlayerSummaries/v2` endpoint — used to validate
+/// the user-supplied API key + SteamID64 pair at connect time.
+const STEAM_PLAYER_SUMMARIES_URL: &str =
+    "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/";
 
-/// Start the full Steam login flow:
-/// 1. Opens an in-app WebView to the Steam login page
-/// 2. Waits for the user to log in (including Steam Guard)
-/// 3. After the post-login redirect lands on the store page, extracts
-///    `steamid` and `webapi_token` from the page HTML (Playnite approach).
-/// 4. Returns session + token as JSON
+// ── Tauri commands ──────────────────────────────────────────────
+
+/// Validate the user-supplied Steam API key + SteamID64 pair,
+/// persist the resulting `SteamSession` to the OS keychain, and
+/// return the freshly-saved session object to the frontend.
 ///
-/// The `webapi_token` can be passed as `access_token` to official Steam
-/// Web API endpoints like `IPlayerService/GetOwnedGames/v1/` — no API
-/// key required.
+/// Validation URL:
+/// `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/
+///  ?key=<api_key>&steamids=<steam_id>`
+///
+/// Decision matrix:
+///   * HTTP 403 Forbidden \u2192 key is invalid / revoked.
+///   * HTTP 200 with empty `players` array \u2192 key is valid but the
+///     SteamID doesn't correspond to a public profile (private
+///     account, which Steam still treats as "valid API call").
+///   * HTTP 200 with non-empty `players` array \u2192 key valid and the
+///     SteamID resolves to a public profile. We surface the
+///     `personaname` from the first entry as the display name,
+///     which is the same name the Steam community shows.
 #[tauri::command]
-pub async fn steam_start_login(app: AppHandle) -> Result<String, String> {
-    // Single channel for navigation callbacks:
-    //   "__LOGIN_OK__"  → user completed login
-    //   base64 JSON     → data extracted from the page
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    let tx_nav = tx.clone();
-    let rx = Arc::new(Mutex::new(rx));
-
-    // Guard to avoid double-signalling login completion.
-    let login_sent = Arc::new(AtomicBool::new(false));
-    let login_sent_nav = Arc::clone(&login_sent);
-
-    let webview = WebviewWindowBuilder::new(
-        &app,
-        "steam-login",
-        WebviewUrl::External(
-            STEAM_LOGIN_URL
-                .parse()
-                .map_err(|e| format!("Invalid URL: {e}"))?,
-        ),
-    )
-    .title("Steam Login")
-    .inner_size(800.0, 700.0)
-    .resizable(true)
-    .user_agent(USER_AGENT)
-    .on_navigation(move |url| {
-        let url_str = url.as_str();
-
-        // Intercept data extraction via custom scheme.
-        if url_str.starts_with("gamelib-steam://data/") {
-            let data = url_str["gamelib-steam://data/".len()..].to_string();
-            let _ = tx_nav.send(data);
-            return false;
-        }
-
-        // Detect successful login: redirected away from /login to a
-        // store or community page.
-        if !login_sent_nav.load(Ordering::SeqCst)
-            && ((url_str.starts_with("https://store.steampowered.com/")
-                && !url_str.contains("/login"))
-                || (url_str.starts_with("https://steamcommunity.com/")
-                    && !url_str.contains("/login")
-                    && !url_str.contains("login.steampowered.com")))
-        {
-            login_sent_nav.store(true, Ordering::SeqCst);
-            let _ = tx_nav.send("__LOGIN_OK__".to_string());
-        }
-
-        true
-    })
-    .build()
-    .map_err(|e| format!("Failed to create login window: {e}"))?;
-
-    // ── Phase 1 — wait for login (5 minute timeout) ──────────────────
-    {
-        let rx = Arc::clone(&rx);
-        let login_signal = tokio::task::spawn_blocking(move || {
-            rx.lock().unwrap().recv_timeout(Duration::from_secs(300))
-        })
-        .await
-        .map_err(|e| format!("Join error: {e}"))?
-        .map_err(|_| "Login timed out after 5 minutes".to_string())?;
-
-        if login_signal != "__LOGIN_OK__" {
-            let _ = webview.close();
-            return Err(format!("Unexpected login signal: {login_signal}"));
-        }
+pub async fn steam_connect(
+    app: AppHandle,
+    api_key: String,
+    steam_id: String,
+) -> Result<SteamSession, String> {
+    // ── Pre-flight validation ─────────────────────────────────────
+    // Trim once and use the trimmed values for both the gate and the
+    // outbound URL. Without this, a pasted `"  ABC...XYZ  "` would
+    // pass the empty gate but be sent to Steam unsanitized — Steam
+    // would reject it with HTTP 403 and the user would see "Invalid
+    // Steam API key" without realising the culprit is stray
+    // whitespace from a copy-paste.
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("Steam API key is required".to_string());
+    }
+    // SteamID64 is a 17-digit decimal integer. Reject anything else
+    // before sending the round-trip — saves a probe call for obvious
+    // typos like a pasted vanity URL ("https://steamcommunity.com/id/foo").
+    if steam_id.len() != 17 || !steam_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(
+            "Steam ID must be a 17-digit number (SteamID64).\n\
+             Find yours at https://steamcommunity.com/my"
+                .to_string(),
+        );
     }
 
-    // Give the store page time to fully render — the post-login redirect
-    // may be instant if the user was already logged in (WebView2 shares
-    // cookies with Edge on Windows).
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // ── Probe call ────────────────────────────────────────────────
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
-    // ── Phase 2 — extract steamid + webapi_token from page HTML ──────
-    //
-    // Playnite's approach (SteamStoreService.cs): after the store page
-    // loads, `GetPageSourceAsync()` returns HTML containing:
-    //   &quot;steamid&quot;:&quot;7656119...&quot;
-    //   &quot;webapi_token&quot;:&quot;abc123...&quot;
-    //
-    // We do the same via JS eval — matching both HTML-encoded quotes
-    // (&quot;) and regular quotes in case the page uses either.
-    webview
-        .eval(
-            "(function(){\
-             var h=document.documentElement.outerHTML;\
-             var sid=(h.match(/(?:&quot;|\")steamid(?:&quot;|\")\\s*:\\s*(?:&quot;|\")(\\d{17})(?:&quot;|\")/)||[])[1]||'';\
-             var tok=(h.match(/(?:&quot;|\")webapi_token(?:&quot;|\")\\s*:\\s*(?:&quot;|\")([^&\"]+)(?:&quot;|\")/)||[])[1]||'';\
-             var name=((h.match(/(?:&quot;|\")strPersonaName(?:&quot;|\")\\s*:\\s*(?:&quot;|\")([^&\"]+)(?:&quot;|\")/)||[])[1]||'');\
-             location.href='gamelib-steam://data/'+btoa(JSON.stringify({steamId:sid,webApiToken:tok,displayName:name}))})()",
-        )
-        .map_err(|e| format!("eval token extraction failed: {e}"))?;
+    let url = format!(
+        "{}?key={}&steamids={}",
+        STEAM_PLAYER_SUMMARIES_URL, api_key, steam_id
+    );
 
-    let token_b64 = {
-        let rx = Arc::clone(&rx);
-        tokio::task::spawn_blocking(move || {
-            rx.lock().unwrap().recv_timeout(Duration::from_secs(15))
-        })
+    let resp = client
+        .get(&url)
+        .send()
         .await
-        .map_err(|e| format!("Join error: {e}"))?
-        .map_err(|_| "Token extraction timed out — page may not have loaded".to_string())?
+        .map_err(|e| format!("Steam API request failed: {e}"))?;
+
+    let status = resp.status();
+    if status.as_u16() == 403 {
+        return Err(
+            "Steam rejected the API key (HTTP 403).\n\
+             Get a new key from https://steamcommunity.com/dev/apikey"
+                .to_string(),
+        );
+    }
+    if !status.is_success() {
+        return Err(format!(
+            "Steam API returned HTTP {}",
+            status.as_u16()
+        ));
+    }
+
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Steam API response: {e}"))?;
+
+    // The response shape is
+    //   { "response": { "players": [ { "steamid": "...", "personaname":
+    //                                  "...", ... }, ... ] } }
+    // An empty `players` array means the API key works but the SteamID
+    // isn't a public profile (private, banned, or just doesn't
+    // exist). We accept that as a *valid* pair so the user can still
+    // sync their owned games — only `GetPlayerSummaries` is muted.
+    let players = body
+        .get("response")
+        .and_then(|r| r.get("players"))
+        .and_then(|p| p.as_array());
+    let players = match players {
+        Some(arr) => arr,
+        None => {
+            return Err(
+                "Steam API returned an unexpected response shape (no `response.players` array)"
+                    .to_string(),
+            );
+        }
     };
 
-    // Close the WebView — we have the token.
-    let _ = webview.close();
-
-    // ── Parse extracted data ─────────────────────────────────────────
-    let json_bytes = general_purpose::STANDARD
-        .decode(&token_b64)
-        .map_err(|e| format!("Base64 decode failed: {e}"))?;
-    let json_str = String::from_utf8(json_bytes)
-        .map_err(|e| format!("UTF-8 decode failed: {e}"))?;
-    let data: serde_json::Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("JSON parse failed: {e}"))?;
-
-    let steam_id = data["steamId"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            format!(
-                "Could not find steamid in page HTML. Raw data: {}",
-                json_str.chars().take(200).collect::<String>()
-            )
-        })?
-        .to_string();
-
-    let web_api_token = data["webApiToken"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            "Could not find webapi_token in page HTML — are you logged into Steam?".to_string()
-        })?
-        .to_string();
-
-    let display_name = data["displayName"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    // Validate the steam_id looks like a 64-bit Steam ID.
-    if !steam_id.chars().all(|c| c.is_ascii_digit()) || steam_id.len() != 17 {
-        return Err(format!("Invalid Steam ID extracted: {steam_id}"));
-    }
+    let display_name = players
+        .first()
+        .and_then(|p| p.get("personaname"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     let session = SteamSession {
-        steam_id: steam_id.clone(),
-        web_api_token,
-        display_name,
+        // Both values moved — neither is used after this constructor.
+        steam_id,
+        api_key: api_key.to_string(),
+        display_name: display_name.clone(),
     };
 
-    let result = serde_json::json!({
-        "session": session,
-    });
+    // ── Persist to the OS keychain ─────────────────────────────
+    let store = db::secrets::SecretStore::new();
+    store.set(
+        "steam_session",
+        &serde_json::to_string(&session).map_err(|e| e.to_string())?,
+    )?;
+    // Also clean up any stale `steam_config` blob from the prior
+    // OpenID+RSA auth flow so the keychain doesn't accumulate dead
+    // state.
+    let _ = store.delete("steam_config");
+    if let Some(db_state) = try_db_state(&app) {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = db::kv::set(
+            db_state.inner(),
+            "steam_last_login_unix",
+            &now_secs.to_string(),
+        );
+        if let Some(name) = display_name {
+            let _ = db::kv::set(db_state.inner(), "steam_display_name", &name);
+        }
+    }
 
-    Ok(result.to_string())
-}
-
-/// Parse the session data returned by `steam_start_login` and persist
-/// the session to disk.  Returns the parsed `SteamSession`.
-#[tauri::command]
-pub fn steam_finish_login(
-    app: AppHandle,
-    session_data: String,
-) -> Result<SteamSession, String> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(&session_data).map_err(|e| format!("Parse failed: {e}"))?;
-
-    let session: SteamSession = serde_json::from_value(parsed["session"].clone())
-        .map_err(|e| format!("Session parse failed: {e}"))?;
-
-    save_session(&app, &session)?;
     Ok(session)
 }
 
-/// Check whether a saved Steam session exists.
+/// Read the persisted `SteamSession` from the keychain. Returns
+/// `None` if the entry is missing, the JSON is malformed, or the
+/// entry doesn't match the current `SteamSession` schema.
+///
+/// Note: the prior `steam_get_session` self-healed malformed blobs
+/// by deleting them. `#[serde(alias = "webApiToken")]` on the
+/// `api_key` field means a pre-Phase-5 4-field blob decodes
+/// cleanly without the self-heal path firing, so the migration is
+/// friendly to existing users.
+#[tauri::command]
+pub fn steam_get_session(_app: AppHandle) -> Option<SteamSession> {
+    let store = db::secrets::SecretStore::new();
+    let secret = store.get("steam_session").ok().flatten()?;
+    match serde_json::from_str::<SteamSession>(&secret) {
+        Ok(s) if !s.api_key.is_empty() && !s.steam_id.is_empty() => Some(s),
+        _ => {
+            // Schema-evolved blob, or a stub session from an
+            // earlier process that wrote zeros. Drop it so the UI
+            // flips to \"Connect Steam Account\" rather than showing
+            // a phantom \"Connected\" badge.
+            let _ = store.delete("steam_session");
+            None
+        }
+    }
+}
+
 #[tauri::command]
 pub fn steam_is_authenticated(app: AppHandle) -> bool {
-    get_session_path(&app).exists()
+    steam_get_session(app).is_some()
 }
 
-/// Delete the saved Steam session.
 #[tauri::command]
-pub fn steam_logout(app: AppHandle) -> Result<(), String> {
-    let path = get_session_path(&app);
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+pub fn steam_logout(_app: AppHandle) -> Result<(), String> {
+    let store = db::secrets::SecretStore::new();
+    store.delete("steam_session")?;
+    let _ = store.delete("steam_config");
+    if let Some(db_state) = try_db_state(&_app) {
+        let _ = db::kv::delete(db_state.inner(), "steam_last_login_unix");
+        let _ = db::kv::delete(db_state.inner(), "steam_display_name");
     }
     Ok(())
 }
 
-/// Load the saved Steam session from disk.  Returns `None` if none exists.
-#[tauri::command]
-pub fn steam_get_session(app: AppHandle) -> Result<Option<SteamSession>, String> {
-    let path = get_session_path(&app);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let session: SteamSession =
-        serde_json::from_str(&json).map_err(|e| format!("Parse session: {e}"))?;
-    Ok(Some(session))
-}
+// ── helpers ─────────────────────────────────────────────────────────
 
-// ── Deprecated (kept for backward compat) ────────────────────────────
-
-#[allow(deprecated)]
-#[tauri::command]
-pub fn steam_save_config(
-    app: AppHandle,
-    config: super::types::SteamApiConfig,
-) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let config_path = data_dir.join("steam_config.json");
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(&config_path, json).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[allow(deprecated)]
-#[tauri::command]
-pub fn steam_load_config(
-    app: AppHandle,
-) -> Result<Option<super::types::SteamApiConfig>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let config_path = data_dir.join("steam_config.json");
-    if !config_path.exists() {
-        return Ok(None);
-    }
-    let json = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let config: super::types::SteamApiConfig =
-        serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    Ok(Some(config))
-}
-
-#[tauri::command]
-pub fn steam_clear_config(app: AppHandle) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let config_path = data_dir.join("steam_config.json");
-    if config_path.exists() {
-        std::fs::remove_file(&config_path).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-// ── utilities ──────────────────────────────────────────────────────
-
-fn get_session_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
-        .unwrap_or_default()
-        .join("steam_session.json")
-}
-
-fn save_session(app: &AppHandle, session: &SteamSession) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let path = data_dir.join("steam_session.json");
-    let json = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(())
+/// Returns the live `Arc<Db>` if it has been registered with
+/// Tauri's `State` container. Earlier than `db::init` completing
+/// during setup, it's not present yet; callers fall through to
+/// the no-db path.
+fn try_db_state(app: &AppHandle) -> Option<tauri::State<'_, db::Db>> {
+    app.try_state::<db::Db>()
 }

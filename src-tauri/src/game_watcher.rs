@@ -37,6 +37,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
 use tauri::{AppHandle, Emitter};
 
+use crate::db::{self, Db};
 use crate::metrics_collector;
 use crate::steam_game_watcher;
 
@@ -109,15 +110,22 @@ pub struct GameWatcher {
     active_sessions: HashMap<String, ActiveSession>,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
+    /// Phase 3: handle to the SQLite pool so `finish_session` can
+    /// record each session row before emitting the `game-exited`
+    /// event. Pool ops are sync and ~ms, so the inline write is
+    /// cheap and guarantees the row is committed before any
+    /// frontend listener sees the event.
+    db: Db,
 }
 
 impl GameWatcher {
-    pub fn new() -> Self {
+    pub fn new(db: Db) -> Self {
         Self {
             process_index: HashMap::new(),
             active_sessions: HashMap::new(),
             gpu_id: None,
             gpu_name: None,
+            db,
         }
     }
 
@@ -402,17 +410,61 @@ impl GameWatcher {
             // same clock the frontend reads via `Date.now()` (i.e. system
             // time, not monotonic) so the value survives timezone shifts
             // and clock corrections without a re-derivation step.
-            let finished_at = std::time::SystemTime::now()
+            //
+            // We approximate the session start as `finished_at - elapsed`
+            // since `started_at` on the watcher is a monotonic `Instant`
+            // (no fixed epoch) and we need wall-clock ms for the DB row.
+            let finished_at_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
+            let started_at_ms = finished_at_ms.saturating_sub(elapsed * 1000);
+
+            // Phase 3: write the session row before emitting the event
+            // so any frontend listener that reads from the DB sees a
+            // row in place. Synchronous SQLite insert on a WAL pool is
+            // sub-millisecond; the emit follows only after the commit
+            // returns.
+            let metrics_json = metrics
+                .as_ref()
+                .and_then(|m| serde_json::to_string(m).ok());
+            // `SessionMetrics` exposes u32 scalars directly (not
+            // Option<F>), so we always populate the averages. Cast to
+            // f32 for the SQLite REAL columns.
+            let (avg_fps, avg_cpu, avg_gpu, avg_ram) = match metrics.as_ref() {
+                Some(m) => (
+                    Some(m.avg_fps as f32),
+                    Some(m.avg_cpu_usage as f32),
+                    Some(m.avg_gpu_usage as f32),
+                    Some(m.avg_ram_usage as f32),
+                ),
+                None => (None, None, None, None),
+            };
+            let _ = db::sessions::insert(
+                &self.db,
+                game_id,
+                started_at_ms,
+                finished_at_ms,
+                elapsed,
+                avg_fps,
+                avg_cpu,
+                avg_gpu,
+                avg_ram,
+                metrics_json.as_deref(),
+            );
+
+            // Mirror the timestamp into the games table so the
+            // Library "Continue Playing" rail can sort without a
+            // JOIN. Phase 3 hot-path: replaces the old
+            // full-library-rewrite triggered by save_games.
+            let _ = db::games::update_last_played(&self.db, game_id, finished_at_ms);
 
             let _ = app_handle.emit(
                 "game-exited",
                 GameExitPayload {
                     game_id: session.game_id.clone(),
                     elapsed_seconds: elapsed,
-                    finished_at,
+                    finished_at: finished_at_ms,
                     metrics,
                 },
             );

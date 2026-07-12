@@ -11,22 +11,34 @@ pub struct SteamApiConfig {
     pub steam_id: String,
 }
 
-/// Steam session data extracted from WebView login.
+/// Steam session: a Steam Web API key + the 64-bit SteamID of the
+/// account it belongs to, plus an optional display name pulled from
+/// `ISteamUser/GetPlayerSummaries/v2/` at connect time.
 ///
-/// Contains the `web_api_token` that Playnite's approach extracts from
-/// the store page HTML — this token can be passed as `access_token` to
-/// the official Steam Web API (`IPlayerService/GetOwnedGames/v1/` etc.)
-/// instead of requiring an API key.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The API key is obtained by the user from
+/// https://steamcommunity.com/dev/apikey and paste-pasted into the
+/// Settings UI. It's then passed as the `key=` query parameter on
+/// every subsequent Steam Web API call (`IPlayerService/GetOwnedGames`,
+/// `ISteamUserStats/GetPlayerAchievements`, etc.).
+///
+/// `#[serde(alias = "webApiToken")]` preserves backward-compat
+/// reads of stale keychain blobs from before the Phase-5 refactor —
+/// pre-existing `{ steamId, webApiToken }` JSON decodes cleanly into
+/// `{ steamId, apiKey }`. Outbound serialisation still emits
+/// `apiKey` so newly written blobs stay canonical.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SteamSession {
-    /// 64-bit Steam ID extracted from the store page HTML
+    /// 64-bit SteamID the API key was registered against.
     pub steam_id: String,
-    /// Web API access token extracted from the store page HTML.
-    /// Passed as `access_token` parameter to Steam Web API calls.
-    pub web_api_token: String,
-    /// Display name from the profile (if available)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Steam Web API key. Sent as `key=` to every Steam Web API.
+    #[serde(alias = "webApiToken")]
+    pub api_key: String,
+    /// Display name from `GetPlayerSummaries/v2`. Optional: missing
+    /// `displayName` JSON key deserialises to `None` so a stub or
+    /// older session blob round-trips through the keychain without
+    /// throwing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
 

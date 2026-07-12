@@ -32,15 +32,19 @@ struct OwnedGame {
     rtime_last_played: u64,
 }
 
-/// Sync games from a Steam WebView session using the official Steam Web API.
+/// Sync games from a Steam account using the official Steam Web API.
 ///
-/// `session.web_api_token` is passed as `access_token` to
-/// `IPlayerService/GetOwnedGames/v1/` — the same approach Playnite's
-/// `SteamStoreService` uses.  No API key needed.
+/// `session.api_key` is passed as the `key=` query parameter on
+/// `IPlayerService/GetOwnedGames/v1/`. The API key is a long-lived
+/// registration token from <https://steamcommunity.com/dev/apikey>,
+/// tied to the Steam account but valid for all Steam Web API calls
+/// that the API-key owner can access (their own profile, owned
+/// games, achievements, etc.).
 ///
-/// The token is tied to the user's Steam session and may expire; if the
-/// API call fails with 401/403, the user should re-login via
-/// `steam_start_login`.
+/// Achievements (`ISteamUserStats/GetPlayerAchievements/v1/`) also
+/// accepts `key=` — `fetch_achievements_with_client` builds its URLs
+/// with `&key=<token>` already, so we pass `session.api_key` through
+/// unchanged.
 #[tauri::command]
 pub async fn steam_sync_games(
     app: tauri::AppHandle,
@@ -66,9 +70,9 @@ pub async fn steam_sync_games(
 
     let url = format!(
         "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/\
-         ?access_token={}&steamid={}&include_appinfo=true\
+         ?key={}&steamid={}&include_appinfo=true\
          &include_played_free_games=true&format=json",
-        session.web_api_token, session.steam_id
+        session.api_key, session.steam_id
     );
 
     // Retry on 429 (rate limit) — Steam API is notorious for returning
@@ -207,7 +211,7 @@ pub async fn steam_sync_games(
                         &client,
                         game.appid,
                         &session.steam_id,
-                        &session.web_api_token,
+                        &session.api_key,
                     )
                     .await
                     {

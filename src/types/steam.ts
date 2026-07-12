@@ -1,10 +1,12 @@
 export interface SteamSession {
-  /** 64-bit Steam ID extracted from the store page HTML */
+  /** 64-bit Steam ID (SteamID64) of the user the API key belongs to. */
   steamId: string;
-  /** Web API access token extracted from the store page HTML.
-   *  Passed as `access_token` to Steam Web API calls. */
-  webApiToken: string;
-  /** Display name from profile (if available) */
+  /** Steam Web API key — obtained from https://steamcommunity.com/dev/apikey.
+   *  Passed as the `key=` query parameter to all Steam Web API calls. The key
+   *  is tied to a Steam account registration and does not expire until the
+   *  owner revokes it from the dev/apikey page. */
+  apiKey: string;
+  /** Display name pulled from ISteamUser/GetPlayerSummaries at connect time. */
   displayName?: string;
 }
 

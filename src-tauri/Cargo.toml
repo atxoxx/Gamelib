@@ -33,6 +33,42 @@ chrono = { version = "0.4", features = ["clock"] }
 urlencoding = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
+# === Phase 0–4 storage layer ===
+# Atomic write helper: writes to a sibling .tmp file then fs::rename for
+# crash-safe persistence. Used by every legacy JSON write until the
+# corresponding DAO migration lands in Phase 1–3.
+tempfile = "3"
+# SQLite (bundled — no system library required on Win/Mac/Linux).
+#
+# Pinned to 0.31 because r2d2_sqlite 0.24 declares a transitive
+# dependence on rusqlite ^0.31. Two different rusqlite majors can't
+# coexist in Cargo's dep graph because both link `libsqlite3-sys`
+# with `links = "sqlite3"`. Bumping r2d2_sqlite to 0.25 (which
+# targets rusqlite 0.32) is also fine — pick one. We pin rusqlite to
+# 0.31 + r2d2_sqlite 0.24 to keep the existing API surface stable.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# Connection pool so concurrent Tauri commands don't fight for a single
+# SQLite handle. SqliteConnectionManager is sync; we call DB methods
+# directly inside async commands (the queries are sub-millisecond on
+# WAL-mode local files).
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+# OS keychain for OAuth tokens / debrid API keys (Phase 4).
+# Default features include apple-native (macOS Keychain),
+# windows-native (Credential Manager), and crypto-rust. We
+# additionally opt into sync-secret-service so Linux boxes with
+# Gnome Keyring / KWallet work out of the box. `crypto-rust`
+# (default) avoids the openssl-sys transitive dep — we deliberately
+# do NOT use `vendored` (that's an openssl-sys feature, not
+# keyring's).
+keyring = { version = "3", features = ["sync-secret-service"] }
+# Steam login helpers (encrypt_password + token extraction).
+# Phase 4 keeps these crates here because the original Steam
+# auth.rs already used them; the migration only changes WHERE we
+# persist tokens (file -> OS keychain), not the encryption flow.
+rand = "0.8"
+sha2 = "0.10"
+num-bigint = "0.4"
 wmi = "0.14"
 # Win32_UI_Shell/WindowsAndMessaging are used for UAC elevation when a game
 # executable requires administrator privileges. Win32_System_Registry is a

@@ -119,7 +119,14 @@ export default function SettingsPage() {
     }
   };
 
-  // Steam integration state
+  // Steam integration state — paste-in API key + SteamID64 flow.
+  // The user gets their API key from
+  // https://steamcommunity.com/dev/apikey and their SteamID64 from
+  // https://steamcommunity.com/my (both linked from the inputs
+  // below). Neither is persisted to localStorage — the keychain
+  // owns the verified SteamSession blob via `steam_connect`.
+  const [steamApiKey, setSteamApiKey] = useState("");
+  const [steamId, setSteamId] = useState("");
   const [steamAuth, setSteamAuth] = useState<SteamAuthState>({ isAuthenticated: false });
   const [isSteamLoggingIn, setIsSteamLoggingIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -186,13 +193,26 @@ export default function SettingsPage() {
 
 
   async function handleSteamLogin() {
+    // Pre-flight: both fields required. The Rust probe call against
+    // ISteamUser/GetPlayerSummaries/v2 enforces non-empty + a
+    // 17-digit SteamID64, but don't spin up the loading state for
+    // a request the user clearly didn't authorise.
+    if (!steamApiKey.trim() || !steamId.trim()) {
+      showToast("API key and Steam ID are required", "error");
+      return;
+    }
     setIsSteamLoggingIn(true);
     try {
-      showToast("A login window will open — log in to Steam there", "info");
-      const resultJson: string = await invoke("steam_start_login");
+      // Validate the (API key, SteamID) pair server-side and persist
+      // the resulting SteamSession to the OS keychain. No webview, no
+      // password round-trip — the user auth'd with Steam in their own
+      // browser to obtain the key from
+      // https://steamcommunity.com/dev/apikey.
+      const session: SteamSession = await invoke("steam_connect", {
+        apiKey: steamApiKey.trim(),
+        steamId: steamId.trim(),
+      });
 
-      // Finish login — persists session to disk
-      const session: SteamSession = await invoke("steam_finish_login", { sessionData: resultJson });
       setSteamAuth({ isAuthenticated: true, session });
 
       localStorage.setItem("gamelib-steam-sync-info", JSON.stringify({
@@ -200,7 +220,8 @@ export default function SettingsPage() {
       }));
       showToast(`Connected to Steam${session.displayName ? ` as ${session.displayName}` : ""}`, "success");
 
-      // Auto-sync after login — token-based API call, no manual data passing
+      // Auto-sync after connect — same handleSyncNow path used for
+      // manual sync button presses.
       await handleSyncNow(session);
     } catch (err) {
       showToast(`Steam connection failed: ${err}`, "error");
@@ -728,7 +749,7 @@ export default function SettingsPage() {
                   </div>
                   <p className="integration-tile-desc">
                     Import your Steam library, playtime, and
-                    achievements with one-click WebView login.
+                    achievements using a Steam Web API key.
                   </p>
                 </div>
               </div>
@@ -748,8 +769,74 @@ export default function SettingsPage() {
                 )}
 
                 <p className="auth-note">
-                  Your session data stays local — no API key needed.
+                  Your API key stays local — stored only in the
+                  encrypted OS keychain.
                 </p>
+
+                {/* API-key + SteamID64 paste-in flow. Only rendered
+                 *  when the user isn't connected — once
+                 *  `steam_is_authenticated` flips to true the inputs
+                 *  collapse. Each input is paired with a "?" link
+                 *  pointing at the canonical Steam page where the
+                 *  user obtains the value, so the workflow doesn't
+                 *  require hunting outside the app for instructions.
+                 *
+                 *  - API key: https://steamcommunity.com/dev/apikey
+                 *    (the user logs into Steam in their own browser
+                 *    and registers the key against this app's domain)
+                 *  - SteamID64: https://steamcommunity.com/my
+                 *    (Steam's "My profile" page exposes the 17-digit
+                 *    ID under the vanity-URL block at the top) */}
+                {!steamAuth.isAuthenticated && (
+                  <div className="integration-tile-form">
+                    <label className="settings-control">
+                      <div className="settings-label-row">
+                        <span className="settings-label">Steam API Key</span>
+                        <a
+                          href="https://steamcommunity.com/dev/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="settings-link"
+                        >
+                          Get your Steam API key →
+                        </a>
+                      </div>
+                      <input
+                        type="password"
+                        className="settings-input"
+                        value={steamApiKey}
+                        onChange={(e) => setSteamApiKey(e.target.value)}
+                        autoComplete="off"
+                        placeholder="32-char hex string from steamcommunity.com/dev/apikey"
+                        disabled={isSteamLoggingIn}
+                      />
+                    </label>
+                    <label className="settings-control">
+                      <div className="settings-label-row">
+                        <span className="settings-label">Steam ID (SteamID64)</span>
+                        <a
+                          href="https://steamcommunity.com/my"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="settings-link"
+                        >
+                          Find your Steam ID →
+                        </a>
+                      </div>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        value={steamId}
+                        onChange={(e) => setSteamId(e.target.value)}
+                        autoComplete="off"
+                        inputMode="numeric"
+                        pattern="[0-9]{17}"
+                        placeholder="17-digit number, e.g. 76561197960287930"
+                        disabled={isSteamLoggingIn}
+                      />
+                    </label>
+                  </div>
+                )}
 
                 <div className="integration-tile-actions">
                   {steamAuth.isAuthenticated ? (

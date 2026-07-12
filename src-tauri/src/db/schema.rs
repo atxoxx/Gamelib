@@ -1,0 +1,38 @@
+//! Embedded SQL schema strings.
+//!
+//! Every table Gamelib uses lives in a constant here, so the schema
+//! is reviewable in one place and can be unit-tested (we apply each
+//! DDL against a temp DB and verify it's idempotent).
+//!
+//! ## Conventions
+//!
+//! - Timestamps: unix seconds (u64), nullable columns default NULL.
+//! - Compact JSON columns: when a piece of state is "too varied to be
+//!   worth its own columns", we serialize it as compact JSON into a
+//!   single TEXT column. Reads accept the deserialization cost; writes
+//!   skip the schema-overhead cost.
+//! - Foreign keys with `ON DELETE CASCADE` model ownership. The
+//!   `sources` table is the canonical source of truth; deleting a
+//!   source cascades to its cache, downloads, and FTS5 mirrors.
+
+/// DDL for v1 of the schema. Ordered so dependencies come first
+/// (parents before children, tables before their `CREATE TRIGGER`
+/// statements).
+pub const V1_SCHEMA: &str = include_str!("schema_v1.sql");
+
+/// Bootstrap the schema-meta table on a fresh DB. This table is
+/// itself part of v1, but we need to read `PRAGMA user_version`
+/// *before* applying v1, so bootstrap is logically a separate step.
+pub const META_BOOTSTRAP: &str = "
+CREATE TABLE IF NOT EXISTS schema_meta (
+    k TEXT PRIMARY KEY,
+    v TEXT NOT NULL
+);
+";
+
+/// All currently known schema versions, oldest first.
+///
+/// `db::migrate::run_migrations` iterates this list, skipping versions
+/// that are already in `PRAGMA user_version`, and applies the rest in
+/// order inside individual transactions.
+pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA)];

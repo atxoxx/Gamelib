@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
+use serde_json::Value;
 use tauri::Manager;
+
+use crate::db;
 
 /// User-agent for Steam API requests.
 const USER_AGENT: &str =
@@ -8,27 +11,19 @@ const USER_AGENT: &str =
 
 // ── Serializable types ──────────────────────────────────────────────────
 
-/// A single achievement definition + user progress.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Achievement {
     pub api_name: String,
     pub display_name: String,
     pub description: String,
-    /// Icon URL when unlocked.
     pub icon: String,
-    /// Icon URL when locked.
     pub icon_gray: String,
     pub achieved: bool,
-    /// Unix timestamp of unlock (0 if locked).
     pub unlock_time: u64,
-    /// Global unlock percentage (0.0–100.0). Populated by
-    /// `fetch_global_achievement_percentages`.
-    #[serde(default)]
     pub percent: f64,
 }
 
-/// Per-game achievement data returned to the frontend.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GameAchievementData {
@@ -41,7 +36,6 @@ pub struct GameAchievementData {
     pub last_synced: Option<u64>,
 }
 
-/// Whole-library achievements cache.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AchievementsCache {
     pub games: std::collections::HashMap<String, GameAchievementData>,
@@ -91,11 +85,6 @@ struct PlayerAchievementsResponse {
 struct PlayerStats {
     #[serde(default)]
     achievements: Vec<PlayerAchievement>,
-    /// Steam API's `success` flag — `true` when
-    /// `GetPlayerAchievements` returned a valid response. We treat the
-    /// absence of `playerstats` as "no data" and don't currently
-    /// branch on this; kept for schema fidelity so future error paths
-    /// can distinguish "API call failed" from "no achievements yet".
     #[serde(default)]
     #[allow(dead_code)]
     success: bool,
@@ -126,8 +115,6 @@ struct GlobalAchievementPercent {
     percent: f64,
 }
 
-// ── Helper: build HTTP client ───────────────────────────────────────────
-
 fn build_client() -> Result<Client, String> {
     Client::builder()
         .user_agent(USER_AGENT)
@@ -138,22 +125,13 @@ fn build_client() -> Result<Client, String> {
 
 // ── Tauri commands ──────────────────────────────────────────────────────
 
-/// Fetch achievements for a single game from Steam.
-///
-/// Calls three endpoints:
-/// 1. `GetSchemaForGame/v2/` — achievement definitions (names, descriptions, icons)
-/// 2. `GetPlayerAchievements/v1/` — user's unlock status & timestamps
-/// 3. `GetGlobalAchievementPercentagesForApp/v2/` — global rarity percentages
-///
-/// `api_token` is the Steam `web_api_token` extracted during login — it works
-/// as the `key` parameter for these `ISteamUserStats` endpoints.
+/// Fetch achievements for a single game from Steam. (Unchanged.)
 pub async fn fetch_achievements_with_client(
     client: &Client,
     steam_app_id: u32,
     steam_id: &str,
     api_token: &str,
 ) -> Result<GameAchievementData, String> {
-    // ── 1. Get achievement schema (definitions) ────────────────────
     let schema_url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/\
          ?key={}&appid={}&l=english&format=json",
@@ -186,7 +164,6 @@ pub async fn fetch_achievements_with_client(
         .unwrap_or_default();
 
     if schema_achievements.is_empty() {
-        // Game has no achievements defined
         return Ok(GameAchievementData {
             steam_app_id,
             achievements: Vec::new(),
@@ -197,7 +174,6 @@ pub async fn fetch_achievements_with_client(
         });
     }
 
-    // ── 2. Get player achievements (unlock status) ─────────────────
     let player_url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/\
          ?key={}&steamid={}&appid={}&format=json",
@@ -223,11 +199,9 @@ pub async fn fetch_achievements_with_client(
             .map(|ps| ps.achievements)
             .unwrap_or_default()
     } else {
-        // Profile may be private — proceed with schema only, all locked
         Vec::new()
     };
 
-    // ── 3. Get global percentages ──────────────────────────────────
     let global_url = format!(
         "https://api.steampowered.com/ISteamUserStats/\
          GetGlobalAchievementPercentagesForApp/v2/\
@@ -250,7 +224,6 @@ pub async fn fetch_achievements_with_client(
             _ => Vec::new(),
         };
 
-    // Build lookup maps
     let player_map: std::collections::HashMap<String, &PlayerAchievement> = player_achievements
         .iter()
         .map(|a| (a.apiname.clone(), a))
@@ -260,7 +233,6 @@ pub async fn fetch_achievements_with_client(
         .map(|a| (a.name.clone(), a.percent))
         .collect();
 
-    // ── Merge into final Achievement list ──────────────────────────
     let mut achievements: Vec<Achievement> = Vec::with_capacity(schema_achievements.len());
     let mut unlocked_count: u32 = 0;
 
@@ -290,12 +262,11 @@ pub async fn fetch_achievements_with_client(
         });
     }
 
-    // Sort: unlocked first (by unlock_time desc), then locked (by percent desc = easiest first)
     achievements.sort_by(|a, b| {
         match (a.achieved, b.achieved) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            (true, true) => b.unlock_time.cmp(&a.unlock_time), // most recent first
+            (true, true) => b.unlock_time.cmp(&a.unlock_time),
             (false, false) => b.percent.partial_cmp(&a.percent).unwrap_or(std::cmp::Ordering::Equal),
         }
     });
@@ -311,15 +282,6 @@ pub async fn fetch_achievements_with_client(
     })
 }
 
-/// Fetch achievements for a single game from Steam.
-///
-/// Calls three endpoints:
-/// 1. `GetSchemaForGame/v2/` — achievement definitions (names, descriptions, icons)
-/// 2. `GetPlayerAchievements/v1/` — user's unlock status & timestamps
-/// 3. `GetGlobalAchievementPercentagesForApp/v2/` — global rarity percentages
-///
-/// `api_token` is the Steam `web_api_token` extracted during login — it works
-/// as the `key` parameter for these `ISteamUserStats` endpoints.
 #[tauri::command]
 pub async fn fetch_achievements(
     steam_app_id: u32,
@@ -330,46 +292,47 @@ pub async fn fetch_achievements(
     fetch_achievements_with_client(&client, steam_app_id, &steam_id, &api_token).await
 }
 
-/// Save the achievements cache to disk as JSON.
+/// Save the achievements cache to the `achievements_cache` SQLite
+/// table. The frontend still ships a single JSON blob (the
+/// `AchievementsCache` shape); we parse it and upsert one row per
+/// game inside a transaction.
 #[tauri::command]
 pub fn save_achievements_cache(app: tauri::AppHandle, data: String) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("achievements_cache.json");
-    std::fs::write(&file_path, data).map_err(|e| e.to_string())?;
-    Ok(())
+    let parsed: Value = serde_json::from_str(&data)
+        .map_err(|e| format!("parse: {e}"))?;
+    let games = parsed
+        .get("games")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::achievements::upsert_many_from_payload(db_state.inner(), &games)
 }
 
-/// Load the achievements cache from disk.
+/// Load the achievements cache. Returns the same JSON shape the
+/// frontend expects: `{ "games": { "<gameId>": <GameAchievementData> } }`.
 #[tauri::command]
 pub fn load_achievements_cache(app: tauri::AppHandle) -> Result<String, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("achievements_cache.json");
-    if !file_path.exists() {
-        return Ok(String::new());
-    }
-    std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::achievements::read_all_as_payload_json(db_state.inner())
 }
 
-/// Internal helper to load the achievements cache as a Rust struct.
+/// Internal helper: read the achievements cache as a Rust struct.
 pub fn load_cache_internal(app: &tauri::AppHandle) -> Result<AchievementsCache, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("achievements_cache.json");
-    if !file_path.exists() {
-        return Ok(AchievementsCache {
-            games: std::collections::HashMap::new(),
-        });
-    }
-    let content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
+    let payload = load_achievements_cache_inner(app)?;
+    serde_json::from_str(&payload).map_err(|e| format!("parse payload: {e}"))
 }
 
-/// Internal helper to save the achievements cache to disk.
-pub fn save_cache_internal(app: &tauri::AppHandle, cache: &AchievementsCache) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let file_path = data_dir.join("achievements_cache.json");
-    let content = serde_json::to_string(cache).map_err(|e| e.to_string())?;
-    std::fs::write(&file_path, content).map_err(|e| e.to_string())?;
-    Ok(())
+/// Internal helper: save the achievements cache from a struct.
+pub fn save_cache_internal(
+    app: &tauri::AppHandle,
+    cache: &AchievementsCache,
+) -> Result<(), String> {
+    let json = serde_json::to_string(cache).map_err(|e| e.to_string())?;
+    save_achievements_cache(app.clone(), json)
+}
+
+fn load_achievements_cache_inner(app: &tauri::AppHandle) -> Result<String, String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::achievements::read_all_as_payload_json(db_state.inner())
 }

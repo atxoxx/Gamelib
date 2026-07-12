@@ -5,6 +5,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use super::types::EpicAuthTokens;
+use crate::db;
 
 // ── Epic Launcher OAuth constants (from Playnite's EpicLibrary) ─────
 const EPIC_AUTH_ENCODED: &str =
@@ -21,28 +22,17 @@ const USER_AGENT: &str =
 
 // ── Tauri commands ──────────────────────────────────────────────────
 
-/// Start the full Epic OAuth flow:
-/// 1. Opens an in-app WebView to the Epic login page
-/// 2. Waits for Epic to redirect to `localhost/launcher/authorized?code=XXXX`
-/// 3. Intercepts the redirect URL via `on_navigation` BEFORE the page loads
-/// 4. Extracts the auth code, closes the WebView, and returns the code
-///
-/// No TCP server needed — Playnite's approach: watch the navigation URL.
 #[tauri::command]
 pub async fn epic_start_login(app: AppHandle) -> Result<String, String> {
     let (tx, rx) = mpsc::channel();
 
-    // Create the WebView.  The `on_navigation` callback fires for every
-    // navigation (including JS-initiated redirects).  When Epic tries to
-    // send us to `localhost/launcher/authorized?code=XXXX` we grab the
-    // code and close the window before the navigation completes.
     let webview = WebviewWindowBuilder::new(
         &app,
         "epic-login",
         WebviewUrl::External(
             EPIC_LOGIN_URL
                 .parse()
-                .map_err(|e| format!("Invalid URL: {}", e))?,
+                .map_err(|e| format!("Invalid URL: {e}"))?,
         ),
     )
     .title("Epic Games Login")
@@ -52,18 +42,16 @@ pub async fn epic_start_login(app: AppHandle) -> Result<String, String> {
     .on_navigation(move |url| {
         let url_str = url.as_str();
         if url_str.contains("localhost/launcher/authorized") {
-            // Extract the code before the browser tries to load localhost
             if let Some(code) = extract_code_from_url(url_str) {
                 let _ = tx.send(Some(code));
-                return false; // block navigation to localhost
+                return false;
             }
         }
         true
     })
     .build()
-    .map_err(|e| format!("Failed to create login window: {}", e))?;
+    .map_err(|e| format!("Failed to create login window: {e}"))?;
 
-    // Wait for the auth code (up to 5 minutes), then close the window
     let code = tokio::task::spawn_blocking(move || {
         match rx.recv_timeout(std::time::Duration::from_secs(300)) {
             Ok(Some(code)) => Ok(code),
@@ -72,44 +60,41 @@ pub async fn epic_start_login(app: AppHandle) -> Result<String, String> {
         }
     })
     .await
-    .map_err(|e| format!("Join error: {}", e))??;
+    .map_err(|e| format!("Join error: {e}"))??;
 
     let _ = webview.close();
     Ok(code)
 }
 
-/// Exchange an authorization code for access & refresh tokens.
 #[tauri::command]
 pub async fn epic_finish_login(app: AppHandle, auth_code: String) -> Result<EpicAuthTokens, String> {
     let client = Client::builder()
         .user_agent(USER_AGENT)
         .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     let response = client
         .post(EPIC_TOKEN_URL)
-        .header("Authorization", format!("basic {}", EPIC_AUTH_ENCODED))
+        .header("Authorization", format!("basic {EPIC_AUTH_ENCODED}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
-            "grant_type=authorization_code&code={}&token_type=eg1",
-            auth_code
+            "grant_type=authorization_code&code={auth_code}&token_type=eg1"
         ))
         .send()
         .await
-        .map_err(|e| format!("Token request failed: {}", e))?;
+        .map_err(|e| format!("Token request failed: {e}"))?;
 
     let status = response.status();
     let body_text = response.text().await.unwrap_or_default();
 
     if !status.is_success() {
         return Err(format!(
-            "Token exchange failed (HTTP {}): {}",
-            status, body_text
+            "Token exchange failed (HTTP {status}): {body_text}"
         ));
     }
 
     let json: Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+        .map_err(|e| format!("Failed to parse token response: {e}"))?;
 
     let access_token = json["access_token"]
         .as_str()
@@ -141,11 +126,15 @@ pub fn epic_is_authenticated(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn epic_logout(app: AppHandle) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let tokens_path = data_dir.join("epic_tokens.json");
-    if tokens_path.exists() {
-        std::fs::remove_file(&tokens_path).map_err(|e| e.to_string())?;
+pub fn epic_logout(_app: AppHandle) -> Result<(), String> {
+    // Phase 4: tokens live in the OS keychain under
+    // `service=gamelib/gamelib-app, account=epic_tokens`. We also
+    // drop the kv-stored Epic-side sync timestamp so the next login
+    // triggers a fresh library fetch.
+    let store = db::secrets::SecretStore::new();
+    store.delete("epic_tokens")?;
+    if let Some(db_state) = try_db_state(&_app) {
+        let _ = db::kv::delete(db_state.inner(), "epic_last_login_unix");
     }
     Ok(())
 }
@@ -159,11 +148,11 @@ pub async fn refresh_tokens_if_needed(app: &AppHandle) -> Result<EpicAuthTokens,
     let client = Client::builder()
         .user_agent(USER_AGENT)
         .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     let response = client
         .post(EPIC_TOKEN_URL)
-        .header("Authorization", format!("basic {}", EPIC_AUTH_ENCODED))
+        .header("Authorization", format!("basic {EPIC_AUTH_ENCODED}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "grant_type=refresh_token&refresh_token={}&token_type=eg1",
@@ -171,19 +160,18 @@ pub async fn refresh_tokens_if_needed(app: &AppHandle) -> Result<EpicAuthTokens,
         ))
         .send()
         .await
-        .map_err(|e| format!("Token refresh failed: {}", e))?;
+        .map_err(|e| format!("Token refresh failed: {e}"))?;
 
     let status = response.status();
     let body_text = response.text().await.unwrap_or_default();
     if !status.is_success() {
         return Err(format!(
-            "Token refresh failed (HTTP {}): {}",
-            status, body_text
+            "Token refresh failed (HTTP {status}): {body_text}"
         ));
     }
 
     let json: Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Failed to parse refresh response: {}", e))?;
+        .map_err(|e| format!("Failed to parse refresh response: {e}"))?;
 
     let access_token = json["access_token"]
         .as_str()
@@ -234,21 +222,37 @@ fn current_unix() -> u64 {
         .as_secs()
 }
 
+/// Phase 4: persist Epic OAuth tokens in the OS keychain. The
+/// keyring serialises our store as a `String`; we use compact JSON
+/// (no pretty) to keep the blob tiny. Non-sensitive metadata
+/// (login timestamps) goes into the `kv_store` SQLite table when
+/// the DB has been initialised.
 fn save_tokens(app: &AppHandle, tokens: &EpicAuthTokens) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let tokens_path = data_dir.join("epic_tokens.json");
-    let json = serde_json::to_string_pretty(tokens).map_err(|e| e.to_string())?;
-    std::fs::write(&tokens_path, json).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(tokens).map_err(|e| e.to_string())?;
+    let store = db::secrets::SecretStore::new();
+    store.set("epic_tokens", &json)?;
+    if let Some(db_state) = try_db_state(app) {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = db::kv::set(db_state.inner(), "epic_last_login_unix", &now_secs.to_string());
+    }
     Ok(())
 }
 
-fn load_tokens(app: &AppHandle) -> Result<EpicAuthTokens, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let tokens_path = data_dir.join("epic_tokens.json");
-    if !tokens_path.exists() {
-        return Err("No Epic tokens stored".to_string());
-    }
-    let json = std::fs::read_to_string(&tokens_path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| format!("Failed to parse tokens: {}", e))
+fn load_tokens(_app: &AppHandle) -> Result<EpicAuthTokens, String> {
+    let store = db::secrets::SecretStore::new();
+    let secret = store
+        .get("epic_tokens")?
+        .ok_or_else(|| "No Epic tokens stored".to_string())?;
+    serde_json::from_str(&secret).map_err(|e| format!("Failed to parse tokens: {e}"))
+}
+
+/// Returns the live `Arc<Db>` if it has been registered with
+/// Tauri's `State` container. Earlier than `db::init` completing
+/// during setup, it's not present yet; callers fall through to the
+/// no-db path.
+fn try_db_state(app: &AppHandle) -> Option<tauri::State<'_, db::Db>> {
+    app.try_state::<db::Db>()
 }
