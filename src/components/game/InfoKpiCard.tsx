@@ -49,6 +49,8 @@ interface InfoKpiCardProps {
   game: Game;
   sizeUnit: SizeUnit;
   onEditSize?: () => void;
+  /** Hide the play-status KPI tile (used on store pages where "Backlog" is meaningless). */
+  hideStatus?: boolean;
 }
 
 interface DetailRow {
@@ -61,6 +63,7 @@ export default function InfoKpiCard({
   game,
   sizeUnit,
   onEditSize,
+  hideStatus,
 }: InfoKpiCardProps) {
   // Fetch the combined Steam stats payload so the price tile has
   // its data ready without re-firing the IPC call the popover also
@@ -85,7 +88,8 @@ export default function InfoKpiCard({
   const kpis = useMemo(() => {
     const items: ReactNode[] = [];
 
-    items.push(
+    if (!hideStatus) {
+      items.push(
       <KpiTile
         key="play-status"
         size="sm"
@@ -107,9 +111,9 @@ export default function InfoKpiCard({
                 : game.playStatus === "abandoned"
                   ? "danger"
                   : "default"
-        }
-      />
-    );
+        }        />
+      );
+    }
 
     items.push(
       <KpiTile
@@ -172,6 +176,7 @@ export default function InfoKpiCard({
     priceCents,
     priceCurrency,
     priceIsFree,
+    hideStatus,
   ]);
 
   // Definition list rows: every field with a value renders.
