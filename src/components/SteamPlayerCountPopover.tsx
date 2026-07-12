@@ -7,8 +7,9 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
-import type { SteamGameStats } from "../types/game";
+import type { SteamGameReviews } from "../types/game";
+import { useSteamGameStats } from "../hooks/useSteamGameStats";
+import SteamPlayerActivityCompact from "./SteamPlayerActivityCompact";
 
 /**
  * SteamPlayerCountPopover
@@ -16,21 +17,30 @@ import type { SteamGameStats } from "../types/game";
  *  Click-to-expand companion to `<SteamPlayerCount>`. Renders a compact
  *  anchored card next to the badge with three layers of info:
  *
- *   1. **Live current players** — pulled from the same backend command
- *      the badge uses, so the number never disagrees with the pill
- *      the user just clicked.
+ *   1. **Live current players** — pulled from the parent's count so
+ *      the badge and the popover header agree at click time.
  *   2. **Aggregate review breakdown** — positive/total ratio as a
  *      horizontal bar with Steam's qualitative label ("Very Positive",
  *      "Mixed", …) and the raw counts underneath.
- *   3. **Static metadata** — developer, publisher, release date, price.
- *      Sourced from Steam's `appdetails` endpoint, cached for 24h
- *      because the fields essentially never change.
+ *   3. **Player activity (24h)** — compact sparkline + Peak / Avg /
+ *      Samples summary so the user gets the trend without leaving the
+ *      popover.
  *
- *  All three sections are returned by a single `get_steam_game_stats`
- *  Tauri command so the IPC round-trip is one and the two HTTP fetches
- *  fan out in parallel on the Rust side. Each section degrades
- *  independently — a Steam hiccup on `appdetails` blanks only its
- *  grid, leaving the live count and reviews intact.
+ *  Static metadata (developer / publisher / release date / price) was
+ *  moved off the popover:
+ *    - Developer / publisher / release date live on the Game page
+ *      Info card (more appropriate context, doesn't compete with the
+ *      sparkline for vertical space).
+ *    - Price is rendered as the 4th KPI tile in `InfoKpiCard` next
+ *      to Status / Play Time / Size, fetched via the same shared
+ *      `useSteamGameStats` hook.
+ *
+ *  All three popover sections are populated by a single
+ *  `get_steam_game_stats` Tauri command so the IPC round-trip is one
+ *  and the two HTTP fetches fan out in parallel on the Rust side.
+ *  Each section degrades independently — a Steam hiccup on
+ *  `appdetails` blanks only the dependent data, leaving the live
+ *  count and reviews intact.
  *
  *  Positioning & dismissal
  *  ───────────────────────
@@ -72,39 +82,13 @@ interface SteamPlayerCountPopoverProps {
 }
 
 const VIEWPORT_MARGIN = 12;
-/** Canonical width — overridden by the CSS custom property on
- *  `.steam-stats-popover`, with this as a layout-effect fallback for
- *  the brief moment before the browser has measured the rendered
- *  popover. Keep in sync with the CSS rule. */
-const FALLBACK_WIDTH_PX = 320;
-
-/**
- * Format a price-overview cents value into a human-readable string.
- * Renders as "Free to Play" when `isFree`, falls back to a plain
- * `N.NN` number when no currency symbol matches the small map below.
- */
-function formatSteamPrice(
-  cents: number | null,
-  currency: string | null,
-  isFree: boolean
-): string {
-  if (isFree) return "Free to Play";
-  if (cents == null || cents <= 0) return "—";
-  const major = cents / 100;
-  const symbols: Record<string, string> = {
-    USD: "$",
-    EUR: "€",
-    GBP: "£",
-    JPY: "¥",
-    CNY: "¥",
-    RUB: "₽",
-    BRL: "R$",
-    AUD: "A$",
-    CAD: "C$",
-  };
-  const symbol = currency ? symbols[currency] ?? "" : "";
-  return `${symbol}${major.toFixed(2)}`;
-}
+/** Fallback width for the layout-effect position recalc on first
+ *  paint, used only when the browser has not yet measured the
+ *  rendered popover. The canonical width lives in the CSS custom
+ *  property `--steam-stats-popover-width` (set in `store.css` on
+ *  `.steam-stats-popover`); this constant exists solely so the
+ *  position math doesn't read `0` on the first layout pass. */
+const FALLBACK_WIDTH_PX = 360;
 
 export default function SteamPlayerCountPopover({
   appId,
@@ -121,33 +105,17 @@ export default function SteamPlayerCountPopover({
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  // ── Stats fetch state ───────────────────────────────────────────────
-  // `null` ⇒ not yet resolved. We treat the fetch as a single "stats
-  // payload" rather than three independent booleans because the
-  // backend returns them in one call; a per-section `loading` flag
-  // would just be `!stats` three times over.
-  const [stats, setStats] = useState<SteamGameStats | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    invoke<SteamGameStats>("get_steam_game_stats", { appId })
-      .then((result) => {
-        if (!cancelled) setStats(result);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.warn(
-            `[SteamPlayerCountPopover] stats fetch failed for appid ${appId}:`,
-            err
-          );
-          setFetchError(String(err));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [appId]);
+  // ── Stats fetch ─────────────────────────────────────────────────
+  // Delegates to the shared hook so the same `appdetails` / review
+  // payload can drive multiple consumers (e.g. the InfoKpiCard's
+  // price tile) without each one issuing its own IPC call. The Rust
+  // backend caches `appdetails` for 24h, so duplicate concurrent
+  // fetches are cheap.
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: fetchError,
+  } = useSteamGameStats(appId);
 
   // ── Position state ─────────────────────────────────────────────────
   // Stored in state (not derived in render) so the JSX stays pure and
@@ -257,8 +225,11 @@ export default function SteamPlayerCountPopover({
   }, [anchorRef]);
 
   // ── Derived values ──────────────────────────────────────────────────
-  const reviewsLoading = !stats && !fetchError;
-  const detailsLoading = !stats && !fetchError;
+  // First-fetch loading state from the shared hook (true only on the
+  // initial IPC round-trip; false on subsequent re-renders). Using the
+  // hook's own flag keeps the source of truth in one place rather
+  // than re-deriving it from `!stats && !fetchError` here.
+  const reviewsLoading = statsLoading;
 
   // Memoize the positive-percent so the bar fill doesn't recompute on
   // every render (it's just a division, but the bar transition is
@@ -280,6 +251,11 @@ export default function SteamPlayerCountPopover({
     if (s >= 5) return "mid";
     return "bad";
   }, [stats?.reviews?.score]);
+
+  // The reviews summary may be undefined when Steam hasn't returned
+  // one yet; the section handles each shape explicitly. This just
+  // narrows the access for the positive-pct label.
+  const reviewSummary: SteamGameReviews | null = stats?.reviews ?? null;
 
   return createPortal(
     <div
@@ -352,11 +328,11 @@ export default function SteamPlayerCountPopover({
             <span className="steam-stats-popover-section-title">Reviews</span>
             {reviewsLoading ? (
               <span className="steam-stats-popover-skeleton-pill" />
-            ) : stats?.reviews ? (
+            ) : reviewSummary ? (
               <span
                 className={`steam-stats-popover-section-badge steam-stats-popover-tone-${reviewTone}`}
               >
-                {stats.reviews.scoreDesc ?? "Unrated"}
+                {reviewSummary.scoreDesc ?? "Unrated"}
               </span>
             ) : (
               <span className="steam-stats-popover-section-empty">—</span>
@@ -367,7 +343,7 @@ export default function SteamPlayerCountPopover({
               <div className="steam-stats-popover-skeleton-bar" />
               <div className="steam-stats-popover-skeleton-line short" />
             </>
-          ) : stats?.reviews ? (
+          ) : reviewSummary ? (
             <>
               <div
                 className={`steam-stats-popover-reviews-bar steam-stats-popover-tone-${reviewTone}`}
@@ -383,12 +359,12 @@ export default function SteamPlayerCountPopover({
                 />
               </div>
               <div className="steam-stats-popover-reviews-count">
-                <strong>{stats.reviews.totalPositive.toLocaleString()}</strong>{" "}
+                <strong>{reviewSummary.totalPositive.toLocaleString()}</strong>{" "}
                 positive
                 <span className="steam-stats-popover-reviews-count-sep">·</span>
-                {stats.reviews.totalNegative.toLocaleString()} negative
+                {reviewSummary.totalNegative.toLocaleString()} negative
                 <span className="steam-stats-popover-reviews-count-sep">·</span>
-                {stats.reviews.totalReviews.toLocaleString()} total
+                {reviewSummary.totalReviews.toLocaleString()} total
               </div>
             </>
           ) : (
@@ -400,84 +376,13 @@ export default function SteamPlayerCountPopover({
 
         <div className="steam-stats-popover-divider" />
 
-        {/* Details — 2x2 grid of static metadata. Three states:
-            1. Loading (skeleton lines in each cell)
-            2. Loaded with data (real values)
-            3. Loaded with no data (single empty-state message
-               spanning the full width) — replaces what would
-               otherwise be 4 cryptic "—" cells, and surfaces
-               the backend's `detailsError` (e.g. "appdetails
-               returned no data block") so the user understands
-               why the section is empty. */}
-        {detailsLoading ? (
-          <div className="steam-stats-popover-grid">
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Developer</div>
-              <div className="steam-stats-popover-grid-value">
-                <span className="steam-stats-popover-skeleton-line" />
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Publisher</div>
-              <div className="steam-stats-popover-grid-value">
-                <span className="steam-stats-popover-skeleton-line" />
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Released</div>
-              <div className="steam-stats-popover-grid-value">
-                <span className="steam-stats-popover-skeleton-line" />
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Price</div>
-              <div className="steam-stats-popover-grid-value">
-                <span className="steam-stats-popover-skeleton-line" />
-              </div>
-            </div>
-          </div>
-        ) : stats?.details ? (
-          <div className="steam-stats-popover-grid">
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Developer</div>
-              <div className="steam-stats-popover-grid-value">
-                {stats.details.developer ?? (
-                  <span className="steam-stats-popover-section-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Publisher</div>
-              <div className="steam-stats-popover-grid-value">
-                {stats.details.publisher ?? (
-                  <span className="steam-stats-popover-section-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Released</div>
-              <div className="steam-stats-popover-grid-value">
-                {stats.details.releaseDate ?? (
-                  <span className="steam-stats-popover-section-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="steam-stats-popover-grid-item">
-              <div className="steam-stats-popover-grid-label">Price</div>
-              <div className="steam-stats-popover-grid-value">
-                {formatSteamPrice(
-                  stats.details.priceCents,
-                  stats.details.currency,
-                  stats.details.isFree
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="steam-stats-popover-section-error">
-            {stats?.detailsError ?? "No metadata available for this title"}
-          </div>
-        )}
+        {/* Player activity (24h) — compact sparkline + Peak / Avg /
+            Samples summary. Owns its own polling via
+            `usePlayerCountHistory` (60s + focus refresh), so the
+            popover's stats hook and the activity hook share nothing
+            beyond the cached backend responses. The compact
+            component handles its own loading / empty / error states. */}
+        <SteamPlayerActivityCompact appId={appId} />
 
         {/* If the whole fetch failed (e.g. offline), surface a single
             inline message instead of three "—" placeholders. */}

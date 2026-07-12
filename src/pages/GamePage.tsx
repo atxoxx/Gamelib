@@ -13,7 +13,6 @@ import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
-import PlayerCountSparklineCard from "../components/PlayerCountSparklineCard";
 import CrackWatchCard from "../components/CrackWatchCard";
 import AchievementsTab from "../components/AchievementsTab";
 import GameRelationsCard from "../components/GameRelationsCard";
@@ -2134,9 +2133,9 @@ export function GameActivityTab({ game }: { game: Game }) {
   if (sessions.length === 0) {
     return (
     <>
-    {/* Live Steam concurrent-player count history (24h sparkline).
-        Sourced from PlayerCountHistoryCache on the Rust side. */}
-    <PlayerCountSparklineCard appId={game.steamAppId} />
+    {/* Player activity (24h sparkline) now lives inside the Steam
+        stats popover (SteamPlayerCountPopover + SteamPlayerActivityCompact).
+        The activity tab is focused on playtime + sessions. */}
       <div className="game-activity-empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="12" cy="12" r="10" />

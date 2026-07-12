@@ -817,7 +817,12 @@
 .steam-stats-popover {
   position: fixed;
   z-index: 10000;
-  width: var(--steam-stats-popover-width, 320px);
+  /* Widened from 320px → 360px to comfortably fit the 24h
+   * player activity sparkline + Peak/Avg/Samples summary. The
+   * JavaScript fallback width is the matching constant in
+   * `SteamPlayerCountPopover.tsx` so the layout-effect position
+   * recalc measures the right size on first render. */
+  width: var(--steam-stats-popover-width, 360px);
   max-width: calc(100vw - 24px);
   background: var(--color-bg-elevated, color-mix(in srgb, var(--color-bg-primary) 92%, transparent));
   backdrop-filter: blur(20px) saturate(1.4);
@@ -1110,37 +1115,153 @@
   opacity: 0.5;
 }
 
-/* ── Details grid (2x2 dev/publisher/release/price) ──────────── */
+/* ── Player activity section (24h sparkline + tiny stats) ─────
+ *
+ * Replaces the old 2x2 details grid (dev / pub / release / price).
+ * Dev / publisher / release date now live on the Info card; price
+ * has been promoted to a 4th KPI tile in the InfoKpiCard.
+ *
+ * Geometry notes:
+ *  - `.steam-stats-popover-activity-svg` uses `preserveAspectRatio="none"`
+ *    so it stretches to whatever width the popover gives it without
+ *    re-rendering on resize.
+ *  - The baseline line is drawn behind the curve so a flat-zero
+ *    chart still has a visible floor.
+ *  - The now-dot is drawn last so it sits on top of the line.
+ *  - The accent gradient is themed via `var(--color-accent)` so it
+ *    follows whatever accent color the active theme picked.
+ */
 
-.steam-stats-popover-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 14px;
-}
-
-.steam-stats-popover-grid-item {
+.steam-stats-popover-activity {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+}
+
+.steam-stats-popover-activity-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-success);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.steam-stats-popover-activity-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
+  animation: steam-stats-popover-activity-pulse 2s ease-in-out infinite;
+}
+
+@keyframes steam-stats-popover-activity-pulse {
+  0%, 100% { opacity: 0.65; transform: scale(0.9); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+.steam-stats-popover-activity-chart {
+  position: relative;
+  width: 100%;
+  height: 56px;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 40%, transparent);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.steam-stats-popover-activity-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.steam-stats-popover-activity-baseline {
+  stroke: color-mix(in srgb, var(--color-border) 70%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.steam-stats-popover-activity-line {
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.steam-stats-popover-activity-now-dot {
+  fill: var(--color-accent);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--color-accent) 70%, transparent));
+  vector-effect: non-scaling-stroke;
+}
+
+.steam-stats-popover-activity-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.steam-stats-popover-activity-empty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  opacity: 0.6;
+  animation: steam-stats-popover-activity-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.steam-stats-popover-activity-empty-text {
+  font-size: 10px;
+}
+
+.steam-stats-popover-activity-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.steam-stats-popover-activity-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 6px 4px;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 50%, transparent);
+  border-radius: var(--radius-sm);
   min-width: 0;
 }
 
-.steam-stats-popover-grid-label {
-  font-size: 9px;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.steam-stats-popover-activity-stat-value {
+  font-size: 13px;
   font-weight: var(--font-weight-semibold);
-}
-
-.steam-stats-popover-grid-value {
-  font-size: 12px;
   color: var(--color-text-primary);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.3;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.steam-stats-popover-activity-stat-label {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: var(--font-weight-medium);
 }
 
 /* ── Whole-fetch failure ─────────────────────────────────────── */

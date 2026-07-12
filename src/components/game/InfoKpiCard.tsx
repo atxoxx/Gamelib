@@ -10,12 +10,14 @@ import {
   IconInfo,
   IconPlatform,
   IconStar,
+  IconTag,
   IconUser,
   IconUsers,
   IconClock,
   IconX,
 } from "./icons";
 import { StatusDot } from "./shared";
+import { useSteamGameStats, formatSteamPrice } from "../../hooks/useSteamGameStats";
 
 /**
  * InfoKpiCard
@@ -27,7 +29,7 @@ import { StatusDot } from "./shared";
  *
  *  Layout:
  *    ┌─ Top KPI row ─────────────────────────────┐
- *    │  [Status]    [Play Time]    [Size]        │  ← tiles, only the
+ *    │  [Status]    [Play Time]    [Size] [Price]│  ← tiles, only the
  *    │                                             ones with data show
  *    ├─ Definition list ──────────────────────────┤
  *    │  Platform      [icon]  value              │  ← icon-prefixed,
@@ -60,7 +62,26 @@ export default function InfoKpiCard({
   sizeUnit,
   onEditSize,
 }: InfoKpiCardProps) {
-  // KPI tiles at the top: surface the most-glanced values first
+  // Fetch the combined Steam stats payload so the price tile has
+  // its data ready without re-firing the IPC call the popover also
+  // uses. The Rust backend caches `appdetails` for 24h, so concurrent
+  // consumers (popover + this card) cost one Steam call, not two.
+  const { data: steamStats } = useSteamGameStats(game.steamAppId);
+
+  // Pull the price fields once so the dependency array on the
+  // `kpis` memo stays stable. The card silently falls back to no
+  // price tile when Steam returned no `details` block (offline,
+  // appid has no `appdetails`, etc.).
+  const priceCents = steamStats?.details?.priceCents ?? null;
+  const priceCurrency = steamStats?.details?.currency ?? null;
+  const priceIsFree = steamStats?.details?.isFree ?? false;
+  const hasPrice =
+    steamStats?.details != null &&
+    (priceIsFree || (priceCents != null && priceCents > 0));
+
+  // KPI tiles at the top: surface the most-glanced values first.
+  // The Price tile only renders when Steam has a price for the
+  // title, keeping the row tight for games that don't.
   const kpis = useMemo(() => {
     const items: ReactNode[] = [];
 
@@ -124,8 +145,34 @@ export default function InfoKpiCard({
       );
     }
 
+    // Price tile — always rendered as the 4th slot so the kpi-row
+    // height stays stable while Steam's `appdetails` round-trip
+    // resolves. While the fetch is in flight we show a "—" placeholder;
+    // once the data arrives the real value (free / paid / etc.)
+    // takes its place without reflowing the row above.
+    const showPrice = hasPrice;
+    items.push(
+      <KpiTile
+        key="price"
+        size="sm"
+        label="Price"
+        icon={<IconTag size={12} />}
+        value={showPrice ? formatSteamPrice(priceCents, priceCurrency, priceIsFree) : "—"}
+        subtext={showPrice ? (priceIsFree ? "Steam" : "On Steam") : "Loading…"}
+        intent={!showPrice ? "default" : priceIsFree ? "success" : "default"}
+      />
+    );
+
     return items;
-  }, [game, sizeUnit, onEditSize]);
+  }, [
+    game,
+    sizeUnit,
+    onEditSize,
+    hasPrice,
+    priceCents,
+    priceCurrency,
+    priceIsFree,
+  ]);
 
   // Definition list rows: every field with a value renders.
   // Order: identity (platform, dates) → people (dev/pub) → series
