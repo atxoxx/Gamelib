@@ -1084,6 +1084,55 @@ async fn get_steam_player_count(
     }
 }
 
+/// Look up the Steam app id for a game by name (best-effort).
+///
+/// Drives the `useSteamAppId` frontend hook, which auto-resolves the
+/// Steam appid for non-Steam library rows (manual imports, Epic, GOG)
+/// so the live concurrent-player badge works on the Game page hero
+/// AND the activity dashboard / sessions lists, not just Steam-
+/// synced titles. Same token-match rule as `fetch_game_reviews`:
+/// every whitespace-separated word in `game_name` must appear in the
+/// Steam candidate's display name. So "Halo" matches "Halo Infinite"
+/// but "The Witcher" doesn't silently grab "The Witcher 3".
+///
+/// **Confidence gate** for the persistence boundary. The underlying
+/// per-token rule is loose for SINGLE-token short queries like
+/// "Halo", "Steam", or "CSGO" — many Steam candidates contain the
+/// word, and we'd risk persisting "Halo Infinite" (1240440) onto a
+/// manual "Halo: Reach" library row, locking in a WRONG appid
+/// forever (the live player-count badge would then forever display
+/// the count for the wrong game). To avoid that we refuse to even
+/// run the lookup for queries that are too short to be unambiguous:
+///
+///   - trimmed length < 3 chars   →  return `None`
+///   - 1 token AND length < 6     →  return `None`
+///   - 2+ tokens                  →  proceed to the token-match lookup
+///
+/// This gate lives at the Tauri boundary (not in
+/// `game_scraper::lookup_steam_app_id` itself) because that function
+/// is ALSO called by `fetch_game_reviews`, where a permissive match
+/// is the right behavior — Steam reviews are a much better signal
+/// than "we guessed wrong on the appid". The player-count path gets
+/// the stricter gate because the cost of being wrong is much higher
+/// (a permanently persisted wrong appid on the user's library row).
+/// Empty queries return None without burning a Steam call.
+#[tauri::command]
+async fn lookup_steam_app_id_for_game(game_name: String) -> Result<Option<u32>, String> {
+    let trimmed = game_name.trim();
+    if trimmed.is_empty() || trimmed.len() < 3 {
+        return Ok(None);
+    }
+    let token_count = trimmed.split_whitespace().count();
+    if token_count < 2 && trimmed.len() < 6 {
+        return Ok(None);
+    }
+    Ok(
+        game_scraper::lookup_steam_app_id(&game_name)
+            .await
+            .map(|v| v as u32),
+    )
+}
+
 // === Player Count History (ring buffer for activity-tab sparkline) =========
 //
 // Per-appid ring buffer of successful player-count fetches. Powers the
@@ -1853,6 +1902,7 @@ pub fn run() {
             // badges on the store hero, store detail, and game detail
             // banners — see PlayerCountCache above for caching policy.
             get_steam_player_count,
+            lookup_steam_app_id_for_game,
             // Popover payload: developer/publisher/release/price + reviews.
             // See SteamGameStatsCache above for per-section caching policy.
             get_steam_game_stats,

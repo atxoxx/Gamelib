@@ -2619,7 +2619,7 @@ pub async fn fetch_game_reviews(
 /// This prevents fetching reviews for the wrong game when queries are
 /// ambiguous (e.g. "The Witcher" should not silently return reviews for
 /// "The Witcher 3" when the user actually has "The Witcher 2").
-async fn lookup_steam_app_id(game_name: &str) -> Option<u64> {
+pub async fn lookup_steam_app_id(game_name: &str) -> Option<u64> {
     let client = http_client();
 
     let url = format!(

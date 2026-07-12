@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
 import { GameThumbnail } from "./GameThumbnail";
+import SteamPlayerCount from "../../components/SteamPlayerCount";
+import { useSteamAppId } from "../../hooks/useSteamAppId";
 import * as Icons from "./Icons";
 
 export interface ActivitySessionsProps {
@@ -54,6 +56,16 @@ interface SessionItemProps {
 function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeChartTab, setActiveChartTab] = useState<"usage" | "temps" | "ram" | "fps">("usage");
+
+  // Resolve the Steam appid for this session's game. The hook also
+  // persists successful lookups back onto the library row via
+  // updateGame, so the second session for the same game loads
+  // instantly without a Steam round-trip.
+  const { appId: resolvedSteamAppId } = useSteamAppId(game ?? null);
+  const steamAppId =
+    typeof resolvedSteamAppId === "number"
+      ? resolvedSteamAppId
+      : game?.steamAppId ?? null;
 
   const durationMs = session.durationMin * 60 * 1000;
 
@@ -156,10 +168,21 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
             <GameThumbnail
               iconUrl={game?.iconUrl}
               coverArtUrl={game?.coverArtUrl}
-              steamAppId={game?.steamAppId}
+              steamAppId={steamAppId}
               name={session.gameName}
               className="activity-session-item__game-icon"
             />
+            {steamAppId != null ? (
+              <div
+                className="activity-session-item__player-chip"
+                aria-hidden={false}
+              >
+                <SteamPlayerCount
+                  appId={steamAppId}
+                  className="activity-session-item__player-chip-badge"
+                />
+              </div>
+            ) : null}
           </div>
           <div className="activity-session-item__info">
             <span className="activity-session-item__date">{session.gameName}</span>

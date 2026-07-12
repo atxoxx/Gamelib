@@ -4,6 +4,8 @@ import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { Card } from "../ui";
 import { useCollapsedState } from "../../hooks/useCollapsedState";
+import SteamPlayerCount from "../SteamPlayerCount";
+import { useSteamAppId } from "../../hooks/useSteamAppId";
 
 interface ContinuePlayingRailProps {
   games: Game[];
@@ -41,6 +43,16 @@ const COLLAPSED_STORAGE_KEY = "gamelib:rail:continue-playing:collapsed:v1";
  *  - Sorted desc by `lastPlayed` so the most recently active title
  *    sits on the left (matches the user's mental model: "what did
  *    I just play?").
+ *
+ * **Steam player count:** each card mounts its own
+ * `ContinuePlayingCard` subcomponent which runs `useSteamAppId` to
+ * resolve + persist the game's Steam appid (so non-Steam games also
+ * get the live concurrent-player badge after a one-shot Steam name
+ * lookup). The subcomponent extraction keeps hooks out of the
+ * `.map()` callback — `useSteamAppId` is per-card, deduped via the
+ * hook's session/in-flight cache so multiple rail mounts across the
+ * app round-trip exactly once per gameId in lockstep with the
+ * activity dashboard, Game hero, and session rows.
  */
 export default function ContinuePlayingRail({
   games,
@@ -167,45 +179,10 @@ export default function ContinuePlayingRail({
                     key={game.id}
                     className={`library-rail-item animate-fade-in stagger-${Math.min(i + 1, 8)}`}
                   >
-                    <Card
-                      variant="surface"
-                      elevation="1"
-                      hoverLift
-                      className="library-rail-card"
-                      onClick={() => handleClick(game)}
-                    >
-                      <div className="library-rail-card-cover">
-                        {game.coverArtUrl ? (
-                          <img src={game.coverArtUrl} alt={game.name} />
-                        ) : (
-                          <div className="library-rail-card-cover-placeholder">
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1"
-                              aria-hidden
-                            >
-                              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                            </svg>
-                          </div>
-                        )}
-                        <span className="library-rail-card-platform">
-                          {game.platform}
-                        </span>
-                      </div>
-                      <div className="library-rail-card-body">
-                        <div className="library-rail-card-name" title={game.name}>
-                          {game.name}
-                        </div>
-                        <div
-                          className="library-rail-card-meta library-rail-card-meta--continue"
-                          title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}
-                        >
-                          {formatAgo(game.lastPlayed ?? 0)}
-                        </div>
-                      </div>
-                    </Card>
+                    <ContinuePlayingCard
+                      game={game}
+                      onClick={handleClick}
+                    />
                   </div>
                 ))}
               </div>
@@ -222,6 +199,80 @@ export default function ContinuePlayingRail({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Per-card subcomponent. Extracted so `useSteamAppId` can be called
+ * per card (hooks can't live inside a `.map()` callback) while keeping
+ * the rail's outer component declarative. The hook also persists
+ * positive resolutions back onto the game row via `updateGame`, so a
+ * second visit to the rail fires zero Steam round-trips for already-
+ * known titles.
+ */
+function ContinuePlayingCard({
+  game,
+  onClick,
+}: {
+  game: Game;
+  onClick: (game: Game) => void;
+}) {
+  const { appId: resolvedSteamAppId } = useSteamAppId(game);
+  const steamAppId =
+    typeof resolvedSteamAppId === "number"
+      ? resolvedSteamAppId
+      : game.steamAppId ?? null;
+
+  return (
+    <Card
+      variant="surface"
+      elevation="1"
+      hoverLift
+      className="library-rail-card"
+      onClick={() => onClick(game)}
+    >
+      <div className="library-rail-card-cover">
+        {game.coverArtUrl ? (
+          <img src={game.coverArtUrl} alt={game.name} />
+        ) : (
+          <div className="library-rail-card-cover-placeholder">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              aria-hidden
+            >
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+          </div>
+        )}
+        <span className="library-rail-card-platform">{game.platform}</span>
+        {/* Live Steam concurrent-player chip overlaid bottom-left on
+            the cover. Hidden automatically when the lookup is in
+            flight or Steam has no data, so non-Steam titles still
+            render cleanly. */}
+        {steamAppId != null ? (
+          <div className="library-rail-card-cover__player-chip">
+            <SteamPlayerCount
+              appId={steamAppId}
+              className="library-rail-card-cover__player-chip-badge"
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="library-rail-card-body">
+        <div className="library-rail-card-name" title={game.name}>
+          {game.name}
+        </div>
+        <div
+          className="library-rail-card-meta library-rail-card-meta--continue"
+          title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}
+        >
+          {formatAgo(game.lastPlayed ?? 0)}
+        </div>
+      </div>
+    </Card>
   );
 }
 

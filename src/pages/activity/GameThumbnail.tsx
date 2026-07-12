@@ -22,6 +22,16 @@ import { useState } from "react";
  * 32x32 for the dashboard sidebar). The component always renders a
  * square that fills its container, with `border-radius: inherit` so the
  * parent's rounding still applies.
+ *
+ * Steam player count
+ * ──────────────────
+ * The concurrent-player badge is rendered by the parent consumer
+ * (ActivitySessionItem / ActivitySidebarGameItem), not inside this
+ * component. That keeps the thumbnail's DOM structure flat
+ * (img-or-placeholder, no wrapper div) so the existing CSS that
+ * sizes via `className` continues to work — wrapping the
+ * primary image in a container would have broken the layout that
+ * assumes the className lands on the img/placeholder directly.
  */
 export function GameThumbnail({
   iconUrl,

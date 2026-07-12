@@ -2,6 +2,7 @@ import { useState } from "react";
 import { KpiTile } from "../ui";
 import { type Game, PLAY_STATUS_DETAILS } from "../../types/game";
 import { useGames } from "../../context/GameContext";
+import { useSteamAppId } from "../../hooks/useSteamAppId";
 import SteamPlayerCount from "../SteamPlayerCount";
 import GameStatusDropdown from "./GameStatusDropdown";
 import GameLaunchActions from "./GameLaunchActions";
@@ -29,6 +30,18 @@ import { IconClock, IconPlatform, IconUsers } from "./icons";
  *  owns the Return-to-Library / Edit / Remove affordances. This
  *  keeps the hero compact and avoids duplicate controls inside the
  *  banner.
+ *
+ *  Steam player count
+ *  ──────────────────
+ *  Previously the badge + "Players Now" KPI tile were gated on
+ *  `game.steamAppId != null`, so non-Steam games (manual imports,
+ *  games added from the Store, Epic-synced, GOG-synced) showed
+ *  nothing. Now `<SteamPlayerCount appId={steamAppId} />` and the
+ *  KPI tile read off the `useSteamAppId` hook, which falls back to
+ *  a one-shot Steam name lookup on first mount. The resolved
+ *  appid is persisted back onto `game.steamAppId` so subsequent
+ *  library loads skip the lookup; the badge "just appears" for
+ *  every game Steam has a matching entry for.
  */
 
 interface GameHeroProps {
@@ -43,6 +56,11 @@ function formatHeroPlayTime(playTime: string): string {
 
 export default function GameHero({ game, onLaunch }: GameHeroProps) {
   const { updateGame } = useGames();
+  // useSteamAppId resolves `game.steamAppId` for non-Steam games
+  // via a one-shot Steam store-search fallback. Persists the
+  // resolution back onto the row, so the next time this game is
+  // loaded the badge is instant.
+  const { appId: steamAppId } = useSteamAppId(game);
   const [bannerErrored, setBannerErrored] = useState(false);
 
   const addedDate = new Date(game.addedAt).toLocaleDateString(undefined, {
@@ -63,7 +81,7 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
         )}
 
         <div className="hero-player-count">
-          <SteamPlayerCount appId={game.steamAppId} />
+          <SteamPlayerCount appId={steamAppId} />
         </div>
 
         <div className="game-banner">
@@ -90,15 +108,18 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
         </div>
 
         {/* KPI overlay: glass tiles that surface the most-glanced
-            stats right on the banner. */}
+            stats right on the banner. The "Players Now" tile now
+            follows the resolved appid from `useSteamAppId` so it
+            works on manual imports / Store-added / Epic / GOG rows
+            the moment the hook finds a Steam match for the name. */}
         <div className="game-hero__kpis">
-          {game.steamAppId ? (
+          {steamAppId != null ? (
             <KpiTile
               glass
               size="sm"
               label="Players Now"
               icon={<IconUsers size={12} />}
-              value={<SteamPlayerCountHero appId={game.steamAppId} />}
+              value={<SteamPlayerCountHero appId={steamAppId} />}
               intent="accent"
             />
           ) : null}

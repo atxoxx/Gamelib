@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { formatPlayTime } from "../../types/game";
+import { formatPlayTime, type Game } from "../../types/game";
 import BarChart from "../../components/charts/BarChart";
 import LineChart from "../../components/charts/LineChart";
 import DonutChart from "../../components/charts/DonutChart";
 import { GameThumbnail } from "./GameThumbnail";
+import SteamPlayerCount from "../../components/SteamPlayerCount";
+import { useSteamAppId } from "../../hooks/useSteamAppId";
 import * as Icons from "./Icons";
 
 export interface ActivityDashboardProps {
@@ -415,31 +417,20 @@ export function ActivityDashboard({
             </button>
 
             {filteredSidebarGames.map((g) => {
-              const barWidth = maxSidebarMinutes > 0 ? (g.minutes / maxSidebarMinutes) * 100 : 0;
+              // Match the sidebar summary to the full library row so
+              // useSteamAppId sees the path field (some Steam-synced
+              // games use `steam://run/<id>` paths) and the right name
+              // for the Steam store-search fallback.
+              const fullGame = games.find((gm) => gm.id === g.id) ?? null;
               return (
-                <button
+                <ActivitySidebarGameButton
                   key={g.id}
-                  type="button"
-                  className={`activity-game-sidebar__item ${
-                    selectedGameId === g.id ? "activity-game-sidebar__item--selected" : ""
-                  }`}
-                  onClick={() => setSelectedGameId(g.id)}
-                >
-                  <GameThumbnail
-                    iconUrl={g.iconUrl}
-                    coverArtUrl={g.coverArtUrl}
-                    steamAppId={g.steamAppId}
-                    name={g.title}
-                    className="activity-game-sidebar__icon"
-                  />
-                  <div className="activity-game-sidebar__info">
-                    <span className="activity-game-sidebar__name">{g.title}</span>
-                    <div className="activity-game-sidebar__bar">
-                      <div className="activity-game-sidebar__bar-fill" style={{ width: `${barWidth}%` }} />
-                    </div>
-                  </div>
-                  <span className="activity-game-sidebar__time">{formatPlayTime(g.minutes)}</span>
-                </button>
+                  summary={g}
+                  game={fullGame}
+                  selected={selectedGameId === g.id}
+                  maxMinutes={maxSidebarMinutes}
+                  onSelect={setSelectedGameId}
+                />
               );
             })}
 
@@ -561,5 +552,85 @@ export function ActivityDashboard({
         </div>
       </div>
     </div>
+  );
+}
+
+
+/**
+ * Per-row subcomponent for the activity dashboard sidebar.
+ * Extracted so `useSteamAppId` can be called per card (hooks can't
+ * live inside a `.map()` callback) while keeping the parent
+ * component declarative. The hook auto-resolves the Steam appid
+ * for non-Steam library rows + persists positive results back
+ * onto the row, so the second mount of the dashboard reads from
+ * `game.steamAppId` directly without re-fetching.
+ */
+function ActivitySidebarGameButton({
+  summary,
+  game,
+  selected,
+  maxMinutes,
+  onSelect,
+}: {
+  summary: {
+    id: string;
+    title: string;
+    platform: string;
+    iconUrl: string | null;
+    coverArtUrl: string | null;
+    steamAppId: number | null;
+    minutes: number;
+  };
+  game: Game | null;
+  selected: boolean;
+  maxMinutes: number;
+  onSelect: (id: string) => void;
+}) {
+  const { appId: resolvedSteamAppId } = useSteamAppId(game);
+  const steamAppId =
+    typeof resolvedSteamAppId === "number"
+      ? resolvedSteamAppId
+      : summary.steamAppId ?? game?.steamAppId ?? null;
+
+  const barWidth = maxMinutes > 0 ? (summary.minutes / maxMinutes) * 100 : 0;
+
+  return (
+    <button
+      type="button"
+      className={`activity-game-sidebar__item ${
+        selected ? "activity-game-sidebar__item--selected" : ""
+      }`}
+      onClick={() => onSelect(summary.id)}
+    >
+      <div className="activity-game-sidebar__icon-wrapper">
+        <GameThumbnail
+          iconUrl={summary.iconUrl}
+          coverArtUrl={summary.coverArtUrl}
+          steamAppId={steamAppId}
+          name={summary.title}
+          className="activity-game-sidebar__icon"
+        />
+        {steamAppId != null ? (
+          <div className="activity-game-sidebar__player-chip">
+            <SteamPlayerCount
+              appId={steamAppId}
+              className="activity-game-sidebar__player-chip-badge"
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="activity-game-sidebar__info">
+        <span className="activity-game-sidebar__name">{summary.title}</span>
+        <div className="activity-game-sidebar__bar">
+          <div
+            className="activity-game-sidebar__bar-fill"
+            style={{ width: `${barWidth}%` }}
+          />
+        </div>
+      </div>
+      <span className="activity-game-sidebar__time">
+        {formatPlayTime(summary.minutes)}
+      </span>
+    </button>
   );
 }
