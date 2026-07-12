@@ -646,6 +646,20 @@ async fn get_store_game_detail(slug: String) -> Option<GameMetadataResult> {
     game_scraper::get_store_game_detail(&slug).await
 }
 
+/// Fetch every game that belongs to a given IGDB collection, sorted
+/// by release date ascending. Used by the frontend Game Relations
+/// card to populate the "Other in Collection" group on the Store
+/// game detail page. `limit` is clamped to 50 internally (IGDB's
+/// per-request max) so callers can pass a higher ceiling without
+/// worrying about silent truncation.
+#[tauri::command]
+async fn get_collection_games(
+    collection_id: u64,
+    limit: Option<u32>,
+) -> Result<Vec<StoreGameSummary>, String> {
+    game_scraper::get_collection_games(collection_id, limit.unwrap_or(50)).await
+}
+
 /// Fetch reviews for a game from the best available source (Steam first, IGDB fallback).
 /// Returns the reviews and a `source` string ("steam" | "igdb" | "none") so the UI
 /// can label them correctly.
@@ -1631,7 +1645,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games, get_store_game_detail, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url, steam_save_config, steam_load_config, steam_clear_config, steam_sync_games,
             steam_start_login, steam_finish_login, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             // Download-feature commands. The torrent engine manages

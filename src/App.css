@@ -3180,6 +3180,239 @@
 }
 
 /* ==============================
+   Game Relations Card
+   ============================== */
+/* Unifies "More from this series / developer / publisher" + IGDB
+ * similar-games + same-collection members into a single
+ * grouped card on the Library GamePage and the Store
+ * GameDetail page. Inspired by Playnite's GameRelations
+ * extension. */
+
+.game-relations-card {
+  /* Inherits `.game-section` styles (background, border, padding,
+   * margin). We only add the relations-specific styles below. */
+}
+
+.game-relations-blurb {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: calc(-1 * var(--space-md)) 0 var(--space-lg) 0;
+  line-height: 1.5;
+}
+
+.game-relations-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.game-relations-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.game-relations-group-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.game-relations-group-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.game-relations-group-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.game-relations-group-titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.game-relations-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.game-relations-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.game-relations-group-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-relations-row {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-2xs) var(--space-2xs) var(--space-sm) var(--space-2xs);
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.game-relations-row::-webkit-scrollbar {
+  height: 6px;
+}
+
+.game-relations-row::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.game-relations-row::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.game-relations-row::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+.game-relations-row-item {
+  flex: 0 0 auto;
+  width: 130px;
+  scroll-snap-align: start;
+}
+
+.game-relation-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  border-radius: var(--radius-md);
+  outline: none;
+}
+
+.game-relation-card:hover {
+  transform: translateY(-3px);
+}
+
+.game-relation-card:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.game-relation-card-cover {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+}
+
+.game-relation-card:hover .game-relation-card-cover {
+  border-color: var(--color-accent);
+}
+
+.game-relation-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.game-relation-card:hover .game-relation-card-cover img {
+  transform: scale(1.06);
+}
+
+.game-relation-card-cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+.game-relation-card-cover-placeholder svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.3;
+}
+
+.game-relation-card-pill {
+  position: absolute;
+  top: var(--space-2xs);
+  left: var(--space-2xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(16, 185, 129, 0.92);
+  color: #fff;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.5px;
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  text-transform: uppercase;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.game-relation-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 2px;
+}
+
+.game-relation-card-name {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ==============================
    Settings Page
    ============================== */
 .settings-container {

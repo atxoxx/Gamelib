@@ -81,6 +81,13 @@ export interface Game {
   gameCategory?: string;
   releaseStatus?: string;
   languageSupports?: LanguageSupportInfo[];
+  /** IGDB collection ID for the first collection this game belongs to.
+   *  Used by the GameRelationsCard on the Library page to fetch
+   *  "other games in this collection" via the get_collection_games
+   *  Tauri command. Mirrors GameMetadataResult.collectionId and the
+   *  Rust GameMetadataResult.collection_id field. Populated by
+   *  GameContext.enrichGameMetadata after an IGDB enrichment. */
+  collectionId?: number;
   launchArguments?: string;
   runAsAdmin?: boolean;
   playStatus?: PlayStatus;
@@ -97,7 +104,13 @@ export interface TimeToBeat {
 export interface SimilarGame {
   id: number;
   name: string;
-  coverUrl?: string;
+  /**
+   * Cover URL. Accepts `string | null` (IGDB's `coverUrl` on
+   * `StoreGameSummary` is nullable) and `string | undefined`
+   * (older library records may omit it). The GameRelationsCard
+   * treats both equivalently via the `useProgressiveImage` hook.
+   */
+  coverUrl?: string | null;
 }
 
 export interface ReleaseDateInfo {
@@ -399,6 +412,12 @@ export interface GameMetadataResult {
   igdbReviews?: IgdbReview[];
   alternativeNames?: string[];
   collection?: string;
+  /// IGDB collection ID for the first collection this game belongs
+  /// to. Used by the Store GameDetail page's GameRelationsCard to
+  /// fetch "Other in Collection" members via the dedicated
+  /// `get_collection_games` Tauri command. Mirrors the Rust
+  /// `GameMetadataResult.collection_id` field.
+  collectionId?: number;
   franchise?: string;
   gameCategory?: string;
   releaseStatus?: string;
@@ -956,4 +975,88 @@ export interface ActivityStats {
   avgGpuAll: number;
   avgCpuAll: number;
 }
+
+// ─── Game Relations (relations card on GamePage + StoreGameDetail) ──────────
+
+/**
+ * A single entry in the Game Relations card. Extends `SimilarGame` with
+ * optional navigation hints so the same shape works for both library
+ * games (navigate to /library/{id}) and store games (navigate to
+ * /store/{slug}). The `id` field is always required because it's
+ * the deduplication key across groups; everything else is optional.
+ */
+export interface RelatedGame extends SimilarGame {
+  /** IGDB slug for store navigation. Populated for store-mode entries. */
+  slug?: string;
+  /** Local library game id. Populated for in-library entries. */
+  libraryGameId?: string;
+  /**
+   * True when this related game is already in the user's local library.
+   * The card renders a subtle "In library" pill on these entries so the
+   * user doesn't open a game they already own.
+   */
+  inLibrary?: boolean;
+}
+
+/**
+ * The kind of relationship a `RelatedGame` entry has to the "current"
+ * game. Each variant maps to a distinct group section in the
+ * GameRelationsCard, ordered in a fixed visual hierarchy (see
+ * `RELATION_GROUP_ORDER`).
+ *
+ * - `same_series`      : same IGDB collection (e.g. "Mass Effect")
+ * - `same_franchise`   : same IGDB franchise
+ * - `same_developer`   : same developer string in the local library
+ * - `same_publisher`   : same publisher string in the local library
+ * - `shared_genres`    : ≥2 overlapping genre tags (heuristic)
+ * - `in_your_library`  : store-page cross-ref; the store game is in
+ *                        the user's local library under a matching name
+ * - `other_in_collection` : store-page; other games in the same IGDB
+ *                        collection, fetched via `get_collection_games`
+ * - `similar`          : IGDB's `similar_games` field
+ */
+export type RelationType =
+  | "same_series"
+  | "same_franchise"
+  | "same_developer"
+  | "same_publisher"
+  | "shared_genres"
+  | "in_your_library"
+  | "other_in_collection"
+  | "similar";
+
+/**
+ * Fixed visual order for relation groups. Library-mode groups come
+ * first (the local-library focus is the primary use case, mirroring
+ * Playnite's GameRelations), then store-mode groups (which only
+ * appear on the Store game detail page).
+ */
+export const RELATION_GROUP_ORDER: readonly RelationType[] = [
+  "same_series",
+  "same_franchise",
+  "same_developer",
+  "same_publisher",
+  "shared_genres",
+  "in_your_library",
+  "other_in_collection",
+  "similar",
+];
+
+/**
+ * One rendered group inside the GameRelationsCard. The card maps
+ * `type` → title → icon and renders the entries as a horizontal
+ * row of covers. Groups are computed in a single `useMemo` so the
+ * library scan runs at most once per game-change.
+ */
+export interface RelationGroup {
+  /** The relation type — drives title, icon, and order. */
+  type: RelationType;
+  /** Display title (e.g. "More from this series"). */
+  title: string;
+  /** Optional sub-label (e.g. "Mass Effect" for the series group). */
+  subtitle?: string;
+  /** The games in this group, ordered by the per-group sort rule. */
+  games: RelatedGame[];
+}
+
 

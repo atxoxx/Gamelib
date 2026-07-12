@@ -9,7 +9,7 @@ import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, slugify, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
@@ -20,10 +20,8 @@ import PlayerCountSparklineCard from "../components/PlayerCountSparklineCard";
 import CrackWatchCard from "../components/CrackWatchCard";
 import AchievementsTab from "../components/AchievementsTab";
 import SteamPlayerCount from "../components/SteamPlayerCount";
+import GameRelationsCard from "../components/GameRelationsCard";
 import { Button } from "../components/ui";
-import { useProgressiveImage } from "../hooks/useProgressiveImages";
-
-
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
   label,
@@ -306,36 +304,6 @@ function TimeToBeatRow({ label, targetSeconds, currentPlayTime }: { label: strin
   );
 }
 
-function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => void }) {
-  const [coverUrl, imgRef] = useProgressiveImage(sim.coverUrl || null);
-  return (
-    <div 
-      className="similar-game-card" 
-      onClick={onClick}
-      style={{ cursor: 'pointer' }}
-    >
-      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
-        {coverUrl ? (
-          <img 
-            ref={imgRef}
-            src={coverUrl} 
-            alt={sim.name} 
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            className="similar-game-cover"
-          />
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
-        )}
-      </div>
-      <div style={{ padding: 'var(--space-sm)' }}>
-        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
-          {sim.name}
-        </h4>
-      </div>
-    </div>
-  );
-}
-
 // Track which game IDs have already been auto-enriched in this GameDetail
 // mount to avoid repeat calls when enrichment-triggered state updates
 // re-fire the useEffect below. Cross-mount dedupe is handled by the
@@ -539,7 +507,40 @@ function GameDetail({ game }: { game: Game }) {
     if (!game.name) return;
     const hasDescription = !!game.description;
     const missingTTB = !game.timeToBeat;
-    if (hasDescription && !missingTTB) return;
+    // Also re-enrich if any of the 5 relation-relevant fields are
+    // missing. The standalone Similar Games section was removed in
+    // favor of the GameRelationsCard, which needs at least one of
+    // collection / franchise / developer / publisher / genres to
+    // build any group. A partially-enriched game (has description +
+    // timeToBeat but no relation fields) would otherwise skip
+    // enrichment and silently produce an empty Game Relations card.
+    const hasCollection = !!game.collection;
+    const hasDeveloper = !!game.developer;
+    const hasPublisher = !!game.publisher;
+    const hasGenres = !!(game.genres && game.genres.length > 0);
+    // `franchise` is intentionally NOT in this list: many legitimate
+    // one-off games (e.g. indie titles) have no IGDB franchise, and
+    // IGDB will never fill it in. Requiring it would cause the
+    // auto-enrichment to re-fire on every GamePage visit for those
+    // games, and the empty field would never become non-empty.
+    const hasAllRelationFields =
+      hasCollection && hasDeveloper && hasPublisher && hasGenres;
+    // Also re-enrich when a game has a collection NAME but no
+    // collection ID. The name is populated by the existing merge
+    // path, but the ID is a separate field that the GameRelationsCard
+    // needs to fetch "other games in this collection" from IGDB.
+    // Without this gate, a game with a collection name but a missing
+    // ID would skip enrichment forever and the "Other in this
+    // collection" group would never appear.
+    const missedCollectionId =
+      !!game.collection && game.collectionId === undefined;
+    if (
+      hasDescription &&
+      !missingTTB &&
+      hasAllRelationFields &&
+      !missedCollectionId
+    )
+      return;
 
     enrichmentStartedRef.current = true;
     // enrichGameMetadata is wrapped in silent useCallback; the only
@@ -549,7 +550,20 @@ function GameDetail({ game }: { game: Game }) {
     enrichGameMetadata(game.id, game.name, game.steamAppId).catch(
       (err) => console.error("Auto-enrichment failed:", err)
     );
-  }, [game.id, game.name, game.steamAppId, game.description, game.timeToBeat, game.metadataSource, enrichGameMetadata]);
+  }, [
+    game.id,
+    game.name,
+    game.steamAppId,
+    game.description,
+    game.timeToBeat,
+    game.metadataSource,
+    game.collection,
+    game.collectionId,
+    game.developer,
+    game.publisher,
+    game.genres,
+    enrichGameMetadata,
+  ]);
 
   function handleLaunch() {
     launchGame(game);
@@ -1608,29 +1622,20 @@ function GameDetail({ game }: { game: Game }) {
               </section>
             )}
 
-            {/* Similar Games Section */}
-            {game.similarGames && game.similarGames.length > 0 && (
-              <section className="game-section similar-games-section" style={{ marginTop: 'var(--space-xl)' }}>
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="14" y="14" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
-                  </svg>
-                  Similar Games
-                </h2>
-                <div className="similar-games-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
-                  {game.similarGames.slice(0, 6).map((sim) => (
-                    <SimilarGameCard 
-                      key={sim.id} 
-                      sim={sim} 
-                      onClick={() => navigate(`/store/${slugify(sim.name)}`)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+            {/* Game Relations Card — library-local + IGDB relations.
+                Renders below the standalone Similar Games section per
+                the design decision (both cards are kept side-by-side:
+                the standalone section is a thin IGDB-similar rail, this
+                is the broader relations surface). The card silently
+                renders nothing when no groups have content. */}
+            <GameRelationsCard
+              mode="library"
+              currentGame={game}
+              currentGameId={game.id}
+              similarGames={game.similarGames}
+              collectionId={game.collectionId}
+              collectionName={game.collection}
+            />
 
           </div>
 

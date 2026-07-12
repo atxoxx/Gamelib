@@ -71,6 +71,12 @@ pub struct GameMetadataResult {
     pub alternative_names: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
+    /// IGDB collection ID for the first collection this game belongs
+    /// to. Used by the frontend Game Relations card to fetch
+    /// "other games in this collection" via the dedicated
+    /// `get_collection_games` Tauri command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub franchise: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -465,6 +471,11 @@ async fn search_steam(game_name: &str) -> Option<GameMetadataResult> {
         description: data.short_description.clone(),
         developer: data.developers.first().cloned(),
         publisher: data.publishers.first().cloned(),
+        // Steam API does not return IGDB collection IDs, so the
+        // GameRelationsCard cannot fetch "Other in Collection"
+        // members for Steam-sourced metadata. Hardcode `None`
+        // because the struct requires the field.
+        collection_id: None,
         release_date: data
             .release_date
             .as_ref()
@@ -667,6 +678,10 @@ async fn search_launchbox(game_name: &str) -> Option<GameMetadataResult> {
         description,
         developer,
         publisher,
+        // LaunchBox does not return IGDB collection IDs, so the
+        // GameRelationsCard cannot fetch "Other in Collection"
+        // members for LaunchBox-sourced metadata. Hardcode `None`.
+        collection_id: None,
         release_date,
         genres,
         images,
@@ -1193,7 +1208,11 @@ struct IgdbGame {
     release_dates: Option<Vec<IgdbReleaseDateRaw>>,
     game_type: Option<u32>,
     status: Option<u32>,
-    collections: Option<Vec<IgdbName>>,
+    /// IGDB collections: each collection has both an ID and a name.
+    /// We only use the first one for the GameMetadataResult, but
+    /// keeping the full list lets future "in N collections" UI work
+    /// without re-querying IGDB.
+    collections: Option<Vec<IgdbCollection>>,
     franchises: Option<Vec<IgdbName>>,
     alternative_names: Option<Vec<IgdbName>>,
     language_supports: Option<Vec<IgdbLanguageSupport>>,
@@ -1233,6 +1252,16 @@ struct IgdbCover {
 
 #[derive(Debug, Deserialize)]
 struct IgdbName {
+    name: String,
+}
+
+/// IGDB collection reference with both id and name. Used by the
+/// `IgdbGame.collections` field and by the `get_collection_games`
+/// command to identify a collection unambiguously. The `id` is
+/// what we forward to the frontend; the `name` is what we display.
+#[derive(Debug, Deserialize)]
+struct IgdbCollection {
+    id: u64,
     name: String,
 }
 
@@ -1359,7 +1388,7 @@ fields name, slug, summary, storyline, first_release_date, rating, aggregated_ra
        websites.url, websites.category,
        similar_games.name, similar_games.cover.url,
        release_dates.platform.name, release_dates.human, release_dates.region,
-       game_type, status, collections.name, franchises.name, alternative_names.name,
+       game_type, status, collections.id, collections.name, franchises.name, alternative_names.name,
        language_supports.language.name, language_supports.language_support_type.name;
 limit 8;"#,
         escaped_name
@@ -1630,6 +1659,9 @@ limit 8;"#,
         let collection = game.collections.as_ref()
             .and_then(|list| list.first().map(|c| c.name.clone()));
 
+        let collection_id = game.collections.as_ref()
+            .and_then(|list| list.first().map(|c| c.id));
+
         let franchise = game.franchises.as_ref()
             .and_then(|list| {
                 if list.is_empty() { None }
@@ -1677,6 +1709,7 @@ limit 8;"#,
             igdb_reviews,
             alternative_names,
             collection,
+            collection_id,
             franchise,
             game_category,
             release_status,
@@ -2116,7 +2149,7 @@ fields name, slug, summary, storyline, first_release_date, rating, aggregated_ra
        websites.url, websites.category,
        similar_games.name, similar_games.cover.url,
        release_dates.platform.name, release_dates.human, release_dates.region,
-       game_type, status, collections.name, franchises.name, alternative_names.name,
+       game_type, status, collections.id, collections.name, franchises.name, alternative_names.name,
        language_supports.language.name, language_supports.language_support_type.name;
 limit 1;"#,
         escaped_slug
@@ -2404,6 +2437,9 @@ limit 1;"#,
     let collection = game.collections.as_ref()
         .and_then(|list| list.first().map(|c| c.name.clone()));
 
+    let collection_id = game.collections.as_ref()
+        .and_then(|list| list.first().map(|c| c.id));
+
     let franchise = game.franchises.as_ref()
         .and_then(|list| {
             if list.is_empty() { None }
@@ -2455,6 +2491,7 @@ limit 1;"#,
         igdb_reviews,
         alternative_names,
         collection,
+        collection_id,
         franchise,
         game_category,
         release_status,
@@ -2663,8 +2700,14 @@ async fn fetch_steam_reviews(
     app_id: u64,
     cursor: &str,
     language: Option<&str>,
-    filter_type: Option<&str>,
-    purchase_type: Option<&str>,
+    // Both `_filter_type` and `_purchase_type` are intentionally
+    // unused at present — they were added for the post-ReviewViewer-
+    // parity enhancement pipeline and are kept on the signature so
+    // the Tauri command in `lib.rs` continues to compile without
+    // a breaking change. Prefix with `_` to silence the
+    // `unused_variable` warning without removing the public API.
+    _filter_type: Option<&str>,
+    _purchase_type: Option<&str>,
 ) -> Result<(Vec<IgdbReview>, u64, Option<String>, Option<SteamQuerySummary>), String> {
     let client = http_client();
 
@@ -3895,3 +3938,140 @@ mod tests {
 
 
 
+
+// ─── Collection Lookup (Game Relations card) ───────────────────────────────
+//
+// Fetch every game that belongs to a given IGDB collection.
+//
+// The frontend Game Relations card uses this to populate the
+// "Other in Collection" group on the Store game detail page.
+// We deliberately use IGDB's `where collections = {id}` filter
+// on `/v4/games` directly rather than calling
+// `/v4/collections/{id}` first to get the member IDs — the
+// single-call approach is both faster (1 round-trip vs 2) and
+// lets us request the full `StoreGameSummary` field set in one
+// pass.
+//
+// Returns results sorted by `first_release_date` ascending so the
+// user sees the series in chronological order, with the current
+// game visible in context (it's not excluded — the frontend
+// de-duplicates if needed).
+pub async fn get_collection_games(
+    collection_id: u64,
+    limit: u32,
+) -> Result<Vec<StoreGameSummary>, String> {
+    let token = get_twitch_token().await?;
+    let client = http_client();
+    let client_id = crate::config::get_twitch_client_id();
+
+    // Field list mirrors the one used by `fetch_store_games` so
+    // the returned `StoreGameSummary` shape is identical to
+    // what the Store grid expects. The `limit` is clamped to 50
+    // (IGDB's per-request max) to avoid silent truncation.
+    let body = format!(
+        r#"fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,websites.url;
+where collections = ({});
+sort first_release_date asc;
+limit {};
+offset 0;"#,
+        collection_id,
+        limit.min(50),
+    );
+
+    let _guard = igdb_acquire().await;
+    let resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB collection games request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        // Capture the status BEFORE consuming the body via
+        // `resp.text()` — `text` takes `self` by value and
+        // moves `resp`, so a subsequent `resp.status()` call
+        // would be a borrow-of-moved-value error.
+        let status = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "IGDB collection games failed with status {}: {}",
+            status,
+            err_text
+        ));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB response: {}", e))?;
+
+    // Reuse the same `IgdbGameSummary` parser + `StoreGameSummary`
+    // mapper as `fetch_store_games` so the returned objects are
+    // bit-for-bit identical (same field set, same cover-URL
+    // size, same website dedup). The mapping logic is duplicated
+    // rather than extracted because Rust's `fn` returns own
+    // their values and the mapper is short enough that the
+    // duplication is cheaper than the trait/generic overhead.
+    let games: Vec<IgdbGameSummary> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB collection games parse error: {}", e))?;
+
+    let summaries: Vec<StoreGameSummary> = games
+        .into_iter()
+        .map(|g| {
+            let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                };
+                clean.replace("t_thumb", "t_cover_big")
+            });
+
+            let release_date = g.first_release_date.map(format_unix_timestamp);
+
+            let websites = g.websites.and_then(|list| {
+                let mut unique = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for w in list {
+                    if let Some(url) = w.url {
+                        if seen.insert(url.clone()) {
+                            unique.push(url);
+                        }
+                    }
+                }
+                if unique.is_empty() { None } else { Some(unique) }
+            });
+
+            StoreGameSummary {
+                id: g.id,
+                name: g.name,
+                slug: g.slug,
+                summary: g.summary,
+                rating: g.rating,
+                aggregated_rating: g.aggregated_rating,
+                cover_url,
+                genres: g
+                    .genres
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|gen| gen.name)
+                    .collect(),
+                platforms: g
+                    .platforms
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect(),
+                first_release_date: release_date,
+                total_rating_count: g.total_rating_count.unwrap_or(0),
+                hypes: g.hypes.unwrap_or(0),
+                websites,
+            }
+        })
+        .collect();
+
+    Ok(summaries)
+}

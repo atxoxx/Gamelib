@@ -391,6 +391,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         similarGames: current.similarGames ?? meta.similarGames ?? undefined,
         releases: current.releases ?? meta.releases ?? undefined,
         igdbReviews: current.igdbReviews ?? meta.igdbReviews ?? undefined,
+        collectionId: setIfEmpty("collectionId", meta.collectionId ?? undefined),
         metadataSource: meta.sourceName,
         metadataUrl: meta.sourceUrl,
       });
@@ -602,6 +603,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       igdbReviews: metadata.igdbReviews ?? undefined,
       alternativeNames: metadata.alternativeNames ?? undefined,
       collection: metadata.collection ?? undefined,
+      collectionId: metadata.collectionId,
       franchise: metadata.franchise ?? undefined,
       gameCategory: metadata.gameCategory ?? undefined,
       releaseStatus: metadata.releaseStatus ?? undefined,
@@ -668,6 +670,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
           igdbReviews: item.metadata.igdbReviews ?? undefined,
           alternativeNames: item.metadata.alternativeNames ?? undefined,
           collection: item.metadata.collection ?? undefined,
+          collectionId: item.metadata.collectionId,
           franchise: item.metadata.franchise ?? undefined,
           gameCategory: item.metadata.gameCategory ?? undefined,
           releaseStatus: item.metadata.releaseStatus ?? undefined,

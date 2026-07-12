@@ -3,15 +3,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
-import type { GameMetadataResult, IgdbReview, SimilarGame } from "../types/game";
-import { slugify } from "../types/game";
-import { useProgressiveImage } from "../hooks/useProgressiveImages";
+import type { GameMetadataResult, IgdbReview } from "../types/game";
 import { Button } from "../components/ui";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
 import SteamPlayerCount from "../components/SteamPlayerCount";
+import GameRelationsCard from "../components/GameRelationsCard";
 import type { Game } from "../types/game";
 
 
@@ -178,36 +177,6 @@ function StoreGameNotFound() {
       <h2 className="main-empty-title">Game Not Found</h2>
       <p className="main-empty-subtitle">This game could not be found on IGDB.</p>
       <Button variant="ghost" size="sm" onClick={() => navigate("/store")}>Back to Store</Button>
-    </div>
-  );
-}
-
-function SimilarGameCard({ sim, onClick }: { sim: SimilarGame; onClick: () => void }) {
-  const [coverUrl, imgRef] = useProgressiveImage(sim.coverUrl || null);
-  return (
-    <div 
-      className="similar-game-card" 
-      onClick={onClick}
-      style={{ cursor: 'pointer' }}
-    >
-      <div className="similar-game-cover-container" style={{ aspectRatio: '2/3', background: 'var(--color-bg-tertiary)', overflow: 'hidden', position: 'relative', borderRadius: 'var(--radius-md) var(--radius-md) 0 0' }}>
-        {coverUrl ? (
-          <img 
-            ref={imgRef}
-            src={coverUrl} 
-            alt={sim.name} 
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            className="similar-game-cover"
-          />
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)' }}>No Cover</div>
-        )}
-      </div>
-      <div style={{ padding: 'var(--space-sm)' }}>
-        <h4 style={{ fontSize: '11px', fontWeight: '600', color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: '1.3' }}>
-          {sim.name}
-        </h4>
-      </div>
     </div>
   );
 }
@@ -558,28 +527,25 @@ export default function StoreGameDetail() {
               </section>
             )}
 
-            {data.similarGames && data.similarGames.length > 0 && (
-              <section className="game-section similar-games-section" style={{ marginTop: 'var(--space-xl)' }}>
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="14" y="14" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
-                  </svg>
-                  Similar Games
-                </h2>
-                <div className="similar-games-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--space-lg)' }}>
-                  {data.similarGames.slice(0, 6).map((sim) => (
-                    <SimilarGameCard 
-                      key={sim.id} 
-                      sim={sim} 
-                      onClick={() => navigate(`/store/${slugify(sim.name)}`)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+            {/* Game Relations Card — IGDB + library cross-ref. Placed
+                at the bottom of the main column, after the standalone
+                Similar Games section. The card self-suppresses when
+                no groups have content, so a thinly-populated title
+                (no collection, no similar games, not in library) won't
+                render an empty card.
+                
+                Pass-through the raw `data.similarGames` / `data.collection`
+                rather than `?? []` / `?? undefined` so React's useMemo
+                dep array in GameRelationsCard sees a stable reference
+                between renders (a new `[]` each render would invalidate
+                the memo and re-run the O(N) library scan for free). */}
+            <GameRelationsCard
+              mode="store"
+              currentGame={data}
+              similarGames={data.similarGames}
+              collectionId={data.collectionId}
+              collectionName={data.collection}
+            />
           </div>
 
           <div className="game-side-col">
