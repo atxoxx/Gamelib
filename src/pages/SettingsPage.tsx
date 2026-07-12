@@ -8,6 +8,7 @@ import { useSources } from "../context/SourceContext";
 import { useTheme, type ThemeDescriptor } from "../context/ThemeContext";
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
+import type { GogAuthState, GogSyncResult } from "../types/gog";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { useAchievements } from "../context/AchievementContext";
@@ -172,6 +173,19 @@ export default function SettingsPage() {
   const [isEpicLoggingIn, setIsEpicLoggingIn] = useState(false);
   const [isEpicSyncing, setIsEpicSyncing] = useState(false);
 
+  // GOG Galaxy integration state. The probe at mount mirrors the
+  // pattern Epic uses: a cheap `gog_is_authenticated` boolean call
+  // to decide whether the Connect or Sync tile is rendered, with the
+  // `{ userId, username, lastSync }` enrichment hydrated from a
+  // localStorage blob on first success. No `gogAuthReady` gate is
+  // required here — there's no paste-in field whose contents should
+  // be hidden until the probe resolves (unlike Steam's API key +
+  // SteamID64 inputs).
+  const [gogAuth, setGogAuth] = useState<GogAuthState>({ isAuthenticated: false });
+  const [gogSyncResult, setGogSyncResult] = useState<GogSyncResult | null>(null);
+  const [isGogLoggingIn, setIsGogLoggingIn] = useState(false);
+  const [isGogSyncing, setIsGogSyncing] = useState(false);
+
   // Theme state — powered by ThemeContext
   function handleThemeChange(themeId: string) {
     setTheme(themeId);
@@ -223,6 +237,27 @@ export default function SettingsPage() {
             try {
               const info = JSON.parse(saved);
               setEpicAuth((prev) => ({ ...prev, ...info }));
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* not authenticated */ }
+    })();
+
+    (async () => {
+      // GOG probe: same shape as the Epic probe above — a boolean
+      // auth check, then hydrate the localStorage enrichment into
+      // `gogAuth` so the Sync tile can render `last sync` and
+      // username on the first paint without a bounce.
+      try {
+        const authenticated: boolean = await invoke("gog_is_authenticated");
+        if (cancelled) return;
+        setGogAuth({ isAuthenticated: authenticated });
+        if (authenticated) {
+          const saved = localStorage.getItem("gamelib-gog-sync-info");
+          if (saved) {
+            try {
+              const info = JSON.parse(saved);
+              setGogAuth((prev) => ({ ...prev, ...info }));
             } catch { /* ignore */ }
           }
         }
@@ -564,11 +599,161 @@ export default function SettingsPage() {
     }
   }
 
+  // ── GOG handlers ──────────────────────────────────────────────────
+
+  async function handleGogLogin() {
+    setIsGogLoggingIn(true);
+    try {
+      // Single-phase (after the 2026 OAuth pivot): Rust opens a
+      // Tauri WebView at gog.com, JS detects the logged-in cookie
+      // state and fires `gog_webview_callback` with the bundle, the
+      // awaiting command resolves with the persisted GogSession.
+      // No more `gog_finish_login` follow-up — that command is gone.
+      showToast("A login window will open — log in to GOG Galaxy there", "info");
+      const session = await invoke<{ userId: string; username: string }>(
+        "gog_start_login"
+      );
+      setGogAuth({
+        isAuthenticated: true,
+        userId: session.userId,
+        username: session.username,
+      });
+      localStorage.setItem(
+        "gamelib-gog-sync-info",
+        JSON.stringify(session)
+      );
+      showToast(
+        `Connected to GOG${session.username ? ` as ${session.username}` : ""}`,
+        "success"
+      );
+      // Auto-sync after first connect — same UX as Steam/Epic so the
+      // user sees their library immediately on success.
+      await handleGogSync();
+    } catch (err) {
+      showToast(`GOG connection failed: ${err}`, "error");
+    } finally {
+      setIsGogLoggingIn(false);
+    }
+  }
+
+  async function handleGogSync() {
+    setIsGogSyncing(true);
+    setGogSyncResult(null);
+    try {
+      const result: GogSyncResult = await invoke("gog_sync_library");
+      setGogSyncResult(result);
+      if (result.success) {
+        // Deduplicate against existing library entries by `gogGameId`.
+        // Mirrors the Epic dedupe-by-namespace+itemId and Steam
+        // dedupe-by-appid so the three vendors share the same
+        // "skip if already imported" parser.
+        const existingGogIds = new Set(
+          games.filter((gm) => gm.gogGameId).map((gm) => gm.gogGameId)
+        );
+        const newGames: Game[] = [];
+        for (const entry of result.syncedGames ?? []) {
+          if (existingGogIds.has(entry.gogGameId)) continue;
+          newGames.push({
+            id: entry.id,
+            name: entry.title,
+            path: entry.installPath ?? "",
+            platform: "GOG",
+            installed: entry.isInstalled,
+            playTime: formatPlayTime(entry.playtimeMinutes ?? 0),
+            addedAt: Date.now(),
+            gogGameId: entry.gogGameId,
+            gogPlaytime: entry.playtimeMinutes,
+            coverArtUrl: entry.coverUrl,
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt:
+              entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+            // GOG returns `lastPlayed` as unix SECONDS — the project
+            // convention is milliseconds (Steam/Epic round-trip the
+            // same way). Multiply on ingest.
+            lastPlayed: entry.lastPlayed ? entry.lastPlayed * 1000 : undefined,
+          });
+        }
+
+        // Refresh `lastPlayed` for existing GOG entries when GOG
+        // reports a more recent session — same pattern as Steam/Epic,
+        // keeps the Library "Continue Playing" rail honest across
+        // sync rounds.
+        for (const entry of result.syncedGames ?? []) {
+          if (!existingGogIds.has(entry.gogGameId)) continue;
+          const game = games.find((g) => g.gogGameId === entry.gogGameId);
+          const syncedLastPlayed = entry.lastPlayed
+            ? entry.lastPlayed * 1000
+            : undefined;
+          if (
+            game &&
+            syncedLastPlayed &&
+            (!game.lastPlayed || syncedLastPlayed > game.lastPlayed)
+          ) {
+            updateGame(game.id, { lastPlayed: syncedLastPlayed });
+          }
+        }
+
+        if (newGames.length > 0) {
+          addGames(newGames);
+          showToast(
+            `Synced ${result.gamesImported} GOG games · ${newGames.length} new`,
+            "success"
+          );
+        } else {
+          showToast(
+            `Synced ${result.gamesImported} GOG games (all already in library)`,
+            "success"
+          );
+        }
+
+        // Persist sync info. `lastSync` is unix SECONDS — matches the
+        // Rust `last_sync: u64` field and the Epic pattern.
+        setGogAuth((prev) => ({ ...prev, lastSync: result.lastSync }));
+        localStorage.setItem(
+          "gamelib-gog-sync-info",
+          JSON.stringify({
+            userId: gogAuth.userId,
+            username: gogAuth.username,
+            lastSync: result.lastSync,
+          })
+        );
+      }
+    } catch (err) {
+      setGogSyncResult({
+        success: false,
+        gamesImported: 0,
+        gamesSkipped: 0,
+        errors: [String(err)],
+        lastSync: 0,
+        syncedGames: [],
+      });
+      showToast(`GOG sync failed: ${err}`, "error");
+    } finally {
+      setIsGogSyncing(false);
+    }
+  }
+
+  async function handleGogDisconnect() {
+    if (!confirm("Remove your GOG Galaxy connection?")) return;
+    try {
+      await invoke("gog_logout");
+      setGogAuth({ isAuthenticated: false });
+      setGogSyncResult(null);
+      localStorage.removeItem("gamelib-gog-sync-info");
+      showToast("GOG Galaxy disconnected", "info");
+    } catch (err) {
+      showToast(`Failed: ${err}`, "error");
+    }
+  }
+
   // Live count of connected integrations — drives the badge on the
-  // Integrations pill in the sub-nav. Lints nicely to 0 when neither is
-  // connected and to 2 when both are.
+  // Integrations pill in the sub-nav. Lints to 0 when none are
+  // connected and to 3 when Steam + Epic + GOG are all linked.
   const connectedIntegrations =
-    (steamAuth.isAuthenticated ? 1 : 0) + (epicAuth.isAuthenticated ? 1 : 0);
+    (steamAuth.isAuthenticated ? 1 : 0) +
+    (epicAuth.isAuthenticated ? 1 : 0) +
+    (gogAuth.isAuthenticated ? 1 : 0);
 
   return (
     <div className="settings-container">
@@ -1138,8 +1323,96 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* ── GOG Galaxy ── */}
+          <div className="integration-tile gog">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><GogIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">GOG Galaxy</h3>
+                    {gogAuth.isAuthenticated && (
+                      <span className="integration-badge active">Connected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Import your owned GOG Galaxy library, including
+                    playtime and last-session stats, plus installed
+                    games detected from the standard GOG install paths.
+                  </p>
+                </div>
+              </div>
+
+              <div className="integration-tile-body">
+                {gogAuth.isAuthenticated ? (
+                  <div className="auth-status">
+                    Connected
+                    {gogAuth.username ? ` as ${gogAuth.username}` : ""}
+                    {gogAuth.userId ? ` (ID: ${gogAuth.userId})` : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    Log in with your GOG Galaxy account to import your
+                    library. A login window will open inside the app.
+                  </p>
+                )}
+
+                <p className="auth-note">
+                  Your tokens stay local — stored only in the
+                  encrypted OS keychain, just like Steam and Epic.
+                </p>
+
+                <div className="integration-tile-actions">
+                  {gogAuth.isAuthenticated ? (
+                    <Button
+                      variant="primary"
+                      onClick={handleGogSync}
+                      isLoading={isGogSyncing}
+                    >
+                      Sync Library
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      onClick={handleGogLogin}
+                      isLoading={isGogLoggingIn}
+                    >
+                      Connect GOG Account
+                    </Button>
+                  )}
+                </div>
+
+                {gogSyncResult && (
+                  <div className={`sync-result ${gogSyncResult.success ? "success" : "error"}`}>
+                    {gogSyncResult.success
+                      ? `✓ Imported ${gogSyncResult.gamesImported} games${gogSyncResult.errors.length ? ` · ${gogSyncResult.errors.length} warning(s)` : ""}`
+                      : `✗ ${gogSyncResult.errors?.[0] || "Sync failed"}`}
+                  </div>
+                )}
+
+                {gogAuth.lastSync && (
+                  <p className="sync-result-time">
+                    Last sync: {new Date(gogAuth.lastSync * 1000).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {gogAuth.isAuthenticated && (
+              <div className="danger-zone">
+                <p className="danger-zone-text">
+                  <strong>Disconnect GOG Galaxy.</strong> Clears local
+                  tokens — your GOG account is unaffected.
+                </p>
+                <Button variant="danger" size="sm" onClick={handleGogDisconnect}>
+                  Disconnect
+                </Button>
+              </div>
+            )}
+          </div>
+
           <p className="integration-footer">
-            More integrations coming soon — GOG and more.
+            More integrations coming soon — itch.io and more.
           </p>
         </section>
       )}
@@ -1401,6 +1674,17 @@ function EpicIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
       <path d="M12 2L2 7l1.5 9L12 22l8.5-6L22 7 12 2zm0 2.5l7.5 4-1.3 7.8L12 19.5l-6.2-3.2L4.5 8.5 12 4.5z" />
+    </svg>
+  );
+}
+
+function GogIcon() {
+  // Stylised G mark — a chunky stroked ring with a small notch on
+  // the right edge (mirroring GOG.com's "open circle + tail" logo).
+  // Inline SVG keeps the icon-themeable via `currentColor`.
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 2a8 8 0 0 1 7.74 6H14v3h5.74A8 8 0 0 1 12 20.5 8.5 8.5 0 0 1 3.5 12 8.5 8.5 0 0 1 12 4z" />
     </svg>
   );
 }

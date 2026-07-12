@@ -62,6 +62,21 @@ pub struct GameRow {
     pub steam_app_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steam_playtime: Option<u32>,
+    // ── GOG Galaxy integration columns (v2 migration) ──
+    /// GOG product id (stringified int, e.g. `"1207658925"`). Drives
+    /// the dedup key on `gog_sync_library` and the gog-`{id}` slug
+    /// used by the Library page's GameRelationsCard. Stored as
+    /// `String` because `api.gog.com/products` returns IDs as both
+    /// integers and strings depending on the endpoint, and we want
+    /// lossless round-trips through serde.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gog_game_id: Option<String>,
+    /// Playtime in MINUTES, sourced from
+    /// `https://gameplay.gog.com/clients/<user_id>/playtime`.
+    /// Persisted on sync so a sync-less reload still surfaces the
+    /// correct playtime in the Library page's play-time column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gog_playtime: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub store_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,7 +152,8 @@ pub fn upsert_all(db: &Db, rows: &[GameRow]) -> Result<(), String> {
                 time_to_beat_json, similar_games_json, releases_json,
                 igdb_reviews_json, alternative_names_json, steam_achievements_json,
                 language_supports_json,
-                collection, franchise, game_category, release_status
+                collection, franchise, game_category, release_status,
+                gog_game_id, gog_playtime
             ) VALUES (
                 ?1,?2,?3,?4,?5,?6,?7,
                 ?8,?9,?10,?11,?12,
@@ -152,7 +168,8 @@ pub fn upsert_all(db: &Db, rows: &[GameRow]) -> Result<(), String> {
                 ?41,?42,?43,
                 ?44,?45,?46,
                 ?47,
-                ?48,?49,?50,?51
+                ?48,?49,?50,?51,
+                ?52,?53
             )",
         )
         .map_err(|e| format!("games prepare: {e}"))?;
@@ -209,6 +226,12 @@ pub fn upsert_all(db: &Db, rows: &[GameRow]) -> Result<(), String> {
             r.franchise,
             r.game_category,
             r.release_status,
+            // v2 migration columns — NULL when the row pre-dates the
+            // GOG integration (i.e. the user upgraded an existing
+            // library). The GameRow struct's Option-typed fields
+            // handle the NULL path uniformly.
+            r.gog_game_id,
+            r.gog_playtime,
         ])
         .map_err(|e| format!("games insert {i}: {e}"))?;
     }
@@ -289,7 +312,7 @@ pub fn delete_many(db: &Db, ids: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-const GAMES_SELECT_SQL: &str = "SELECT id, name, path, platform, installed, play_time, added_at, cover_art_url, notes, size_bytes, size_detected_at, size_root_path, icon_url, banner_url, logo_url, description, developer, publisher, release_date, metadata_source, metadata_url, storyline, igdb_rating, critic_rating, steam_app_id, steam_playtime, store_source, epic_namespace, epic_catalog_item_id, launch_arguments, run_as_admin, last_played, play_status, genres_json, themes_json, game_modes_json, player_perspectives_json, screenshots_json, videos_json, websites_json, time_to_beat_json, similar_games_json, releases_json, igdb_reviews_json, alternative_names_json, steam_achievements_json, language_supports_json, collection, franchise, game_category, release_status FROM games";
+const GAMES_SELECT_SQL: &str = "SELECT id, name, path, platform, installed, play_time, added_at, cover_art_url, notes, size_bytes, size_detected_at, size_root_path, icon_url, banner_url, logo_url, description, developer, publisher, release_date, metadata_source, metadata_url, storyline, igdb_rating, critic_rating, steam_app_id, steam_playtime, store_source, epic_namespace, epic_catalog_item_id, launch_arguments, run_as_admin, last_played, play_status, genres_json, themes_json, game_modes_json, player_perspectives_json, screenshots_json, videos_json, websites_json, time_to_beat_json, similar_games_json, releases_json, igdb_reviews_json, alternative_names_json, steam_achievements_json, language_supports_json, collection, franchise, game_category, release_status, gog_game_id, gog_playtime FROM games";
 
 fn game_row_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<GameRow> {
     Ok(GameRow {
@@ -344,6 +367,13 @@ fn game_row_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<GameRow> {
         franchise: r.get(48)?,
         game_category: r.get(49)?,
         release_status: r.get(50)?,
+        // v2 migration columns — read past the original 51 columns.
+        // `rusqlite::Row::get` returns `Ok(None)` for a NULL TEXT /
+        // NULL INTEGER cell with the requested `Option<String>` /
+        // `Option<u32>` target, so a pre-v2 row reads back with both
+        // fields `None` and silently adopts the new shape.
+        gog_game_id: r.get(51)?,
+        gog_playtime: r.get::<_, Option<i64>>(52)?.map(|n| n as u32),
     })
 }
 

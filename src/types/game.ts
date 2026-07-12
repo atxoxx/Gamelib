@@ -33,6 +33,17 @@ export interface Game {
   detectedExe?: string;
   /** Playtime in minutes reported by Steam (used as fallback for playTime) */
   steamPlaytime?: number;
+  /** ── GOG Galaxy integration fields ──────────────────────────
+   *  Mirrors the Steam integration shape so the Library page
+   *  filter sidebar can tag GOG-synced titles uniformly. */
+  /** GOG numeric product id (e.g. `1207658925`). Drives the
+   *  gog-`{id}` slug used by the GameRelationsCard and Store
+   *  coverage check. Stored as `string` because GOG is inconsistent
+   *  about returning the id as JSON number vs stringified integer. */
+  gogGameId?: string;
+  /** Playtime in minutes reported by the GOG gameplay endpoint
+   *  `https://gameplay.gog.com/clients/<user_id>/playtime`. */
+  gogPlaytime?: number;
   /** Achievement completion data synced from Steam */
   steamAchievements?: SteamAchievement[];
   /**

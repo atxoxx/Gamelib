@@ -20,6 +20,13 @@
 /// statements).
 pub const V1_SCHEMA: &str = include_str!("schema_v1.sql");
 
+/// DDL for v2 of the schema. Adds two columns to `games` to support
+/// the GOG Galaxy integration (`gog_game_id`, `gog_playtime`).
+/// Both default `NULL` to preserve backward-compat for installs
+/// that have pre-existing rows without GOG metadata — the Rust DAO
+/// uses `Option<..>` for both.
+pub const V2_SCHEMA: &str = include_str!("schema_v2.sql");
+
 /// Bootstrap the schema-meta table on a fresh DB. This table is
 /// itself part of v1, but we need to read `PRAGMA user_version`
 /// *before* applying v1, so bootstrap is logically a separate step.
@@ -35,4 +42,12 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 /// `db::migrate::run_migrations` iterates this list, skipping versions
 /// that are already in `PRAGMA user_version`, and applies the rest in
 /// order inside individual transactions.
-pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA)];
+///
+/// **Adding a new version**: append `(vN, &new_const)` at the end —
+/// never renumber existing tuples (existing installs row-locked on
+/// the corresponding `schema_meta` entry would otherwise miss the
+/// bump). New columns should be appended via `ALTER TABLE … ADD
+/// COLUMN`, never by editing the existing schema file's
+/// `CREATE TABLE` clause (existing installs would never see the
+/// edit because their `schema_version` is already past v1).
+pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA), ("v2", V2_SCHEMA)];
