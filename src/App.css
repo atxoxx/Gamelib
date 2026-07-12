@@ -1474,6 +1474,11 @@
   justify-content: space-between;
   margin-bottom: var(--space-lg);
 }
+.game-top-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
 
 .game-top-actions {
   display: flex;

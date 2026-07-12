@@ -25,10 +25,10 @@ import { IconClock, IconPlatform, IconUsers } from "./icons";
  *  │  (left)                (meta middle)     Launch (R) │
  *  └──────────────────────────────────────────────────────┘
  *
- *  The Library/Edit/Remove buttons that used to live here
- *  were removed in favour of the TopNav Library tab and the
- *  Sidebar right-click context menu (see Sidebar.tsx:451-456).
- *  This keeps the hero compact and avoids duplicate affordances.
+ *  The TopBar (`.game-top-bar`) above the hero in `GamePage.tsx`
+ *  owns the Return-to-Library / Edit / Remove affordances. This
+ *  keeps the hero compact and avoids duplicate controls inside the
+ *  banner.
  */
 
 interface GameHeroProps {

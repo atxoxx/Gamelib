@@ -31,7 +31,7 @@ import {
   GameDetailsCard,
   RelatedContentCard,
 } from "../components/game";
-import { Button } from "../components/ui";
+import { Button, ConfirmModal } from "../components/ui";
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
   label,
@@ -170,13 +170,15 @@ void null; // placeholder to keep this section marker stable
 // for a parallel module-scoped Set here anymore.
 
 function GameDetail({ game }: { game: Game }) {
-  // Note: useNavigate is no longer needed here — `handleBack` and
-  // `handleDelete` (which called navigate("/library")) were removed
-  // when the duplicate Library/Edit/Remove top bar was deleted.
-  // `GameNotFound` (below) calls useNavigate() directly for its
-  // "Back to Library" button, so the import is still needed.
+  const navigate = useNavigate();
   const { showToast } = useToast();
-  const { updateGame, launchGame, enrichGameMetadata } = useGames();
+  const { updateGame, launchGame, enrichGameMetadata, removeGame } = useGames();
+  // Confirm-remove flow state. Clicking the Remove button in the
+  // top bar opens the ConfirmModal; only on confirm do we actually
+  // wipe the game (matches the destructive-action discipline used
+  // by the IGDB / downloads tabs, vs. the silent toast path the
+  // sidebar right-click uses).
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks" | "achievements">("overview");
 
   // Metadata fetching state
@@ -347,7 +349,36 @@ function GameDetail({ game }: { game: Game }) {
 
   function handleLaunch() {
     launchGame(game);
-  }  function cancelEditing() {
+  }
+
+  function handleBack() {
+    navigate("/library");
+  }
+
+  function handleEditRequest() {
+    setEditing(true);
+  }
+
+  function handleRemoveRequest() {
+    setShowRemoveConfirm(true);
+  }
+
+  function handleCancelRemove() {
+    setShowRemoveConfirm(false);
+  }
+
+  function handleConfirmRemove() {
+    removeGame(game.id);
+    showToast(`Removed ${game.name}`, "info");
+    // Navigate immediately so we don't render the "Game Not Found"
+    // empty state for the about-to-be-deleted game for a single tick.
+    // GameDetail is keyed by game.id (see the parent GamePage render),
+    // so navigate() unmounts this component for free — no need to
+    // also call setShowRemoveConfirm(false).
+    navigate("/library");
+  }
+
+  function cancelEditing() {
     setEditing(false);
   }
 
@@ -820,11 +851,51 @@ function GameDetail({ game }: { game: Game }) {
 
   return (
     <div className="game-page">
-      {/* Hero Section - compact KPI-driven layout, see GameHero.tsx.
-          The Library/Edit/Remove buttons that used to live above the
-          hero (and inside it) have been removed; the TopNav Library
-          tab + Sidebar right-click context menu (see Sidebar.tsx) are
-          the canonical entry points for navigation and remove. */}
+      {/* Top bar above the hero: "Return to Library" back link on the
+          left (mirrors the same `.game-top-bar` + `.game-back-link`
+          pattern used by StoreGameDetail), and Edit + Remove actions
+          on the right. Edit opens the existing modal; Remove opens a
+          ConfirmModal (matches the destructive-action discipline used
+          elsewhere, vs. the silent toast path the sidebar uses). */}
+      <div className="game-top-bar">
+        <button
+          className="game-back-link"
+          onClick={handleBack}
+          aria-label="Return to library"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Return to Library
+        </button>
+        <div className="game-top-bar__actions">
+          <button
+            type="button"
+            className="game-edit-btn"
+            onClick={handleEditRequest}
+            aria-label={`Edit ${game.name}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            Edit
+          </button>
+          <button
+            type="button"
+            className="game-edit-btn game-edit-btn-danger"
+            onClick={handleRemoveRequest}
+            aria-label={`Remove ${game.name} from library`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            Remove
+          </button>
+        </div>
+      </div>
+
       <GameHero game={game} onLaunch={handleLaunch} />
 
       {/* Tabs */}
@@ -1650,6 +1721,20 @@ function GameDetail({ game }: { game: Game }) {
           </div>
         </div>
       )}
+
+      {/* Confirm modal for the destructive Remove top-bar action.
+          Rendered through the same Portal-based ConfirmModal used
+          elsewhere in the app so the Cancel / Delete focus order,
+          Escape handling, and backdrop click are consistent. */}
+      <ConfirmModal
+        open={showRemoveConfirm}
+        title={`Remove ${game.name} from library?`}
+        message="This removes the game's metadata, cover, and tracked play time from GameLib. Your installed files on disk are not touched; you can re-import the game later if you change your mind."
+        confirmLabel="Remove"
+        cancelLabel="Keep"
+        onConfirm={handleConfirmRemove}
+        onCancel={handleCancelRemove}
+      />
     </div>
   );
 }
