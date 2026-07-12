@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useToast } from "../context/ToastContext";
@@ -119,14 +119,17 @@ export default function SettingsPage() {
     }
   };
 
-  // Steam integration state — paste-in API key + SteamID64 flow.
-  // The user gets their API key from
-  // https://steamcommunity.com/dev/apikey and their SteamID64 from
-  // https://steamcommunity.com/my (both linked from the inputs
-  // below). Neither is persisted to localStorage — the keychain
-  // owns the verified SteamSession blob via `steam_connect`.
-  const [steamApiKey, setSteamApiKey] = useState("");
-  const [steamId, setSteamId] = useState("");
+  // Tracks whether the initial Steam-session probe has resolved.
+  // Starts false so the API-key + SteamID inputs don't flash in
+  // with hydrated localStorage values on remount (e.g. user
+  // navigates to Library and back) BEFORE the keychain probe
+  // confirms they're actually still connected via Connect Steam.
+  // Without this gate, on remount the form would briefly render
+  // with hydrated values before isAuthenticated flipped to true,
+  // which violates the "stay logged in until disconnect" UX
+  // contract even though the underlying state was technically
+  // correct.
+  const [steamAuthReady, setSteamAuthReady] = useState(false);
   const [steamAuth, setSteamAuth] = useState<SteamAuthState>({ isAuthenticated: false });
   const [isSteamLoggingIn, setIsSteamLoggingIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -136,6 +139,32 @@ export default function SettingsPage() {
     syncPlaytime: true,
     syncAchievements: true,
   });
+  // The user gets their API key from
+  // https://steamcommunity.com/dev/apikey and their SteamID64 from
+  // https://steamcommunity.com/my (both linked from the inputs
+  // below). Both fields are persisted to localStorage on every
+  // keystroke (see the onChange handlers below) and re-hydrated
+  // on mount, so navigating away — or a reboot — doesn't wipe them.
+  // The keychain still owns the verified SteamSession blob that
+  // `steam_connect` writes on successful Connect; the localStorage
+  // copy is only the user's *unverified* input, kept around so the
+  // form is pre-filled next time they open Settings.
+  const [steamApiKey, setSteamApiKey] = useState("");
+  const [steamId, setSteamId] = useState("");
+
+  // Hydrate the Steam API key + SteamID64 inputs from localStorage
+  // on mount. Tauri WebView stores localStorage in the OS app-data
+  // dir, so this survives reboots. Sync (no IPC) — runs once at
+  // mount before the async Steam-session probe completes, so the
+  // fields are visible the moment the user opens Settings.
+  useEffect(() => {
+    try {
+      setSteamApiKey(localStorage.getItem("gamelib-steam-apikey") || "");
+      setSteamId(localStorage.getItem("gamelib-steam-steamid") || "");
+    } catch (e) {
+      console.error("Failed to load Steam credentials from localStorage:", e);
+    }
+  }, []);
 
   // Epic integration state
   const [epicAuth, setEpicAuth] = useState<EpicAuthState>({ isAuthenticated: false });
@@ -150,10 +179,16 @@ export default function SettingsPage() {
     showToast(`Theme changed to ${themeMeta?.name ?? themeId}`, "success");
   }
 
+  // Tracks whether the user has navigated away mid-probe so we
+  // don't call setState on an unmounted component. The Steam +
+  // Epic probes each `await invoke(...)`, which is long enough that
+  // the user might leave Settings during the wait.
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const session: SteamSession | null = await invoke("steam_get_session");
+        if (cancelled) return;
         if (session) {
           setSteamAuth({ isAuthenticated: true, session });
           const saved = localStorage.getItem("gamelib-steam-sync-info");
@@ -166,11 +201,21 @@ export default function SettingsPage() {
 
         }
       } catch { /* no session yet */ }
+      finally {
+        // Reveal the form only after the probe resolves (success OR
+        // error). Without this `finally`, on remount after a prior
+        // successful Connect, the form would briefly flash the
+        // hydrated API-key + SteamID inputs before isAuthenticated
+        // flipped to true — making the user think the connection
+        // was lost.
+        if (!cancelled) setSteamAuthReady(true);
+      }
     })();
 
     (async () => {
       try {
         const authenticated: boolean = await invoke("epic_is_authenticated");
+        if (cancelled) return;
         setEpicAuth({ isAuthenticated: authenticated });
         if (authenticated) {
           const saved = localStorage.getItem("gamelib-epic-sync-info");
@@ -188,11 +233,75 @@ export default function SettingsPage() {
       const saved = localStorage.getItem("gamelib-steam-settings");
       if (saved) setSteamSettings(JSON.parse(saved));
     } catch { /* keep defaults */ }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // Tracks whether auto-reconnect has already run for this
+  // mount cycle. useRef so the value persists across renders
+  // within the same component instance without forcing a
+  // re-render. A new ref is created on every remount (page
+  // navigation away + back, or app restart), giving each fresh
+  // visit one attempt to silently re-establish the Steam
+  // connection from the localStorage-persisted credentials.
+  const autoReconnectAttempted = useRef(false);
 
+  // Auto-reconnect on mount if we have local credentials but the
+  // keychain probe didn't find a verified session. The OS
+  // keychain occasionally loses entries across reboots on Linux
+  // (Secret Service daemon hiccups) and Windows (Credential
+  // Manager after OS upgrades) — this restores the connection
+  // transparently from the localStorage values the user already
+  // typed. Subsequent restarts find the freshly-written
+  // keychain entry via the probe directly, so this only fires
+  // on the first boot after losing it.
+  //
+  // Runs ONCE per mount via the useRef guard — a user-initiated
+  // Disconnect later in the same session wouldn't re-trigger
+  // anyway (steamAuthReady doesn't flip back to false), but the
+  // ref short-circuits any future re-renders that happen to
+  // read `steamAuthReady` again.
+  //
+  // `[steamAuthReady]` is the ONLY dep intentionally. Adding
+  // `steamApiKey`/`steamId`/`steamAuth.isAuthenticated` would
+  // re-fire the effect on every keystroke while the form is
+  // open. The hydration effect populates those state values
+  // synchronously on mount, so they're stable by the time this
+  // effect's dep flips.
+  useEffect(() => {
+    if (!steamAuthReady) return;
+    // Mark FIRST so the guard is consistent regardless of which
+    // early-return we hit below — otherwise a user who typed
+    // values and got a Steam rejection could poll again on
+    // every remount with the same revoked key.
+    autoReconnectAttempted.current = true;
 
-  async function handleSteamLogin() {
+    // Probe already found a verified session — nothing to do.
+    if (steamAuth.isAuthenticated) return;
+
+    // No persisted credentials to revalidate against — the
+    // user must type them in manually.
+    if (!steamApiKey.trim() || !steamId.trim()) return;
+
+    // Silent revalidation. { autoSync: false } skips the
+    // post-Connect library sync so a quiet reboot doesn't
+    // trigger a heavy network round-trip the user didn't opt
+    // into. handleSteamLogin's success path writes a fresh
+    // entry to the keychain, so the NEXT restart finds the
+    // session via steam_get_session directly.
+    void handleSteamLogin({ autoSync: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steamAuthReady]);
+
+  async function handleSteamLogin(options: { autoSync?: boolean } = {}) {
+    // Destructure with a default so the existing call site (the
+    // Connect button) keeps its current semantics — manual
+    // Connect auto-syncs fresh game data. The auto-reconnect
+    // path passes { autoSync: false } so a quiet reboot doesn't
+    // trigger a heavy sync for users with huge libraries.
+    const { autoSync = true } = options;
     // Pre-flight: both fields required. The Rust probe call against
     // ISteamUser/GetPlayerSummaries/v2 enforces non-empty + a
     // 17-digit SteamID64, but don't spin up the loading state for
@@ -220,9 +329,14 @@ export default function SettingsPage() {
       }));
       showToast(`Connected to Steam${session.displayName ? ` as ${session.displayName}` : ""}`, "success");
 
-      // Auto-sync after connect — same handleSyncNow path used for
-      // manual sync button presses.
-      await handleSyncNow(session);
+      // Auto-sync after a manual Connect (same handleSyncNow
+      // path as the Sync Library button). The auto-reconnect
+      // path passes { autoSync: false } so reboots don't sneak
+      // in a heavy sync the user didn't ask for — they can
+      // click Sync Library manually for fresh data.
+      if (autoSync) {
+        await handleSyncNow(session);
+      }
     } catch (err) {
       showToast(`Steam connection failed: ${err}`, "error");
     } finally {
@@ -318,6 +432,10 @@ export default function SettingsPage() {
       setSteamAuth({ isAuthenticated: false });
       setSyncResult(null);
       localStorage.removeItem("gamelib-steam-sync-info");
+      // Intentionally NOT clearing `gamelib-steam-apikey` /
+      // `gamelib-steam-steamid` here: the requirement is for the
+      // user's pasted input to persist, so reconnecting shouldn't
+      // force them to re-paste the 32-char key and 17-digit ID.
       showToast("Steam disconnected", "info");
     } catch (err) {
       showToast(`Failed: ${err}`, "error");
@@ -787,7 +905,7 @@ export default function SettingsPage() {
                  *  - SteamID64: https://steamcommunity.com/my
                  *    (Steam's "My profile" page exposes the 17-digit
                  *    ID under the vanity-URL block at the top) */}
-                {!steamAuth.isAuthenticated && (
+                {!steamAuth.isAuthenticated && steamAuthReady && (
                   <div className="integration-tile-form">
                     <label className="settings-control">
                       <div className="settings-label-row">
@@ -805,7 +923,10 @@ export default function SettingsPage() {
                         type="password"
                         className="settings-input"
                         value={steamApiKey}
-                        onChange={(e) => setSteamApiKey(e.target.value)}
+                        onChange={(e) => {
+                          setSteamApiKey(e.target.value);
+                          localStorage.setItem("gamelib-steam-apikey", e.target.value);
+                        }}
                         autoComplete="off"
                         placeholder="32-char hex string from steamcommunity.com/dev/apikey"
                         disabled={isSteamLoggingIn}
@@ -827,7 +948,10 @@ export default function SettingsPage() {
                         type="text"
                         className="settings-input"
                         value={steamId}
-                        onChange={(e) => setSteamId(e.target.value)}
+                        onChange={(e) => {
+                          setSteamId(e.target.value);
+                          localStorage.setItem("gamelib-steam-steamid", e.target.value);
+                        }}
                         autoComplete="off"
                         inputMode="numeric"
                         pattern="[0-9]{17}"
@@ -850,8 +974,13 @@ export default function SettingsPage() {
                   ) : (
                     <Button
                       variant="primary"
-                      onClick={handleSteamLogin}
+                      // Wrapped arrow disables MouseEventHandler arg-passing and
+                      // discards the returned Promise with `void` so the new
+                      // `{ autoSync?: boolean }` options object doesn't leak
+                      // through `.autoSync` on the SyntheticEvent.
+                      onClick={() => { void handleSteamLogin(); }}
                       isLoading={isSteamLoggingIn}
+                      disabled={!steamAuthReady}
                     >
                       Connect Steam Account
                     </Button>
