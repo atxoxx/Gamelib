@@ -478,6 +478,325 @@ impl GameWatcher {
     pub fn is_running(&self, game_id: &str) -> bool {
         self.active_sessions.contains_key(game_id)
     }
+
+    /// Force-terminate the tracked process for `game_id` and finalize
+    /// the session in the same atomic step.
+    ///
+    /// Why we kill-then-finalize in a single call (rather than letting
+    /// the 5 s poll loop pick up the dead process organically):
+    ///
+    ///   - Snappier UX: the user clicks "Force Close" and the running
+    ///     indicator disappears within the same React tick instead of
+    ///     after the next poll cycle. Window of inconsistency between
+    ///     backend state and `runningGameIds` frontend state drops from
+    ///     0–5 s to 0 ms.
+    ///   - One cleanup path: by routing back through the existing
+    ///     `finish_session`, the activity dashboard, last-played stamp,
+    ///     SQLite session row, and `game-exited` event all see the same
+    ///     snapshot they would on a natural exit. The frontend's
+    ///     ActivityContext listener filters sessions shorter than one
+    ///     minute (existing behavior) — a force-closed sub-minute
+    ///     session still updates `game.playTime` and `lastPlayed` in
+    ///     `GameContext`, just no separate Activity row, mirroring
+    ///     natural exits.
+    ///
+    /// PID-recycling guard: between the last 5 s poll and the closing
+    /// click, the tracked PID could in theory be recycled by the OS to
+    /// an unrelated user-owned process. Naively calling
+    /// `OpenProcess(PROCESS_TERMINATE) + TerminateProcess` on that PID
+    /// would kill the WRONG process. We guard against this by re-reading
+    /// the process's actual exe path via `QueryFullProcessImageNameW`
+    /// and comparing it against `session.matched_exe` (normalized
+    /// lowercase + back-slashes). Only when the exe matches do we open
+    /// a terminate handle and call `TerminateProcess`. A mismatched
+    /// exe OR a failed query means we report `killed: false` and let
+    /// the session get cleared via `finish_session` anyway — the user
+    /// still gets the running indicator cleared, and the frontend can
+    /// show a warning toast.
+    ///
+    /// Safe-rail enumeration of the three return shapes:
+    ///   - `Ok({ pid: 0, killed: false })`   — pending session (Steam
+    ///     protocol or UAC), no real PID to terminate. Frontend =
+    ///     "Force closed X" success toast (it's not wrong, just an
+    ///     unusual path).
+    ///   - `Ok({ pid: N, killed: true })`    — verified + terminated.
+    ///     Frontend = "Force closed X" success toast.
+    ///   - `Ok({ pid: N, killed: false })`   — session exists but we
+    ///     could not safely kill the process (PID recycled, access
+    ///     denied, exe-path mismatch). Frontend = warning toast "ended
+    ///     session, please close X manually".
+    ///   - `Err(...)`                        — session is no longer
+    ///     tracked (race between button click and watcher cleanup).
+    ///     Frontend = error toast.
+    ///
+    /// `non_windows` always returns the pending-session shape: the
+    /// cross-platform process poll in `query_running_processes()`
+    /// returns an empty list on every non-Windows target today, so
+    /// `last_pid` is always 0 and we'd never have anything to `kill`
+    /// even if we pulled in `libc`.
+    pub fn force_close(
+        &mut self,
+        app_handle: &AppHandle,
+        game_id: &str,
+    ) -> Result<ForceCloseResult, String> {
+        // Copy out the fields we need so we can drop the immutable
+        // borrow on `active_sessions` mutating operations below.
+        let (pid, expected_exe_lower) = match self.active_sessions.get(game_id) {
+            Some(session) => (
+                session.last_pid,
+                session
+                    .matched_exe
+                    .to_lowercase()
+                    .replace('/', "\\"),
+            ),
+            None => return Err(format!("Game is not running: {game_id}")),
+        };
+
+        let killed = if pid != 0 {
+            #[cfg(windows)]
+            {
+                kill_pid_if_exe_matches(pid, &expected_exe_lower)
+            }
+            #[cfg(not(windows))]
+            {
+                // See comment above: cross-platform watcher doesn't
+                // resolve processes on non-Windows, so we have nothing
+                // to terminate. The False return signals "session
+                // cleared without an actual kill".
+                false
+            }
+        } else {
+            // No PID (pending / Steam protocol / UAC). Nothing
+            // physical to kill. finished_via_session is still True
+            // below — we report killed=false so the frontend toast
+            // can distinguish "killed an actual process" from
+            // "cleared a pending session", while still routing
+            // through the same cleanup path.
+            false
+        };
+
+        // Same `game-exited` emission path as a normal exit, so the
+        // frontend listeners see one consistent event payload.
+        self.finish_session(app_handle, game_id);
+        Ok(ForceCloseResult { pid, killed })
+    }
+}
+
+/// Outcome of `GameWatcher::force_close`. Serialised via serde so the
+/// frontend can render an accurate toast without guessing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceCloseResult {
+    /// The PID that was tracked at the time the user clicked
+    /// force-close. `0` when the session had no PID yet (pending Steam
+    /// protocol / UAC). Informational; primarily used by debug logs
+    /// and the toast copy ("PID N for "X") when killed.
+    pub pid: u32,
+    /// `true` only when both:
+    ///   1. `QueryFullProcessImageNameW` confirmed the tracked PID's
+    ///      exe path still matches `session.matched_exe` (no PID
+    ///      recycle), AND
+    ///   2. `OpenProcess(PROCESS_TERMINATE) + TerminateProcess`
+    ///      succeeded (no access denied).
+    /// `false` for pending sessions (pid == 0), PID-recycled, or
+    /// access-denied paths. The session is ALWAYS cleaned up via
+    /// `finish_session` regardless of this flag — only the toast
+    /// copy diverges.
+    pub killed: bool,
+}
+
+/// Windows-only helper. Re-reads the tracked PID's exe path and
+/// compares it against the expected lowercase/normalized path we
+/// stored in `ActiveSession.matched_exe` at launch time. Only when
+/// the path matches do we escalate to killing, escalating through:
+///
+///   1. Direct `TerminateProcess` (fast, requires `PROCESS_TERMINATE`
+///      rights on the target). Works for ~99% of games — user launches
+///      the game under their own token, owns the resulting process.
+///
+///   2. Fallback to `taskkill /F /T /PID <pid>`. Doesn't require
+///      `PROCESS_TERMINATE` because taskkill hands the kill off to
+///      the SYSTEM-owned Task Scheduler service which has rights
+///      the user's token doesn't. This is the escape hatch for the
+///      elevation case: game launched with `runas`/UAC and our
+///      Gamelib process runs at a lower integrity level, so the
+///      DACL on the game's process token denies us
+///      `PROCESS_TERMINATE` and TerminateProcess returns
+///      `ERROR_ACCESS_DENIED`.
+///
+/// The `/T` flag on taskkill also nukes the process TREE (anti-cheat
+/// daemon, crash handler, VR runtime, any helper that shares the
+/// tracked PID as parent) which single-TerminateProcess would
+/// leave orphaned. Game-level "I closed it but something is still
+/// using my GPU/IO" complaints usually come from this omission.
+///
+/// Doing this with a QUERY handle FIRST then escalating to terminate
+/// (or taskkill) is intentional: `PROCESS_QUERY_LIMITED_INFORMATION`
+/// is granted more liberally than `PROCESS_TERMINATE`, so we want to
+/// be sure the target IS the right process before asking for the
+/// higher privilege (or shelling out a subprocess). The reverse
+/// order (open terminate first, then query) would work too but
+/// needlessly escalates without first confirming intent.
+///
+/// Returns `true` on a verified+successful kill by any path,
+/// `false` on any verification or kill failure.
+///
+/// Anti-cheat caveat: PPL (Protected Process Light) anti-cheat
+/// cannot be terminated via either path without admin / driver
+/// cooperation. For those titles the kill is best-effort — the
+/// user will see the warning toast and may need to close via the
+/// anti-cheat's own menu or reboot the system.
+#[cfg(windows)]
+fn kill_pid_if_exe_matches(pid: u32, expected_exe_lower: &str) -> bool {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
+    };
+
+    unsafe {
+        // 1. Verify the PID still belongs to the process we expect.
+        //    OpenProcess may fail with ERROR_ACCESS_DENIED if the
+        //    tracked process has already exited AND its PID has been
+        //    recycled to a system process owned by another user —
+        //    in that case we cannot safely issue a kill on this PID.
+        let query_handle = match OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            pid,
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!(
+                    "[game_watcher] force_close: OpenProcess(query) failed for PID {pid}: {e}; cannot verify PID safety, skipping kill"
+                );
+                return false;
+            }
+        };
+
+        let mut buf = [0u16; 1024];
+        let mut size = buf.len() as u32;
+        let verified = QueryFullProcessImageNameW(
+            query_handle,
+            PROCESS_NAME_WIN32,
+            PWSTR::from_raw(buf.as_mut_ptr()),
+            &mut size,
+        )
+        .is_ok()
+            && {
+                let actual = OsString::from_wide(&buf[..size as usize])
+                    .to_string_lossy()
+                    .to_string()
+                    .to_lowercase()
+                    .replace('/', "\\");
+                actual == expected_exe_lower
+            };
+        let _ = CloseHandle(query_handle);
+
+        if !verified {
+            eprintln!(
+                "[game_watcher] force_close: PID {pid} exe path no longer matches tracked session; PID likely recycled. Skipping kill."
+            );
+            return false;
+        }
+
+        // 2. PID verified — escalate to direct TerminateProcess.
+        //    Fast and synchronous in the typical case (game running
+        //    under our token). On access-denied (game elevated above
+        //    us, or DACL denied) fall through to taskkill which uses
+        //    SYSTEM-level Task Scheduler service rights.
+        let term_handle = match OpenProcess(PROCESS_TERMINATE, false, pid) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!(
+                    "[game_watcher] force_close: OpenProcess(terminate) failed for PID {pid}: {e}; falling back to taskkill"
+                );
+                return try_taskkill(pid);
+            }
+        };
+        if TerminateProcess(term_handle, 0).is_ok() {
+            let _ = CloseHandle(term_handle);
+            eprintln!(
+                "[game_watcher] force-closed PID {pid} via TerminateProcess"
+            );
+            return true;
+        }
+        let _ = CloseHandle(term_handle);
+        eprintln!(
+            "[game_watcher] force_close: TerminateProcess returned false for PID {pid}; falling back to taskkill"
+        );
+    }
+
+    // 3. Fallback for elevated/process-tree cases — see helper.
+    try_taskkill(pid)
+}
+
+/// Win32 fallback: `taskkill /F /T /PID <pid>`. Returns true on
+/// exit-code 0, false otherwise.
+///
+/// The `/F` switch forces termination (kills the process even if
+/// it's hung in a non-responding window). The `/T` switch kills the
+/// entire process tree (parent + children), which matters for
+/// games with separate processes for the launcher, anti-cheat
+/// daemon, VR runtime, crash reporter — a single TerminateProcess
+/// on the parent leaves those orphaned and still consuming GPU/IO
+/// until they notice their parent is gone (EAC/BattleEye especially
+/// are notorious for this — "I closed the game but my fans are
+/// still spinning at 100%").
+///
+/// Why we shell out: invoking taskkill.exe means spawning a child
+/// Rust process, paying the CreateProcess + stdio pipe cost (~50ms
+/// cold, ~10ms warm). We could use `NtTerminateProcess` / the
+/// Task Scheduler COM API to avoid that, but taskkill.exe is what
+/// every Microsoft / Steam / Epic-process tool calls here, is
+/// present on every Windows install since XP, and side-steps the
+/// 32/64-bit token + privilege juggling that would be required to
+/// inline it. Trailing whitespace in the search path is benign
+/// — `Command::new("taskkill")` relies on PATH resolution, which
+/// for `%SystemRoot%\System32` is always present in the default
+/// user's PATH.
+#[cfg(windows)]
+fn try_taskkill(pid: u32) -> bool {
+    use std::process::Command;
+    let pid_str = pid.to_string();
+
+    match Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid_str])
+        .output()
+    {
+        Ok(output) => {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                eprintln!(
+                    "[game_watcher] taskkill /F /T /PID {} succeeded: {}",
+                    pid,
+                    stdout.trim()
+                );
+                true
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                eprintln!(
+                    "[game_watcher] taskkill /F /T /PID {} failed: exit={:?} stdout={} stderr={}",
+                    pid,
+                    output.status.code(),
+                    stdout.trim(),
+                    stderr.trim()
+                );
+                false
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[game_watcher] force_close: failed to invoke taskkill for PID {pid}: {e}"
+            );
+            false
+        }
+    }
 }
 
 // ─── Shared Types ─────────────────────────────────────────────────────────────

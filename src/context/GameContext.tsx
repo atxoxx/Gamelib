@@ -76,6 +76,15 @@ interface GameContextType {
   getGame: (id: string) => Game | undefined;
   runningGameIds: string[];
   launchGame: (game: Game) => void;
+  /**
+   * Force-terminate the running game process and record the session.
+   * Visible from the Game page "Force Close" button — pairs with the
+   * `force_close_game` Tauri command. Reuses the same `game-exited`
+   * event path as a natural exit, so activity / playtime / lastPlayed
+   * all flow through to the existing listeners without bespoke
+   * bookkeeping.
+   */
+  forceCloseGame: (game: Game) => Promise<void>;
   addStoreGame: (metadata: GameMetadataResult) => Promise<string>;
   importLocalGames: (items: { path: string; metadata: GameMetadataResult | null }[]) => Promise<void>;
   fetchGameReviews: (gameId: string, gameName: string, steamAppId?: number) => Promise<void>;
@@ -485,6 +494,37 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [games]
   );
 
+  const forceCloseGame = useCallback(async (game: Game) => {
+    try {
+      const result = await invoke<{ pid: number; killed: boolean }>(
+        "force_close_game",
+        { gameId: game.id }
+      );
+      // Three distinct outcomes per the backend contract:
+      //   - killed=true: process was actually terminated. Success toast.
+      //   - killed=false with pid > 0: session cleared but the
+      //     terminate call was refused (PID recycled, access denied).
+      //     The session is no longer tracked so the running
+      //     indicator WILL still clear via `game-exited`, but we
+      //     surface the partial success so the user knows the game
+      //     itself may still be running on disk.
+      //   - pid == 0 (always killed=false): pending session (Steam
+      //     protocol / UAC) — nothing to terminate. Treat as success.
+      if (result.killed) {
+        showToast(`Force closed ${game.name}`, "success");
+      } else if (result.pid > 0) {
+        showToast(
+          `Ended session for ${game.name} — the game process may still be running. Close it manually if needed.`,
+          "warning"
+        );
+      } else {
+        showToast(`Force closed ${game.name}`, "success");
+      }
+    } catch (err) {
+      showToast(`Failed to force close ${game.name}: ${err}`, "error");
+    }
+  }, [showToast]);
+
   const launchGame = useCallback(async (game: Game) => {
     if (runningGameIds.includes(game.id)) {
       showToast(`${game.name} is already running`, "info");
@@ -755,6 +795,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         getGame,
         runningGameIds,
         launchGame,
+        forceCloseGame,
         addStoreGame,
         importLocalGames,
         fetchGameReviews,

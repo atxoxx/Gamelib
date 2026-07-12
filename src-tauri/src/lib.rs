@@ -243,6 +243,36 @@ fn detect_gpus() -> Vec<GpuInfo> {
     gpu_detector::detect_gpus()
 }
 
+/// Force-terminate the tracked process for `game_id` and finalize the
+/// session. Frontend exposes this as the "Force Close" button on the
+/// Game page when a game is in the running state.
+///
+/// Returns a `ForceCloseResult { pid, killed }` so the frontend can
+/// distinguish "we actually terminated the process" (success toast)
+/// from "we cleared the session state but the underlying process
+/// could not be safely killed" (warning toast) — the latter happens
+/// when the tracked PID was recycled by the OS to an unrelated
+/// process between the last poll and the click, or when the user
+/// doesn't have `PROCESS_TERMINATE` rights on it.
+///
+/// On Windows, terminates via `TerminateProcess` after verifying the
+/// PID still belongs to the session's tracked exe (PID-recycling
+/// guard; see `kill_pid_if_exe_matches`). On every other target the
+/// watcher doesn't track processes at all (the cross-platform
+/// `query_running_processes()` returns empty on non-Windows), so
+/// there is nothing to terminate — but we still run the full
+/// `finish_session` cleanup so the running indicator clears and the
+/// activity session is recorded.
+#[tauri::command]
+fn force_close_game(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<game_watcher::ForceCloseResult, String> {
+    let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
+    let mut w = watcher.lock().map_err(|e| e.to_string())?;
+    w.force_close(&app, &game_id)
+}
+
 /// Windows error code ERROR_ELEVATION_REQUIRED (740). Returned when a
 /// process needs to be launched with administrator privileges.
 #[cfg(windows)]
@@ -1846,7 +1876,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             // GOG Galaxy library integration. After the 2026 OAuth

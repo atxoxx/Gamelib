@@ -2498,6 +2498,15 @@
   color: var(--color-info);
 }
 
+/* Warning variant for Force-Close partial-failure toasts */
+.toast-warning {
+  border-left: 3px solid var(--color-warning);
+}
+
+.toast-warning .toast-icon {
+  color: var(--color-warning);
+}
+
 .toast-message {
   flex: 1;
   font-size: var(--font-size-sm);

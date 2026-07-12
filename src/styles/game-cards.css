@@ -769,6 +769,32 @@
   border-color: #1a9fff;
 }
 
+/* Force Close — destructive action button that appears next to
+ * the "Running…" status pill. Transparent base + danger border
+ * keeps it visually distinct from the running indicator so users
+ * don't accidentally click on it instead of the install/launch
+ * controls. Hover fills with the danger color and adds a glow so
+ * the action feels weighty without conflicting with the running
+ * status's success theme. */
+.game-launch-btn--force-close {
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  box-shadow: none;
+}
+
+.game-launch-btn--force-close:hover {
+  background: var(--color-danger);
+  color: #fff;
+  border-color: var(--color-danger);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-danger) 50%, transparent);
+  transform: translateY(-1px);
+}
+
+.game-launch-btn--force-close:active {
+  transform: translateY(0);
+}
+
 .running-dot-pulse {
   display: inline-block;
   width: 8px;
