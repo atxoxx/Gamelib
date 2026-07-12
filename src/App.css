@@ -423,6 +423,14 @@
   align-items: center;
   gap: var(--space-xs);
   -webkit-app-region: no-drag;
+  /* Allow this flex child to shrink below its content's
+   * intrinsic min-width so .topnav-tabs (which carries
+   * overflow-x: auto) can scroll instead of pushing
+   * the right cluster off-screen. Without this, default
+   * min-width: auto clamps .topnav-left at the sum of
+   * all 11 tab widths (~1100px) and the whole .topnav
+   * overflows the viewport horizontally on narrow windows. */
+  min-width: 0;
 }
 
 .topnav-logo {
@@ -452,6 +460,36 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+  /* Scrollable tab strip — when the window narrows, the tabs
+   * overflow horizontally inside this element rather than
+   * pushing the right cluster off-screen. min-width:0 unlocks
+   * overflow:auto on a flex item (default min-width:auto clamps
+   * this). flex-shrink:1 lets the strip absorb the slack; the
+   * right cluster (downloads / settings / window controls) holds
+   * its width via flex-shrink:0. */
+  overflow-x: auto;
+  min-width: 0;
+  flex-shrink: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* Themed scrollbar for the tab strip — same look as the existing
+ * .game-relations-row rules for visual consistency. Hidden track,
+ * dim thumb that brightens on hover so it reads as residual chrome
+ * without competing for attention. */
+.topnav-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+.topnav-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.topnav-tabs::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.topnav-tabs::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
 }
 
 .topnav-tab {
@@ -468,6 +506,11 @@
   transition: all var(--duration-normal) var(--ease-standard);
   position: relative;
   outline: none;
+  /* Keep each tab at its natural width inside the scrollable
+   * strip — without flex-shrink:0 + nowrap, the labels would
+   * compress before a scrollbar appears. */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .topnav-tab:hover {
@@ -525,8 +568,14 @@
 .topnav-right {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   -webkit-app-region: no-drag;
+  /* Pin the page-actions cluster to the window's right edge. When
+   * the tab strip overflows, .topnav-tabs shrinks (scrollbar
+   * appears there); this row never does. The tighter 4px gap
+   * keeps the download + settings pair visually compact next
+   * to the window-chrome divider. */
+  flex-shrink: 0;
 }
 
 .topnav-btn {
@@ -553,6 +602,118 @@
   width: 18px;
   height: 18px;
 }
+/* ==============================
+   Window Controls (custom title-bar)
+   ==============================
+ * Min / max(+restore) / close rendered into the topnav when the
+ * Tauri main window ships with decorations:false
+ * (see src-tauri/tauri.conf.json). The vertical divider between
+ * .topnav-right and .topnav-window-chrome keeps the boundary
+ * visible against every theme without competing with the
+ * existing bottom-border of .topnav.
+ *
+ * Buttons: Win11-inspired minimal squares, 36x28 hit area.
+ * "no-drag" so a click never becomes a window-drag, and so the
+ * parent <nav>'s double-click -> maximize handler doesn't fire
+ * on a button double-click.
+ */
+.topnav-window-chrome {
+  display: flex;
+  align-items: center;
+  margin-left: 0;
+  padding-left: var(--space-xs);
+  border-left: 1px solid color-mix(in srgb,
+    var(--color-text-muted) 22%,
+    transparent);
+  -webkit-app-region: no-drag;
+  /* Pin the window chrome next to the page-actions cluster.
+   * Combined with .topnav-right's flex-shrink:0, both stay
+   * anchored to the right edge as the window narrows. */
+  flex-shrink: 0;
+}
+
+/* Topnav right cluster: bundles .topnav-right (page actions)
+ * and .topnav-window-chrome (min/max/close + the vertical
+ * divider) into a single flex unit. The parent .topnav runs
+ * justify-content: space-between and, when given three direct
+ * children, distributes equal space on both sides of the middle
+ * one — pushing .topnav-right into the geometric center of the
+ * topnav on wide windows. With this wrapper, .topnav has only
+ * two flex children (.topnav-left and this cluster), so the
+ * cluster is anchored to the right edge and the inner members
+ * stay flush against each other at every window width. */
+.topnav-right-cluster {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  /* No gap: .topnav-window-chrome owns the visual gap before
+   * the divider via its own padding-left. Adding a gap here
+   * would double-count. */
+  gap: 0;
+}
+
+/* The marker below used to be matched directly; now the
+   cluster rule is inserted above it so .topnav-related
+   rules stay contiguous in the file. */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.window-controls-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+  -webkit-app-region: no-drag;
+}
+
+.window-controls-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.window-controls-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.window-controls-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Close button gets a vivid red on hover so the destructive
+ * intent is unmistakable. Uses the theme color-danger var so
+ * light/themed variants can swap in a deeper red without losing
+ * the semantic meaning. */
+.window-controls-btn--close:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+
+/* Inline :active so the press feedback is co-located with the
+ * button itself; flatter specificity than a separate rule. */
+.window-controls-btn:active {
+  background: var(--color-bg-active);
+  transform: scale(0.96);
+}
+
+.window-controls-btn--close:active {
+  background: color-mix(in srgb, var(--color-danger) 80%, black 20%);
+}
+
 
 /* ==============================
    Sidebar

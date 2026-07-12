@@ -1,7 +1,35 @@
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useActiveDownloadCount } from "../context/DownloadContext";
 import DownloadPopover from "./DownloadPopover";
+import WindowControls from "./WindowControls";
+
+/**
+ * Mouse-event guard: an interactive element is anything the user
+ * would EXPECT to receive their own click without the title-bar
+ * doing something else. Buttons, links (NavLinks render `<a>`),
+ * elements that are tagged as buttons via ARIA, and form fields
+ * all qualify. If a double-click lands inside one of these we
+ * don't toggle maximize — the user is interacting with that
+ * control, not the empty drag region. Anchor matching collapses
+ * the whole interactive subtree (e.g. a tab icon inside the
+ * `<a>`) without us having to touch the SVG `<line>` it contains.
+ */
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  // "no-drag" on the children stops a window-drag from starting,
+  // but onDoubleClick still bubbles — so we still want this guard
+  // for any future control. "a[href]" (vs just "a") keeps hover-only
+  // anchors without `href` from blocking the user; role="tab/menuitem"
+  // covers ARIA-tagged controls; contenteditable="true" covers any
+  // future rich-text editor embedded in the chrome; the rest are the
+  // straight DOM form/control tags.
+  return target.closest(
+    'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"], input, select, textarea'
+  ) !== null;
+}
 
 function LibraryIcon() {
   return (
@@ -257,8 +285,40 @@ export default function TopNav() {
   // via `aria-controls` for screen readers.
   const popoverId = useId();
 
+  // Double-click the drag region → toggle maximize. This restores
+  // the standard Windows title-bar behavior that
+  // `decorations: false` removes.
+  //
+  // We listen on the topnav <nav> itself (the only DOM element
+  // with the entire drag region) so a user double-clicking the
+  // empty space between tabs and the window controls gets the
+  // expected "grow to fullscreen" gesture. The handler skips
+  // events whose target is inside an interactive child — the
+  // `-webkit-app-region: no-drag` rule on those children stops
+  // a *drag* from starting, but `onDoubleClick` still bubbles, so
+  // without this filter a double-click on a tab would both fire
+  // navigate and toggle maximize.
+  const handleTitleBarDoubleClick = useCallback(
+    (e: MouseEvent<HTMLElement>) => {
+      if (isInteractiveTarget(e.target)) return;
+      // `.catch(() => {})` swallows the "no Tauri bridge" rejection
+      // during `npm run dev` so an unhandled-rejection warning doesn't
+      // clutter the dev console. The verbs here are OS-level only and
+      // throw identically when the bridge is absent, so swallowing is
+      // the right trade-off. (For app-side actions we surface failures
+      // via ToastContext.) Memoized so the handler reference stays
+      // stable across renders.
+      getCurrentWindow().toggleMaximize().catch(() => {});
+    },
+    [],
+  );
+
   return (
-    <nav className="topnav" aria-label="Main navigation">
+    <nav
+      className="topnav"
+      aria-label="Main navigation"
+      onDoubleClick={handleTitleBarDoubleClick}
+    >
       <div className="topnav-left">
         <div className="topnav-logo">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -286,57 +346,82 @@ export default function TopNav() {
         </div>
       </div>
 
-      {/* Contextual actions live on the far right (system-style actions
-       *  like Settings, Downloads). Icon-only so they don't compete
-       *  with the primary nav for attention. The Download button
-       *  opens a popover (below) that lists every active and
-       *  completed torrent; the Settings button uses NavLink so the
-       *  "active" treatment matches the regular tabs. */}
-      <div className="topnav-right">
-        <button
-          ref={downloadBtnRef}
-          type="button"
-          className={`topnav-btn topnav-btn-downloads${downloadsOpen ? " active" : ""}`}
-          onClick={() => setDownloadsOpen((o) => !o)}
-          aria-label={`Downloads${activeDownloads > 0 ? ` (${activeDownloads} active)` : ""}`}
-          aria-expanded={downloadsOpen}
-          aria-haspopup="dialog"
-          aria-controls={popoverId}
-          title="Downloads"
-        >
-          <DownloadIcon />
-          {activeDownloads > 0 && (
-            <span
-              className="topnav-btn-badge"
-              role="status"
-              aria-label={`${activeDownloads} active downloads`}
-            >
-              {activeDownloads}
-            </span>
-          )}
-        </button>
-        <DownloadPopover
-          open={downloadsOpen}
-          onClose={() => {
-            setDownloadsOpen(false);
-            // Restore focus to the trigger so keyboard users don't
-            // get stranded after Escape / click-outside closes the
-            // popover.
-            downloadBtnRef.current?.focus();
-          }}
-          anchorRef={downloadBtnRef}
-          id={popoverId}
-        />
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            `topnav-btn topnav-btn-settings${isActive ? " active" : ""}`
-          }
-          aria-label="Settings"
-          title="Settings"
-        >
-          <SettingsIcon />
-        </NavLink>
+      {/* Right cluster: bundles .topnav-right (page actions:
+       *  downloads + settings) and .topnav-window-chrome (min/max/
+       *  close + the vertical divider). We render them inside a
+       *  single flex unit because the parent `.topnav` uses
+       *  `justify-content: space-between` and would otherwise
+       *  distribute equal space on both sides of the middle child,
+       *  pushing .topnav-right into the geometric center of the
+       *  topnav on wide windows (large empty gap between settings
+       *  and the divider). With the cluster wrapper, .topnav has
+       *  only two children — `.topnav-left` on the left, this
+       *  cluster on the right — and the inner members stay flush
+       *  regardless of window width. */}
+      <div className="topnav-right-cluster">
+        {/* Contextual actions live on the far right (system-style
+         *  actions like Settings, Downloads). Icon-only so they
+         *  don't compete with the primary nav for attention. The
+         *  Download button opens a popover (below) that lists every
+         *  active and completed torrent; the Settings button uses
+         *  NavLink so the "active" treatment matches the regular
+         *  tabs. */}
+        <div className="topnav-right">
+          <button
+            ref={downloadBtnRef}
+            type="button"
+            className={`topnav-btn topnav-btn-downloads${downloadsOpen ? " active" : ""}`}
+            onClick={() => setDownloadsOpen((o) => !o)}
+            aria-label={`Downloads${activeDownloads > 0 ? ` (${activeDownloads} active)` : ""}`}
+            aria-expanded={downloadsOpen}
+            aria-haspopup="dialog"
+            aria-controls={popoverId}
+            title="Downloads"
+          >
+            <DownloadIcon />
+            {activeDownloads > 0 && (
+              <span
+                className="topnav-btn-badge"
+                role="status"
+                aria-label={`${activeDownloads} active downloads`}
+              >
+                {activeDownloads}
+              </span>
+            )}
+          </button>
+          <DownloadPopover
+            open={downloadsOpen}
+            onClose={() => {
+              setDownloadsOpen(false);
+              // Restore focus to the trigger so keyboard users don't
+              // get stranded after Escape / click-outside closes the
+              // popover.
+              downloadBtnRef.current?.focus();
+            }}
+            anchorRef={downloadBtnRef}
+            id={popoverId}
+          />
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `topnav-btn topnav-btn-settings${isActive ? " active" : ""}`
+            }
+            aria-label="Settings"
+            title="Settings"
+          >
+            <SettingsIcon />
+          </NavLink>
+        </div>
+
+        {/* Custom window controls (min / max / close) — see
+         *  `./WindowControls.tsx` for the implementation. They live
+         *  INSIDE `.topnav-right-cluster` so the divider on
+         *  `.topnav-window-chrome`'s left edge renders flush against
+         *  the settings cog, no wide-window drift to the geometric
+         *  center of the row. */}
+        <div className="topnav-window-chrome">
+          <WindowControls />
+        </div>
       </div>
     </nav>
   );
