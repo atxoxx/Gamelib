@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use reqwest::Client;
 use serde_json::Value;
 use tauri::Manager;
@@ -112,7 +112,48 @@ struct GlobalPercentBody {
 #[derive(Debug, Deserialize)]
 struct GlobalAchievementPercent {
     name: String,
+    /// Steam's `GetGlobalAchievementPercentagesForApp/v2` returns the
+    /// unlock **percentage** as a JSON **string** (e.g. `"48.234"`),
+    /// not a JSON number. `serde_json` will not coerce a string into
+    /// `f64` by default, so we use a custom deserializer that accepts
+    /// both shapes — Steam has historically returned the string form,
+    /// but we keep the numeric path as forward-compat in case they
+    /// ever change it. Without this, parse of the whole
+    /// `GlobalPercentResponse` fails, the error is swallowed by the
+    /// `.unwrap_or(...)` upstream, every achievement's `percent`
+    /// defaults to `0.0`, and the achievement tab renders "0.0%" for
+    /// every row.
+    #[serde(deserialize_with = "deserialize_percent")]
     percent: f64,
+}
+
+/// Custom deserializer for `GlobalAchievementPercent.percent`. Accepts
+/// either a JSON string (Steam's actual response shape) or a JSON
+/// number (defensive — easier than chasing a regression if Valve ever
+/// switches the wire format). Returns the value as `f64` 0–100.
+fn deserialize_percent<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = Value::deserialize(deserializer)?;
+    let n = match v {
+        Value::Number(n) => n
+            .as_f64()
+            .ok_or_else(|| serde::de::Error::custom("percent is not a valid f64")),
+        Value::String(s) => s
+            .trim()
+            .parse::<f64>()
+            .map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom(
+            "percent must be a JSON string or number",
+        )),
+    }?;
+    // Steam doesn't return NaN/Inf, but `parse::<f64>` silently
+    // accepts "NaN" / "Infinity" — Rust would serialize those as JSON
+    // `null`, which would then crash the frontend's `.toFixed(1)`.
+    // Coerce non-finite values to 0.0 so one bad row can't blank
+    // the whole rarity distribution.
+    Ok(if n.is_finite() { n } else { 0.0 })
 }
 
 fn build_client() -> Result<Client, String> {
@@ -212,14 +253,23 @@ pub async fn fetch_achievements_with_client(
         match client.get(&global_url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 let body = resp.text().await.unwrap_or_else(|_| "{}".to_string());
-                let parsed: GlobalPercentResponse =
-                    serde_json::from_str(&body).unwrap_or(GlobalPercentResponse {
-                        achievementpercentages: None,
-                    });
-                parsed
-                    .achievementpercentages
-                    .map(|ap| ap.achievements)
-                    .unwrap_or_default()
+                match serde_json::from_str::<GlobalPercentResponse>(&body) {
+                    Ok(parsed) => parsed
+                        .achievementpercentages
+                        .map(|ap| ap.achievements)
+                        .unwrap_or_default(),
+                    Err(e) => {
+                        // Log instead of silently swallowing — the
+                        // string-as-percent schema mismatch bit us
+                        // once already; a future wire-format change
+                        // should be loud, not invisible.
+                        eprintln!(
+                            "[achievements] failed to parse GetGlobalAchievementPercentagesForApp \
+                             response for appid {steam_app_id}: {e}"
+                        );
+                        Vec::new()
+                    }
+                }
             }
             _ => Vec::new(),
         };
