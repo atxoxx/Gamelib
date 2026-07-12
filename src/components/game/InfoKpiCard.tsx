@@ -235,17 +235,36 @@ export default function InfoKpiCard({
       });
     }
     if (game.releaseStatus) {
-      const intent =
-        game.releaseStatus.toLowerCase().includes("released")
-          ? "success"
-          : game.releaseStatus.toLowerCase().includes("early")
-            ? "warning"
+      // IGDB's `status` field can be stale or wrong for upcoming games
+      // (e.g. GTA 6 with releaseDate 2026-11-19 still tagged "Released"
+      // because IGDB flipped it to "Released" before launch). Override
+      // to "Upcoming" when the release date is still in the future so
+      // users aren't misled into thinking a not-yet-released title is
+      // already out. We only override when the raw status is "Released"
+      // — Alpha/Beta/Early Access/Cancelled are correctly independent
+      // of the public release date.
+      const isFutureRelease =
+        !!game.releaseDate &&
+        (() => {
+          const t = new Date(game.releaseDate).getTime();
+          return Number.isFinite(t) && t > Date.now();
+        })();
+      const effectiveStatus =
+        isFutureRelease && game.releaseStatus.toLowerCase().includes("released")
+          ? "Upcoming"
+          : game.releaseStatus;
+      const intent = effectiveStatus.toLowerCase().includes("released")
+        ? "success"
+        : effectiveStatus.toLowerCase().includes("early")
+          ? "warning"
+          : effectiveStatus.toLowerCase() === "upcoming"
+            ? "info"
             : "default";
       out.push({
         label: "Release Status",
         value: (
           <span className={`info-dl-value-tag info-dl-value-tag--${intent}`}>
-            {game.releaseStatus}
+            {effectiveStatus}
           </span>
         ),
         icon: <IconCheck size={12} />,
