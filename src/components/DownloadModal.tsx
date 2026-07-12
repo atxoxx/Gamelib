@@ -21,6 +21,7 @@
 // the open/close state.
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useDownloads } from "../context/DownloadContext";
 import { useSources } from "../context/SourceContext";
@@ -402,7 +403,14 @@ export default function DownloadModal({
     [ownership, step],
   );
 
-  return (
+  // Render the modal into `document.body` via a React Portal so it
+  // escapes any stacking context created by ancestor elements
+  // (e.g. the Game page's hero cards). Without this, the modal's
+  // z-index is confined to the closest stacking context, which
+  // can cause it to be painted behind page-level surfaces even
+  // though its z-index (9998) is technically very high. This
+  // matches the pattern used by ImportModal, ConfirmModal, etc.
+  return createPortal(
     <div
       className="modal-backdrop"
       onMouseDown={() => {
@@ -661,7 +669,8 @@ export default function DownloadModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

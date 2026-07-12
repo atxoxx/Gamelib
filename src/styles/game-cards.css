@@ -1,0 +1,1066 @@
+/* ==============================
+   Game Page - KPI Design System
+   ==============================
+   Styles for the redesigned Game page card components (KpiTile,
+   InfoKpiCard, RatingsKpiCard, TimeToBeatCard, SpecsCard, etc.).
+   All values use existing CSS custom properties so every theme
+   (dark / light / nord / cyberpunk / emerald / dracula) gets a
+   sensible color without bespoke overrides per tile.
+*/
+
+/* ── KpiTile primitive ─────────────────────────────────────────── */
+
+.kpi-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  transition: transform var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard);
+  position: relative;
+  overflow: hidden;
+  animation: kpiTileIn 360ms var(--ease-enter) both;
+  animation-delay: var(--kpi-stagger, 0ms);
+}
+
+.kpi-tile--glass {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: var(--shadow-md);
+}
+
+.kpi-tile--sm {
+  padding: var(--space-sm) var(--space-md);
+  gap: 2px;
+}
+
+.kpi-tile--lg {
+  padding: var(--space-lg) var(--space-xl);
+  gap: var(--space-sm);
+}
+
+.kpi-tile--clickable {
+  cursor: pointer;
+}
+
+.kpi-tile--clickable:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+@keyframes kpiTileIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.kpi-tile__top { width: 100%; }
+
+.kpi-tile__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
+.kpi-tile__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+  flex: 1;
+  min-width: 0;
+}
+
+.kpi-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.kpi-tile--intent-accent .kpi-tile__icon { color: var(--color-accent); }
+.kpi-tile--intent-success .kpi-tile__icon { color: var(--color-success); }
+.kpi-tile--intent-warning .kpi-tile__icon { color: var(--color-warning); }
+.kpi-tile--intent-danger .kpi-tile__icon { color: var(--color-danger); }
+.kpi-tile--intent-info .kpi-tile__icon { color: var(--color-info); }
+
+.kpi-tile__trailing {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.kpi-tile__value {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.15;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-tile--sm .kpi-tile__value {
+  font-size: var(--font-size-lg);
+}
+
+.kpi-tile--lg .kpi-tile__value {
+  font-size: var(--font-size-3xl);
+}
+
+.kpi-tile--intent-accent .kpi-tile__value { color: var(--color-accent); }
+.kpi-tile--intent-success .kpi-tile__value { color: var(--color-success); }
+.kpi-tile--intent-warning .kpi-tile__value { color: var(--color-warning); }
+.kpi-tile--intent-danger .kpi-tile__value { color: var(--color-danger); }
+.kpi-tile--intent-info .kpi-tile__value { color: var(--color-info); }
+
+.kpi-tile__subtext {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
+.kpi-tile__footer { width: 100%; margin-top: 2px; }
+
+/* ── KPI row inside cards (InfoKpiCard hero stats) ────────────── */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+/* ── Game section title (reusable across all cards) ────────────── */
+
+.game-section-title__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.game-section-title__text {
+  flex: 1;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+
+.game-section-title__trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.game-section-title__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+/* ── InfoKpiCard (hybrid KPI tiles + definition list) ──────────── */
+
+.info-kpi-card { padding: var(--space-xl); }
+
+.info-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+}
+
+.info-dl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.info-dl-row:last-child { border-bottom: none; }
+
+.info-dl-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.info-dl-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.info-dl-value {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.info-dl-value-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.info-dl-value-tag--success { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-border)); }
+.info-dl-value-tag--warning { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 30%, var(--color-border)); }
+.info-dl-value-tag--default { color: var(--color-text-secondary); }
+
+.info-dl-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* ── RatingsKpiCard (big numbers + breakdown) ──────────────────── */
+
+.ratings-kpi-card { padding: var(--space-xl); }
+
+.ratings-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.ratings-kpi-tile .kpi-tile__value {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.ratings-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.ratings-breakdown__title {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: var(--space-xs);
+}
+
+.ratings-breakdown__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 11px;
+}
+
+.ratings-breakdown__label {
+  width: 90px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.ratings-breakdown__track {
+  flex: 1;
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.ratings-breakdown__fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 600ms var(--ease-standard);
+}
+
+.ratings-breakdown__pct {
+  width: 36px;
+  text-align: right;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── TimeToBeatCard (3-column KPI grid + per-row progress) ─────── */
+
+.ttb-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.ttb-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.ttb-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ttb-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.ttb-row__label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.3px;
+}
+
+.ttb-row__meta {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ttb-row__track {
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.ttb-row__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), #818cf8);
+  border-radius: var(--radius-full);
+  transition: width 600ms var(--ease-standard);
+  box-shadow: 0 0 6px var(--color-accent-glow);
+}
+
+.ttb-row__fill--done {
+  background: linear-gradient(90deg, var(--color-success), #059669);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 50%, transparent);
+}
+
+/* ── SpecsCard (icon-prefixed groups + modern pills) ───────────── */
+
+.specs-card { padding: var(--space-xl); }
+
+.specs-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.specs-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.specs-group__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.specs-group__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+}
+
+.specs-group__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Reusable pill: used by Specs, InfoKpiCard genres, and any
+ * inline metadata label that wants the modern rounded look. */
+.spec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.2px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  transition: all var(--duration-fast) var(--ease-standard);
+  cursor: default;
+}
+
+.spec-pill:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-tertiary));
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+/* ── ReleasesCard (compact release list) ───────────────────────── */
+
+.releases-card { padding: var(--space-xl); }
+
+.releases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.releases-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+}
+
+.releases-row:last-child { border-bottom: none; }
+
+.releases-row__platform {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.releases-row__meta {
+  color: var(--color-text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.releases-row__region {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+/* ── LanguagesSection (compact table) ──────────────────────────── */
+
+.languages-section { padding: var(--space-xl); }
+
+.languages-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.languages-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+
+.languages-table th {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.lang-th-center { text-align: center; }
+
+.languages-table td {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.languages-table tbody tr:last-child td { border-bottom: none; }
+
+.lang-name { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+
+.lang-cell-center { text-align: center; }
+
+/* ── AboutSection ──────────────────────────────────────────────── */
+
+.about-section__text {
+  line-height: 1.7;
+  color: var(--color-text-primary);
+}
+
+/* ── StorylineSection ──────────────────────────────────────────── */
+
+.storyline-quote {
+  margin: 0;
+  padding: var(--space-md) 0 var(--space-md) var(--space-lg);
+  border-left: 3px solid var(--color-accent);
+  font-style: italic;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  font-size: var(--font-size-md);
+}
+
+/* ── GameDetailsCard ───────────────────────────────────────────── */
+
+.game-details-card__path {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-details-card__path-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.game-details-card .game-path {
+  cursor: pointer;
+  transition: background var(--duration-fast);
+  display: inline-block;
+  max-width: 100%;
+}
+
+.game-details-card .game-path:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ── RelatedContentCard ────────────────────────────────────────── */
+
+.related-content-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.related-content-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.related-content-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+/* ── GameHero (compact layout) ──────────────────────────────────
+   Single-row layout: compact banner with KPI overlay on top, then
+   a single flex row below combining logo/title (left) + meta
+   (middle) + launch actions (right). The Library/Edit/Remove
+   top bar that used to live above the banner has been removed
+   (use the TopNav Library tab + Sidebar right-click context menu).
+   Total hero height is ~200-260px instead of the previous
+   ~400-500px. */
+
+.game-hero--compact {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--space-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-sm);
+  /* Create a fresh stacking context so the hero's internal
+   * z-indices (.game-hero__kpis at 3, .game-hero__info-row at 2)
+   * can't leak out and paint above page-level overlays like the
+   * Download modal (z-index 9998) or the downloads popover. */
+  isolation: isolate;
+}
+
+.game-hero__banner {
+  position: relative;
+  min-height: clamp(120px, 15vw, 180px);
+}
+
+.game-hero__kpis {
+  position: absolute;
+  bottom: var(--space-md);
+  right: var(--space-md);
+  display: flex;
+  gap: var(--space-sm);
+  z-index: 3;
+  max-width: 65%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  pointer-events: none; /* let the underlying banner show through */
+}
+
+.game-hero__kpis > * { pointer-events: auto; }
+
+/* Single row below the banner: title (left) + meta (middle, takes
+   remaining space) + launch actions (right). No stacked blocks. */
+.game-hero__info-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-xl);
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-secondary))
+  );
+  position: relative;
+  z-index: 2;
+}
+
+.game-hero__title-block {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 40%;
+}
+
+.game-hero--compact .game-hero-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-hero--compact .game-hero-logo {
+  max-height: 56px;
+  max-width: 200px;
+  margin: 0;
+}
+
+.game-hero--compact .game-hero-meta {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  min-width: 0;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.game-hero__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+}
+
+.game-hero__status-value {
+  display: inline-block;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: inherit;
+  line-height: 1;
+}
+
+.game-hero-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* ── GameLaunchActions ─────────────────────────────────────────── */
+
+.game-launch-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.game-launch-actions--sm { gap: var(--space-sm); }
+.game-launch-actions--md { gap: var(--space-md); }
+
+.game-launch-btn.running {
+  background: var(--color-success);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-success) 50%, transparent);
+}
+
+.game-launch-btn--install {
+  background: linear-gradient(135deg, #1a9fff, #0077cc);
+  border: 1px solid #0077cc;
+}
+
+.game-launch-btn--install:hover {
+  background: linear-gradient(135deg, #4ab4ff, #1a9fff);
+  border-color: #1a9fff;
+}
+
+.running-dot-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px #fff;
+  animation: runningPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes runningPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ── Edit button danger variant (used in GameHero top bar) ─────── */
+
+.game-edit-btn-danger {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border));
+}
+
+.game-edit-btn-danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: #fff;
+  border-color: var(--color-danger);
+}
+
+/* ── VideosSection refinement ──────────────────────────────────── */
+
+.videos-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* 16:9 wrapper for the active video iframe. Without this, the
+ * iframe collapses to 0 height and the first video renders as
+ * a thumbnail above the selector strip. */
+.video-iframe-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.video-iframe-wrapper iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+.videos-empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+  padding: var(--space-md) 0;
+}
+
+/* Horizontal carousel strip for the trailer thumbnails.
+ * Same pattern as the screenshots carousel: flex + overflow-x +
+ * scroll-snap. Buttons are fixed 16:9 so the strip scrolls
+ * smoothly regardless of how many videos the game has. */
+.video-selector-list {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  padding: 2px 2px var(--space-sm) 2px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.video-selector-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.video-selector-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.video-selector-list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.video-selector-list::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Base button — these were previously missing, so the buttons
+ * fell back to a 2-col grid (default inline-button layout in
+ * the section's flex container). With explicit width/height
+ * + flex-shrink, they render as a snap-aligned strip. */
+.video-selector-btn {
+  position: relative;
+  flex: 0 0 auto;
+  width: 220px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  padding: 0;
+  scroll-snap-align: start;
+  box-sizing: border-box;
+  transition: border-color var(--transition-fast) var(--ease-standard),
+              transform var(--transition-fast) var(--ease-standard),
+              box-shadow var(--transition-fast) var(--ease-standard);
+}
+
+.video-selector-btn:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+}
+
+.video-selector-btn.active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow), 0 0 14px var(--color-accent-glow);
+}
+
+.video-selector-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-selector-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+
+.video-selector-btn.active .video-selector-play-overlay { opacity: 1; }
+.video-selector-btn:hover .video-selector-play-overlay { opacity: 1; }
+
+.video-selector-twitch {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #9146ff 0%, #6441a5 100%);
+  color: #fff;
+}
+
+.video-selector-fallback {
+  font-size: 10px;
+  color: var(--color-text-primary);
+  padding: var(--space-sm);
+  text-align: center;
+}
+
+/* ── ScreenshotsSection (horizontal carousel) ──────────────────── */
+
+.screenshots-carousel {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+  scrollbar-width: thin;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.screenshots-carousel::-webkit-scrollbar {
+  height: 8px;
+}
+
+.screenshots-carousel::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.screenshots-carousel::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.screenshots-carousel::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+.screenshot-item {
+  flex-shrink: 0;
+  width: 220px;
+  height: 124px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  transition: all var(--transition-fast) var(--ease-standard);
+  scroll-snap-align: start;
+  background: var(--color-bg-tertiary);
+}
+
+.screenshot-item:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
+}
+
+.screenshot-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-fast) var(--ease-standard);
+}
+
+.screenshot-item:hover .screenshot-img {
+  transform: scale(1.05);
+}
+
+/* ── Game section elevated card surface ─────────────────────────
+   The .game-section base style in App.css uses --color-surface
+   (very close to --color-bg-primary in the dark theme). We don't
+   override the background here (would conflict with light theme);
+   instead we add a stronger border-light + shadow + accent-tinted
+   top accent stripe so every section card pops from the page in
+   all 6 themes. */
+
+.game-section {
+  position: relative;
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border-light);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.game-section:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-border-light));
+}
+
+/* Subtle accent stripe across the top of each section so the cards
+   feel related to the brand without being noisy. */
+.game-section::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--space-lg);
+  right: var(--space-lg);
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 55%, transparent),
+    transparent
+  );
+  border-radius: 0 0 var(--radius-full) var(--radius-full);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.game-section-title {
+  /* Reset the App.css title to use the section title pattern */
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: calc(-1 * var(--space-xl)) calc(-1 * var(--space-xl)) var(--space-lg);
+  padding: var(--space-lg) var(--space-xl) var(--space-md);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary)),
+    color-mix(in srgb, var(--color-accent) 0%, var(--color-surface)) 80%
+  );
+  position: relative;
+}
+
+.game-section-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+  filter: drop-shadow(0 0 6px var(--color-accent-glow));
+}

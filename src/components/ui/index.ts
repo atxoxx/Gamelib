@@ -15,3 +15,6 @@ export type { SkeletonProps, SkeletonTextProps } from "./Skeleton";
 
 export { ConfirmModal } from "./ConfirmModal";
 export type { ConfirmModalProps } from "./ConfirmModal";
+
+export { KpiTile } from "./KpiTile";
+export type { KpiTileProps } from "./KpiTile";

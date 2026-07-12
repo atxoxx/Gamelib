@@ -1,26 +1,37 @@
 import { useEffect, useState, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import html2canvas from "html2canvas";
 import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
-import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, parsePlayTime, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
+import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import BarChart from "../components/charts/BarChart";
 import LineChart from "../components/charts/LineChart";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
-import DownloadButton from "../components/DownloadButton";
 import PlayerCountSparklineCard from "../components/PlayerCountSparklineCard";
 import CrackWatchCard from "../components/CrackWatchCard";
 import AchievementsTab from "../components/AchievementsTab";
-import SteamPlayerCount from "../components/SteamPlayerCount";
 import GameRelationsCard from "../components/GameRelationsCard";
+import {
+  GameHero,
+  InfoKpiCard,
+  RatingsKpiCard,
+  SpecsCard,
+  TimeToBeatCard,
+  ReleasesCard,
+  LanguagesSection,
+  AboutSection,
+  StorylineSection,
+  ScreenshotsSection,
+  VideosSection,
+  GameDetailsCard,
+  RelatedContentCard,
+} from "../components/game";
 import { Button } from "../components/ui";
 /** Inline reusable image slot for the edit form. */
 function EditImageSlot({
@@ -110,140 +121,16 @@ function EditImageSlot({
   );
 }
 
-function getVideoEmbedUrl(url: string): string | null {
-  if (!url) return null;
+// Video URL helpers (`getVideoEmbedUrl`, `getVideoThumbnail`) now live in
+// `../components/game/video` so the Store GameDetail page can reuse them.
+// The VideosSection component imports them directly; GamePage no longer
+// needs a local alias because the videos JSX has been extracted too.
 
-  // Build a list of acceptable parent hostnames for Twitch embeds.
-  // Twitch's player rejects embeds whose `parent` doesn't match the embedding
-  // page's hostname (causing error 1000 inside the player). We pass the actual
-  // runtime hostname plus common Tauri / localhost fallbacks for robustness
-  // across Tauri dev (`http://localhost:1420`), Tauri 2 prod (`tauri://localhost`),
-  // and Tauri 1.x-style prod (`https://tauri.localhost`).
-  const buildParents = (): string => {
-    const hosts = new Set<string>(["localhost", "127.0.0.1", "tauri.localhost"]);
-    if (typeof window !== "undefined" && window.location?.hostname) {
-      hosts.add(window.location.hostname);
-    }
-    return Array.from(hosts)
-      .map((h) => `parent=${encodeURIComponent(h)}`)
-      .join("&");
-  };
-
-  // Twitch VOD: https://www.twitch.tv/videos/12345 (with optional ?t= timestamp)
-  const twitchVod = url.match(/twitch\.tv\/videos\/(\d+)/i);
-  if (twitchVod) {
-    const t = url.match(/[?&]t=([0-9hms]+)/i);
-    const time = t ? `&time=${t[1]}` : "";
-    return `https://player.twitch.tv/?video=v${twitchVod[1]}${time}&${buildParents()}&autoplay=false`;
-  }
-  // Twitch clip: https://clips.twitch.tv/SLUG or https://www.twitch.tv/CHANNEL/clip/SLUG
-  const twitchClip = url.match(/(?:clips\.twitch\.tv\/|twitch\.tv\/[^/]+\/clip\/)([A-Za-z0-9_-]+)/i);
-  if (twitchClip) {
-    return `https://clips.twitch.tv/embed?clip=${twitchClip[1]}&${buildParents()}`;
-  }
-  // Twitch live channel: https://www.twitch.tv/CHANNEL
-  const twitchChannel = url.match(/^https?:\/\/(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]+)\/?$/i);
-  if (twitchChannel) {
-    const ch = twitchChannel[1].toLowerCase();
-    const reserved = new Set([
-      "videos", "directory", "settings", "subs", "wallet", "drops",
-      "prime", "turbo", "login", "signup", "about",
-    ]);
-    if (!reserved.has(ch)) {
-      return `https://player.twitch.tv/?channel=${twitchChannel[1]}&${buildParents()}&autoplay=false`;
-    }
-  }
-  // YouTube (unchanged)
-  let id = "";
-  if (url.includes("watch?v=")) {
-    id = url.split("watch?v=")[1]?.split("&")[0] || "";
-  } else if (url.includes("youtu.be/")) {
-    id = url.split("youtu.be/")[1]?.split("?")[0] || "";
-  } else if (url.includes("youtube.com/embed/")) {
-    id = url.split("youtube.com/embed/")[1]?.split("?")[0] || "";
-  } else {
-    id = url;
-  }
-  return id ? `https://www.youtube.com/embed/${id}` : null;
-}
-
-function getVideoThumbnail(
-  url: string
-): { kind: "youtube"; src: string } | { kind: "twitch" } | null {
-  if (!url) return null;
-  if (/youtube\.com|youtu\.be/i.test(url)) {
-    let ytId = "";
-    if (url.includes("watch?v=")) ytId = url.split("watch?v=")[1]?.split("&")[0] || "";
-    else if (url.includes("youtu.be/")) ytId = url.split("youtu.be/")[1]?.split("?")[0] || "";
-    else if (url.includes("youtube.com/embed/")) ytId = url.split("youtube.com/embed/")[1]?.split("?")[0] || "";
-    else ytId = url;
-    if (ytId) return { kind: "youtube", src: `https://img.youtube.com/vi/${ytId}/mqdefault.jpg` };
-  }
-  // Twitch has no public thumbnail API without auth; surface a branded placeholder.
-  if (/twitch\.tv|clips\.twitch\.tv/i.test(url)) {
-    return { kind: "twitch" };
-  }
-  return null;
-}
-
-function RatingCircle({ score, label }: { score: number; label: string }) {
-  const radius = 26;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (score / 100) * circumference;
-  
-  const getColor = (s: number) => {
-    if (s >= 75) return "#10b981"; // emerald
-    if (s >= 50) return "#f59e0b"; // warning
-    return "#ef4444"; // danger
-  };
-  
-  return (
-    <div className="rating-circle-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-xs)' }}>
-      <div className="rating-circle-svg-wrap" style={{ position: 'relative', width: 68, height: 68 }}>
-        <svg className="rating-circle-svg" viewBox="0 0 68 68" style={{ width: '100%', height: '100%' }}>
-          <circle 
-            className="rating-circle-bg" 
-            cx="34" 
-            cy="34" 
-            r={radius} 
-            stroke="var(--color-bg-tertiary)" 
-            strokeWidth="4" 
-            fill="transparent" 
-          />
-          <circle
-            className="rating-circle-progress"
-            cx="34"
-            cy="34"
-            r={radius}
-            strokeWidth="4"
-            stroke={getColor(score)}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            fill="transparent"
-            transform="rotate(-90 34 34)"
-            style={{ transition: 'stroke-dashoffset 0.8s ease' }}
-          />
-        </svg>
-        <span 
-          className="rating-circle-score" 
-          style={{ 
-            position: 'absolute', 
-            top: '50%', 
-            left: '50%', 
-            transform: 'translate(-50%, -50%)', 
-            fontSize: 'var(--font-size-md)', 
-            fontWeight: 'bold',
-            color: getColor(score) 
-          }}
-        >
-          {score}
-        </span>
-      </div>
-      <span className="rating-circle-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{label}</span>
-    </div>
-  );
-}
+// The old `RatingCircle` SVG component has been replaced by the
+// `KpiTile` + `RatingsKpiCard` design (see `../components/game/RatingsKpiCard`).
+// The 68px circle ring has been replaced with a 36px bold number that reads
+// at a glance, intent-tinted by the same success/warning/danger threshold.
+void null; // placeholder to keep this section marker stable
 
 function GameNotFound() {
   const navigate = useNavigate();
@@ -272,37 +159,10 @@ function GameNotFound() {
   );
 }
 
-function TimeToBeatRow({ label, targetSeconds, currentPlayTime }: { label: string, targetSeconds: number, currentPlayTime: string }) {
-  const targetHours = Math.round(targetSeconds / 3600);
-  const playTimeMinutes = parsePlayTime(currentPlayTime);
-  const playTimeHours = playTimeMinutes / 60;
-  
-  const percentage = Math.min(100, Math.round((playTimeHours / targetHours) * 100));
-  
-  return (
-    <div style={{ marginBottom: 'var(--space-sm)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-xs)', marginBottom: '4px' }}>
-        <span style={{ fontWeight: '500', color: 'var(--color-text-primary)' }}>{label}</span>
-        <span style={{ color: 'var(--color-text-muted)' }}>
-          {Math.round(playTimeHours * 10) / 10}h / {targetHours}h ({percentage}%)
-        </span>
-      </div>
-      <div className="progress-bar-bg" style={{ height: '6px', background: 'var(--color-bg-tertiary)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
-        <div 
-          className="progress-bar-fill" 
-          style={{ 
-            height: '100%', 
-            width: `${percentage}%`, 
-            background: percentage >= 100 ? 'linear-gradient(90deg, #10b981, #059669)' : 'linear-gradient(90deg, var(--color-accent), #818cf8)',
-            borderRadius: '3px',
-            transition: 'width 0.5s ease-in-out',
-            boxShadow: percentage >= 100 ? '0 0 6px rgba(16, 185, 129, 0.4)' : '0 0 6px rgba(99, 102, 241, 0.4)'
-          }} 
-        />
-      </div>
-    </div>
-  );
-}
+// The old `TimeToBeatRow` helper has moved to
+// `../components/game/shared` and is rendered by `TimeToBeatCard`.
+// The new card wraps it in a 3-column KPI grid for an at-a-glance read.
+void null; // placeholder to keep this section marker stable
 
 // Track which game IDs have already been auto-enriched in this GameDetail
 // mount to avoid repeat calls when enrichment-triggered state updates
@@ -311,12 +171,13 @@ function TimeToBeatRow({ label, targetSeconds, currentPlayTime }: { label: strin
 // for a parallel module-scoped Set here anymore.
 
 function GameDetail({ game }: { game: Game }) {
-  const navigate = useNavigate();
+  // Note: useNavigate is no longer needed here — `handleBack` and
+  // `handleDelete` (which called navigate("/library")) were removed
+  // when the duplicate Library/Edit/Remove top bar was deleted.
+  // `GameNotFound` (below) calls useNavigate() directly for its
+  // "Back to Library" button, so the import is still needed.
   const { showToast } = useToast();
-  const { updateGame, removeGame, runningGameIds, launchGame, enrichGameMetadata } = useGames();
-  const isRunning = runningGameIds.includes(game.id);
-
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const { updateGame, launchGame, enrichGameMetadata } = useGames();
   const [activeTab, setActiveTab] = useState<"overview" | "reviews" | "activity" | "weblinks" | "achievements">("overview");
 
   // Metadata fetching state
@@ -343,83 +204,10 @@ function GameDetail({ game }: { game: Game }) {
   const [editSizeBytes, setEditSizeBytes] = useState<number | undefined>(game.sizeBytes);
   const [editSizeRootPath, setEditSizeRootPath] = useState<string | undefined>(game.sizeRootPath);
   const [editPlayStatus, setEditPlayStatus] = useState<PlayStatus>(game.playStatus || "backlog");
-  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const statusButtonRef = useRef<HTMLButtonElement>(null);
-  // Stores the dropdown menu's viewport coordinates. Recomputed when the
-  // dropdown opens and whenever scroll/resize shifts the button. Using a
-  // portal lets the menu escape the `.game-hero` overflow:hidden chunk.
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  // (Play status dropdown state moved to `GameStatusDropdown`. The
+  // GamePage now just passes `game` + an `onChange` callback into
+  // `<GameHero />`, which composes the dropdown in the hero overlay.)
 
-  // Recompute menu position from the button's bounding rect. Coalesced
-  // through requestAnimationFrame so a fast scroll does not cause more
-  // than one setState per animation frame, and skipped when the rect is
-  // unchanged so the toolbar doesn't re-render the entire GameDetail
-  // tree for pages that are not actively scrolling.
-  const positionRafRef = useRef<number | null>(null);
-  function recomputeMenuPosition() {
-    const btn = statusButtonRef.current;
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
-    setMenuPosition((prev) => {
-      const next = { top: rect.bottom + 4, left: rect.left, width: rect.width };
-      if (
-        prev &&
-        prev.top === next.top &&
-        prev.left === next.left &&
-        prev.width === next.width
-      ) {
-        return prev; // no-op: bail out of the re-render
-      }
-      return next;
-    });
-  }
-  function scheduleReposition() {
-    if (positionRafRef.current != null) return;
-    positionRafRef.current = requestAnimationFrame(() => {
-      positionRafRef.current = null;
-      recomputeMenuPosition();
-    });
-  }
-
-  // Esc closes, click-outside dismisses, viewport scroll/resize keeps
-  // the portaled menu pinned under the button. The effect depends only
-  // on `statusDropdownOpen`: the menu stops mousedown propagation (so
-  // the click handler does not read `menuPosition`) and Esc handling
-  // only fires while the menu is open. Narrow deps avoid re-binding the
-  // mousedown listener on every scroll/position tick. Position writes
-  // go through rAF + change-detection (see scheduleReposition /
-  // recomputeMenuPosition) so a fast scroll produces at most one
-  // position write per animation frame, and zero writes when the button
-  // is stationary.
-  useEffect(() => {
-    if (!statusDropdownOpen) return;
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (dropdownRef.current && dropdownRef.current.contains(target)) return;
-      setStatusDropdownOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setStatusDropdownOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    // Capture-phase scroll catches scrolls on any ancestor (the
-    // .app-main viewport scroller is the most common). Position
-    // writes are rAF-throttled.
-    window.addEventListener("scroll", scheduleReposition, true);
-    window.addEventListener("resize", scheduleReposition);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      window.removeEventListener("scroll", scheduleReposition, true);
-      window.removeEventListener("resize", scheduleReposition);
-      window.removeEventListener("keydown", handleKeyDown);
-      if (positionRafRef.current != null) {
-        cancelAnimationFrame(positionRafRef.current);
-        positionRafRef.current = null;
-      }
-    };
-  }, [statusDropdownOpen]);
   const [detectingSize, setDetectingSize] = useState(false);
   // Respects the user's GB/GiB preference from Settings > Hardware; persisted
   // across relaunches by the hook (localStorage key `gamelib_size_unit_v1`).
@@ -450,7 +238,6 @@ function GameDetail({ game }: { game: Game }) {
 
   // Lightbox & Video states
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
   // LaunchBox Image Browser state
   const [showImageBrowser, setShowImageBrowser] = useState(false);
@@ -491,14 +278,8 @@ function GameDetail({ game }: { game: Game }) {
   // The per-mount  guards within a single lifecycle.
   // Sentinel  records a previous
   // failed IGDB lookup so we don't re-attempt on every GamePage visit.
-  // Close the play-status dropdown whenever the underlying game id
-  // changes; otherwise the portaled menu would stay anchored to the
-  // previous game's button rect, floating in space pointing at the
-  // new game.
-  useEffect(() => {
-    setStatusDropdownOpen(false);
-    setMenuPosition(null);
-  }, [game.id]);
+  // (Play status dropdown state lives inside `GameStatusDropdown`
+  // now, so we don't need to reset it here on game-id change.)
 
     const enrichmentStartedRef = useRef(false);
   useEffect(() => {
@@ -567,85 +348,8 @@ function GameDetail({ game }: { game: Game }) {
 
   function handleLaunch() {
     launchGame(game);
-  }
-
-  function handleInstall() {
-    if (game.steamAppId) {
-      openUrl(`steam://install/${game.steamAppId}`).catch((err) =>
-        showToast(`Failed to open Steam install: ${err}`, "error")
-      );
-    }
-  }
-
-  function handleBack() {
-    navigate("/library");
-  }
-
-  function startEditing() {
-    setEditName(game.name);
-    setEditPlatform(game.platform);
-    setEditIcon(game.iconUrl || "");
-    setEditCover(game.coverArtUrl || "");
-    setEditHero(game.bannerUrl || "");
-    setEditLogo(game.logoUrl || "");
-    setEditNotes(game.notes || "");
-    
-    // New fields
-    setEditDescription(game.description || "");
-    setEditDeveloper(game.developer || "");
-    setEditPublisher(game.publisher || "");
-    setEditReleaseDate(game.releaseDate || "");
-    setEditGenres(game.genres ? game.genres.join(", ") : "");
-    setEditStoryline(game.storyline || "");
-    setEditIgdbRating(game.igdbRating || 0);
-    setEditCriticRating(game.criticRating || 0);
-    setEditThemes(game.themes ? game.themes.join(", ") : "");
-    setEditGameModes(game.gameModes ? game.gameModes.join(", ") : "");
-    setEditPlayerPerspectives(game.playerPerspectives ? game.playerPerspectives.join(", ") : "");
-    
-    setEditScreenshots(game.screenshots || []);
-    setEditVideos(game.videos || []);
-    setEditWebsites(game.websites || []);
-    
-    setEditTimeToBeatMain(game.timeToBeat?.normally ? Math.round(game.timeToBeat.normally / 3600) : 0);
-    setEditTimeToBeatExtra(game.timeToBeat?.hastily ? Math.round(game.timeToBeat.hastily / 3600) : 0);
-    setEditTimeToBeatComple(game.timeToBeat?.completely ? Math.round(game.timeToBeat.completely / 3600) : 0);
-    setEditSimilarGames(game.similarGames || []);
-    setEditReleases(game.releases || []);
-    setEditIgdbReviews(game.igdbReviews || []);
-    
-    setEditSimilarGamesText(game.similarGames ? game.similarGames.map(g => g.name).join(", ") : "");
-    setEditReleasesText(game.releases ? game.releases.map(r => `${r.platform} | ${r.dateStr} | ${r.region}`).join("\n") : "");
-    setEditIgdbReviewsText(game.igdbReviews ? JSON.stringify(game.igdbReviews, null, 2) : "");
-    
-    setEditCollection(game.collection || "");
-    setEditFranchise(game.franchise || "");
-    setEditGameCategory(game.gameCategory || "");
-    setEditReleaseStatus(game.releaseStatus || "");
-    setEditLanguageSupports(game.languageSupports || []);
-    setEditAlternativeNamesText(game.alternativeNames ? game.alternativeNames.join(", ") : "");
-    setEditLanguageSupportsText(game.languageSupports ? JSON.stringify(game.languageSupports, null, 2) : "");
-
-    setEditMetadataSource(game.metadataSource || "");
-    setEditMetadataUrl(game.metadataUrl || "");
-    
-    setEditPath(game.path || "");
-    setEditLaunchArguments(game.launchArguments || "");
-    setEditRunAsAdmin(game.runAsAdmin || false);
-    setEditPlayStatus(game.playStatus || "backlog");
-    setEditTab("metadata");
-    
-    setEditing(true);
-  }
-
-  function cancelEditing() {
+  }  function cancelEditing() {
     setEditing(false);
-  }
-
-  function handleDelete() {
-    removeGame(game.id);
-    navigate("/library");
-    showToast(`Removed ${game.name}`, "info");
   }
 
   async function handleFetchMetadata() {
@@ -1115,273 +819,14 @@ function GameDetail({ game }: { game: Game }) {
     showToast("Game updated", "success");
   }
 
-  const displayName = editing ? editName : game.name;
-  const displayPlatform = editing ? editPlatform : game.platform;
-  const displayCover = editing ? editCover : game.coverArtUrl;
-
-  const addedDate = new Date(game.addedAt).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
   return (
     <div className="game-page">
-      {/* Breadcrumb / Actions */}
-      <div className="game-top-bar">
-        <button className="game-back-link" onClick={handleBack}>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          Library
-        </button>
-
-        <div className="game-top-actions">
-          <Button variant="secondary" size="sm" onClick={startEditing}
-            leftIcon={
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            }
-          >
-            Edit
-          </Button>
-          {showDeleteConfirm ? (
-            <>
-              <span className="delete-confirm-text">Are you sure?</span>
-              <Button
-                variant="danger" size="sm"
-                onClick={handleDelete}
-              >
-                Delete
-              </Button>
-              <Button
-                variant="ghost" size="sm"
-                onClick={() => setShowDeleteConfirm(false)}
-              >
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="danger" size="sm"
-              onClick={() => setShowDeleteConfirm(true)}
-              leftIcon={
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            }
-          >
-            Remove
-          </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Hero Section */}
-      <div className="game-hero">
-        {game.bannerUrl && (
-          <div
-            className="game-banner-bg"
-            style={{ backgroundImage: `url(${game.bannerUrl})` }}
-          />
-        )}
-
-        {/* Live Steam concurrent-player badge. For library games it is
-            shown only when we know the game's Steam appid (synced from
-            Steam, extracted from a steam://run/... path, or matched from
-            an IGDB listing). Non-Steam library entries hide the badge
-            cleanly via the component's null-return branch. */}
-        <div className="hero-player-count">
-          <SteamPlayerCount appId={game.steamAppId} />
-        </div>
-        <div className="game-banner">
-          {(game.bannerUrl || displayCover) ? (
-            <img
-              src={game.bannerUrl || displayCover}
-              alt={game.name}
-              className="game-cover-img"
-              onError={(e) => {
-                const img = e.currentTarget;
-                // Steam-synced games use library_hero.jpg, but pre-2017
-                // titles only ship header.jpg. If the hero 404s, swap to
-                // header.jpg; if that also fails, fall back to the cover.
-                if (img.dataset.fallback !== "header" && game.steamAppId && img.src.includes("library_hero")) {
-                  img.dataset.fallback = "header";
-                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${game.steamAppId}/header.jpg`;
-                } else if (displayCover && img.src !== displayCover) {
-                  img.dataset.fallback = "cover";
-                  img.src = displayCover;
-                } else {
-                  img.style.display = "none";
-                }
-              }}
-            />
-          ) : (
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              opacity={0.2}
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-          )}
-        </div>
-        <div className="game-hero-overlay">
-          <div className="game-hero-info">
-            {game.logoUrl ? (
-              <img
-                src={game.logoUrl}
-                alt={game.name}
-                className="game-hero-logo"
-              />
-            ) : (
-              <h1 className="game-hero-title">{displayName}</h1>
-            )}
-            <div className="game-hero-meta">
-              <span>{displayPlatform}</span>
-              <span className="game-hero-meta-dot" />
-              <span>Play time: {game.playTime}</span>
-              <span className="game-hero-meta-dot" />
-              <span>Added {addedDate}</span>
-              <span className="game-hero-meta-dot" />
-              
-              {/* Play Status interactive dropdown. The menu is portaled
-                  into document.body so it escapes the `overflow: hidden`
-                  clip applied to `.game-hero` for its rounded banner
-                  corners. Position is recomputed from the button's
-                  `getBoundingClientRect()` on open, scroll, and resize. */}
-              <div className="game-status-dropdown-container" ref={dropdownRef}>
-                <button
-                  ref={statusButtonRef}
-                  className="game-status-selector-btn"
-                  onClick={() => {
-                    if (!statusDropdownOpen) {
-                      recomputeMenuPosition();
-                      setStatusDropdownOpen(true);
-                    } else {
-                      setStatusDropdownOpen(false);
-                    }
-                  }}
-                  aria-expanded={statusDropdownOpen}
-                  aria-haspopup="listbox"
-                >
-                  <span className="status-dot" style={{ backgroundColor: PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color, boxShadow: `0 0 8px ${PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color}` }} />
-                  <span>{PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}</span>
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: statusDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform var(--transition-fast)' }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-              </div>
-              {statusDropdownOpen && menuPosition && createPortal(
-                <div
-                  className="game-status-dropdown-menu"
-                  role="listbox"
-                  style={{
-                    position: "fixed",
-                    top: menuPosition.top,
-                    left: menuPosition.left,
-                    minWidth: Math.max(menuPosition.width, 140),
-                    zIndex: 1100,
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  {Object.entries(PLAY_STATUS_DETAILS).map(([key, details]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="option"
-                      aria-selected={game.playStatus === key || (!game.playStatus && key === 'backlog')}
-                      className={`game-status-dropdown-item ${game.playStatus === key || (!game.playStatus && key === 'backlog') ? 'active' : ''}`}
-                      onClick={() => {
-                        updateGame(game.id, { playStatus: key as PlayStatus });
-                        setStatusDropdownOpen(false);
-                        showToast(`Play status updated to ${details.label}`, "success");
-                      }}
-                    >
-                      <span className="status-dot" style={{ backgroundColor: details.color }} />
-                      {details.label}
-                    </button>
-                  ))}
-                </div>,
-                document.body
-              )}
-            </div>
-          </div>
-          {!editing && (
-            <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'center' }}>
-              {!game.installed && game.platform === "Steam" && game.steamAppId && (
-                <button
-                  className="game-launch-btn game-install-btn"
-                  onClick={handleInstall}
-                  style={{
-                    background: 'linear-gradient(135deg, #1a9fff, #0077cc)',
-                    borderColor: '#0077cc',
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  Install via Steam
-                </button>
-              )}
-              <button
-                className={`game-launch-btn${isRunning ? " running" : ""}`}
-                onClick={handleLaunch}
-                disabled={isRunning}
-              >
-                {isRunning ? (
-                  <>
-                    <span className="running-dot-pulse" />
-                    Running...
-                  </>
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                      <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                    Launch Game
-                  </>
-                )}
-              </button>
-              <DownloadButton
-                gameName={game.name}
-                gameId={game.id}
-                steamAppId={game.steamAppId}
-              />
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Hero Section - compact KPI-driven layout, see GameHero.tsx.
+          The Library/Edit/Remove buttons that used to live above the
+          hero (and inside it) have been removed; the TopNav Library
+          tab + Sidebar right-click context menu (see Sidebar.tsx) are
+          the canonical entry points for navigation and remove. */}
+      <GameHero game={game} onLaunch={handleLaunch} />
 
       {/* Tabs */}
       <div className="game-tabs">
@@ -1400,227 +845,15 @@ function GameDetail({ game }: { game: Game }) {
       {activeTab === "overview" && (
         <div className="game-content-grid">
           <div className="game-main-col">
-            {game.description && (
-              <section className="game-section">
-                <h2 className="game-section-title">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                  </svg>
-                  About
-                </h2>
-                <p className="game-description" style={{ lineHeight: 1.6, color: 'var(--color-text-primary)' }}>{game.description}</p>
-                {game.metadataSource && game.metadataUrl && (
-                  <a
-                    className="metadata-source-link"
-                    href={game.metadataUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ marginTop: 'var(--space-md)', display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)', color: 'var(--color-accent)', textDecoration: 'none', fontSize: 'var(--font-size-sm)', fontWeight: 500 }}
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      <polyline points="15 3 21 3 21 9" />
-                      <line x1="10" y1="14" x2="21" y2="3" />
-                    </svg>
-                    View on {game.metadataSource}
-                  </a>
-                )}
-              </section>
-            )}
-
-            {game.storyline && (
-              <section className="game-section storyline-section">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                  Storyline
-                </h2>
-                <div className="storyline-quote-wrap" style={{ position: 'relative', paddingLeft: 'var(--space-lg)', borderLeft: '3px solid var(--color-accent)' }}>
-                  <p className="game-storyline" style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>"{game.storyline}"</p>
-                </div>
-              </section>
-            )}
-
-            {game.screenshots && game.screenshots.length > 0 && (
-              <section className="game-section screenshots-section">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                  Screenshots ({game.screenshots.length})
-                </h2>
-                <div className="screenshots-carousel" style={{ display: 'flex', gap: 'var(--space-md)', overflowX: 'auto', paddingBottom: 'var(--space-sm)', scrollbarWidth: 'thin' }}>
-                  {game.screenshots.map((src, index) => (
-                    <div 
-                      key={index} 
-                      className="screenshot-item" 
-                      onClick={() => setLightboxImage(src)} 
-                      style={{ flexShrink: 0, width: 220, height: 124, borderRadius: 'var(--radius-md)', overflow: 'hidden', cursor: 'pointer', border: '1px solid var(--color-border)', transition: 'all var(--transition-fast)' }}
-                    >
-                      <img src={src} alt={`${game.name} Screenshot ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform var(--transition-fast)' }} className="screenshot-img" />
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {game.videos && game.videos.length > 0 && (
-              <section className="game-section videos-section">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="23 7 16 12 23 17 23 7" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                  </svg>
-                  Trailers & Videos
-                </h2>
-                {(() => {
-                  const activeUrl = activeVideoUrl || game.videos[0];
-                  const embedUrl = getVideoEmbedUrl(activeUrl);
-                  return (
-                    <div className="videos-container" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                      {embedUrl ? (
-                        <div className="video-iframe-wrapper" style={{ position: 'relative', width: '100%', paddingBottom: '56.25%', height: 0, borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
-                          <iframe
-                            src={embedUrl}
-                            title={`${game.name} Video Trailer`}
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
-                          />
-                        </div>
-                      ) : (
-                        <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>Video link is invalid</p>
-                      )}
-                      {game.videos.length > 1 && (
-                        <div className="video-selector-list" style={{ display: 'flex', gap: 'var(--space-sm)', overflowX: 'auto', paddingBottom: 'var(--space-xs)' }}>
-                          {game.videos.map((url, idx) => {
-                            const isSelected = activeUrl === url;
-                            const thumb = getVideoThumbnail(url);
-                            return (
-                              <button
-                                key={idx}
-                                className={`video-selector-btn${isSelected ? " active" : ""}`}
-                                onClick={() => setActiveVideoUrl(url)}
-                                style={{
-                                  flexShrink: 0,
-                                  border: isSelected ? '2px solid var(--color-accent)' : '2px solid transparent',
-                                  padding: 0,
-                                  background: 'none',
-                                  borderRadius: 'var(--radius-sm)',
-                                  overflow: 'hidden',
-                                  cursor: 'pointer',
-                                  width: 96,
-                                  height: 54,
-                                  position: 'relative'
-                                }}
-                              >
-                                {thumb?.kind === "youtube" ? (
-                                  <>
-                                    <img src={thumb.src} alt={`Trailer ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                    <div className="video-selector-play-overlay" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', opacity: isSelected ? 1 : 0.6, transition: 'opacity var(--transition-fast)' }}>
-                                      <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 16, height: 16, color: '#fff' }}><polygon points="5 3 19 12 5 21 5 3" /></svg>
-                                    </div>
-                                  </>
-                                ) : thumb?.kind === "twitch" ? (
-                                  <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #9146ff 0%, #6441a5 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 18, height: 18, color: '#fff' }}>
-                                      <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.714 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z" />
-                                    </svg>
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize: 10, color: 'var(--color-text-primary)' }}>Trailer {idx + 1}</span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </section>
-            )}
-
-            <section className="game-section">
-              <h2 className="game-section-title">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="16" y1="13" x2="8" y2="13" />
-                  <line x1="16" y1="17" x2="8" y2="17" />
-                  <polyline points="10 9 9 9 8 9" />
-                </svg>
-                Details
-              </h2>
-              <p className="game-description">
-                <strong>Executable Path:</strong>{" "}
-                <code className="game-path">{game.path}</code>
-              </p>
-            </section>
-
-            {/* Related Content section */}
-            {(game.metadataUrl || game.metadataSource) && (
-              <section className="game-section related-content-card">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                  </svg>
-                  Related Content
-                </h2>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-md)' }}>
-                  {game.metadataUrl && (
-                    <a 
-                      href={game.metadataUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="related-content-btn"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                        <polyline points="15 3 21 3 21 9" />
-                        <line x1="10" y1="14" x2="21" y2="3" />
-                      </svg>
-                      View on {game.metadataSource || 'Metadata Provider'}
-                    </a>
-                  )}
-                  {game.platform === "Steam" && (
-                    <a 
-                      href={`https://steamcommunity.com/app/${game.path.match(/steam:\/\/run\/(\d+)/)?.[1] || game.path.match(/\/app\/(\d+)/)?.[1] || ''}`}
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="related-content-btn"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                      </svg>
-                      Steam Community Hub
-                    </a>
-                  )}
-                </div>
-              </section>
-            )}
+            <AboutSection game={game} />
+            <StorylineSection game={game} />
+            <ScreenshotsSection
+              game={game}
+              onOpen={(src) => setLightboxImage(src)}
+            />
+            <VideosSection game={game} />
+            <GameDetailsCard game={game} />
+            <RelatedContentCard game={game} />
 
             {/* Game Relations Card — library-local + IGDB relations.
                 Renders below the standalone Similar Games section per
@@ -1636,373 +869,20 @@ function GameDetail({ game }: { game: Game }) {
               collectionId={game.collectionId}
               collectionName={game.collection}
             />
-
           </div>
 
           <div className="game-side-col">
-            <section className="game-section">
-              <h2 className="game-section-title">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-                Info
-              </h2>
-              <div className="info-grid">
-                <div className="info-item">
-                  <span className="info-label">Platform</span>
-                  <span className="info-value">{game.platform}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Status</span>
-                  <span className="info-value">
-                    {game.installed ? "Installed" : "Not Installed"}
-                  </span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Play Status</span>
-                  <span className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span className="status-dot" style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color, boxShadow: `0 0 6px ${PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color}` }} />
-                    {PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}
-                  </span>
-                </div>
-                <div className="info-item">
-                  <span className="info-label">Play Time</span>
-                  <span className="info-value">{game.playTime}</span>
-                </div>
-                {game.sizeBytes != null && (
-                  <div className="info-item">
-                    <span className="info-label">Size</span>
-                    <span className="info-value size-clickable" onClick={() => setEditing(true)} title="Edit size">
-                      {formatSize(game.sizeBytes, sizeUnit)}
-                    </span>
-                  </div>
-                )}
-                <div className="info-item">
-                  <span className="info-label">Added</span>
-                  <span className="info-value">{addedDate}</span>
-                </div>
-                {game.developer && (
-                  <div className="info-item">
-                    <span className="info-label">Developer</span>
-                    <span className="info-value">{game.developer}</span>
-                  </div>
-                )}
-                {game.publisher && (
-                  <div className="info-item">
-                    <span className="info-label">Publisher</span>
-                    <span className="info-value">{game.publisher}</span>
-                  </div>
-                )}
-                {game.releaseDate && (
-                  <div className="info-item">
-                    <span className="info-label">Released</span>
-                    <span className="info-value">{game.releaseDate}</span>
-                  </div>
-                )}
-                {game.collection && (
-                  <div className="info-item">
-                    <span className="info-label">Series</span>
-                    <span className="info-value">{game.collection}</span>
-                  </div>
-                )}
-                {game.franchise && (
-                  <div className="info-item">
-                    <span className="info-label">Franchise</span>
-                    <span className="info-value">{game.franchise}</span>
-                  </div>
-                )}
-                {game.gameCategory && (
-                  <div className="info-item">
-                    <span className="info-label">Game Type</span>
-                    <span className="info-value">{game.gameCategory}</span>
-                  </div>
-                )}
-                {game.releaseStatus && (
-                  <div className="info-item">
-                    <span className="info-label">Release Status</span>
-                    <span className="info-value">{game.releaseStatus}</span>
-                  </div>
-                )}
-                {game.alternativeNames && game.alternativeNames.length > 0 && (
-                  <div className="info-item" style={{ gridColumn: 'span 2' }}>
-                    <span className="info-label">Also Known As</span>
-                    <span className="info-value" style={{ display: 'block', fontSize: '11px', marginTop: '2px', color: 'var(--color-text-muted)', lineHeight: '1.4' }}>
-                      {game.alternativeNames.join(", ")}
-                    </span>
-                  </div>
-                )}
-              </div>
-              {game.genres && game.genres.length > 0 && (
-                <div className="info-genres" style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                  {game.genres.map((g) => (
-                    <span key={g} className="metadata-genre-tag">{g}</span>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {(game.igdbRating || game.criticRating) && (
-              <section className="game-section ratings-card">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                  </svg>
-                  IGDB Ratings
-                </h2>
-                <div className="ratings-circle-wrap" style={{ display: 'flex', justifyContent: 'space-around', gap: 'var(--space-md)' }}>
-                  {game.igdbRating && (
-                    <RatingCircle score={Math.round(game.igdbRating)} label="Community" />
-                  )}
-                  {game.criticRating && (
-                    <RatingCircle score={Math.round(game.criticRating)} label="Critics" />
-                  )}
-                </div>
-                {(() => {
-                  const breakdown = (() => {
-                    let exceptional = 0, recommended = 0, meh = 0, skip = 0;
-                    let total = 0;
-                    if (game.igdbReviews && game.igdbReviews.length > 0) {
-                      game.igdbReviews.forEach((r) => {
-                        if (r.rating !== undefined) {
-                          total++;
-                          if (r.rating >= 90) exceptional++;
-                          else if (r.rating >= 75) recommended++;
-                          else if (r.rating >= 50) meh++;
-                          else skip++;
-                        }
-                      });
-                    }
-                    if (total === 0) {
-                      const base = game.igdbRating || 75;
-                      const exp = Math.max(0, Math.round((base - 60) * 1.5));
-                      const rec = Math.max(0, Math.round((base - 40) * 0.8));
-                      const m = Math.max(0, Math.round((100 - base) * 0.6));
-                      const sk = Math.max(0, 100 - (exp + rec + m));
-                      return { exceptional: exp, recommended: rec, meh: m, skip: sk, total: 100 };
-                    }
-                    return {
-                      exceptional: Math.round((exceptional / total) * 100),
-                      recommended: Math.round((recommended / total) * 100),
-                      meh: Math.round((meh / total) * 100),
-                      skip: Math.round((skip / total) * 100),
-                      total: 100
-                    };
-                  })();
-
-                  const items = [
-                    { label: "Exceptional", val: breakdown.exceptional, color: "#10b981" },
-                    { label: "Recommended", val: breakdown.recommended, color: "#3b82f6" },
-                    { label: "Meh", val: breakdown.meh, color: "#f59e0b" },
-                    { label: "Skip", val: breakdown.skip, color: "#ef4444" },
-                  ];
-
-                  return (
-                    <div style={{ marginTop: 'var(--space-lg)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
-                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '600' }}>Score Breakdown</span>
-                      {items.map((item) => (
-                        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                          <span style={{ fontSize: '11px', width: '85px', color: 'var(--color-text-primary)' }}>{item.label}</span>
-                          <div style={{ flex: 1, height: '6px', background: 'var(--color-bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div 
-                              style={{ 
-                                height: '100%', 
-                                width: `${item.val}%`, 
-                                background: item.color, 
-                                borderRadius: '3px',
-                                boxShadow: `0 0 4px ${item.color}`
-                              }} 
-                            />
-                          </div>
-                          <span style={{ fontSize: '11px', width: '30px', textAlign: 'right', color: 'var(--color-text-muted)' }}>{item.val}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </section>
-            )}
-
-            {(game.gameModes || game.themes || game.playerPerspectives) && (
-              <section className="game-section specs-card">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                    <line x1="6" y1="6" x2="6.01" y2="6" />
-                    <line x1="6" y1="18" x2="6.01" y2="18" />
-                  </svg>
-                  Game Specs
-                </h2>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                  {game.gameModes && game.gameModes.length > 0 && (
-                    <div>
-                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Modes</span>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                        {game.gameModes.map((m) => <span key={m} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{m}</span>)}
-                      </div>
-                    </div>
-                  )}
-                  {game.themes && game.themes.length > 0 && (
-                    <div>
-                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Themes</span>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                        {game.themes.map((t) => <span key={t} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{t}</span>)}
-                      </div>
-                    </div>
-                  )}
-                  {game.playerPerspectives && game.playerPerspectives.length > 0 && (
-                    <div>
-                      <span className="spec-label" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 'var(--space-xs)' }}>Perspectives</span>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
-                        {game.playerPerspectives.map((p) => <span key={p} className="spec-tag" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-primary)' }}>{p}</span>)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {game.timeToBeat && (game.timeToBeat.normally || game.timeToBeat.completely || game.timeToBeat.hastily) && (
-              <section className="game-section time-to-beat-card">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  Time to Beat
-                </h2>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-                  {game.timeToBeat.normally !== undefined && game.timeToBeat.normally > 0 && (
-                    <TimeToBeatRow 
-                      label="Main Story" 
-                      targetSeconds={game.timeToBeat.normally} 
-                      currentPlayTime={game.playTime} 
-                    />
-                  )}
-                  {game.timeToBeat.completely !== undefined && game.timeToBeat.completely > 0 && (
-                    <TimeToBeatRow 
-                      label="Completionist" 
-                      targetSeconds={game.timeToBeat.completely} 
-                      currentPlayTime={game.playTime} 
-                    />
-                  )}
-                  {game.timeToBeat.hastily !== undefined && game.timeToBeat.hastily > 0 && (
-                    <TimeToBeatRow
-                      label="Rushed"
-                      targetSeconds={game.timeToBeat.hastily}
-                      currentPlayTime={game.playTime}
-                    />
-                  )}
-                </div>
-              </section>
-            )}
-
-            {game.releases && game.releases.length > 0 && (
-              <section className="game-section releases-card">
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <line x1="16" y1="2" x2="16" y2="6" />
-                    <line x1="8" y1="2" x2="8" y2="6" />
-                    <line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                  Releases
-                </h2>
-                <div className="releases-list" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                  {game.releases.map((rel, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', padding: '6px 0', borderBottom: '1px solid var(--color-border)' }}>
-                      <span style={{ fontWeight: '500', color: 'var(--color-text-primary)' }}>{rel.platform}</span>
-                      <span style={{ color: 'var(--color-text-muted)' }}>{rel.dateStr} ({rel.region})</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* CrackWatch Status */}
+            <InfoKpiCard
+              game={game}
+              sizeUnit={sizeUnit}
+              onEditSize={() => setEditing(true)}
+            />
+            <RatingsKpiCard game={game} />
+            <SpecsCard game={game} />
+            <TimeToBeatCard game={game} />
+            <ReleasesCard game={game} />
             <CrackWatchCard gameName={game.name} />
-
-            {/* Languages Section */}
-            {game.languageSupports && game.languageSupports.length > 0 && (
-              <section className="game-section languages-section" style={{ marginTop: 'var(--space-xl)' }}>
-                <h2 className="game-section-title">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    <line x1="9" y1="10" x2="15" y2="10" />
-                    <line x1="9" y1="14" x2="13" y2="14" />
-                  </svg>
-                  Supported Languages
-                </h2>
-                {(() => {
-                  const langMap: Record<string, { interface: boolean; audio: boolean; subtitles: boolean }> = {};
-                  game.languageSupports.forEach(ls => {
-                    if (!ls.language) return;
-                    if (!langMap[ls.language]) {
-                      langMap[ls.language] = { interface: false, audio: false, subtitles: false };
-                    }
-                    const type = ls.supportType ? ls.supportType.toLowerCase() : "";
-                    if (type === "interface") langMap[ls.language].interface = true;
-                    else if (type === "audio") langMap[ls.language].audio = true;
-                    else if (type === "subtitles") langMap[ls.language].subtitles = true;
-                  });
-
-                  const languagesList = Object.keys(langMap).sort();
-
-                  return (
-                    <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-secondary)' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-sm)', textAlign: 'left' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'rgba(255,255,255,0.02)' }}>
-                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600' }}>Language</th>
-                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Interface</th>
-                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Audio</th>
-                            <th style={{ padding: 'var(--space-sm) var(--space-md)', color: 'var(--color-text-muted)', fontWeight: '600', textAlign: 'center' }}>Subtitles</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {languagesList.map(lang => (
-                            <tr key={lang} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                              <td style={{ padding: 'var(--space-sm) var(--space-md)', fontWeight: '500', color: 'var(--color-text-primary)' }}>{lang}</td>
-                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
-                                {langMap[lang].interface ? (
-                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
-                                ) : (
-                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
-                                {langMap[lang].audio ? (
-                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
-                                ) : (
-                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-sm) var(--space-md)', textAlign: 'center' }}>
-                                {langMap[lang].subtitles ? (
-                                  <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span>
-                                ) : (
-                                  <span style={{ color: 'var(--color-text-muted)' }}>-</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  );
-                })()}
-              </section>
-            )}
-
+            <LanguagesSection game={game} />
           </div>
         </div>
       )}

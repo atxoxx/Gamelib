@@ -1,4 +1,5 @@
 @import "./styles/settings.css";
+@import "./styles/game-cards.css";
 
 /* ==============================
    Theme Engine - CSS Custom Properties
@@ -1215,35 +1216,40 @@
 /* Game Tabs */
 .game-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2xs);
+  border-bottom: 1px solid var(--color-border-light);
   margin-bottom: var(--space-xl);
   padding: 0 var(--space-xs);
 }
 
 .game-tab {
   padding: var(--space-md) var(--space-lg);
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.2px;
   cursor: pointer;
   position: relative;
   transition: all var(--transition-fast);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
-.game-tab:hover {
+.game-tab:not(.active):hover {
   color: var(--color-text-primary);
   background: var(--color-bg-hover);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-color: var(--color-border);
+  border-bottom-color: transparent;
 }
 
 .game-tab.active {
   color: var(--color-accent);
   border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  font-weight: var(--font-weight-bold);
 }
 
 .game-tab-placeholder {
@@ -1313,13 +1319,9 @@
   transform: scale(1.05);
 }
 
-.video-selector-btn:hover {
-  filter: brightness(1.2);
-}
-
-.video-selector-btn.active {
-  box-shadow: 0 0 10px var(--color-accent-glow);
-}
+/* .video-selector-btn hover/active states live in src/styles/game-cards.css
+ * to keep all video-related styles co-located. The base button
+ * (width, aspect-ratio, border, etc.) is also defined there. */
 
 .rating-circle-progress {
   transition: stroke-dashoffset 0.8s ease;

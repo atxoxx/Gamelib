@@ -1,0 +1,30 @@
+/**
+ * Barrel for the Game page card components.
+ *
+ *  Importing cards from a single path keeps the parent page
+ *  clean (`import { InfoKpiCard, RatingsKpiCard, ... } from
+ *  '../components/game'`) and lets the cards be reused by the
+ *  Store GameDetail page without duplicating the directory
+ *  layout in the import paths.
+ */
+
+export { default as GameHero } from "./GameHero";
+export { default as GameStatusDropdown } from "./GameStatusDropdown";
+export { default as GameLaunchActions } from "./GameLaunchActions";
+
+export { default as InfoKpiCard } from "./InfoKpiCard";
+export { default as RatingsKpiCard } from "./RatingsKpiCard";
+export { default as TimeToBeatCard } from "./TimeToBeatCard";
+export { default as SpecsCard } from "./SpecsCard";
+export { default as ReleasesCard } from "./ReleasesCard";
+export { default as LanguagesSection } from "./LanguagesSection";
+
+export { default as AboutSection } from "./AboutSection";
+export { default as StorylineSection } from "./StorylineSection";
+export { default as ScreenshotsSection } from "./ScreenshotsSection";
+export { default as VideosSection } from "./VideosSection";
+export { default as GameDetailsCard } from "./GameDetailsCard";
+export { default as RelatedContentCard } from "./RelatedContentCard";
+
+export { SectionTitle, TimeToBeatRow, StatusDot, formatPlayTimeCompact } from "./shared";
+export { getVideoEmbedUrl, getVideoThumbnail } from "./video";
