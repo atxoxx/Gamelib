@@ -10,6 +10,19 @@ interface StoreGameGridProps {
   hasMore: boolean;
   onLoadMore: () => void;
   onCardClick: (game: StoreGameSummary) => void;
+  /**
+   * True when the user has enabled the per-source download filter.
+   * Used to swap the generic empty-state copy for a source-filter-
+   * specific message ("No games match your selected sources") so the
+   * cause of an empty result is obvious.
+   */
+  isSourceFilterActive?: boolean;
+  /**
+   * True while at least one (game, source) availability check is
+   * still in flight. Drives the "checking…" subtitle on the source-
+   * filter empty state so users know the list may grow.
+   */
+  isSourceCheckPending?: boolean;
 }
 
 /** Card skeleton placeholder shown while the initial batch loads. */
@@ -35,6 +48,8 @@ export default function StoreGameGrid({
   hasMore,
   onLoadMore,
   onCardClick,
+  isSourceFilterActive = false,
+  isSourceCheckPending = false,
 }: StoreGameGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -84,7 +99,33 @@ export default function StoreGameGrid({
   }
 
   // ── Empty state (after loading completes) ──────────────────────────────
+  // Distinguish the source-filter empty state from the generic one so
+  // the cause of an empty result is self-explanatory — users otherwise
+  // wonder whether they broke the search, hit a rate limit, or whether
+  // the source filter is just being strict.
   if (!loading && games.length === 0) {
+    if (isSourceFilterActive) {
+      return (
+        <div className="store-empty">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <h3>No games match your selected sources</h3>
+          <p>
+            {isSourceCheckPending
+              ? "Still checking the rest of the page — listing may grow in a moment."
+              : "Try removing a source from the sidebar — the filter uses a strict AND-intersection, so a game must appear in every checked source to be shown."}
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="store-empty">
         <svg

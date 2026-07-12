@@ -1,3 +1,6 @@
+import { useSources } from "../../context/SourceContext";
+import type { SourceLink } from "../../types/source";
+
 const GENRES = [
   "Action",
   "Adventure",
@@ -30,10 +33,12 @@ interface StoreFilterSidebarProps {
   yearMin: number | null;
   yearMax: number | null;
   ratingMin: number | null;
+  selectedSourceIds: string[];
   onGenresChange: (genres: string[]) => void;
   onPlatformsChange: (platforms: string[]) => void;
   onYearRangeChange: (min: number | null, max: number | null) => void;
   onRatingMinChange: (rating: number | null) => void;
+  onSourcesChange: (sourceIds: string[]) => void;
   onApply: () => void;
   onReset: () => void;
 }
@@ -44,13 +49,23 @@ export default function StoreFilterSidebar({
   yearMin,
   yearMax,
   ratingMin,
+  selectedSourceIds,
   onGenresChange,
   onPlatformsChange,
   onYearRangeChange,
   onRatingMinChange,
+  onSourcesChange,
   onApply,
   onReset,
 }: StoreFilterSidebarProps) {
+  // Hook up to the live source list so the sidebar re-renders when the
+  // user adds/removes/toggles a source in Settings. Only enabled
+  // sources are surfaced — a disabled source wouldn't contribute to
+  // any download-search call, so showing it as a filter option would
+  // be misleading.
+  const { sources } = useSources();
+  const enabledSources: SourceLink[] = sources.filter((s) => s.enabled);
+
   const handleGenreToggle = (genre: string) => {
     if (selectedGenres.includes(genre)) {
       onGenresChange(selectedGenres.filter((g) => g !== genre));
@@ -64,6 +79,14 @@ export default function StoreFilterSidebar({
       onPlatformsChange(selectedPlatforms.filter((p) => p !== platform));
     } else {
       onPlatformsChange([...selectedPlatforms, platform]);
+    }
+  };
+
+  const handleSourceToggle = (sourceId: string) => {
+    if (selectedSourceIds.includes(sourceId)) {
+      onSourcesChange(selectedSourceIds.filter((s) => s !== sourceId));
+    } else {
+      onSourcesChange([...selectedSourceIds, sourceId]);
     }
   };
 
@@ -153,6 +176,42 @@ export default function StoreFilterSidebar({
             )
           }
         />
+      </div>
+
+      <div className="store-filter-section">
+        <h4 className="store-filter-heading">Download Sources</h4>
+        {enabledSources.length === 0 ? (
+          <p className="store-filter-empty-text">
+            No sources added yet — open Settings → Sources to add one. The
+            filter will only show store games whose titles are present in
+            every selected source.
+          </p>
+        ) : (
+          <div className="store-filter-list">
+            {enabledSources.map((source) => (
+              <label key={source.id} className="store-filter-source-row">
+                <input
+                  type="checkbox"
+                  checked={selectedSourceIds.includes(source.id)}
+                  onChange={() => handleSourceToggle(source.id)}
+                />
+                <span className="store-filter-source-name" title={source.url}>
+                  {source.name}
+                </span>
+                {source.gameCount > 0 && (
+                  <span
+                    className="store-filter-source-count"
+                    title={`${source.gameCount.toLocaleString()} entries in source`}
+                  >
+                    {source.gameCount >= 1000
+                      ? `${(source.gameCount / 1000).toFixed(1)}k`
+                      : source.gameCount}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="store-filter-actions">
