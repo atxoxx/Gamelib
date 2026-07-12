@@ -358,6 +358,21 @@ impl TorrentEngine {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Restored Download")
                 .to_string();
+            // Cold-start re-stamp decision for FetchingMetadata / Paused
+            // rows. Bound BEFORE the struct literal because the
+            // `status,` field-init below moves `status`. The
+            // FetchingMetadata grace-arm in `refresh_stats` keeps rows
+            // by `(now - added_at) < 300`; if a user closed the app
+            // mid-FetchingMetadata, the saved `added_at` predates the
+            // grace window and would be pruned within 2 s of init.
+            // Treating app restart as a fresh "still alive" tick
+            // re-applies the grace window from this point forward.
+            // Completed rows keep their original `added_at` for UI
+            // sort stability.
+            let needs_fresh_added_at = matches!(
+                status,
+                DownloadStatus::FetchingMetadata | DownloadStatus::Paused
+            );
             self.downloads.insert(id.clone(), TorrentDownload {
                 id: id.clone(),
                 name,
@@ -373,7 +388,21 @@ impl TorrentEngine {
                 status,
                 game_id: meta.game_id.clone(),
                 source_name: meta.source_name.clone(),
-                added_at: meta.added_at,
+                // Cold-start re-stamp for FetchingMetadata / Paused rows:
+                // the FetchingMetadata grace-arm in `refresh_stats` keeps
+                // rows by `(now - added_at) < 300`, so if a user closed
+                // the app mid-FetchingMetadata (before the previous fix
+                // existed, the row vanished; with the extended grace,
+                // `added_at` from a previous run is too old and the row
+                // would be pruned within 2 s of init). Re-stamping here
+                // treats app restart as a fresh "still alive" tick so the
+                // grace window applies from this point forward. Completed
+                // rows keep the original `added_at` to preserve UI sort.
+                added_at: if needs_fresh_added_at {
+                    unix_now()
+                } else {
+                    meta.added_at
+                },
                 files: meta.files.clone(),
                 auto_extract: meta.auto_extract,
                 extracted: meta.extracted,
@@ -884,13 +913,20 @@ impl TorrentEngine {
             self.mark_dirty();
         }
 
+        // 130s = librqbit `add_torrent` background timeout (120s)
+        // + 10s buffer. Guarantees the FetchingMetadata keep-arm
+        // hands off cleanly to the Error(_) keep-arm when the
+        // timeout fires instead of having the row pruned.
+        const FETCHING_METADATA_GRACE_SECS: u64 = 130;
         self.downloads
             .retain(|id, d| {
                 id.starts_with("dd_") ||
                 id.starts_with("db_") ||
                 alive_set.contains_key(id) ||
                 matches!(d.status, DownloadStatus::Completed) ||
-                (matches!(d.status, DownloadStatus::Paused) && !d.files.is_empty() && !d.source_uri.is_empty() && id.starts_with("dl_"))
+                matches!(d.status, DownloadStatus::Error(_)) ||
+                (matches!(d.status, DownloadStatus::Paused) && !d.files.is_empty() && !d.source_uri.is_empty() && id.starts_with("dl_")) ||
+                (matches!(d.status, DownloadStatus::FetchingMetadata) && unix_now().saturating_sub(d.added_at) < FETCHING_METADATA_GRACE_SECS && id.starts_with("dl_"))
             });
 
         self.direct_counters.retain(|id, _| self.downloads.contains_key(id));
@@ -1968,6 +2004,7 @@ pub async fn torrent_start_selected(
             let d = guard.downloads.get_mut(&id)
                 .ok_or_else(|| format!("Download not found in engine: {}", id))?;
             d.status = DownloadStatus::FetchingMetadata;
+            d.added_at = unix_now();
             source_uri = d.source_uri.clone();
             save_path = normalize_path(&d.save_path);
             game_id = d.game_id.clone();

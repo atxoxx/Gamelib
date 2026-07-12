@@ -70,14 +70,12 @@ export default function SettingsPage() {
   // Debrid Settings State
   const [debridProvider, setDebridProvider] = useState("none");
   const [debridApiKey, setDebridApiKey] = useState("");
-  const [fallbackTorrent, setFallbackTorrent] = useState(true);
   const [testingDebrid, setTestingDebrid] = useState(false);
 
   // Load Debrid on mount
   useEffect(() => {
     setDebridProvider(localStorage.getItem("gamelib-debrid-provider") || "none");
     setDebridApiKey(localStorage.getItem("gamelib-debrid-apikey") || "");
-    setFallbackTorrent(localStorage.getItem("gamelib-debrid-fallback-torrent") !== "false");
   }, []);
 
   const handleTestDebrid = async () => {
@@ -1601,19 +1599,11 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  <div className="settings-limit-row">
-                    <label className="settings-checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={fallbackTorrent}
-                        onChange={(e) => {
-                          setFallbackTorrent(e.target.checked);
-                          localStorage.setItem("gamelib-debrid-fallback-torrent", String(e.target.checked));
-                        }}
-                      />
-                      <span>Fallback to standard torrent download if magnet is not cached</span>
-                    </label>
-                  </div>
+                  <p className="settings-help-text" style={{ marginTop: "var(--space-xs)", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
+                    Debrid is used <strong>only</strong> to unrestrict direct download links. Magnet URIs
+                    and <code>.torrent</code> file URLs always go through the P2P torrent engine, regardless
+                    of this setting.
+                  </p>
                 </>
               )}
             </div>

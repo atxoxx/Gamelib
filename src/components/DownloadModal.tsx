@@ -54,7 +54,6 @@ export default function DownloadModal({
   const {
     addDownload,
     addDirectDownload,
-    addDebridDownload,
     selectSavePath,
     activeDownloads,
     startSelectedDownload,
@@ -238,10 +237,16 @@ export default function DownloadModal({
         } catch {
           targetFileName = match.title + ".zip";
         }
-        
+
         targetFileName = targetFileName.replace(/[:*?"<>|\\/]/g, "").trim();
         const fullSavePath = `${finalSavePath}/${targetFileName}`.replace(/\\/g, "/");
 
+        // Policy note: only direct-download links flow through the
+        // `addDirectDownload` path (which earns a debrid unrestrict call
+        // when a debrid provider is configured). Torrents — magnet URIs
+        // and .torrent file URLs — never go through debrid so they stay
+        // on the P2P path below. Debrid is intentionally restricted to
+        // direct-link unrestriction here.
         await addDirectDownload(sourceUri, fullSavePath, gameId ?? null, match.sourceName, autoExtract, match.uris);
         showToast(
           `Downloading direct link "${targetFileName}" from ${match.sourceName}`,
@@ -251,49 +256,15 @@ export default function DownloadModal({
         return;
       }
 
-      const debridProvider = localStorage.getItem("gamelib-debrid-provider") || "none";
-      const debridApiKey = localStorage.getItem("gamelib-debrid-apikey") || "";
-      const fallbackTorrent = localStorage.getItem("gamelib-debrid-fallback-torrent") !== "false";
-
-      if (isMagnet && debridProvider !== "none" && debridApiKey) {
-        setStep("starting");
-        try {
-          const cacheCheck = await invoke<{ instant: boolean; provider: string }>("check_debrid_cache", {
-            provider: debridProvider,
-            apikey: debridApiKey,
-            magnet: sourceUri,
-          });
-
-          if (cacheCheck.instant || !fallbackTorrent) {
-            let targetFileName = match.title.replace(/[:*?"<>|\\/]/g, "").trim() + ".zip";
-            const fullSavePath = `${finalSavePath}/${targetFileName}`.replace(/\\/g, "/");
-
-            await addDebridDownload(
-              sourceUri,
-              fullSavePath,
-              gameId ?? null,
-              match.sourceName,
-              debridProvider,
-              debridApiKey,
-              autoExtract
-            );
-            showToast(
-              `Downloading "${match.title}" via ${debridProvider} (cached link)`,
-              "success",
-            );
-            onClose();
-            return;
-          } else {
-            showToast("Magnet not cached on Debrid. Falling back to P2P Torrent...", "info");
-          }
-        } catch (e) {
-          console.error("[DownloadModal] Debrid check failed:", e);
-          if (!fallbackTorrent) {
-            throw new Error(`Debrid error: ${e}`);
-          }
-        }
-      }
-
+      // At this point `sourceUri` is either a magnet URI or a `.torrent`
+      // URL — both are handled by the P2P torrent engine via
+      // `torrent_add`. We deliberately do NOT route torrents through
+      // debird (neither cache-check + unrestrict, nor upload-magnet +
+      // status-poll): magnets and `.torrent` URLs are always downloaded
+      // through `librqbit` (DHT / trackers / peer swarm), so the
+      // metadata fetch, file selection, piece downloads, ratio stats,
+      // and persistence all work the way a torrent client is expected
+      // to behave.
       if (chooseFiles) {
         setStep("fetching_metadata");
         const newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
@@ -326,7 +297,6 @@ export default function DownloadModal({
     matches,
     addDownload,
     addDirectDownload,
-    addDebridDownload,
     gameId,
     showToast,
     onClose,

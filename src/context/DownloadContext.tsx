@@ -76,15 +76,6 @@ interface DownloadContextValue {
     autoExtract?: boolean,
     uris?: string[],
   ) => Promise<TorrentDownload>;
-  addDebridDownload: (
-    magnet: string,
-    savePath: string,
-    gameId?: string | null,
-    sourceName?: string,
-    provider?: string,
-    apikey?: string,
-    autoExtract?: boolean,
-  ) => Promise<TorrentDownload>;
   startSelectedDownload: (
     id: string,
     onlyFiles: number[],
@@ -366,36 +357,6 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const addDebridDownload = useCallback(
-    async (
-      magnet: string,
-      savePath: string,
-      gameId: string | null = null,
-      sourceName = "Debrid Download",
-      provider = "alldebrid",
-      apikey = "",
-      autoExtract = false,
-    ): Promise<TorrentDownload> => {
-      const id = `db_${Math.random().toString(36).substring(2, 11)}`;
-      const newDownload = await invoke<TorrentDownload>("debrid_download_start", {
-        id,
-        magnet,
-        savePath,
-        gameId,
-        sourceName,
-        provider,
-        apikey,
-        autoExtract,
-      });
-      setDownloads((prev) => {
-        const without = prev.filter((d) => d.id !== newDownload.id);
-        return [newDownload, ...without];
-      });
-      return newDownload;
-    },
-    [],
-  );
-
   const startSelectedDownload = useCallback(
     async (id: string, onlyFiles: number[], autoExtract: boolean): Promise<void> => {
       await invoke("torrent_start_selected", { id, onlyFiles, autoExtract });
@@ -494,7 +455,6 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       loading,
       addDownload,
       addDirectDownload,
-      addDebridDownload,
       startSelectedDownload,
       updateDirectDownloadUrl,
       pauseDownload,
@@ -515,7 +475,6 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       loading,
       addDownload,
       addDirectDownload,
-      addDebridDownload,
       startSelectedDownload,
       updateDirectDownloadUrl,
       pauseDownload,
