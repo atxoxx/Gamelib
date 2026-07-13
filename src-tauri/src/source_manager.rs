@@ -96,6 +96,14 @@ struct SyncDownloadSourcesRequest {
 
 /// Response from `POST /download-sources` and entries in the
 /// `POST /download-sources/sync` response array.
+///
+/// The Hydra API returns catalog metadata only (id, name,
+/// fingerprint, download_count, status) — the full download
+/// list is served by separate repack/search endpoints
+/// (`/games/steam/:appid/download-sources`,
+/// `/catalogue/search`). We use `download_count` for the
+/// source's `game_count` when the raw source URL is
+/// unreachable (HTTP 403, Cloudflare, etc.).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -251,22 +259,31 @@ impl SourceManager {
         // 1. Register with Hydra.
         let hydra_resp = self.hydra_add_source(&trimmed).await?;
 
-        // 2. Fetch the source JSON. Cloudflare-protected URLs may
-        //    fail here — we still save the source; `game_count`
-        //    remains at the Hydra fallback count.
-        let game_source = match self.fetch_source_json(&hydra_resp.url).await {
-            Ok(src) => src,
-            Err(e) => {
-                eprintln!(
-                    "[source_manager] Warning: fetch_source_json failed for {}: {}",
-                    hydra_resp.url, e
-                );
-                GameSource {
-                    name: hydra_resp.name.clone(),
-                    downloads: Vec::new(),
+        // 2. Try to fetch the raw source JSON for local caching.
+        //    This may fail (HTTP 403, Cloudflare, etc.) — in that
+        //    case we fall back to Hydra's `download_count` for the
+        //    game tally. The actual download links are served by
+        //    Hydra's repack/search endpoints, not the raw JSON.
+        let (game_source, effective_count) =
+            match self.fetch_source_json(&hydra_resp.url).await {
+                Ok(src) => {
+                    let count = src.downloads.len();
+                    (src, count)
                 }
-            }
-        };
+                Err(e) => {
+                    eprintln!(
+                        "[source_manager] fetch_source_json failed for {}: {}; using Hydra download_count ({})",
+                        hydra_resp.url, e, hydra_resp.download_count
+                    );
+                    (
+                        GameSource {
+                            name: hydra_resp.name.clone(),
+                            downloads: Vec::new(),
+                        },
+                        hydra_resp.download_count,
+                    )
+                }
+            };
 
         let now_secs = unix_now();
         let local_id = format!("src_{}_{}", unix_now_nanos(), SOURCE_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -276,6 +293,12 @@ impl SourceManager {
             name.trim().to_string()
         };
 
+        // When the raw source JSON was unreachable we still have
+        // Hydra's download_count — use it so the UI shows the real
+        // number of titles rather than "0 games". commit_cached_source
+        // will overwrite with the actual parsed count when downloads
+        // are available; when they aren't it falls through to our
+        // effective_count.
         let source = SourceLink {
             id: local_id.clone(),
             hydra_source_id: hydra_resp.id.clone(),
@@ -283,7 +306,7 @@ impl SourceManager {
             name: display_name.clone(),
             enabled: true,
             last_fetched: Some(now_secs),
-            game_count: 0,
+            game_count: effective_count,
         };
         db::sources::upsert_source(&self.db, &source)?;
 
@@ -295,6 +318,9 @@ impl SourceManager {
             &game_source,
             now_secs,
         )?;
+        // Prefer the parsed count when downloads were available;
+        // otherwise the Hydra-supplied effective_count is correct.
+        let final_count = if game_count > 0 { game_count } else { effective_count };
 
         Ok(SourceLink {
             id: local_id,
@@ -303,7 +329,7 @@ impl SourceManager {
             name: display_name,
             enabled: true,
             last_fetched: Some(now_secs),
-            game_count,
+            game_count: final_count,
         })
     }
 
@@ -458,12 +484,15 @@ impl SourceManager {
             source.hydra_source_id.clone()
         };
 
-        let results = self.hydra_sync_sources(&[hydra_id.clone()]).await?;
-        if !results.is_empty() {
-            let hydra_resp = &results[0];
-            let game_source_opt = self.fetch_source_json(&hydra_resp.url).await.ok();
-            cache_hydra_response(&self.db, source.id.clone(), hydra_resp, game_source_opt, now)?;
-            return Ok(());
+        // When we have a valid Hydra id, try the bulk-sync endpoint first.
+        if !hydra_id.is_empty() {
+            let results = self.hydra_sync_sources(&[hydra_id.clone()]).await?;
+            if !results.is_empty() {
+                let hydra_resp = &results[0];
+                let game_source_opt = self.fetch_source_json(&hydra_resp.url).await.ok();
+                cache_hydra_response(&self.db, source.id.clone(), hydra_resp, game_source_opt, now)?;
+                return Ok(());
+            }
         }
 
         // Fallback: direct fetch from the source URL.
@@ -565,15 +594,33 @@ impl SourceManager {
 
     /// POSTs the local source URL to Hydra if not already
     /// registered; returns the existing or newly-assigned Hydra id.
+    ///
+    /// If the Hydra registration fails (e.g. the URL was already
+    /// registered by a previous run whose `hydra_source_id` was
+    /// lost), we return the empty string rather than aborting the
+    /// refresh. Callers fall through to the direct-fetch path which
+    /// doesn't need a Hydra id.
     async fn ensure_hydra_id(&self, source: &SourceLink) -> Result<String, String> {
         if !source.hydra_source_id.is_empty() {
             return Ok(source.hydra_source_id.clone());
         }
-        let hydra_resp = self.hydra_add_source(&source.url).await?;
-        let mut updated = source.clone();
-        updated.hydra_source_id = hydra_resp.id.clone();
-        db::sources::upsert_source(&self.db, &updated)?;
-        Ok(hydra_resp.id)
+        match self.hydra_add_source(&source.url).await {
+            Ok(hydra_resp) => {
+                let mut updated = source.clone();
+                updated.hydra_source_id = hydra_resp.id.clone();
+                db::sources::upsert_source(&self.db, &updated)?;
+                Ok(hydra_resp.id)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[source_manager] ensure_hydra_id: Hydra registration failed for {}: {e}",
+                    source.id
+                );
+                // Return the (possibly-empty) fallback so
+                // callers can proceed with a direct fetch.
+                Ok(source.hydra_source_id.clone())
+            }
+        }
     }
 
     fn url_exists(&self, url: &str) -> Result<bool, String> {
@@ -815,6 +862,13 @@ fn cache_hydra_response(
         downloads: Vec::new(),
     });
     db::sources::commit_cached_source(db, &local_source_id, &hydra_resp.id, &game_source, fetched_at)?;
+    // When the raw JSON was unreachable the cached downloads are
+    // empty (game_count was set to 0 by commit_cached_source), but
+    // Hydra's download_count is still authoritative. Patch the
+    // source's game_count so the UI shows the real tally.
+    if game_source.downloads.is_empty() && hydra_resp.download_count > 0 {
+        db::sources::update_game_count(db, &local_source_id, hydra_resp.download_count)?;
+    }
     Ok(())
 }
 

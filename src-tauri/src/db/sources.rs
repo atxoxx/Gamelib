@@ -28,9 +28,30 @@ use crate::source_manager::{CachedSource, GameSource, MatchedDownload, SourceLin
 // ── Source metadata CRUD ────────────────────────────────────────
 
 /// Insert or update a source's metadata.
+///
+/// The `sources` table has a `PRIMARY KEY (id)` and a `UNIQUE (url)`
+/// index. `ON CONFLICT(id)` alone does not catch a URL collision with
+/// a different `id` — e.g. when the legacy auto-importer encounters
+/// the same URL under both a legacy key and a freshly-added key.
+///
+/// To keep the upsert idempotent we first DELETE any row that
+/// already claims our URL under a different `id`. The CASCADE
+/// foreign keys on `sources_cache` / `downloads` / FTS5 tear down
+/// the stale row automatically. Both statements run in a single
+/// transaction so a crash between the DELETE and the INSERT cannot
+/// leave the row orphaned.
 pub fn upsert_source(db: &Db, source: &SourceLink) -> Result<(), String> {
-    let conn = db.conn().map_err(|e| format!("sources conn: {e}"))?;
-    conn.execute(
+    let mut conn = db.conn().map_err(|e| format!("sources conn: {e}"))?;
+    let tx = conn.transaction().map_err(|e| format!("sources tx: {e}"))?;
+    // 1. Remove any stale row that already holds this URL under a
+    //    different local id.  If no such row exists this is a no-op.
+    tx.execute(
+        "DELETE FROM sources WHERE url = ?1 AND id != ?2",
+        params![source.url, source.id],
+    )
+    .map_err(|e| format!("sources dedupe: {e}"))?;
+    // 2. Normal insert-or-update on the primary key.
+    tx.execute(
         "INSERT INTO sources(id, hydra_source_id, url, name, enabled,
                               last_fetched, game_count, added_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -53,6 +74,7 @@ pub fn upsert_source(db: &Db, source: &SourceLink) -> Result<(), String> {
         ],
     )
     .map_err(|e| format!("sources upsert: {e}"))?;
+    tx.commit().map_err(|e| format!("sources upsert commit: {e}"))?;
     Ok(())
 }
 
@@ -73,6 +95,20 @@ pub fn remove_source(db: &Db, id: &str) -> Result<(), String> {
     let conn = db.conn().map_err(|e| format!("sources conn: {e}"))?;
     conn.execute("DELETE FROM sources WHERE id = ?1", params![id])
         .map_err(|e| format!("sources delete: {e}"))?;
+    Ok(())
+}
+
+/// Override a source's `game_count` without touching the rest of the
+/// row. Used when Hydra returns a `download_count` but the raw source
+/// JSON was unreachable (HTTP 403, Cloudflare, etc.) — the UI should
+/// still show the correct tally from Hydra rather than "0 games".
+pub fn update_game_count(db: &Db, id: &str, count: usize) -> Result<(), String> {
+    let conn = db.conn().map_err(|e| format!("sources conn: {e}"))?;
+    conn.execute(
+        "UPDATE sources SET game_count = ?1 WHERE id = ?2",
+        params![count as i64, id],
+    )
+    .map_err(|e| format!("sources game_count update: {e}"))?;
     Ok(())
 }
 

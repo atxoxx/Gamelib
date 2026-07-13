@@ -266,7 +266,14 @@ fn import_sources(
     let sources: Vec<serde_json::Value> = serde_json::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", sources_meta_path.display()))?;
 
-    // Sources metadata first (idempotent upsert).
+    // Sources metadata first (idempotent upsert).  Errors on
+    // individual rows (e.g. two legacy entries sharing the same
+    // URL) are logged-and-continued rather than aborting the
+    // entire import — a single corrupt entry should not prevent
+    // the rest of the sources from importing, and should not
+    // prevent the file from being moved to the backup directory.
+    let mut meta_imported: usize = 0;
+    let mut meta_errors: usize = 0;
     for s in &sources {
         let id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let hydra = s.get("hydraSourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -290,7 +297,31 @@ fn import_sources(
             last_fetched,
             game_count,
         };
-        sources::upsert_source(db, &link)?;
+        match sources::upsert_source(db, &link) {
+            Ok(()) => meta_imported += 1,
+            Err(e) => {
+                meta_errors += 1;
+                eprintln!(
+                    "[db::legacy] skipping source {}: {e}",
+                    id
+                );
+            }
+        }
+    }
+    if meta_errors > 0 {
+        eprintln!(
+            "[db::legacy] sources metadata: {meta_imported} imported, {meta_errors} skipped"
+        );
+    }
+    // Safety net: if every single legacy source failed to import,
+    // don't move the originals — the file is either corrupt or the
+    // DB schema is fundamentally incompatible. Returning an error
+    // here keeps the files on disk for a future retry.
+    if meta_imported == 0 && meta_errors > 0 {
+        return Err(format!(
+            "all {} source metadata entries failed to import",
+            meta_errors
+        ));
     }
 
     if !sources_cache_dir.exists() {
