@@ -1101,3 +1101,157 @@
   border-top: 1px solid var(--color-border);
   font-style: italic;
 }
+
+/* ── 8. Launcher tab + checkbox inline-text blocks ───────────────── */
+
+/* Two-column responsive grid that lays out the launcher / data cards.
+ * Falls back to a single column under 600px so the rows stay readable
+ * on narrow windows. */
+.settings-launcher-grid,
+.settings-data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-md);
+}
+
+.settings-launcher-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.settings-launcher-card:hover {
+  border-color: var(--color-border-light);
+}
+
+/* Yellow-tinted warning variant for the UAC bypass toggle. Visually
+ * pushes the user toward reading the warning copy underneath; they
+ * have to actively engage the box to dismiss it. */
+.settings-launcher-card--warn {
+  border-color: color-mix(in srgb, var(--color-warning, #eab308) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning, #eab308) 5%, var(--color-bg-secondary));
+}
+
+.settings-launcher-card--warn:hover {
+  border-color: color-mix(in srgb, var(--color-warning, #eab308) 55%, var(--color-border));
+}
+
+/* Two-line layout for checkbox labels: a bold title above a muted
+ * helper description. Used in the Launcher tab and Data & Sync
+ * cards so each toggle reads like a real option, not a square tick. */
+.settings-checkbox-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-checkbox-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+.settings-checkbox-desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* ── 9. Accent color picker (Appearance) ──────────────────────────── */
+
+.accent-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-top: var(--space-sm);
+}
+
+.accent-swatch {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  background-clip: padding-box;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+/* Inner ring so the swatch's background-color shows while the
+ * border conveys selection state. Keeps the circle clean against
+ * both dark and light themes. */
+.accent-swatch::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: var(--radius-full);
+  background: inherit;
+  pointer-events: none;
+}
+
+.accent-swatch:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* Solid ring + faint glow on the active selection so users can
+ * see at a glance which accent is currently applied without
+ * reading a "current" label. */
+.accent-swatch.active {
+  border-color: var(--color-text-primary);
+  box-shadow:
+    0 0 0 2px var(--color-bg-secondary),
+    0 0 12px color-mix(in srgb, currentColor 50%, transparent);
+}
+
+.accent-swatch--custom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #ec4899, #7c66ff, #06b6d4);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Native color input is rendered above the swatch as an invisible
+ * hit target. Width/height 100% so the clickable area covers the
+ * whole swatch, opacity:0 so the native UI is hidden. */
+.accent-swatch--custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+.accent-clear {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-full);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.accent-clear:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+}

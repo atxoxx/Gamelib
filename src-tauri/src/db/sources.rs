@@ -146,7 +146,6 @@ pub fn commit_cached_source(
     tx.execute("DELETE FROM downloads WHERE source_id = ?1", params![source_id])
         .map_err(|e| format!("downloads delete: {e}"))?;
 
-    let count = game_source.downloads.len();
     let count = {
         let mut stmt = tx
             .prepare(

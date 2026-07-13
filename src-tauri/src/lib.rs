@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant, SystemTime};
 use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager, WindowEvent};
 use tokio::sync::Mutex;
 
 mod config;
@@ -270,7 +270,19 @@ fn force_close_game(
 ) -> Result<game_watcher::ForceCloseResult, String> {
     let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
     let mut w = watcher.lock().map_err(|e| e.to_string())?;
-    w.force_close(&app, &game_id)
+    let result = w.force_close(&app, &game_id);
+    let _ = app.emit(
+        "discord-presence-update",
+        serde_json::json!({
+            "state": "stopped",
+            "gameId": game_id,
+            "finishedAt": SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        }),
+    );
+    result
 }
 
 /// Windows error code ERROR_ELEVATION_REQUIRED (740). Returned when a
@@ -364,6 +376,151 @@ fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path, args: Option<&
     Ok(Some(pid))
 }
 
+// === Launcher settings (L2/L3/L5) ============================================
+//
+// State that needs to be read on the hot path (every launch, every
+// window-close event) is held in an Arc<Mutex<…>> managed through
+// `tauri::State`. Reads are O(1) and take the std sync lock briefly;
+// writes go through the kv_store so the values survive restarts. Each
+// setter command keeps the in-memory copy and the on-disk copy in sync.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherSettings {
+    /// L2: When the user clicks the close button, hide the window
+    /// instead of quitting the app. The user reopens via the OS
+    /// tray/dock icon.
+    close_to_tray_enabled: bool,
+    /// L3: When the user clicks Play, the main window hides itself so
+    /// the game gets full-screen focus without a competing Gamelib
+    /// window in the taskbar.
+    minimize_on_launch_enabled: bool,
+    /// L5: When true, the launch path REFUSES to silently retry with
+    /// ShellExecuteExW(runas) on ERROR_ELEVATION_REQUIRED. The launch
+    /// just fails with a clear error message — for users who don't
+    /// want surprise UAC prompts mid-session.
+    disable_elevation_prompts: bool,
+}
+
+impl Default for LauncherSettings {
+    fn default() -> Self {
+        Self {
+            close_to_tray_enabled: false,
+            minimize_on_launch_enabled: false,
+            disable_elevation_prompts: false,
+        }
+    }
+}
+
+/// Read the persisted launcher settings on startup so the in-memory
+/// mirror matches the kv_store. Each missing key falls back to the
+/// struct default — a fresh install lands in a fully-default state.
+fn load_launcher_settings(db: &db::Db) -> LauncherSettings {
+    let get = |key: &str| db::kv::get(db, key).ok().flatten();
+    LauncherSettings {
+        close_to_tray_enabled: get(KV_CLOSE_TO_TRAY)
+            .map(|v| v == "true")
+            .unwrap_or(false),
+        minimize_on_launch_enabled: get(KV_MINIMIZE_ON_LAUNCH)
+            .map(|v| v == "true")
+            .unwrap_or(false),
+        disable_elevation_prompts: get(KV_DISABLE_ELEVATION_PROMPTS)
+            .map(|v| v == "true")
+            .unwrap_or(false),
+    }
+}
+
+const KV_CLOSE_TO_TRAY: &str = "launcher.close_to_tray_enabled";
+const KV_MINIMIZE_ON_LAUNCH: &str = "launcher.minimize_on_launch_enabled";
+const KV_DISABLE_ELEVATION_PROMPTS: &str = "launcher.disable_elevation_prompts";
+
+/// L2: Get the current launcher settings. Read-only IPC; the frontend
+/// hydrates its UI forms from this on mount.
+#[tauri::command]
+fn get_launcher_settings(state: tauri::State<'_, Arc<std::sync::Mutex<LauncherSettings>>>) -> LauncherSettings {
+    state.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+/// L2: Toggle close-to-tray at runtime. Updates both the in-memory
+/// state (so the CloseRequested handler picks up the new value without
+/// needing a restart) and the kv_store (so it survives restarts).
+#[tauri::command]
+fn set_close_to_tray_enabled(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<std::sync::Mutex<LauncherSettings>>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::kv::set(db_state.inner(), KV_CLOSE_TO_TRAY, if_enabled(enabled))?;
+    state.lock().map(|mut s| s.close_to_tray_enabled = enabled).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// L3: Toggle minimize-on-launch. Affects the next `launch_game`.
+#[tauri::command]
+fn set_minimize_on_launch_enabled(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<std::sync::Mutex<LauncherSettings>>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::kv::set(db_state.inner(), KV_MINIMIZE_ON_LAUNCH, if_enabled(enabled))?;
+    state.lock().map(|mut s| s.minimize_on_launch_enabled = enabled).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// L5: Toggle whether strictly-forbidding UAC elevation prompts are
+/// allowed during launch. When true,ERROR_ELEVATION_REQUIRED is
+/// returned as a clear user-facing error rather than a surprise UAC.
+#[tauri::command]
+fn set_disable_elevation_prompts(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<std::sync::Mutex<LauncherSettings>>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::kv::set(db_state.inner(), KV_DISABLE_ELEVATION_PROMPTS, if_enabled(enabled))?;
+    state.lock().map(|mut s| s.disable_elevation_prompts = enabled).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn if_enabled(b: bool) -> &'static str {
+    if b {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+/// L4: Toggle the OS-level auto-launch on boot. Wraps the
+/// tauri-plugin-autostart calls — enabling registers the binary,
+/// disabling unregisters it. Errors from the OS layer are surfaced
+/// verbatim so the UI can show "permission denied" vs "already
+/// registered" cleanly.
+#[tauri::command]
+fn set_autostart_enabled(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| format!("autostart enable: {e}"))?;
+    } else {
+        manager.disable().map_err(|e| format!("autostart disable: {e}"))?;
+    }
+    Ok(())
+}
+
+/// L4: Probe the OS-level autostart registration state. Mirrors the
+/// setting the OS reports (not the user's preference) so the toggle
+/// can show what's *actually* registered after a system reset that
+/// cleared the registry entry.
+#[tauri::command]
+fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| format!("autostart status: {e}"))
+}
+
 /// Launch a game executable with unified process tracking.
 ///
 /// Replaces the old split between `launch_game` (local, child.wait()),
@@ -400,11 +557,54 @@ fn launch_game(
     run_as_admin: Option<bool>,
 ) -> Result<String, String> {
     let watcher: tauri::State<'_, Arc<std::sync::Mutex<GameWatcher>>> = app.state();
+    let launcher: tauri::State<'_, Arc<std::sync::Mutex<LauncherSettings>>> = app.state();
+
+    let launcher_settings = launcher
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+
+    // Emit the launch event EARLY so any Discord-rich-presence subscriber
+    // can flip its status before the game window steals focus. The event
+    // name "discord-presence-update" with state="playing" mirrors the
+    // shape the eventual Discord IPC plugin will subscribe to; we ship
+    // the stub now so the contract is stable.
+    if launcher_settings.disable_elevation_prompts
+        && run_as_admin.unwrap_or(false)
+    {
+        return Err(
+            "Launch with admin elevation is blocked by Settings → Disable UAC elevation prompts. Enable the setting or unset \"Run as administrator\" on the game to launch."
+                .to_string(),
+        );
+    }
+
+    let _ = app.emit(
+        "discord-presence-update",
+        serde_json::json!({
+            "state": "playing",
+            "gameId": game_id,
+            "gameName": game_name,
+            "startedAt": SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        }),
+    );
 
     // Update GPU info on the watcher for metrics collection
     {
         let mut w = watcher.lock().map_err(|e| e.to_string())?;
         w.set_gpu(gpu_id.clone(), gpu_name.clone());
+    }
+
+    // L3: Hide the main window when minimize-on-launch is on, BEFORE
+    // spawning the game process, so the OS doesn't briefly flash both
+    // windows during the launch transition. Failure to hide isn't fatal
+    // — the launch proceeds anyway.
+    if launcher_settings.minimize_on_launch_enabled {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.hide();
+        }
     }
 
     let mut initial_pid: u32 = 0;
@@ -468,7 +668,17 @@ fn launch_game(
                 Err(e) => {
                     #[cfg(windows)]
                     {
+                        // L5: Respect the user's no-UAC choice on the
+                        // implicit retry path too. ERROR_ELEVATION_REQUIRED
+                        // is exactly the kind of "surprise UAC mid-session"
+                        // that the toggle is meant to suppress.
                         if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) {
+                            if launcher_settings.disable_elevation_prompts {
+                                return Err(
+                                    "Game requires administrator privileges and Settings → Disable UAC elevation prompts is on. Enable the setting or unset \"Run as administrator\" on the game to launch."
+                                        .to_string(),
+                                );
+                            }
                             initial_pid = launch_elevated(path, cwd, launch_arguments.as_deref())?.unwrap_or(0);
                             None
                         } else {
@@ -1876,6 +2086,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // L4: autostart-on-boot. Pass an empty args vec — we don't
+        // currently ship a `--minimized` flag, so the binary just
+        // launches into the regular window. The plugin also writes
+        // the right per-OS artifact (LaunchAgent on macOS,
+        // `HKCU\…\Run` regkey on Windows, .desktop autostart on
+        // Linux) so calling `enable()` is the only API surface the
+        // frontend needs.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
@@ -1940,7 +2161,55 @@ pub fn run() {
             // counts, with server-computed peak/average. Powers the
             // activity-tab sparkline — see PlayerCountHistoryCache
             // above for the 24h cap + 5s dedupe policy.
-            get_player_count_history])
+            get_player_count_history,
+            // New launcher settings — close-to-tray (L2), minimize
+            // on launch (L3), disable UAC elevation prompts (L5),
+            // and OS auto-launch on boot (L4 via tauri-plugin-autostart).
+            get_launcher_settings,
+            set_close_to_tray_enabled,
+            set_minimize_on_launch_enabled,
+            set_disable_elevation_prompts,
+            set_autostart_enabled,
+            is_autostart_enabled])
+        .on_window_event(|window, event| {
+            // L2: intercept the user clicking the OS-level close
+            // button (or the in-app WindowControls close button, since
+            // both end up at the same CloseRequested event). When
+            // close_to_tray is on, hide the window instead of letting
+            // it close — the app keeps running with no visible chrome
+            // and the user reopens it from the taskbar. The lock is
+            // held briefly (one bool read) and never across an
+            // .await, so the std sync Mutex is the simplest correct
+            // primitive here.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let settings = window
+                        .app_handle()
+                        .state::<Arc<std::sync::Mutex<LauncherSettings>>>();
+                    let close_to_tray = settings
+                        .lock()
+                        .map(|s| s.close_to_tray_enabled)
+                        .unwrap_or(false);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        return;
+                    }
+                }
+            }
+            // Unpause / unhide from taskbar click — when the window
+            // is hidden and the user clicks the dock/taskbar icon,
+            // tauri emits a Focused event. Re-show + unminimize so
+            // the user sees the app without manual intervention.
+            if let WindowEvent::Focused(true) = event {
+                if window.label() == "main" {
+                    if let Some(win) = window.app_handle().get_webview_window("main") {
+                        let _ = win.show();
+                        let _ = win.unminimize();
+                    }
+                }
+            }
+        })
         .setup(|app| {
             // Load .env file for development (production builds have
             // credentials baked in at compile time via option_env!()).
@@ -1969,6 +2238,19 @@ pub fn run() {
                 }
             };
             app.manage(db.clone());
+
+            // ── Initialize the launcher settings (L2/L3/L5) ────────
+            // Read the persisted close-to-tray/minimize/disable-UAC
+            // toggles from kv, then manage the in-memory mirror so
+            // `launch_game`, `force_close_game`, and the
+            // CloseRequested event handler can all read it on the
+            // hot path without an extra DB round-trip. The setters
+            // update both the mirror and the kv_store.
+            let db_state: tauri::State<'_, db::Db> = app.state();
+            let launcher_settings = Arc::new(std::sync::Mutex::new(
+                load_launcher_settings(db_state.inner()),
+            ));
+            app.manage(launcher_settings);
 
             // ── Initialize the GameWatcher ──────────────────────────
             // Long-lived background service that polls WMI for running

@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import MainContent from "./components/MainContent";
@@ -26,6 +26,8 @@ import { DownloadProvider } from "./context/DownloadContext";
 import { SourceProvider } from "./context/SourceContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { AchievementProvider } from "./context/AchievementContext";
+import { SettingsProvider } from "./context/SettingsContext";
+import { LandingRedirect } from "./components/LandingRedirect";
 import Splashscreen from "./components/Splashscreen";
 import "./App.css";
 import "./store.css";
@@ -59,9 +61,17 @@ function App() {
                 <WishlistProvider>
                   <SourceProvider>
                     <DownloadProvider>
+                      <SettingsProvider>
                       <Routes>
                         <Route element={<AppLayout />}>
-                          <Route index element={<Navigate to="/library" replace />} />
+                          {/* L6: default landing page — read from
+                              SettingsContext so changes the user makes
+                              in Settings apply on the *next* mount
+                              (without a full reload). See
+                              ./components/LandingRedirect.tsx for the
+                              resolved-target computation; <Navigate>
+                              itself only sees the resolved path. */}
+                          <Route index element={<LandingRedirect />} />
                           <Route path="library" element={<LibraryPage />} />
                           <Route path="library/:gameId" element={<GamePage />} />
                           <Route path="wishlist" element={<WishlistPage />} />
@@ -78,6 +88,7 @@ function App() {
                           <Route path="plugins" element={<PluginsPage />} />
                         </Route>
                       </Routes>
+                      </SettingsProvider>
                     </DownloadProvider>
                   </SourceProvider>
                 </WishlistProvider>

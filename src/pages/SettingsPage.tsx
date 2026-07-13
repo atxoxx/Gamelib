@@ -6,6 +6,7 @@ import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
 import { useSources } from "../context/SourceContext";
 import { useTheme, type ThemeDescriptor } from "../context/ThemeContext";
+import { useSettings, type LandingPage, type SyncIntervalMinutes } from "../context/SettingsContext";
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import type { GogAuthState, GogSyncResult } from "../types/gog";
@@ -33,7 +34,7 @@ const DESCRIPTOR_LABELS: Record<ThemeDescriptor, string> = {
   minimal: "✨ Minimal",
 };
 
-type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads";
+type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads" | "launcher";
 
 export default function SettingsPage() {
   const { showToast } = useToast();
@@ -44,6 +45,37 @@ export default function SettingsPage() {
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
   const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
   const { updateSpeedLimits } = useDownloads();
+  // New settings slice (covers all 12 settings added in this drop:
+  // Rust-backed launcher settings + localStorage knobs for sync
+  // intervals / privacy / accent / blocklist / discord presence /
+  // history retention). Hydration handled inside SettingsProvider.
+  const {
+    closeToTray,
+    setCloseToTray,
+    minimizeOnLaunch,
+    setMinimizeOnLaunch,
+    disableElevationPrompts,
+    setDisableElevationPrompts,
+    autoStartEnabled,
+    setAutoStartEnabled,
+    landingPage,
+    setLandingPage,
+    accentColor,
+    setAccentColor,
+    syncIntervalMinutes,
+    setSyncIntervalMinutes,
+    steamAutoDetect,
+    setSteamAutoDetect,
+    hideAchievementProgress,
+    setHideAchievementProgress,
+    discordRichPresence,
+    setDiscordRichPresence,
+    historyCapDays,
+    setHistoryCapDays,
+    blockedSourceDomains,
+    setBlockedSourceDomains,
+    ready,
+  } = useSettings();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
 
@@ -815,6 +847,15 @@ export default function SettingsPage() {
             <span className="settings-nav-pill-count">{sources.length}</span>
           )}
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSettingsTab === "launcher"}
+          className={`settings-nav-pill${activeSettingsTab === "launcher" ? " active" : ""}`}
+          onClick={() => setActiveSettingsTab("launcher")}
+        >
+          <RocketIcon /> Launcher
+        </button>
       </nav>
 
       {/* Appearance */}
@@ -904,6 +945,74 @@ export default function SettingsPage() {
             />
             <span>Sync with system theme (auto-switch dark/light based on OS preference)</span>
           </label>
+
+          {/* Per-theme accent color override — users can pick a custom
+           *  accent without creating a full theme. Applies to buttons,
+           *  active pills, focus rings, and toggles via the
+           *  --color-accent CSS variable (re-applied on every change in
+           *  SettingsContext). */}
+          <div className="settings-row" style={{ marginTop: "var(--space-xl)" }}>
+            <div className="settings-control">
+              <label className="settings-label">Accent color override</label>
+              <p className="settings-helper-lead">
+                Tint buttons, links, and active states without losing
+                your theme. Resets to the theme's built-in accent when
+                cleared.
+              </p>
+              <div className="accent-picker">
+                {/* 6 preset swatches + a color input that opens the
+                 *  native picker. Clicking an active swatch clears
+                 *  the override; clicking a new swatch applies it. */}
+                {[
+                  { name: "Purple", value: "#7c66ff" },
+                  { name: "Pink", value: "#ec4899" },
+                  { name: "Orange", value: "#f97316" },
+                  { name: "Green", value: "#10b981" },
+                  { name: "Cyan", value: "#06b6d4" },
+                  { name: "Yellow", value: "#eab308" },
+                ].map((swatch) => (
+                  <button
+                    key={swatch.value}
+                    type="button"
+                    className={`accent-swatch${accentColor === swatch.value ? " active" : ""}`}
+                    style={{ backgroundColor: swatch.value }}
+                    onClick={() => {
+                      // Toggle: clicking the currently-active swatch
+                      // reverts to the theme default so users can
+                      // undo without hunting for a "clear" button.
+                      setAccentColor(
+                        accentColor === swatch.value ? null : swatch.value,
+                      );
+                    }}
+                    aria-label={`Use ${swatch.name} accent`}
+                    title={swatch.name}
+                  />
+                ))}
+                <label
+                  className={`accent-swatch accent-swatch--custom${accentColor && !["#7c66ff", "#ec4899", "#f97316", "#10b981", "#06b6d4", "#eab308"].includes(accentColor) ? " active" : ""}`}
+                  style={accentColor ? { backgroundColor: accentColor } : undefined}
+                  title="Pick a custom color"
+                >
+                  <input
+                    type="color"
+                    value={accentColor ?? "#7c66ff"}
+                    onChange={(e) => setAccentColor(e.target.value)}
+                    aria-label="Custom accent color"
+                  />
+                  <span aria-hidden>🎨</span>
+                </label>
+                {accentColor && (
+                  <button
+                    type="button"
+                    className="accent-clear"
+                    onClick={() => setAccentColor(null)}
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1221,6 +1330,28 @@ export default function SettingsPage() {
                       <input type="checkbox" checked disabled />
                       <span>IGDB metadata loads automatically when you open a game</span>
                     </label>
+                    {/* Steam auto-detect: when enabled, a background
+                     *  watcher polls steamapps/ every 5 minutes and
+                     *  shows a toast if a new install lands. Mirrors
+                     *  the auto-sync-on-launch pattern so users have
+                     *  a single "how often should Steam talk to us"
+                     *  mental model. */}
+                    <label className="settings-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={steamAutoDetect}
+                        onChange={(e) => {
+                          setSteamAutoDetect(e.target.checked);
+                          showToast(
+                            e.target.checked
+                              ? "Will notify when new Steam games are installed"
+                              : "Auto-detect disabled",
+                            "info",
+                          );
+                        }}
+                      />
+                      <span>Detect new Steam installs automatically</span>
+                    </label>
                   </div>
                 )}
               </div>
@@ -1412,6 +1543,159 @@ export default function SettingsPage() {
           <p className="integration-footer">
             More integrations coming soon — itch.io and more.
           </p>
+
+          {/* ── Data & sync preferences (across vendors) ── */}
+          <header className="settings-section-header" style={{ marginTop: "var(--space-xl)" }}>
+            <span className="settings-section-icon"><IntegrationsIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Data &amp; sync preferences</h2>
+              <p className="settings-section-desc">
+                Settings that apply across Steam, Epic, and GOG — or
+                control how shared data (player counts, achievements)
+                is presented.
+              </p>
+            </div>
+          </header>
+
+          <div className="settings-data-grid">
+            {/* Per-store sync interval — single knob that schedules
+             *  steam_sync_games / epic_sync_library / gog_sync_library
+             *  on a repeating timer. 0 = off (manual only). */}
+            <div className="settings-launcher-card">
+              <div className="settings-control">
+                <label className="settings-label">Auto-sync interval</label>
+                <p className="settings-helper-lead">
+                  How often Gamelib re-imports your library from Steam,
+                  Epic, and GOG in the background.
+                </p>
+                <div className="settings-input-group">
+                  <select
+                    className="settings-select"
+                    value={syncIntervalMinutes}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const next = raw as SyncIntervalMinutes;
+                      setSyncIntervalMinutes(next);
+                      showToast(
+                        next === 0
+                          ? "Auto-sync disabled (manual only)"
+                          : `Auto-sync set to every ${next === 60 ? "hour" : next === 360 ? "6 hours" : next === 720 ? "12 hours" : next === 1440 ? "24 hours" : `${next} min`}`,
+                        "success",
+                      );
+                    }}
+                  >
+                    <option value={0}>Off — manual only</option>
+                    <option value={15}>Every 15 minutes</option>
+                    <option value={30}>Every 30 minutes</option>
+                    <option value={60}>Every hour</option>
+                    <option value={360}>Every 6 hours</option>
+                    <option value={720}>Every 12 hours</option>
+                    <option value={1440}>Every 24 hours</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Player-count history retention cap — controls how long
+             *  Steam player-count samples are kept around for the
+             *  Activity page / game-page sparklines. */}
+            <div className="settings-launcher-card">
+              <div className="settings-control">
+                <label className="settings-label">Player-count history retention</label>
+                <p className="settings-helper-lead">
+                  How long to keep historical Steam player counts
+                  for the trend sparklines on each game page.
+                  Shorter = less disk used; longer = richer sparklines.
+                </p>
+                <div className="settings-input-group">
+                  <select
+                    className="settings-select"
+                    value={historyCapDays}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const next = (raw === 7 || raw === 30 ? raw : 1) as 1 | 7 | 30;
+                      setHistoryCapDays(next);
+                      showToast(
+                        next === 1
+                          ? "History will roll off after 1 day"
+                          : next === 7
+                          ? "History will roll off after 1 week"
+                          : "History will roll off after 1 month",
+                        "info",
+                      );
+                    }}
+                  >
+                    <option value={1}>1 day</option>
+                    <option value={7}>1 week</option>
+                    <option value={30}>1 month</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Achievement privacy — hides unlock percentages + rarity
+             *  rings on the GamePage achievements panel + the
+             *  AchievementsTab sidebar, since those can act as
+             *  spoilers when the user is working through a list. */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={hideAchievementProgress}
+                  onChange={(e) => {
+                    setHideAchievementProgress(e.target.checked);
+                    showToast(
+                      e.target.checked
+                        ? "Achievement progress hidden — no spoilers"
+                        : "Achievement progress visible",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Hide achievement progress (no spoilers)
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Strips global unlock percentages and rarity rings
+                    from the Achievements tab and Game page so
+                    achievement lists read like a clean checklist.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Discord rich presence — emits state to the
+             *  discord-presence-update event when a game launches or
+             *  exits. Currently a no-op attach point; the real
+             *  renderer lives in lib.rs::emit_discord_presence. */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={discordRichPresence}
+                  onChange={(e) => {
+                    setDiscordRichPresence(e.target.checked);
+                    showToast(
+                      e.target.checked
+                        ? "Discord rich presence will broadcast while playing"
+                        : "Discord presence disabled",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Show what you’re playing on Discord
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Posts a “Playing X” status to your Discord profile
+                    and clears it when the game exits.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1515,6 +1799,40 @@ export default function SettingsPage() {
             <header className="settings-section-header">
               <span className="settings-section-icon"><DownloadIcon /></span>
               <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Blocked source domains</h2>
+                <p className="settings-section-desc">
+                  Domains listed here are filtered out of every
+                  download search — nothing from these hosts appears
+                  in the Download modal’s results list. One domain
+                  per line.
+                </p>
+              </div>
+            </header>
+
+            <div className="settings-control" style={{ maxWidth: "480px" }}>
+              <textarea
+                className="settings-input"
+                rows={5}
+                placeholder="example-tracker.com&#10;suspicious-mirror.net"
+                value={blockedSourceDomains.join("\n")}
+                onChange={(e) => {
+                  setBlockedSourceDomains(
+                    e.target.value.split(/\r?\n/).map((line) => line.trim()),
+                  );
+                }}
+                spellCheck={false}
+                style={{ resize: "vertical", minHeight: "88px", fontFamily: "SFMono-Regular, Consolas, monospace" }}
+              />
+              <p className="settings-helper-text">
+                Currently blocked: {blockedSourceDomains.length === 0 ? "none" : `${blockedSourceDomains.length} domain${blockedSourceDomains.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
                 <h2 className="settings-section-title">Download sources</h2>
                 <p className="settings-section-desc">
                   Add JSON-formatted source URLs to find download mirrors for
@@ -1610,7 +1928,208 @@ export default function SettingsPage() {
           </section>
         </>
       )}
+
+      {/* Launcher — startup, window, and launch behaviour */}
+      {activeSettingsTab === "launcher" && (
+        <section className="settings-section">
+          <header className="settings-section-header">
+            <span className="settings-section-icon"><RocketIcon /></span>
+            <div className="settings-section-header-text">
+              <h2 className="settings-section-title">Launcher behaviour</h2>
+              <p className="settings-section-desc">
+                Decide what Gamelib does at boot, when you launch a game,
+                and how the window itself behaves.
+              </p>
+            </div>
+          </header>
+
+          <div className="settings-launcher-grid">
+            {/* Landing page — where the app routes on open */}
+            <div className="settings-launcher-card">
+              <div className="settings-control">
+                <label className="settings-label" htmlFor="settings-landing-page">
+                  Default landing page
+                </label>
+                <p className="settings-helper-lead">
+                  Which route opens when Gamelib launches. Useful if your
+                  workflow starts in Activity, Downloads, or Deals rather
+                  than the Library.
+                </p>
+                <div className="settings-input-group">
+                  <select
+                    id="settings-landing-page"
+                    className="settings-select"
+                    value={landingPage}
+                    onChange={(e) => {
+                      const next = e.target.value as LandingPage;
+                      setLandingPage(next);
+                      showToast(
+                        `Default page set to ${next.charAt(0).toUpperCase() + next.slice(1)}`,
+                        "success",
+                      );
+                    }}
+                  >
+                    <option value="library">📚 Library</option>
+                    <option value="store">🏬 Store</option>
+                    <option value="wishlist">❤️ Wishlist</option>
+                    <option value="deals">💰 Deals</option>
+                    <option value="activity">📊 Activity</option>
+                    <option value="achievements">🏆 Achievements</option>
+                    <option value="downloads">⬇️ Downloads</option>
+                    <option value="storage">💾 Storage</option>
+                    <option value="news">📰 News</option>
+                    <option value="community">👥 Community</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Close-to-tray — closes-to-tray instead of exiting */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={closeToTray}
+                  disabled={!ready}
+                  onChange={(e) => {
+                    void setCloseToTray(e.target.checked);
+                    showToast(
+                      e.target.checked
+                        ? "Closing will now minimize to tray"
+                        : "Closing will now exit Gamelib",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Close to tray instead of quitting
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Clicking the × keeps the launcher running in the
+                    background. Right-click the tray icon to quit
+                    for real.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Minimize on game launch */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={minimizeOnLaunch}
+                  disabled={!ready}
+                  onChange={(e) => {
+                    void setMinimizeOnLaunch(e.target.checked);
+                    showToast(
+                      e.target.checked
+                        ? "Gamelib will minimize when you launch a game"
+                        : "Gamelib will stay open while you play",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Minimize when a game starts
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Drops the launcher out of the way while a game is
+                    in the foreground — useful for one-monitor
+                    set-ups.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Auto-start on boot (system tray) */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={autoStartEnabled}
+                  disabled={!ready}
+                  onChange={(e) => {
+                    // Optimistic flip for snappy UX; revert + toast on error
+                    const target = e.target.checked;
+                    showToast(
+                      target
+                        ? "Enabling auto-launch on boot…"
+                        : "Disabling auto-launch…",
+                      "info",
+                    );
+                    setAutoStartEnabled(target).catch((err) => {
+                      showToast(`Auto-launch failed: ${err}`, "error");
+                    });
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Start Gamelib when you sign in
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Registers the app in your OS startup list (Windows
+                    Registry / macOS Login Items / Linux .desktop).
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Disable UAC elevation prompts */}
+            <div className="settings-launcher-card settings-launcher-card--warn">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={disableElevationPrompts}
+                  disabled={!ready}
+                  onChange={(e) => {
+                    void setDisableElevationPrompts(e.target.checked);
+                    showToast(
+                      e.target.checked
+                        ? "UAC prompts disabled — games may fail to launch"
+                        : "UAC prompts re-enabled",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Never request elevation (UAC prompt)
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Suppresses the Windows "run as administrator"
+                    prompt when a game requires it. Games that genuinely
+                    need elevation will silently fail to launch —
+                    leave off unless you know what you're doing.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
+  );
+}
+
+function RocketIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+      <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22 22 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
+      <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </svg>
   );
 }
 

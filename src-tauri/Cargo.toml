@@ -23,6 +23,16 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2.7.1"
+# Auto-launch the app on system boot (Windows / macOS / Linux). The
+# `MacosLauncher::LaunchAgent` arg makes the macOS build use a per-user
+# LaunchAgent — the only launcher the modern macOS allows without
+# helper entitlements. We pass an empty `args` here because the user
+# can boot the app into a regular visible window (the `--minimized`
+# boot-flag is intentionally not exposed; adding it would require a
+# second settings tile and a second kv key, and only one user asked
+# for it). `withGlobalTauri` is on so the frontend can subscribe to
+# the backend's "discord-presence-update" event too.
+tauri-plugin-autostart = "2"
 base64 = "0.22"
 mime_guess = "2.0.5"
 spider = { version = "2", default-features = false, features = ["sync", "ua_generator"] }
