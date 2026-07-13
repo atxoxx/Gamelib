@@ -27,6 +27,52 @@ const THEME_PREVIEW_COLORS: Record<string, { bg: string; text: string; accent: s
   dracula:   { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" },
 };
 
+/**
+ * Curated palette of preset accent colors exposed to the user on the
+ * Appearance tab. Ordered cool→warm so a single horizontal scan
+ * reads as a complete hue wheel, matching how the existing grid wraps
+ * into ~2 rows at the settings container's 940px max-width.
+ *
+ * The original 6 hardcoded swatches (Purple/Violet, Emerald, Cyan,
+ * Orange, Yellow, Pink) are preserved verbatim so existing
+ * `gamelib.accent_color` localStorage values stay detectable as a
+ * preset and keep their matching tooltip / aria-label.
+ *
+ * Hex values pulled from Tailwind's 500-step palette — chosen for
+ * enough contrast against the dark theme background to read as an
+ * accent when applied to buttons, focus rings, and glows, while
+ * staying saturated enough to survive the `#0007`-fading recipe the
+ * SettingsContext uses to derive `--color-accent-glow`.
+ */
+const ACCENT_PRESETS: { name: string; value: string }[] = [
+  // Cool spectrum — magenta through green
+  { name: "Fuchsia", value: "#d946ef" },
+  { name: "Purple",  value: "#a855f7" },
+  { name: "Violet",  value: "#7c66ff" }, // (replaces the old "Purple" preset — same hex)
+  { name: "Indigo",  value: "#6366f1" },
+  { name: "Blue",    value: "#3b82f6" },
+  { name: "Sky",     value: "#0ea5e9" },
+  { name: "Cyan",    value: "#06b6d4" },
+  { name: "Teal",    value: "#14b8a6" },
+  { name: "Emerald", value: "#10b981" }, // (replaces the old "Green" preset — same hex)
+  { name: "Lime",    value: "#84cc16" },
+  // Warm spectrum — yellow through pink
+  { name: "Yellow",  value: "#eab308" },
+  { name: "Amber",   value: "#f59e0b" },
+  { name: "Orange",  value: "#f97316" },
+  { name: "Rose",    value: "#f43f5e" },
+  { name: "Crimson", value: "#ef4444" },
+  { name: "Pink",    value: "#ec4899" },
+];
+
+// Lower-cased set so the "is this a custom pick?" branch below only
+// needs to do a single O(1) lookup instead of a per-render
+// `["#7c66ff", "#ec4899", ...].includes(accentColor)` whose list we'd
+// otherwise have to keep in sync with ACCENT_PRESETS by hand.
+const PRESET_VALUE_SET: Set<string> = new Set(
+  ACCENT_PRESETS.map((p) => p.value.toLowerCase()),
+);
+
 const DESCRIPTOR_LABELS: Record<ThemeDescriptor, string> = {
   vibrant: "🎮 Vibrant",
   calm: "🧘 Calm",
@@ -946,11 +992,12 @@ export default function SettingsPage() {
             <span>Sync with system theme (auto-switch dark/light based on OS preference)</span>
           </label>
 
-          {/* Per-theme accent color override — users can pick a custom
-           *  accent without creating a full theme. Applies to buttons,
-           *  active pills, focus rings, and toggles via the
-           *  --color-accent CSS variable (re-applied on every change in
-           *  SettingsContext). */}
+          {/* Per-theme accent color override — users can pick from a
+           *  curated palette of 16 presets OR drop in any arbitrary
+           *  hex via the custom picker. Applies to buttons, active
+           *  pills, focus rings, and toggles via the
+           *  --color-accent CSS variable (re-applied on every change
+           *  in SettingsContext). */}
           <div className="settings-row" style={{ marginTop: "var(--space-xl)" }}>
             <div className="settings-control">
               <label className="settings-label">Accent color override</label>
@@ -959,37 +1006,44 @@ export default function SettingsPage() {
                 your theme. Resets to the theme's built-in accent when
                 cleared.
               </p>
-              <div className="accent-picker">
-                {/* 6 preset swatches + a color input that opens the
-                 *  native picker. Clicking an active swatch clears
-                 *  the override; clicking a new swatch applies it. */}
-                {[
-                  { name: "Purple", value: "#7c66ff" },
-                  { name: "Pink", value: "#ec4899" },
-                  { name: "Orange", value: "#f97316" },
-                  { name: "Green", value: "#10b981" },
-                  { name: "Cyan", value: "#06b6d4" },
-                  { name: "Yellow", value: "#eab308" },
-                ].map((swatch) => (
-                  <button
-                    key={swatch.value}
-                    type="button"
-                    className={`accent-swatch${accentColor === swatch.value ? " active" : ""}`}
-                    style={{ backgroundColor: swatch.value }}
-                    onClick={() => {
-                      // Toggle: clicking the currently-active swatch
-                      // reverts to the theme default so users can
-                      // undo without hunting for a "clear" button.
-                      setAccentColor(
-                        accentColor === swatch.value ? null : swatch.value,
-                      );
-                    }}
-                    aria-label={`Use ${swatch.name} accent`}
-                    title={swatch.name}
-                  />
-                ))}
+              <div className="accent-picker" role="group" aria-label="Preset accent colors">
+                {/* Render the 16 preset swatches from ACCENT_PRESETS so
+                 *  adding a new color is a one-line constant edit.
+                 *  Clicking an active swatch clears the override back
+                 *  to the per-theme default so users can undo without
+                 *  hunting for a "clear" button. */}
+                {ACCENT_PRESETS.map((swatch) => {
+                  // ACCENT_PRESETS values are lowercase by construction,
+                  // so a single .toLowerCase() on the user-controlled
+                  // accentColor is enough — no need to normalise both
+                  // sides of the comparison.
+                  const isActive = accentColor?.toLowerCase() === swatch.value;
+                  return (
+                    <button
+                      key={swatch.value}
+                      type="button"
+                      className={`accent-swatch${isActive ? " active" : ""}`}
+                      style={{ backgroundColor: swatch.value }}
+                      onClick={() => {
+                        setAccentColor(isActive ? null : swatch.value);
+                      }}
+                      aria-label={`Use ${swatch.name} accent`}
+                      aria-pressed={isActive}
+                      title={swatch.name}
+                    />
+                  );
+                })}
+                {/* Custom 🎨 swatch — only marks itself "active" when
+                 *  the user has picked a hex that isn't one of the
+                 *  presets. Memoises no extra React state — the
+                 *  Set lookup is O(1) and derived from the same
+                 *  source of truth as the swatches above. */}
                 <label
-                  className={`accent-swatch accent-swatch--custom${accentColor && !["#7c66ff", "#ec4899", "#f97316", "#10b981", "#06b6d4", "#eab308"].includes(accentColor) ? " active" : ""}`}
+                  className={`accent-swatch accent-swatch--custom${
+                    accentColor && !PRESET_VALUE_SET.has(accentColor.toLowerCase())
+                      ? " active"
+                      : ""
+                  }`}
                   style={accentColor ? { backgroundColor: accentColor } : undefined}
                   title="Pick a custom color"
                 >

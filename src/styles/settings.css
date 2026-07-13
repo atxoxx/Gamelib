@@ -1173,8 +1173,14 @@
 
 .accent-swatch {
   position: relative;
-  width: 32px;
-  height: 32px;
+  /* 28px instead of 32px so the full 16-preset row + custom + reset
+   * fits in ~2 wrapped rows inside the 940px settings container
+   * instead of ~3 — keeps the picker from looking overloaded now
+   * that the palette has tripled in size. The custom 🎨 swatch and
+   * the Reset button drop down to match via the same .accent-swatch
+   * + .accent-clear heights below. */
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-full);
   border: 2px solid transparent;
   cursor: pointer;
@@ -1237,7 +1243,8 @@
 .accent-clear {
   display: inline-flex;
   align-items: center;
-  height: 32px;
+  /* Keeps the Reset pill aligned to the 28px swatches. */
+  height: 28px;
   padding: 0 var(--space-md);
   border-radius: var(--radius-full);
   background: transparent;
