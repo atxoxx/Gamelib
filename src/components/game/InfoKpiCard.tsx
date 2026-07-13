@@ -1,11 +1,19 @@
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { KpiTile } from "../ui";
-import { formatSize, PLAY_STATUS_DETAILS, type Game, type SizeUnit } from "../../types/game";
+import {
+  formatSize,
+  PLAY_STATUS_DETAILS,
+  type Game,
+  type SizeUnit,
+} from "../../types/game";
 import {
   IconBuilding,
   IconCalendar,
   IconCheck,
   IconCollection,
+  IconExternalLink,
+  IconFolder,
   IconHardDrive,
   IconInfo,
   IconPlatform,
@@ -18,6 +26,7 @@ import {
 } from "./icons";
 import { StatusDot } from "./shared";
 import { useSteamGameStats, formatSteamPrice } from "../../hooks/useSteamGameStats";
+import { useToast } from "../../context/ToastContext";
 
 /**
  * InfoKpiCard
@@ -35,14 +44,22 @@ import { useSteamGameStats, formatSteamPrice } from "../../hooks/useSteamGameSta
  *    │  Platform      [icon]  value              │  ← icon-prefixed,
  *    │  Developer     [icon]  value              │    one row per field
  *    │  Publisher     [icon]  value              │
- *    │  …                                           │
+ *    │  …                                          │
+ *    ├─ Genre chips (when present) ───────────────┤
+ *    │  [genre] [genre] [genre]                   │
+ *    ├─ Executable path footer (when present) ────┤
+ *    │  📁 Executable                              │  ← visual click target
+ *    │  C:\…\game.exe   ↗                         │    opens parent folder
  *    └────────────────────────────────────────────┘
- *    [genre] [genre] [genre]  ← genre chip row at the bottom
  *
  *  Empty fields are silently dropped so the card never has
  *  meaningless `—` rows. The `clickable` size row opens the
  *  edit modal so users can re-detect / clear the size without
- *  hunting for the Edit button.
+ *  hunting for the Edit button. The executable-path footer
+ *  opens the *parent folder* in the OS file manager (Explorer
+ *  on Windows, Finder on macOS, the default FM on Linux) — we
+ *  explicitly do NOT launch the .exe, so a misclick just shows
+ *  the user where the file lives instead of starting the game.
  */
 
 interface InfoKpiCardProps {
@@ -59,12 +76,68 @@ interface DetailRow {
   icon: ReactNode;
 }
 
+/**
+ * Extract the containing directory of a path, working on both
+ * Windows (`\`) and Unix (`/`) separators. Returns `null` for any
+ * input we can't sensibly open as a folder — a bare filename, a
+ * drive-root string like `"C:"`, an absolute root like `"/"`, or
+ * an empty / whitespace-only string. The caller uses `null` to
+ * decide not to render the "Open in Explorer" button at all, so
+ * we never surface a clickable action that would just toast an
+ * error.
+ *
+ * We do this in JS rather than via `@tauri-apps/api/path::dirname`
+ * so the operation is pure string work — no IPC round-trip — and
+ * works the same way regardless of which OS the user is on.
+ */
+function getParentDir(filePath: string): string | null {
+  if (!filePath) return null;
+  // Strip any trailing separators so "C:\foo\" collapses to "C:\foo"
+  // before we search for the parent's separator.
+  const trimmed = filePath.replace(/[\\/]+$/, "");
+  if (!trimmed) return null;
+  const lastSep = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+  if (lastSep < 0) return null; // bare filename — no parent
+  if (lastSep === 0) return null; // absolute-root parent like "/" → empty parent
+  const parent = trimmed.slice(0, lastSep);
+  if (!parent) return null;
+  // Windows drive-only parent (e.g. "C:") maps to the current
+  // directory on that drive, which is meaningless to "open". Refuse
+  // it so the caller can skip rendering the button.
+  if (/^[A-Za-z]:$/.test(parent)) return null;
+  return parent;
+}
+
+/**
+ * Compute a "short" version of the path string for display in a
+ * narrow card. When the full path fits within `MAX_CHARS` we show
+ * it verbatim; when it overflows, we elide the middle with a single
+ * Unicode HORIZONTAL ELLIPSIS and surface the most identifier-
+ * dense portion (the tail) — that way the file name (which the
+ * user mentally associates with the game) stays visible even on a
+ * deeply-nested Steam install, without resorting to a CSS bidi
+ * trick that can re-order `\` / `:` / drive letters unpredictably.
+ * The full path is still available on hover via the button's
+ * `title` attribute.
+ */
+const EXE_PATH_DISPLAY_MAX = 56;
+function shortExePath(filePath: string): string {
+  if (filePath.length <= EXE_PATH_DISPLAY_MAX) return filePath;
+  // Keep enough of the tail to leave ~48 visible characters (incl.
+  // the ellipsis prefix). The leading `"… "` (one ellipsis + space)
+  // reads cleanly across CSS-only fallback paths too.
+  const TAIL_LEN = EXE_PATH_DISPLAY_MAX - 2;
+  return "…" + filePath.slice(-TAIL_LEN);
+}
+
 export default function InfoKpiCard({
   game,
   sizeUnit,
   onEditSize,
   hideStatus,
 }: InfoKpiCardProps) {
+  const { showToast } = useToast();
+
   // Fetch the combined Steam stats payload so the price tile has
   // its data ready without re-firing the IPC call the popover also
   // uses. The Rust backend caches `appdetails` for 24h, so concurrent
@@ -81,6 +154,47 @@ export default function InfoKpiCard({
   const hasPrice =
     steamStats?.details != null &&
     (priceIsFree || (priceCents != null && priceCents > 0));
+
+  // Resolve the executable path up front so we can both display it
+  // AND decide whether the "Open in Explorer" button should render.
+  // Store-page mock games have an empty `path` and skip the block;
+  // paths that resolve to a drive-root or a bare filename also skip
+  // the block rather than render an action that would just toast an
+  // error on click. Computed up here (before `handleOpenInExplorer`)
+  // so the handler can capture `parentDir` in its dependency list
+  // without a "used before declaration" ordering bug.
+  const exePath = game.path?.trim() ?? "";
+  const parentDir = exePath ? getParentDir(exePath) : null;
+  const showExecutable = Boolean(parentDir);
+  // `shortExePath` is a constant-time string slice — no need to
+  // memoize. It runs on every render but the JS work is trivial
+  // (a length check + a slice).
+  const displayPath = shortExePath(exePath);
+
+  /**
+   * Reveal the executable on disk by opening its parent folder in
+   * the OS file manager. Uses `tauri-plugin-opener`'s `openPath` —
+   * on Windows that maps to `explorer.exe <dir>`, on macOS to
+   * Finder's "Open Enclosing Folder", and on Linux to the
+   * appropriate xdg-open handler.
+   *
+   * We open the *parent* directory rather than the .exe itself so
+   * a single click lands the user in Explorer to drag,
+   * right-click, or share the file — never accidentally launches
+   * the game. The button is only rendered when `parentDir` is a
+   * real, openable directory, so this handler can assume the path
+   * exists; the `try/catch` covers OS-side failures (deleted
+   * folder, permissions) and surfaces them as a toast.
+   */
+  const handleOpenInExplorer = useCallback(async () => {
+    if (!parentDir) return;
+    try {
+      await openPath(parentDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast(`Could not open folder: ${message}`, "error");
+    }
+  }, [parentDir, showToast]);
 
   // KPI tiles at the top: surface the most-glanced values first.
   // The Price tile only renders when Steam has a price for the
@@ -310,6 +424,36 @@ export default function InfoKpiCard({
           </div>
         )}
       </dl>
+
+      {/*
+        Executable-path footer sits between the definition list and
+        the genre chips. Placing it just above the genres — rather
+        than below them — keeps the click target from being pushed
+        far down on cards with many tags, while still reading as the
+        card's natural footer band.
+      */}
+      {showExecutable && (
+        <button
+          type="button"
+          className="info-exe-path"
+          onClick={handleOpenInExplorer}
+          title={`Open folder containing ${exePath}`}
+          aria-label={`Open folder containing ${exePath}`}
+        >
+          <span className="info-exe-path__head">
+            <span className="info-exe-path__folder" aria-hidden>
+              <IconFolder size={12} />
+            </span>
+            <span className="info-exe-path__label">Executable</span>
+          </span>
+          <span className="info-exe-path__body">
+            <span className="info-exe-path__text">{displayPath}</span>
+            <span className="info-exe-path__arrow" aria-hidden>
+              <IconExternalLink size={14} />
+            </span>
+          </span>
+        </button>
+      )}
 
       {game.genres && game.genres.length > 0 && (
         <div className="info-genres">

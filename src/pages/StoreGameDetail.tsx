@@ -23,8 +23,6 @@ import {
   StorylineSection,
   ScreenshotsSection,
   VideosSection,
-  GameDetailsCard,
-  RelatedContentCard,
 } from "../components/game";
 
 
@@ -373,8 +371,6 @@ export default function StoreGameDetail() {
               onOpen={(src) => setLightboxImage(src)}
             />
             <VideosSection game={mockGame} />
-            <GameDetailsCard game={mockGame} />
-            <RelatedContentCard game={mockGame} />
 
             {/* Game Relations Card — IGDB + library cross-ref */}
             <GameRelationsCard

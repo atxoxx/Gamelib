@@ -23,8 +23,14 @@ export { default as AboutSection } from "./AboutSection";
 export { default as StorylineSection } from "./StorylineSection";
 export { default as ScreenshotsSection } from "./ScreenshotsSection";
 export { default as VideosSection } from "./VideosSection";
-export { default as GameDetailsCard } from "./GameDetailsCard";
-export { default as RelatedContentCard } from "./RelatedContentCard";
+
+/*
+ * `GameDetailsCard` and `RelatedContentCard` were removed in favor of an
+ * inline executable-path row inside `InfoKpiCard` (E3-UI consolidation).
+ * The path click handler opens the containing folder via the OS file
+ * manager, so the standalone "Details" / "Related Content" cards are no
+ * longer needed.
+ */
 
 export { SectionTitle, TimeToBeatRow, StatusDot, formatPlayTimeCompact } from "./shared";
 export { getVideoEmbedUrl, getVideoThumbnail } from "./video";

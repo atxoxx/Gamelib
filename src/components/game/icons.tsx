@@ -271,3 +271,31 @@ export function IconTag({ size, ...p }: IconProps) {
     </BaseIcon>
   );
 }
+
+/**
+ * Folder glyph used by the executable-path click target inside the
+ * InfoKpiCard. Paired with IconExternalLink to nudge the user toward
+ * "click to open in OS file manager" rather than "click to launch".
+ */
+export function IconFolder({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * External-link arrow (northeast). Slides into view on hover behind
+ * the path text to telegraph "this leaves the app" without forcing
+ * the user to read a label.
+ */
+export function IconExternalLink({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </BaseIcon>
+  );
+}

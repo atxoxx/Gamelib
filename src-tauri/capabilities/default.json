@@ -19,6 +19,14 @@
         }
       ]
     },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
     "dialog:default",
     "core:webview:allow-create-webview",
     "core:webview:allow-create-webview-window",

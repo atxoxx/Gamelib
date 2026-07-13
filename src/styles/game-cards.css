@@ -563,15 +563,82 @@
   font-size: var(--font-size-md);
 }
 
-/* ── GameDetailsCard ───────────────────────────────────────────── */
-
-.game-details-card__path {
+/* Info-genres wraps the pill row at the bottom of InfoKpiCard.
+   It sits after either the definition list (most cards) OR the
+   optional executable-path button. Give it a small top margin so
+   the chips breathe from whichever sibling sits above them —
+   without this the chips collapse against the bottom border of
+   the sibling when no executable path is present. */
+.info-genres {
+  margin-top: var(--space-sm);
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.game-details-card__path-label {
+/* ── InfoKpiCard → Executable Path footer ───────────────────────
+   Footer band at the bottom of the Info card. Click opens the
+   containing folder in the OS file manager (Explorer on Windows,
+   Finder on macOS, default FM on Linux) via tauri-plugin-opener
+   `openPath`. Hidden silently when the game has no path (Store
+   page mock games, Steam-only titles, etc.).
+
+   Design choices:
+   - Sits below the genre chips with a subtle border-top so it
+     reads as the card's "footer band" rather than competing with
+     the definition list above it.
+   - Folder icon + "Executable" label on one line; full path on
+     a separate line that gracefully truncates from the front so
+     the most informative part (the .exe name) stays visible even
+     on very long paths.
+   - External-link arrow fades in on hover and shifts right;
+     accent-tinted background lifts the button so it feels pressable.
+   - The whole row is a native <button> for accessibility (focus
+     ring, Enter key, screen-reader announcement of the tooltip). */
+
+.info-exe-path {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  transition: background var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard);
+  position: relative;
+  overflow: hidden;
+}
+
+.info-exe-path:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-tertiary));
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+}
+
+.info-exe-path:active {
+  transform: translateY(0);
+}
+
+.info-exe-path:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.info-exe-path__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
@@ -579,45 +646,66 @@
   letter-spacing: 0.6px;
 }
 
-.game-details-card .game-path {
-  cursor: pointer;
-  transition: background var(--duration-fast);
-  display: inline-block;
-  max-width: 100%;
-}
-
-.game-details-card .game-path:hover {
-  background: var(--color-bg-hover);
-}
-
-/* ── RelatedContentCard ────────────────────────────────────────── */
-
-.related-content-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-}
-
-.related-content-btn {
+.info-exe-path__folder,
+.info-exe-path__arrow {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  text-decoration: none;
-  transition: all var(--duration-fast) var(--ease-standard);
+  justify-content: center;
+  color: var(--color-accent);
+  flex-shrink: 0;
 }
 
-.related-content-btn:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-accent);
+.info-exe-path__label {
+  color: var(--color-text-muted);
+}
+
+.info-exe-path__body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.info-exe-path__text {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.1px;
+  /*
+   * Long paths are pre-truncated by `shortExePath` in InfoKpiCard so
+   * the most useful portion (the trailing .exe name) is what the
+   * user normally sees — a leading Unicode ellipsis marks the
+   * elision. CSS `text-overflow: ellipsis` is just a safety net for
+   * unusually narrow card widths where the JS pre-trim still doesn't
+   * fit; it intentionally cuts from the *end* so we don't trigger a
+   * bidi re-order of drive letters / backslashes (which is the
+   * problem with the original `direction: rtl` trick).
+   *
+   * The full un-truncated path is exposed via the button's `title`
+   * attribute for screen-readers and hover inspection.
+   */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.info-exe-path:hover .info-exe-path__text {
   color: var(--color-accent);
-  transform: translateY(-1px);
+}
+
+.info-exe-path__arrow {
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard);
+}
+
+.info-exe-path:hover .info-exe-path__arrow {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 /* ── GameHero (compact layout) ──────────────────────────────────

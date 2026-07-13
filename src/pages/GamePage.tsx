@@ -28,8 +28,6 @@ import {
   StorylineSection,
   ScreenshotsSection,
   VideosSection,
-  GameDetailsCard,
-  RelatedContentCard,
 } from "../components/game";
 import { Button, ConfirmModal } from "../components/ui";
 /** Inline reusable image slot for the edit form. */
@@ -922,8 +920,6 @@ function GameDetail({ game }: { game: Game }) {
               onOpen={(src) => setLightboxImage(src)}
             />
             <VideosSection game={game} />
-            <GameDetailsCard game={game} />
-            <RelatedContentCard game={game} />
 
             {/* Game Relations Card — library-local + IGDB relations.
                 Renders below the standalone Similar Games section per
