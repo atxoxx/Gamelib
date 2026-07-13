@@ -193,6 +193,32 @@ export default function BarChart({
               >
                 {tooltip && <title>{labels[i]}: {formatValue(value)}</title>}
               </rect>
+              {/*
+                Phase 2.9 PR 4 ("data viz touches") — focus ring.
+                A 2-px outset rect with stroke={color} that is only
+                drawn when this bar is the hovered one. Paints AFTER
+                the bar so SVG painter order puts the ring on top of
+                the bar's body, not behind the next bar over. Pointer
+                events disabled so the ring never intercepts the
+                cursor that the bar group is listening for.
+                strokeWidth + opacity both transition so the ring
+                eases in and out cross-fade-friendly (matches the
+                sibling-bar opacity ramp already in place). */}
+              <rect
+                x={x - 2}
+                y={(value / maxVal) * chartH === 0 ? padding.top + chartH - 4 : y - 2}
+                width={barW + 4}
+                height={Math.max((value / maxVal) * chartH, 1) + (value === 0 ? 4 : 4)}
+                rx="5"
+                fill="none"
+                stroke={color}
+                strokeWidth={isHovered ? 2 : 0}
+                opacity={isHovered ? 0.6 : 0}
+                style={{
+                  transition: "opacity 180ms, stroke-width 180ms",
+                  pointerEvents: "none",
+                }}
+              />
               {/* X-axis label only on stride ticks (and the last tick) so
                   the date axis stays legible on 30d/90d/all-time views. */}
               {showXLabel && (

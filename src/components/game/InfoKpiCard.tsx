@@ -16,6 +16,7 @@ import {
   IconFolder,
   IconHardDrive,
   IconInfo,
+  IconPencil,
   IconPlatform,
   IconStar,
   IconTag,
@@ -249,7 +250,7 @@ export default function InfoKpiCard({
           label="Size"
           icon={<IconHardDrive size={12} />}
           value={formatSize(game.sizeBytes, sizeUnit)}
-          subtext="Click to edit"
+          trailing={<IconPencil size={12} className="kpi-tile__pencil" />}
           {...(onEditSize
             ? {
                 onClick: onEditSize,

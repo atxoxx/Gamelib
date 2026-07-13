@@ -1091,126 +1091,147 @@ function GameDetail({ game }: { game: Game }) {
               {/* TAB 1: METADATA */}
               {editTab === "metadata" && (
                 <div className="edit-form">
-                  <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-name">Name</label>
-                      <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-play-status">Play Status</label>
-                      <select
-                        id="edit-play-status"
-                        className="edit-input"
-                        value={editPlayStatus}
-                        onChange={(e) => setEditPlayStatus(e.target.value as PlayStatus)}
-                      >
-                        {Object.entries(PLAY_STATUS_DETAILS).map(([key, details]) => (
-                          <option key={key} value={key}>
-                            {details.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-platform">Platform</label>
-                      <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-developer">Developer</label>
-                      <input id="edit-developer" className="edit-input" type="text" value={editDeveloper} onChange={(e) => setEditDeveloper(e.target.value)} placeholder="Developer name" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-publisher">Publisher</label>
-                      <input id="edit-publisher" className="edit-input" type="text" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} placeholder="Publisher name" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-release-date">Release Date</label>
-                      <input id="edit-release-date" className="edit-input" type="text" value={editReleaseDate} onChange={(e) => setEditReleaseDate(e.target.value)} placeholder="e.g., YYYY-MM-DD" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-genres">Genres</label>
-                      <input id="edit-genres" className="edit-input" type="text" value={editGenres} onChange={(e) => setEditGenres(e.target.value)} placeholder="Action, Adventure, Shooter" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-themes">Themes</label>
-                      <input id="edit-themes" className="edit-input" type="text" value={editThemes} onChange={(e) => setEditThemes(e.target.value)} placeholder="Sci-Fi, Survival, Sandbox" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-modes">Game Modes</label>
-                      <input id="edit-modes" className="edit-input" type="text" value={editGameModes} onChange={(e) => setEditGameModes(e.target.value)} placeholder="Single player, Multiplayer, Co-op" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
-                      <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
-                    </div>
-                    <div className="edit-field-row">
+                  {/* The 15+ flat inputs that used to render as a
+                   * single wall are now grouped into three
+                   * semantically-labelled fieldsets. Native
+                   * <fieldset> + <legend> so screen readers
+                   * announce each group as a labelled landmark
+                   * when users tab into the modal. The grouping
+                   * follows perceptual chunks (Identity /
+                   * Ratings / Catalog) rather than file read
+                   * order so the user's mental model lines up
+                   * with the form. */}
+                  <fieldset className="edit-fieldset">
+                    <legend className="edit-fieldset-legend">Core Identity</legend>
+                    <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
                       <div className="edit-field">
-                        <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
-                        <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
+                        <label className="edit-label" htmlFor="edit-name">Name</label>
+                        <input id="edit-name" className="edit-input" type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Game name" />
                       </div>
                       <div className="edit-field">
-                        <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
-                        <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
-                      </div>
-                    </div>
-                    
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-collection">Series</label>
-                      <input id="edit-collection" className="edit-input" type="text" value={editCollection} onChange={(e) => setEditCollection(e.target.value)} placeholder="Series or Collection" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-franchise">Franchise</label>
-                      <input id="edit-franchise" className="edit-input" type="text" value={editFranchise} onChange={(e) => setEditFranchise(e.target.value)} placeholder="Franchise name" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-game-category">Game Type</label>
-                      <input id="edit-game-category" className="edit-input" type="text" value={editGameCategory} onChange={(e) => setEditGameCategory(e.target.value)} placeholder="e.g. Main Game, Expansion" />
-                    </div>
-                    <div className="edit-field">
-                      <label className="edit-label" htmlFor="edit-release-status">Release Status</label>
-                      <input id="edit-release-status" className="edit-input" type="text" value={editReleaseStatus} onChange={(e) => setEditReleaseStatus(e.target.value)} placeholder="e.g. Released, Alpha" />
-                    </div>
-
-                    <div className="edit-field-row" style={{ marginTop: 'var(--space-md)' }}>
-                      <div className="edit-field">
-                        <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main Story (Hours)</label>
-                        <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
+                        <label className="edit-label" htmlFor="edit-play-status">Play Status</label>
+                        <select
+                          id="edit-play-status"
+                          className="edit-input"
+                          value={editPlayStatus}
+                          onChange={(e) => setEditPlayStatus(e.target.value as PlayStatus)}
+                        >
+                          {Object.entries(PLAY_STATUS_DETAILS).map(([key, details]) => (
+                            <option key={key} value={key}>
+                              {details.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="edit-field">
-                        <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (Hours)</label>
-                        <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
+                        <label className="edit-label" htmlFor="edit-platform">Platform</label>
+                        <input id="edit-platform" className="edit-input" type="text" value={editPlatform} onChange={(e) => setEditPlatform(e.target.value)} placeholder="e.g., Steam, GOG, Local" />
                       </div>
                       <div className="edit-field">
-                        <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (Hours)</label>
-                        <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
+                        <label className="edit-label" htmlFor="edit-developer">Developer</label>
+                        <input id="edit-developer" className="edit-input" type="text" value={editDeveloper} onChange={(e) => setEditDeveloper(e.target.value)} placeholder="Developer name" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-publisher">Publisher</label>
+                        <input id="edit-publisher" className="edit-input" type="text" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} placeholder="Publisher name" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-release-date">Release Date</label>
+                        <input id="edit-release-date" className="edit-input" type="text" value={editReleaseDate} onChange={(e) => setEditReleaseDate(e.target.value)} placeholder="e.g., YYYY-MM-DD" />
                       </div>
                     </div>
-                  </div>
+                    <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                      <label className="edit-label" htmlFor="edit-description">Description</label>
+                      <textarea id="edit-description" className="edit-input edit-textarea" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Short description or summary..." rows={3} />
+                    </div>
+                  </fieldset>
 
-                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                    <label className="edit-label" htmlFor="edit-similar-games">Similar Games (Comma-separated)</label>
-                    <input id="edit-similar-games" className="edit-input" type="text" value={editSimilarGamesText} onChange={(e) => setEditSimilarGamesText(e.target.value)} placeholder="Game A, Game B, Game C" />
-                  </div>
+                  <fieldset className="edit-fieldset">
+                    <legend className="edit-fieldset-legend">Ratings &amp; Engagement</legend>
+                    <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+                      <div className="edit-field-row">
+                        <div className="edit-field">
+                          <label className="edit-label" htmlFor="edit-igdb-rating">IGDB User Rating</label>
+                          <input id="edit-igdb-rating" className="edit-input" type="number" min="0" max="100" value={editIgdbRating || ""} onChange={(e) => setEditIgdbRating(Number(e.target.value))} placeholder="0-100" />
+                        </div>
+                        <div className="edit-field">
+                          <label className="edit-label" htmlFor="edit-critic-rating">IGDB Critic Rating</label>
+                          <input id="edit-critic-rating" className="edit-input" type="number" min="0" max="100" value={editCriticRating || ""} onChange={(e) => setEditCriticRating(Number(e.target.value))} placeholder="0-100" />
+                        </div>
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-genres">Genres</label>
+                        <input id="edit-genres" className="edit-input" type="text" value={editGenres} onChange={(e) => setEditGenres(e.target.value)} placeholder="Action, Adventure, Shooter" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-themes">Themes</label>
+                        <input id="edit-themes" className="edit-input" type="text" value={editThemes} onChange={(e) => setEditThemes(e.target.value)} placeholder="Sci-Fi, Survival, Sandbox" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-modes">Game Modes</label>
+                        <input id="edit-modes" className="edit-input" type="text" value={editGameModes} onChange={(e) => setEditGameModes(e.target.value)} placeholder="Single player, Multiplayer, Co-op" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-perspectives">Player Perspectives</label>
+                        <input id="edit-perspectives" className="edit-input" type="text" value={editPlayerPerspectives} onChange={(e) => setEditPlayerPerspectives(e.target.value)} placeholder="First person, Third person" />
+                      </div>
+                      <div className="edit-field-row">
+                        <div className="edit-field">
+                          <label className="edit-label" htmlFor="edit-hltb-main">HLTB Main (h)</label>
+                          <input id="edit-hltb-main" className="edit-input" type="number" min="0" value={editTimeToBeatMain || ""} onChange={(e) => setEditTimeToBeatMain(Number(e.target.value))} placeholder="Hours" />
+                        </div>
+                        <div className="edit-field">
+                          <label className="edit-label" htmlFor="edit-hltb-extra">HLTB Extra (h)</label>
+                          <input id="edit-hltb-extra" className="edit-input" type="number" min="0" value={editTimeToBeatExtra || ""} onChange={(e) => setEditTimeToBeatExtra(Number(e.target.value))} placeholder="Hours" />
+                        </div>
+                        <div className="edit-field">
+                          <label className="edit-label" htmlFor="edit-hltb-comple">HLTB Completionist (h)</label>
+                          <input id="edit-hltb-comple" className="edit-input" type="number" min="0" value={editTimeToBeatComple || ""} onChange={(e) => setEditTimeToBeatComple(Number(e.target.value))} placeholder="Hours" />
+                        </div>
+                      </div>
+                    </div>
+                  </fieldset>
 
-                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                    <label className="edit-label" htmlFor="edit-alternative-names">Alternative Names (Comma-separated)</label>
-                    <input id="edit-alternative-names" className="edit-input" type="text" value={editAlternativeNamesText} onChange={(e) => setEditAlternativeNamesText(e.target.value)} placeholder="Witcher III, Wiedźmin 3" />
-                  </div>
+                  <fieldset className="edit-fieldset">
+                    <legend className="edit-fieldset-legend">Catalog &amp; Tagging</legend>
+                    <div className="edit-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-collection">Series</label>
+                        <input id="edit-collection" className="edit-input" type="text" value={editCollection} onChange={(e) => setEditCollection(e.target.value)} placeholder="Series or Collection" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-franchise">Franchise</label>
+                        <input id="edit-franchise" className="edit-input" type="text" value={editFranchise} onChange={(e) => setEditFranchise(e.target.value)} placeholder="Franchise name" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-game-category">Game Type</label>
+                        <input id="edit-game-category" className="edit-input" type="text" value={editGameCategory} onChange={(e) => setEditGameCategory(e.target.value)} placeholder="e.g. Main Game, Expansion" />
+                      </div>
+                      <div className="edit-field">
+                        <label className="edit-label" htmlFor="edit-release-status">Release Status</label>
+                        <input id="edit-release-status" className="edit-input" type="text" value={editReleaseStatus} onChange={(e) => setEditReleaseStatus(e.target.value)} placeholder="e.g. Released, Alpha" />
+                      </div>
+                    </div>
+                    <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                      <label className="edit-label" htmlFor="edit-similar-games">Similar Games (Comma-separated)</label>
+                      <input id="edit-similar-games" className="edit-input" type="text" value={editSimilarGamesText} onChange={(e) => setEditSimilarGamesText(e.target.value)} placeholder="Game A, Game B, Game C" />
+                    </div>
 
-                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                    <label className="edit-label" htmlFor="edit-description">Description</label>
-                    <textarea id="edit-description" className="edit-input edit-textarea" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Short description or summary..." rows={3} />
-                  </div>
-                  
-                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                    <label className="edit-label" htmlFor="edit-storyline">Storyline</label>
-                    <textarea id="edit-storyline" className="edit-input edit-textarea" value={editStoryline} onChange={(e) => setEditStoryline(e.target.value)} placeholder="Deep storyline/narrative summary..." rows={3} />
-                  </div>
+                    <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                      <label className="edit-label" htmlFor="edit-alternative-names">Alternative Names (Comma-separated)</label>
+                      <input id="edit-alternative-names" className="edit-input" type="text" value={editAlternativeNamesText} onChange={(e) => setEditAlternativeNamesText(e.target.value)} placeholder="Witcher III, Wiedźmin 3" />
+                    </div>
 
-                  <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
-                    <label className="edit-label" htmlFor="edit-notes">Notes</label>
-                    <textarea id="edit-notes" className="edit-input edit-textarea" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Personal notes about this game..." rows={3} />
-                  </div>
+                    <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                      <label className="edit-label" htmlFor="edit-storyline">Storyline</label>
+                      <textarea id="edit-storyline" className="edit-input edit-textarea" value={editStoryline} onChange={(e) => setEditStoryline(e.target.value)} placeholder="Deep storyline/narrative summary..." rows={3} />
+                    </div>
+
+                    <div className="edit-field full-width" style={{ marginTop: 'var(--space-md)' }}>
+                      <label className="edit-label" htmlFor="edit-notes">Notes</label>
+                      <textarea id="edit-notes" className="edit-input edit-textarea" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Personal notes about this game..." rows={3} />
+                    </div>
+                  </fieldset>
                 </div>
               )}
 

@@ -788,9 +788,16 @@
 }
 
 .game-hero--compact .game-hero-logo {
-  max-height: 56px;
-  max-width: 200px;
-  margin: 0;
+  /* Bumped from 56 → 88 px to restore the title-card feel the
+   * pre-compact hero had, where the brand mark overlapped the
+   * banner art. The -10px top margin lifts the image up to make
+   * that overlap visually explicit without colliding with the
+   * bottom-anchored KPI tile row (which sits at z-index 3 over
+   * the banner). The 280px max-width keeps horizontally-busy
+   * logos (e.g. indie titles) from dominating the row. */
+  max-height: 88px;
+  max-width: 280px;
+  margin: -10px 0 0 0;
 }
 
 .game-hero--compact .game-hero-meta {

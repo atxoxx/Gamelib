@@ -188,6 +188,24 @@ export default function Sidebar() {
               placeholder="Search games..."
               value={filterState.search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                // Phase 2.9 PR 2: rolling industry-standard shortcut
+                // — Escape clears the search input + drops focus, so
+                // a user mid-typing who decides the filter is wrong
+                // can blow the field away in a single keystroke.
+                // `.blur()` is what makes the `:focus-within` widened
+                // outer glow collapse back to the resting state. We
+                // intentionally only react when the input has a
+                // value — pressing Escape on an empty input does
+                // nothing here so the keystroke doesn't accidentally
+                // chain into the global sidebar Escape handler (if
+                // we ever add one).
+                if (e.key === "Escape" && filterState.search !== "") {
+                  e.preventDefault();
+                  setSearch("");
+                  e.currentTarget.blur();
+                }
+              }}
             />
           </div>
 
@@ -471,7 +489,7 @@ function ContextMenu({
  * before clearing `coverArtUrl` to trigger a re-arm and an IGDB /
  * LaunchBox re-scrape via the observer.
  *
- * Why the ref is on the OUTER `<div className="sidebar-game-item">`
+ * Why the ref is on the OUTER `<button className="sidebar-game-item">`
  * rather than the inner `sidebar-game-icon`: attaching the observer to
  * the larger row rectangle means the trigger fires as soon as the row
  * is anywhere near the viewport — the 300 px rootMargin gives a generous
@@ -493,7 +511,12 @@ function SidebarGameItem({
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const { updateGame, enrichGameMetadata } = useGames();
-  const coverRef = useRef<HTMLDivElement | null>(null);
+  // The ref is attached to the OUTER `<button className="sidebar-game-item">`,
+  // not the inner icon — see the doc comment above for why the larger
+  // rectangle wins for IntersectionObserver rootMargin. React 19 infers
+  // the ref type from the element, so the explicit `HTMLButtonElement`
+  // generic must match the JSX element type.
+  const coverRef = useRef<HTMLButtonElement | null>(null);
 
   // Auto-enrich criteria — short-circuits the observer setup so we
   // don't spam IGDB for games we already know are unmatched.
@@ -529,7 +552,8 @@ function SidebarGameItem({
   }, [canAutoFetchCover, game.id, game.name, game.steamAppId, enrichGameMetadata]);
 
   return (
-    <div
+    <button
+      type="button"
       ref={coverRef}
       className={`sidebar-game-item${isSelected ? " active" : ""}`}
       onClick={onClick}
@@ -592,6 +616,6 @@ function SidebarGameItem({
       <div
         className={`sidebar-game-status ${isRunning ? "running" : game.installed ? "installed" : "not-installed"}`}
       />
-    </div>
+    </button>
   );
 }

@@ -225,7 +225,19 @@ export default function LineChart({
                 stroke="var(--color-bg-primary)"
                 strokeWidth={isActive ? 2 : 1.5}
                 opacity={isDimmed ? 0.3 : 1}
-                style={{ transition: "opacity 150ms, r 150ms" }}
+                style={{
+                  transition: "opacity 150ms, r 150ms",
+                  // Phase 2.9 PR 4: an outer-glow drop-shadow on the
+                  // active dot telegraphs "this column is what you're
+                  // pointing at" even when the cursor is two-three
+                  // pixels off. The shadow inherits the series color
+                  // so each line keeps its own hue and doesn't
+                  // muddy the palette. Inactive dots stay flat so
+                  // the only moving target is the active one.
+                  filter: isActive
+                    ? `drop-shadow(0 0 6px ${series[si].color})`
+                    : "none",
+                }}
               />
             );
           })

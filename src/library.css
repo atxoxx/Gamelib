@@ -1268,6 +1268,47 @@
   height: 20px;
 }
 
+/* Phase 2.9 PR 2 ("Motion & Tactile Feedback"): the empty-state's
+ * primary action card icon ("Import an EXE") gets a gentle infinite
+ * scale-pulse so a first-time user's eye lands on the fastest
+ * time-to-value path. The pulse is intentionally slow (2.4s) and
+ * small (1.08x) so it stays in the "ambient invitation" register
+ * rather than competing with the hero's one-shot entrance animation
+ * (`.libraryEmptyIn`, 460ms cubic-bezier). The `.library-hero-btn-
+ * -primary` on the same page already pulses via focus-only motion;
+ * this rule specializes the empty-state's accent icon into a
+ * continuous attention pull.
+ *
+ * Honours `prefers-reduced-motion: reduce` — falls back to a static
+ * icon for users who've opted out of motion (the icon still has
+ * its hover scale from the base rule). */
+@keyframes libraryEmptyIconPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.library-empty-hero-card-icon--accent {
+  /* `transform-origin: center` is the default but stating it
+   * explicitly so future tweaks that introduce left/right motion
+   * (e.g. shimmer) don't accidentally drift the pulse origin. */
+  transform-origin: center;
+  animation: libraryEmptyIconPulse 2.4s ease-in-out infinite;
+  /* Will-change nudges the browser into promoting the icon to its
+   * own compositor layer so the 60fps scale animation doesn't
+   * periodically trigger a paint of the surrounding card. */
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-empty-hero-card-icon--accent {
+    animation: none;
+  }
+}
+
 .library-empty-hero-card-icon--info {
   color: var(--color-info);
   background: color-mix(in srgb, var(--color-info) 14%, transparent);
@@ -2226,3 +2267,47 @@
   font-variant-numeric: tabular-nums;
 }
 /* Steam Integration styles live in src/styles/settings.css */
+
+/* ===========================================================================
+   Phase 2.9 PR 2 ("Motion & Tactile Feedback"): library empty-state accent
+   icon pulse
+   ────────────────────────────────
+   The empty-state's primary action card icon ("Import an EXE") gets a
+   gentle infinite scale-pulse so first-time users' eyes land on the
+   fastest time-to-value path. The pulse is intentionally slow (2.4s)
+   and small (1.08x) so it stays in the "ambient invitation" register
+   rather than competing with the hero's one-shot entrance animation
+   (`.libraryEmptyIn`, 460ms cubic-bezier). Appended at the end of the
+   file so cascade ordering puts this rule after any earlier
+   `.library-empty-hero-card-icon` modifier rules. */
+
+@keyframes libraryEmptyIconPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.library-empty-hero-card-icon--accent {
+  /* transform-origin: center (the default) stated explicitly so a
+   * future tweak that introduces left/right motion (e.g. shimmer)
+   * doesn't accidentally drift the pulse origin sideways. */
+  transform-origin: center;
+  animation: libraryEmptyIconPulse 2.4s ease-in-out infinite;
+  /* Will-change nudges the browser into promoting the icon to its
+   * own compositor layer so the 60fps scale animation doesn't
+   * periodically trigger a paint of the surrounding card. */
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-empty-hero-card-icon--accent {
+    animation: none;
+  }
+}
+/* PR2_EOF
+echo ""
+echo "=== last 6 lines of library.css ==="
+tail -n 6 "D:\Developement\test\Gamelib\src\library.css"

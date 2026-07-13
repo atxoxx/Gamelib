@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 interface DonutSlice {
   value: number;
@@ -34,6 +34,15 @@ export default function DonutChart({
   showLegend = true,
   formatValue = (v) => String(v),
 }: DonutChartProps) {
+  // Phase 2.9 PR 4 ("data viz touches") — hover state for
+  // segment scale-up. Single local `hoveredIndex` keeps the
+  // hover gesture cheap (one int per chart) and lets the
+  // transform-origin + filter on each <path> only recompute
+  // when the value flips. Resetting to null on mouseLeave
+  // returns all segments to their resting scale + opacity so
+  // the donut never lingers in a partial-hover state.
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   const total = useMemo(() => {
     const raw = slices.reduce((s, sl) => s + sl.value, 0) || 1;
     // Round to strip floating-point summation artifacts (e.g. 0.1 + 0.2 = 0.300...004)
@@ -93,15 +102,51 @@ export default function DonutChart({
         height={size}
         style={{ flexShrink: 0 }}
       >
-        {arcs.map((arc, i) => (
-          <g key={`arc-${i}`}>
-            <path d={arc.d} fill={arc.color} opacity={0.9} stroke="var(--color-bg-primary)" strokeWidth="2">
-              <title>
-                {arc.label}: {formatValue(arc.value)} ({Math.round(arc.pct * 100)}%)
-              </title>
-            </path>
-          </g>
-        ))}
+        {arcs.map((arc, i) => {
+          // The donut's viewBox center is (size/2, size/2) in
+          // user-space coordinates. We pass that as the
+          // transform-origin so each arc scales radially OUT
+          // from the hole rather than from its own bounding
+          // box's top-left (which would actually look like a
+          // jitter, not a "this slice is the focus" gesture).
+          // transform-box: fill-box would let us write
+          // transform-origin: center, but Chromium + WebKit
+          // differ on its behavior for paths inside `<svg>`,
+          // so we anchor on the absolute SVG coordinates.
+          const cx = size / 2;
+          const cy = size / 2;
+          const isHovered = hoveredIndex === i;
+          return (
+            <g key={`arc-${i}`}>
+              <path
+                d={arc.d}
+                fill={arc.color}
+                opacity={isHovered ? 1 : 0.9}
+                stroke="var(--color-bg-primary)"
+                strokeWidth="2"
+                style={{
+                  // transform-origin in SVG user-space: needs to
+                  // be set with `px` (the user units) for the
+                  // scale to radiate from the donut center.
+                  transformOrigin: `${cx}px ${cy}px`,
+                  transform: isHovered ? "scale(1.06)" : "scale(1)",
+                  transition:
+                    "transform 280ms var(--ease-bounce), opacity 200ms, filter 200ms",
+                  filter: isHovered
+                    ? "brightness(1.16) drop-shadow(0 2px 8px rgba(0,0,0,0.35))"
+                    : "none",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={() => setHoveredIndex(i)}
+                onMouseLeave={() => setHoveredIndex(null)}
+              >
+                <title>
+                  {arc.label}: {formatValue(arc.value)} ({Math.round(arc.pct * 100)}%)
+                </title>
+              </path>
+            </g>
+          );
+        })}
         {/* Center text */}
         <text
           x={size / 2}

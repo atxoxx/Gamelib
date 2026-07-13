@@ -160,7 +160,7 @@ export default function Splashscreen() {
       aria-modal="true"
       aria-label={`Launching ${game.name}`}
     >
-      <div className="splashscreen-card">
+      <div className="splashscreen-card animate-scale-up">
         {/* Hero artwork + gradient fallback */}
         <div className="splashscreen-hero">
           {game.bannerUrl || game.coverArtUrl ? (

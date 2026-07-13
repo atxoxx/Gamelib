@@ -602,6 +602,232 @@
   width: 18px;
   height: 18px;
 }
+
+/* ── Topnav 'More' button + dropdown ────────────────────────────────
+ * Wraps the secondary-tier tabs (Downloads / Storage / News /
+ * Achievements / Plugins) behind a single overflow control so the
+ * primary 6 tabs stay uncompressed in the row. The wrapper is
+ * `position: relative` so the absolutely-positioned dropdown can
+ * self-anchor below the trigger without escaping the row's box.
+ *
+ * The trigger mirrors .topnav-tab so its visual weight (height,
+ * padding, hover, active indicator animation) is identical — a
+ * user who lands on /downloads sees the same teal glow as if
+ * Downloads were inline. `flex-shrink: 0` keeps the wrapper on the
+ * row even when .topnav-tabs is mid-scroll. */
+.topnav-more-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.topnav-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-standard);
+  position: relative;
+  flex-shrink: 0;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  /* Same row constraints as .topnav-tab — without flex-shrink:0
+   * the label compresses before the chevron+icon pair can wrap. */
+  outline: none;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.topnav-more:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  transform: translateY(-1px);
+}
+
+.topnav-more:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+.topnav-more.active {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.topnav-more.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 15%;
+  width: 70%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 10px var(--color-accent-glow), 0 0 20px var(--color-accent-glow);
+  animation: topnavIndicatorIn var(--duration-normal) var(--ease-bounce);
+}
+
+.topnav-more-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.topnav-more-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+  /* Rendered as filled discs (overriding the SVG's `fill="none"`
+   * `stroke="currentColor"` defaults) so the affordance reads as
+   * the standard "more options •••" menu cue. Filled dots also
+   * visually balance the chevron next to them — both are solid
+   * shape indicators, vs. the line-based outline stroke icons
+   * used by every inline `.topnav-tab-icon`. */
+  fill: currentColor;
+  stroke: none;
+}
+
+.topnav-more.active .topnav-more-icon {
+  opacity: 1;
+  color: var(--color-accent);
+}
+
+.topnav-more-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+/* Flip the chevron when the dropdown opens — gives the user a
+ * positive visual confirmation that the click registered,
+ * especially useful for the rare case where the menu renders
+ * underneath a busy banner. The `[aria-expanded]` selector
+ * wins over .active because open state is orthogonal to whether
+ * a route inside the group happens to be the current path. */
+.topnav-more[aria-expanded="true"] .topnav-more-chevron {
+  transform: rotate(180deg);
+}
+
+/* Inline active-downloads badge that sits next to the "More"
+ * label. Same shape language as .topnav-btn-badge (which used
+ * to live on the now-deprecated downloads icon button) so the
+ * live-downloads signal survives the IA consolidation and stays
+ * visible without the user expanding the dropdown. */
+.topnav-more-badge-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  letter-spacing: 0.3px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+/* ── Dropdown menu ────────────────────────────────────────────── */
+.topnav-more-menu {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  min-width: 220px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-xs) 0;
+  z-index: 200;
+  /* Reuse the importMenuIn keyframe (importMenu_open animation)
+   * already defined for the sidebar import menu — same composer,
+   * same easing, same duration. Keeps the title-bar popover
+   * family feeling like one product rather than two. */
+  animation: importMenuIn 150ms ease;
+  overflow: hidden;
+}
+
+.topnav-more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  transition: background var(--transition-fast) var(--ease-standard),
+              color var(--transition-fast) var(--ease-standard);
+  cursor: pointer;
+}
+
+.topnav-more-menu-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.topnav-more-menu-item.active {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+}
+
+.topnav-more-menu-item.active .topnav-tab-icon {
+  color: var(--color-accent);
+}
+
+.topnav-more-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.topnav-more-menu-item.active .topnav-more-menu-icon {
+  color: var(--color-accent);
+}
+
+.topnav-more-menu-item .topnav-tab-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.topnav-more-menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.topnav-more-menu-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  letter-spacing: 0.3px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
 /* ==============================
    Window Controls (custom title-bar)
    ==============================
@@ -748,8 +974,32 @@
 
 .sidebar-search:focus-within {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-glow);
+  /* Phase 2.9 PR 2 ("Motion & Tactile Feedback"): the focus ring's
+   * outer glow grows from 2px to 6px on focus so the search box
+   * visually "expands into focus" without the row layout shifting.
+   * The depth shadow gives the input a subtle settle so a hover-then-
+   * focus transition reads as a single intent, not a flicker. The
+   * 2px horizontal padding swell is a one-pixel-per-side micro-
+   * motion that telegraphs "the input has accepted focus" without
+   * crowding the placeholder text. */
+  box-shadow:
+    0 0 0 6px var(--color-accent-glow),
+    0 6px 20px color-mix(in srgb, var(--color-accent) 25%, transparent);
   background: var(--color-bg-hover);
+}
+
+.sidebar-search:focus-within .sidebar-search-icon {
+  transform: scale(1.15);
+}
+
+/* Honor prefers-reduced-motion: skip the icon scale on focus so
+   users who've opted out of motion still see the visual focus
+   treatment (border + outer glow) without the additional
+   movement. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-search:focus-within .sidebar-search-icon {
+    transform: none;
+  }
 }
 
 .sidebar-search-icon {
@@ -1514,6 +1764,65 @@
   gap: var(--space-md);
   min-width: 0;
 }
+
+/* ── Edit form fieldsets (Metadata tab grouping) ─────────────────
+ * The Metadata edit tab previously rendered 15+ flat inputs in a
+ * single 2-column wall that pushed the human eye to scan
+ * bottom-up. Grouping into semantically-labeled <fieldset>s means
+ * the "Core Identity" / "Ratings & Engagement" / "Catalog &
+ * Tagging" chunks each read as one gestalt, halving the eye's
+ * scanning distance between any two fields. The legend sits as a
+ * pill that "breaks" the top border so it reads as a tab header
+ * rather than an input label.
+ *
+ * Native <fieldset> is used (not a div pretending to be one) so
+ * screen readers correctly announce each group as a labelled
+ * landmark when users tab into the modal — this is the right
+ * accessibility primitive for the use case. */
+.edit-fieldset {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg) var(--space-md) var(--space-md);
+  margin: 0;
+  /* Slight background lift vs the modal body so each fieldset
+   * reads as a card; uses --color-bg-secondary which already
+   * matches the modal body's surface, so the only visible change
+   * from the wall-of-inputs version is the border + legend. */
+  background: var(--color-bg-secondary);
+  min-width: 0;
+}
+
+.edit-fieldset + .edit-fieldset {
+  margin-top: var(--space-md);
+}
+
+.edit-fieldset > .edit-form-grid {
+  margin-bottom: 0;
+}
+
+.edit-fieldset-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 2px var(--space-sm);
+  background: var(--color-bg-secondary);
+  /* Pulls the legend so its background pill sits centered on the
+   * fieldset's top border — the standard visual idiom for
+   * labelled form sections. margin-left keeps the legend from
+   * bleeding into the fieldset's rounded corner. */
+  margin: 0 0 var(--space-md) var(--space-sm);
+  border-radius: var(--radius-sm);
+  /* Negative top margin so the legend pill "breaks" the border
+   * rather than appearing as a separate row of content above
+   * the fieldset. */
+  transform: translateY(-50%);
+}
+
 
 /* Media Player */
 .game-media {
@@ -2464,13 +2773,24 @@
 }
 
 @keyframes toastIn {
+  /*
+   * Phase 2.9 PR 4 ("data viz touches"): the toast stack now
+   * rises from the bottom-right corner instead of sliding in
+   * from the right edge — feels closer to the actual toast
+   * metaphor of "floating up to the surface" and signals the
+   * bottom-right anchor more strongly than a sideways slide.
+   * The 20-px translateY + 0.96 scale is heavy enough to read
+   * as motion but not heavy enough to fight the toast-content
+   * pulse when a long message replaces a short one. The
+   * --ease-bounce curve gives the trailing edge a tiny settle
+   * so the toast doesn't slam to its final position. */
   from {
     opacity: 0;
-    transform: translateX(24px) scale(0.96);
+    transform: translateY(20px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -9724,3 +10044,71 @@ ol.rv-bbcode-list {
 .rv-input[type="number"] {
   -moz-appearance: textfield;
 }
+
+/* ── Sidebar game-item: <button> reset + keyboard focus ring ───────
+ * Phase 2.9 PR 3 ("A11y & Micro-Interactions"): the sidebar's
+ * SidebarGameItem is a real <button type="button"> element so it
+ * inherits focus, Enter/Space activation, and screen-reader "button"
+ * announcement from the platform rather than our own role=button +
+ * tabIndex+0 + onKeyDown ceremony. The rules below reset the user-
+ * agent button defaults (which would otherwise impose a border,
+ * background, padding, and font that override the sidebar-game-item
+ * look) and add a keyboard-only focus ring through `box-shadow`
+ * rather than `outline` so the visual harmonizes with the existing
+ * color/shadow token system AND doesn't fight the `.active`
+ * border-left-color rule.
+ *
+ * Why box-shadow instead of the user-agent outline:
+ *   1. `outline` doesn't follow border-radius on Firefox/some Linux
+ *      builds, producing a rectangular ring on rounded rows.
+ *   2. `outline` cannot be styled with `currentColor` glows as
+ *      fluidly as a box-shadow stack, so a focused + selected row
+ *      can't merge the two indicators visually.
+ *   3. The existing accent glow CSS uses box-shadow everywhere else
+ *      on the app — focus follows the same idiom for consistency.
+ *
+ * `:focus-visible` (not `:focus`) gates the ring on keyboard
+ * activation only so a mouse user who clicks the row doesn't
+ * retain a persistent ring between clicks — exactly the same
+ * `:focus-visible` discipline used for the topnav tabs and price
+ * tile. */
+.sidebar-game-item {
+  /* Reset <button> user-agent defaults. `font: inherit` + `color:
+   * inherit` keep the sidebar-game-name typography; `text-align:
+   * left` preserves the existing LTR name-left / status-dot-right
+   * flex layout. */
+  border: none;
+  background: transparent;
+  padding: var(--space-sm) var(--space-md);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  /* `display: flex` was already on the .sidebar-game-item rule, so
+   * the button wrapper preserves the row layout without an extra
+   * rule. */
+  /* `cursor: pointer` is already inherited from the existing rule. */
+}
+
+.sidebar-game-item:focus-visible {
+  /* Two-layer box-shadow: a tight 2px inner ring for definition,
+   * then a 4px outer halo using the existing accent-glow token so
+   * the focus indicator naturally fades into the surrounding glass
+   * surfaces on every theme. `inset` keeps the ring inside the
+   * row's rounded border so it can't leak across adjacent rows. */
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px var(--color-accent),
+    0 0 0 4px var(--color-accent-glow);
+  /* Slight z-index lift so the focus ring paints above the
+   * .sidebar-divider and any sibling rows that overlap the focus
+   * halo on narrow sidebars. */
+  position: relative;
+  z-index: 1;
+}
+
+/* Honor reduced motion — the focus-shadow animation that the other
+ * accent glow rules use isn't present here (the reveal is instant)
+ * so no special override is needed. The fallback `:focus` ring
+ * (without visible) remains the platform default for users who
+ * somehow lose focus-visible. */
+

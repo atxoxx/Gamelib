@@ -229,6 +229,19 @@
   box-shadow: 0 0 32px color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
+/* Phase 2.9 PR 2 ("Motion & Tactile Feedback"): physical press
+ * feedback on the discover hero CTA. The visible press compresses
+ * the button to 97% of its scale and zeroes the hover lift so the
+ * user feels a single solid "tap" rather than hover-then-settle.
+ * The hover transition's `transform` covers `translateY(-1px)` so
+ * setting `translateY(0)` here cleanly cancels the lift on press,
+ * then `scale(0.97)` adds the tactile press on top. */
+.store-hero-cta:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 25%, transparent);
+  transition-duration: 80ms;
+}
+
 .store-hero-cta svg {
   width: 16px;
   height: 16px;
@@ -261,6 +274,14 @@
 
 .store-hero-dot:hover {
   background: color-mix(in srgb, var(--color-text-primary) 55%, transparent);
+}
+
+/* Phase 2.9 PR 2: press compresses the dot indicator so a tap on
+ * the carousel pagination reads as a single physical gesture rather
+ * than a hover-then-jump-to-active. */
+.store-hero-dot:active {
+  transform: scale(0.85);
+  transition-duration: 80ms;
 }
 
 .store-hero-dot.active {

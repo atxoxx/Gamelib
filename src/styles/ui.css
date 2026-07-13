@@ -436,3 +436,43 @@
     animation: none;
   }
 }
+
+/* ── KpiTile trailing icons (pencil hover affordance) ──────────────
+ * Phase 2.9 PR 3 ("A11y & Micro-Interactions"): the pencil that
+ * lives in the Size tile's `trailing` slot is hidden by default
+ * and fades in ONLY when:
+ *   - the user hovers the parent `.kpi-tile--clickable`, OR
+ *   - keyboard focus lands on the tile (via `:focus-visible`).
+ *
+ * Without the `:focus-visible` trigger, a keyboard user tabbing
+ * to the Size tile would have zero affordance — defeating the
+ * reason we removed the permanent "Click to edit" subtext. The
+ * pencil appearing on focus tells the user "yes, this is
+ * interactive" the moment their focus arrives.
+ *
+ * The transition timing matches the existing kpi-tile hover
+ * transition so the pencil fade + the border accent + the lift
+ * settle together as one gesture. */
+.kpi-tile__pencil {
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+  color: var(--color-accent);
+}
+
+.kpi-tile--clickable:hover .kpi-tile__pencil,
+.kpi-tile--clickable:focus-within .kpi-tile__pencil {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Honor reduced motion: snap instead of fade so users who've
+ * opted out of motion get the affordance without the easing. */
+@media (prefers-reduced-motion: reduce) {
+  .kpi-tile__pencil {
+    transition: none;
+  }
+}
+
