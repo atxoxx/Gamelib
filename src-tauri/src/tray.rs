@@ -43,13 +43,9 @@
 //! session`) is auto-reflected without bespoke event-payload
 //! parsing.
 
-use std::sync::Arc;
-
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::{App, AppHandle, Listener, Manager, Wry};
-
-use crate::game_watcher::GameWatcher;
+use tauri::{App, Listener, Manager, Wry};
 
 /// Concrete MenuItem generic for the desktop runtime. The full
 /// `MenuItem<R>` type is parameterised over `R: Runtime`; on desktop
@@ -194,45 +190,42 @@ pub fn build_tray(app: &App<Wry>) -> tauri::Result<()> {
         quit_item: quit_item.clone(),
     });
 
-    // Live update subscribers. We read GameWatcher's active_sessions
-    // on every emit so the indicator follows whatever path added the
-    // session (Launch button via `register_launched_session`,
-    // passive WMI detection via `start_passive_session`, future
-    // integration paths) without bespoke event-payload parsing.
-    // `app.listen` returns an `EventId` (ignored here — we don't
-    // unlisten) and accepts any `Fn + Send + 'static` closure, so
-    // the captured `handle.clone()` is sufficient.
+    // Live update subscribers that read the game name DIRECTLY from
+    // each event payload — deliberately avoiding any call to
+    // `GameWatcher.current_session_name()` because Tauri's emit is
+    // synchronous: when `launch_game` or the background poll thread
+    // emits "game-started"/"game-exited" while holding
+    // `watcher.lock()`, re-locking from this listener would deadlock.
+    //
+    // On game-started we simply stamp "Playing: <name>". On
+    // game-exited we inspect `remainingGameName` (populated by
+    // `finish_session` while it still held the lock) — if another
+    // session is still active we show that name, otherwise we flip
+    // back to idle.
     let app_handle_started = handle.clone();
-    handle.listen("game-started", move |_event| {
-        refresh_status_from_watcher(&app_handle_started);
+    handle.listen("game-started", move |event| {
+        let handles = app_handle_started.state::<TrayHandles>();
+        let payload = event.payload();
+        // `payload()` returns &str — parse as JSON to get `gameName`.
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload) {
+            if let Some(name) = val.get("gameName").and_then(|v| v.as_str()) {
+                handles.show_playing(name);
+            }
+        }
     });
 
     let app_handle_exited = handle.clone();
-    handle.listen("game-exited", move |_event| {
-        refresh_status_from_watcher(&app_handle_exited);
+    handle.listen("game-exited", move |event| {
+        let handles = app_handle_exited.state::<TrayHandles>();
+        let payload = event.payload();
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload) {
+            if let Some(name) = val.get("remainingGameName").and_then(|v| v.as_str()) {
+                handles.show_playing(name);
+            } else {
+                handles.show_idle();
+            }
+        }
     });
 
     Ok(())
-}
-
-/// Read GameWatcher's `current_session_name` once and update the menu
-/// accordingly. The lock on `GameWatcher.active_sessions` is held for
-/// microseconds (a single HashMap`::values().next()` + clone) so it
-/// doesn't contend with the 5 s background poll or the per-launch
-/// `force_close_game` path. If the lock is poisoned (a `GameWatcher`
-/// mutex panicked mid-update), we treat it as "no active session"
-/// and reset to idle so the menu doesn't stay stale forever.
-fn refresh_status_from_watcher(app: &AppHandle<Wry>) {
-    let watcher = app.state::<Arc<std::sync::Mutex<GameWatcher>>>();
-    let handles = app.state::<TrayHandles>();
-
-    let session_name: Option<String> = match watcher.lock() {
-        Ok(w) => w.current_session_name(),
-        Err(_) => None,
-    };
-
-    match session_name {
-        Some(name) => handles.show_playing(&name),
-        None => handles.show_idle(),
-    }
 }

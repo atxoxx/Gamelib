@@ -413,6 +413,16 @@ impl GameWatcher {
     }
 
     fn finish_session(&mut self, app_handle: &AppHandle, game_id: &str) {
+        // Snapshot the name of any remaining active session BEFORE
+        // removing the current one — the tray/overlay listener reads
+        // this from the event payload and must NOT re-lock the watcher
+        // (the emit fires synchronously while we still hold &mut self).
+        let remaining_name = self
+            .active_sessions
+            .values()
+            .find(|s| s.game_id != game_id)
+            .map(|s| s.game_name.clone());
+
         if let Some(mut session) = self.active_sessions.remove(game_id) {
             let _ = session.stop_tx.send(());
             let elapsed = session.started_at.elapsed().as_secs();
@@ -483,6 +493,7 @@ impl GameWatcher {
                     elapsed_seconds: elapsed,
                     finished_at: finished_at_ms,
                     metrics,
+                    remaining_game_name: remaining_name,
                 },
             );
         }
@@ -859,6 +870,12 @@ pub struct GameExitPayload {
     pub finished_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<metrics_collector::SessionMetrics>,
+    /// When another session is still active after this one ends, this
+    /// carries that session's game name so tray / overlay listeners
+    /// can update their status line without re-locking the watcher.
+    /// `None` means no remaining sessions → the tray flips to idle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_game_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
