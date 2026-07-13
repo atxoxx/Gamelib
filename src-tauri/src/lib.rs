@@ -30,6 +30,7 @@ mod store_checker;
 mod torrent_engine;
 mod achievements;
 mod downloader;
+mod tray;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
@@ -723,6 +724,7 @@ fn launch_game(
     {
         let mut w = watcher.lock().map_err(|e| e.to_string())?;
         w.register_launched_session(
+            &app,
             &game_id,
             &game_name,
             &platform,
@@ -2340,6 +2342,8 @@ pub fn run() {
                     eprintln!("[gamelib] torrent_engine::initialize_engine failed: {}", e);
                 }
             });
+
+            tray::build_tray(app).unwrap_or_else(|e| eprintln!("[gamelib] tray setup failed: {e}"));
 
             Ok(())
         })

@@ -13,7 +13,11 @@
     "opener:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "steam://**" }]
+      "allow": [
+        {
+          "url": "steam://**"
+        }
+      ]
     },
     "dialog:default",
     "core:webview:allow-create-webview",
@@ -29,6 +33,8 @@
     "core:window:allow-close",
     "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
-    "core:event:allow-emit"
+    "core:event:allow-emit",
+    "core:tray:default",
+    "core:menu:default"
   ]
 }

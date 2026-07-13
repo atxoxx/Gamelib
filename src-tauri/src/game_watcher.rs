@@ -158,6 +158,7 @@ impl GameWatcher {
     /// Register a session launched explicitly through the app.
     pub fn register_launched_session(
         &mut self,
+        app_handle: &AppHandle,
         game_id: &str,
         game_name: &str,
         platform: &str,
@@ -194,6 +195,22 @@ impl GameWatcher {
                 lost_at: None,
             },
         );
+
+        // Sync emit for the known-PID path. The pending path
+        // (initial_pid == 0) is handled by the poll loop's
+        // transition detector when the real process appears.
+        // Without this branch, app-launched games with known PIDs
+        // never fire game-started, breaking tray listeners.
+        if initial_pid != 0 {
+            let _ = app_handle.emit(
+                "game-started",
+                GameStartedPayload {
+                    game_id: game_id.to_string(),
+                    game_name: game_name.to_string(),
+                    detected_exe: exe_path.map(|s| s.to_string()),
+                },
+            );
+        }
     }
 
     /// Run one poll cycle. Resolves pending sessions, re-attaches sessions
@@ -477,6 +494,31 @@ impl GameWatcher {
     #[allow(dead_code)]
     pub fn is_running(&self, game_id: &str) -> bool {
         self.active_sessions.contains_key(game_id)
+    }
+
+    /// Returns the `game_name` of one currently-active session, or
+    /// `None` if no sessions are running. Used by the system tray to
+    /// label the "Playing: X" status item — the listener closure
+    /// reads the watcher's in-memory state once per emit, so any
+    /// path that registers a session (Launch button via
+    /// `register_launched_session`, passive WMI detection via
+    /// `start_passive_session`, future integration paths we haven't
+    /// wired yet) ends up reflected in the tray without bespoke
+    /// event-payload parsing.
+    ///
+    /// When multiple sessions are active simultaneously (rare —
+    /// dual-monitor multi-client setups), the first one in
+    /// `active_sessions` HashMap iteration order is returned.
+    /// `HashMap` iteration ordering isn't stable, but the
+    /// multi-session case is uncommon enough that deterministic
+    /// selection isn't worth the extra bookkeeping; if a user really
+    /// wants per-window labels we'd need a multi-tray setup, not a
+    /// single status line.
+    pub fn current_session_name(&self) -> Option<String> {
+        self.active_sessions
+            .values()
+            .next()
+            .map(|s| s.game_name.clone())
     }
 
     /// Force-terminate the tracked process for `game_id` and finalize
