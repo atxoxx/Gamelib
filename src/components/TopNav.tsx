@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useActiveDownloadCount } from "../context/DownloadContext";
+import DownloadPopover from "./DownloadPopover";
 import WindowControls from "./WindowControls";
 
 /**
@@ -256,79 +257,17 @@ function AchievementsIcon() {
   );
 }
 
-function MoreDotsIcon() {
-  // Three horizontal dots — the universal "more options" affordance.
-  // Rendered as filled discs (overriding the SVG's stroked defaults
-  // via the .topnav-more-icon CSS rule) so the affordance reads as
-  // a "menu/dots" cue that matches the chevron next to it.
-  return (
-    <svg
-      className="topnav-more-icon"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="5" cy="12" r="1" />
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon() {
-  return (
-    <svg
-      className="topnav-more-chevron"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
-}
-
-// ── Tab grouping ────────────────────────────────────────────────────────
-//
-// When this app grew past the 5-tab sweet spot, we started hitting
-// diminishing returns on cognitive overload — 11 primary tabs forced
-// the user to mentally rank against every other destination before
-// clicking anything. We split into two tiers:
-//
-//   • **primaryTabs** (6): the user-facing surfaces that map to a
-//     primary action — Library (own), Store (browse), Activity
-//     (history), Wishlist (intent), Deals (browse-with-price),
-//     Community (discover). All are reachable in one click from
-//     any other page.
-//   • **moreTabs** (5): utility/status surfaces used less often —
-//     Downloads, Storage, News, Achievements, Plugins. Reachable via
-//     the "More" button + dropdown.
-//
-// Both tiers share the same `.topnav-tab` styling inline and the
-// `.topnav-more-menu-item` styling (mirror of the inline tab) for
-// the dropdown items, so the affordance reads identically between
-// surfaces and a muscle-memory hop from Library to Storage takes
-// the same amount of time.
-const primaryTabs: Tab[] = [
-  { path: "/library", label: "Library", icon: <LibraryIcon /> },
+const tabs: Tab[] = [
   { path: "/store", label: "Store", icon: <StoreIcon /> },
-  { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
+  { path: "/library", label: "Library", icon: <LibraryIcon /> },
   { path: "/wishlist", label: "Wishlist", icon: <WishlistIcon /> },
   { path: "/deals", label: "Deals", icon: <DealsIcon /> },
-  { path: "/community", label: "Community", icon: <CommunityIcon /> },
-];
-
-const moreTabs: Tab[] = [
+  { path: "/activity", label: "Activity", icon: <ActivityIcon /> },
+  { path: "/achievements", label: "Achievements", icon: <AchievementsIcon /> },
   { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
   { path: "/news", label: "News", icon: <NewsIcon /> },
-  { path: "/achievements", label: "Achievements", icon: <AchievementsIcon /> },
+  { path: "/community", label: "Community", icon: <CommunityIcon /> },
   { path: "/plugins", label: "Plugins", icon: <PluginsIcon /> },
 ];
 
@@ -336,62 +275,15 @@ export default function TopNav() {
   const activeDownloads = useActiveDownloadCount();
   const location = useLocation();
 
-  // More-menu open state. Trigger button and dropdown are siblings
-  // inside .topnav-more-wrapper so the dropdown can self-position
-  // absolutely below the button via the wrapper's `position: relative`.
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreBtnRef = useRef<HTMLButtonElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-  const moreId = useId();
-
-  // Highlight the More button when ANY of its contained tabs is the
-  // current route — this keeps the active indicator consistent with
-  // the inline-tab treatment so muscle-memory navigation works
-  // identically whether the destination is inline or behind More.
-  const isMoreTabActive = moreTabs.some((tab) =>
-    location.pathname.startsWith(tab.path),
-  );
-
-  // Click outside + Escape close the More menu. Both handlers are
-  // attached only while `moreOpen` is true so we don't accumulate
-  // listeners across navigations. The Escape handler restores focus
-  // to the trigger button so keyboard users don't get stranded.
-  //
-  // Renders the menu only while open (rather than mounting then
-  // `display:none`-ing) — this matches the DownloadPopover pattern
-  // and avoids paying animation cost for a dropdown that's hidden.
-  // We use `globalThis.MouseEvent` to disambiguate from React's
-  // imported `MouseEvent` (the titlebar handler imports React's
-  // form for the JSX event type).
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onMouseDown = (e: globalThis.MouseEvent) => {
-      const target = e.target as Node | null;
-      const inMenu = moreMenuRef.current?.contains(target ?? null);
-      const inTrigger = moreBtnRef.current?.contains(target ?? null);
-      if (!inMenu && !inTrigger) setMoreOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setMoreOpen(false);
-        moreBtnRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [moreOpen]);
-
-  // Close More when the route changes — a NavLink click should not
-  // leave the dropdown floating after navigation. Doing this in an
-  // effect rather than inline-onClick means route changes from
-  // outside (back/forward, programmatic nav) also collapse the menu.
-  useEffect(() => {
-    setMoreOpen(false);
-  }, [location.pathname]);
+  // Download popover state. We keep the trigger element and the
+  // popover as siblings inside `.topnav-right`, so the popover can
+  // position itself relative to the trigger via the absolute
+  // `.topnav` containing block (set in App.css).
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const downloadBtnRef = useRef<HTMLButtonElement>(null);
+  // Stable id so the popover div and the trigger button are linked
+  // via `aria-controls` for screen readers.
+  const popoverId = useId();
 
   // Double-click the drag region → toggle maximize. This restores
   // the standard Windows title-bar behavior that
@@ -434,20 +326,8 @@ export default function TopNav() {
           </svg>
           Gamelib
         </div>
-
-        {/*
-          The primary tabs sit inside `.topnav-tabs` (with
-          `role="tablist"`) so screen readers and keyboard users
-          can navigate them as a tab group. The More wrapper that
-          follows is a SIBLING of `.topnav-tabs`, not a child —
-          putting it inside the tablist would violate the ARIA
-          spec, which requires every direct child of a tablist to
-          have `role="tab"`, and would also let long tab lists
-          scroll the More button off-screen. Sibling positioning
-          keeps More anchored next to the strip on every window
-          width. */}
         <div className="topnav-tabs" role="tablist">
-          {primaryTabs.map((tab) => {
+          {tabs.map((tab) => {
             const isActive = location.pathname.startsWith(tab.path);
             return (
               <NavLink
@@ -464,84 +344,12 @@ export default function TopNav() {
             );
           })}
         </div>
-
-        {/* More button + dropdown. Sibling of `.topnav-tabs` (see
-         *  the comment block above for the ARIA/sibling-positioning
-         *  rationale). Active state highlights whenever any
-         *  contained tab is the current route, so the user always
-         *  knows they're "in" the More group from the chrome
-         *  alone. The active-downloads count lifts onto this
-         *  button next to the label so users still see the
-         *  live-status signal even though the former downloads
-         *  popover was demoted into regular navigation as part
-         *  of the IA consolidation. */}
-        <div className="topnav-more-wrapper">
-          <button
-            ref={moreBtnRef}
-            type="button"
-            className={`topnav-more hover-lift${isMoreTabActive ? " active" : ""}`}
-            onClick={() => setMoreOpen((o) => !o)}
-            aria-haspopup="menu"
-            aria-expanded={moreOpen}
-            aria-controls={moreId}
-            title="More navigation"
-          >
-            <span className="topnav-more-label-row">
-              <MoreDotsIcon />
-              <span>More</span>
-              {activeDownloads > 0 && (
-                <span
-                  className="topnav-more-badge-inline"
-                  role="status"
-                  aria-label={`${activeDownloads} active downloads`}
-                >
-                  {activeDownloads}
-                </span>
-              )}
-            </span>
-            <ChevronDownIcon />
-          </button>
-          {moreOpen && (
-            <div
-              id={moreId}
-              className="topnav-more-menu"
-              ref={moreMenuRef}
-              role="menu"
-              aria-label="More navigation"
-            >
-              {moreTabs.map((tab) => {
-                const isActive = location.pathname.startsWith(tab.path);
-                return (
-                  <NavLink
-                    key={tab.path}
-                    to={tab.path}
-                    className={`topnav-more-menu-item${isActive ? " active" : ""}`}
-                    role="menuitem"
-                    aria-current={isActive ? "page" : undefined}
-                  >
-                    <span className="topnav-more-menu-icon">
-                      {tab.icon}
-                    </span>
-                    <span className="topnav-more-menu-label">
-                      {tab.label}
-                    </span>
-                    {tab.path === "/downloads" && activeDownloads > 0 && (
-                      <span className="topnav-more-menu-count">
-                        {activeDownloads}
-                      </span>
-                    )}
-                  </NavLink>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Right cluster: bundles .topnav-right (page actions:
-       *  settings) and .topnav-window-chrome (min/max/close + the
-       *  vertical divider). We render them inside a single flex
-       *  unit because the parent `.topnav` uses
+       *  downloads + settings) and .topnav-window-chrome (min/max/
+       *  close + the vertical divider). We render them inside a
+       *  single flex unit because the parent `.topnav` uses
        *  `justify-content: space-between` and would otherwise
        *  distribute equal space on both sides of the middle child,
        *  pushing .topnav-right into the geometric center of the
@@ -549,22 +357,50 @@ export default function TopNav() {
        *  and the divider). With the cluster wrapper, .topnav has
        *  only two children — `.topnav-left` on the left, this
        *  cluster on the right — and the inner members stay flush
-       *  regardless of window width.
-       *
-       *  Note: the previous Downloads popover+button lived here.
-       *  It moved into the "More" dropdown as part of the IA
-       *  consolidation; users navigate to /downloads for the
-       *  full live UI, and the active-downloads count is surfaced
-       *  on the More button itself so the live signal is
-       *  preserved. See the primaryTabs/moreTabs comment above
-       *  for the full reasoning. */}
+       *  regardless of window width. */}
       <div className="topnav-right-cluster">
-        {/* Page actions live on the far right (system-style
-         *  actions like Settings). Icon-only so they don't
-         *  compete with the primary nav for attention. The
-         *  Settings button uses NavLink so the "active"
-         *  treatment matches the regular tabs. */}
+        {/* Contextual actions live on the far right (system-style
+         *  actions like Settings, Downloads). Icon-only so they
+         *  don't compete with the primary nav for attention. The
+         *  Download button opens a popover (below) that lists every
+         *  active and completed torrent; the Settings button uses
+         *  NavLink so the "active" treatment matches the regular
+         *  tabs. */}
         <div className="topnav-right">
+          <button
+            ref={downloadBtnRef}
+            type="button"
+            className={`topnav-btn topnav-btn-downloads${downloadsOpen ? " active" : ""}`}
+            onClick={() => setDownloadsOpen((o) => !o)}
+            aria-label={`Downloads${activeDownloads > 0 ? ` (${activeDownloads} active)` : ""}`}
+            aria-expanded={downloadsOpen}
+            aria-haspopup="dialog"
+            aria-controls={popoverId}
+            title="Downloads"
+          >
+            <DownloadIcon />
+            {activeDownloads > 0 && (
+              <span
+                className="topnav-btn-badge"
+                role="status"
+                aria-label={`${activeDownloads} active downloads`}
+              >
+                {activeDownloads}
+              </span>
+            )}
+          </button>
+          <DownloadPopover
+            open={downloadsOpen}
+            onClose={() => {
+              setDownloadsOpen(false);
+              // Restore focus to the trigger so keyboard users don't
+              // get stranded after Escape / click-outside closes the
+              // popover.
+              downloadBtnRef.current?.focus();
+            }}
+            anchorRef={downloadBtnRef}
+            id={popoverId}
+          />
           <NavLink
             to="/settings"
             className={({ isActive }) =>

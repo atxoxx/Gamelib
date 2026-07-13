@@ -603,133 +603,17 @@
   height: 18px;
 }
 
-/* ── Topnav 'More' button + dropdown ────────────────────────────────
- * Wraps the secondary-tier tabs (Downloads / Storage / News /
- * Achievements / Plugins) behind a single overflow control so the
- * primary 6 tabs stay uncompressed in the row. The wrapper is
- * `position: relative` so the absolutely-positioned dropdown can
- * self-anchor below the trigger without escaping the row's box.
- *
- * The trigger mirrors .topnav-tab so its visual weight (height,
- * padding, hover, active indicator animation) is identical — a
- * user who lands on /downloads sees the same teal glow as if
- * Downloads were inline. `flex-shrink: 0` keeps the wrapper on the
- * row even when .topnav-tabs is mid-scroll. */
-.topnav-more-wrapper {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.topnav-more {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-standard);
-  position: relative;
-  flex-shrink: 0;
-  white-space: nowrap;
-  -webkit-app-region: no-drag;
-  /* Same row constraints as .topnav-tab — without flex-shrink:0
-   * the label compresses before the chevron+icon pair can wrap. */
-  outline: none;
-  font-family: inherit;
-  letter-spacing: 0;
-}
-
-.topnav-more:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-  transform: translateY(-1px);
-}
-
-.topnav-more:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-  border-radius: var(--radius-md);
-}
-
-.topnav-more.active {
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-}
-
-.topnav-more.active::after {
-  content: "";
+.topnav-btn-badge {
   position: absolute;
-  bottom: 0;
-  left: 15%;
-  width: 70%;
-  height: 3px;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
-  border-radius: var(--radius-full);
-  box-shadow: 0 0 10px var(--color-accent-glow), 0 0 20px var(--color-accent-glow);
-  animation: topnavIndicatorIn var(--duration-normal) var(--ease-bounce);
-}
-
-.topnav-more-label-row {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.topnav-more-icon {
-  width: 16px;
-  height: 16px;
-  opacity: 0.8;
-  /* Rendered as filled discs (overriding the SVG's `fill="none"`
-   * `stroke="currentColor"` defaults) so the affordance reads as
-   * the standard "more options •••" menu cue. Filled dots also
-   * visually balance the chevron next to them — both are solid
-   * shape indicators, vs. the line-based outline stroke icons
-   * used by every inline `.topnav-tab-icon`. */
-  fill: currentColor;
-  stroke: none;
-}
-
-.topnav-more.active .topnav-more-icon {
-  opacity: 1;
-  color: var(--color-accent);
-}
-
-.topnav-more-chevron {
-  width: 12px;
-  height: 12px;
-  opacity: 0.7;
-  flex-shrink: 0;
-  transition: transform var(--duration-fast) var(--ease-standard);
-}
-
-/* Flip the chevron when the dropdown opens — gives the user a
- * positive visual confirmation that the click registered,
- * especially useful for the rare case where the menu renders
- * underneath a busy banner. The `[aria-expanded]` selector
- * wins over .active because open state is orthogonal to whether
- * a route inside the group happens to be the current path. */
-.topnav-more[aria-expanded="true"] .topnav-more-chevron {
-  transform: rotate(180deg);
-}
-
-/* Inline active-downloads badge that sits next to the "More"
- * label. Same shape language as .topnav-btn-badge (which used
- * to live on the now-deprecated downloads icon button) so the
- * live-downloads signal survives the IA consolidation and stays
- * visible without the user expanding the dropdown. */
-.topnav-more-badge-inline {
+  top: 5px;
+  right: 5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: var(--font-weight-bold);
   color: #fff;
   background: var(--color-accent);
@@ -737,96 +621,15 @@
   letter-spacing: 0.3px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 8px var(--color-accent-glow);
+  box-shadow: 0 0 6px var(--color-accent-glow);
+  pointer-events: none;
 }
 
-/* ── Dropdown menu ────────────────────────────────────────────── */
-.topnav-more-menu {
-  position: absolute;
-  top: calc(100% + var(--space-xs));
-  left: 0;
-  min-width: 220px;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: var(--space-xs) 0;
-  z-index: 200;
-  /* Reuse the importMenuIn keyframe (importMenu_open animation)
-   * already defined for the sidebar import menu — same composer,
-   * same easing, same duration. Keeps the title-bar popover
-   * family feeling like one product rather than two. */
-  animation: importMenuIn 150ms ease;
-  overflow: hidden;
+.topnav-btn-downloads {
+  position: relative;
 }
 
-.topnav-more-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-primary);
-  text-decoration: none;
-  transition: background var(--transition-fast) var(--ease-standard),
-              color var(--transition-fast) var(--ease-standard);
-  cursor: pointer;
-}
 
-.topnav-more-menu-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.topnav-more-menu-item.active {
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  color: var(--color-accent);
-}
-
-.topnav-more-menu-item.active .topnav-tab-icon {
-  color: var(--color-accent);
-}
-
-.topnav-more-menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.topnav-more-menu-item.active .topnav-more-menu-icon {
-  color: var(--color-accent);
-}
-
-.topnav-more-menu-item .topnav-tab-icon {
-  width: 15px;
-  height: 15px;
-}
-
-.topnav-more-menu-label {
-  flex: 1;
-  min-width: 0;
-}
-
-.topnav-more-menu-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  font-size: 10px;
-  font-weight: var(--font-weight-bold);
-  color: #fff;
-  background: var(--color-accent);
-  border-radius: var(--radius-full);
-  letter-spacing: 0.3px;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
-}
 
 /* ==============================
    Window Controls (custom title-bar)
@@ -10111,4 +9914,5 @@ ol.rv-bbcode-list {
  * so no special override is needed. The fallback `:focus` ring
  * (without visible) remains the platform default for users who
  * somehow lose focus-visible. */
+
 

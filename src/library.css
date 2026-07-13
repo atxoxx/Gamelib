@@ -2307,7 +2307,3 @@
     animation: none;
   }
 }
-/* PR2_EOF
-echo ""
-echo "=== last 6 lines of library.css ==="
-tail -n 6 "D:\Developement\test\Gamelib\src\library.css"
