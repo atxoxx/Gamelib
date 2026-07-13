@@ -789,7 +789,22 @@ impl TorrentEngine {
                 d.upload_speed = entry.upload_speed;
                 d.seeds = entry.seeds;
                 d.peers = entry.peers;
-                d.status = entry.status;
+                // Preserve an explicit Error status set by a background
+                // task (e.g. torrent_add timeout handler). Without this
+                // guard, refresh_stats would see a stalled torrent still
+                // in the librqbit session in Initializing state and
+                // overwrite the user-visible Error back to
+                // FetchingMetadata — the "stuck at FetchingMetadata"
+                // bug. The background task's timeout handler now also
+                // deletes the torrent from the session (belt-and-
+                // suspenders), but retaining this gate in refresh_stats
+                // protects against any future codepath that sets Error
+                // before cleaning up the session entry.
+                if !matches!(&d.status, DownloadStatus::Error(_))
+                    || matches!(&entry.status, DownloadStatus::Error(_))
+                {
+                    d.status = entry.status;
+                }
                 // Only overwrite the file list when we have a live
                 // snapshot from librqbit. A `None` snapshot preserves
                 // the user's confirmed selection across a transient
@@ -918,6 +933,35 @@ impl TorrentEngine {
         // hands off cleanly to the Error(_) keep-arm when the
         // timeout fires instead of having the row pruned.
         const FETCHING_METADATA_GRACE_SECS: u64 = 130;
+
+        // Transition stale FetchingMetadata rows to Error BEFORE
+        // the retain pass, so the Error keep-arm catches them.
+        // Without this, a FetchingMetadata download whose
+        // background task hasn't added the torrent to the session
+        // would be silently pruned after 130 s — the user sees
+        // the download vanish with no explanation.
+        let now = unix_now();
+        for (id, d) in self.downloads.iter_mut() {
+            if matches!(d.status, DownloadStatus::FetchingMetadata)
+                && id.starts_with("dl_")
+                && !alive_set.contains_key(id)
+                && now.saturating_sub(d.added_at) >= FETCHING_METADATA_GRACE_SECS
+            {
+                eprintln!(
+                    "[gamelib] FetchingMetadata timed out after {} s for {}; \
+                     transitioning to Error.",
+                    now.saturating_sub(d.added_at),
+                    id
+                );
+                d.status = DownloadStatus::Error(
+                    "Timed out fetching metadata — no peers responded. \
+                     Check your firewall or try a different source."
+                        .to_string(),
+                );
+                save_needed = true;
+            }
+        }
+
         self.downloads
             .retain(|id, d| {
                 id.starts_with("dd_") ||
@@ -997,39 +1041,6 @@ pub fn unix_now() -> u64 {
 /// Build the frontend-facing id from a librqbit numeric torrent id.
 fn make_frontend_id(numeric_id: usize) -> String {
     format!("dl_{}", numeric_id)
-}
-
-fn hex_decode(hex_str: &str) -> Option<[u8; 20]> {
-    if hex_str.len() != 40 {
-        return None;
-    }
-    let mut bytes = [0u8; 20];
-    let chars: Vec<char> = hex_str.chars().collect();
-    for i in 0..20 {
-        let high = chars[i * 2].to_digit(16)? as u8;
-        let low = chars[i * 2 + 1].to_digit(16)? as u8;
-        bytes[i] = (high << 4) | low;
-    }
-    Some(bytes)
-}
-
-fn parse_magnet_hash(uri: &str) -> Option<[u8; 20]> {
-    let url = url::Url::parse(uri).ok()?;
-    for (k, v) in url.query_pairs() {
-        if k == "xt" {
-            if let Some(hex_str) = v.strip_prefix("urn:btih:") {
-                if hex_str.len() == 40 {
-                    if let Some(decoded) = hex_decode(hex_str) {
-                        return Some(decoded);
-                    }
-                    if let Some(decoded) = hex_decode(&hex_str.to_lowercase()) {
-                        return Some(decoded);
-                    }
-                }
-            }
-        }
-    }
-    None
 }
 
 fn make_frontend_id_from_hash(info_hash: &[u8; 20]) -> String {
@@ -1190,6 +1201,28 @@ fn find_handle(
     })
 }
 
+/// Remove a torrent from the librqbit session by its frontend-facing
+/// id string (`"dl_<n>"`). No-op if the id doesn't parse or the
+/// torrent isn't currently in the session.
+///
+/// Used by the background task in `torrent_add` to clean up after
+/// a timed-out or failed `add_torrent` call — without this cleanup
+/// the stalled torrent stays in the session forever, causing
+/// `refresh_stats` to keep overwriting the Error status the
+/// background task set.
+async fn cleanup_session_torrent(
+    session: &Arc<librqbit::Session>,
+    id_str: &str,
+) {
+    if let Ok(numeric_id) = parse_handle_id(id_str) {
+        if let Some(handle) = find_handle(session, numeric_id) {
+            let _ = session
+                .delete(librqbit::api::TorrentIdOrHash::Id(handle.id()), false)
+                .await;
+        }
+    }
+}
+
 // ─── Global singleton + background polling task ──────────────────────────────
 
 static ENGINE: OnceCell<Arc<tokio::sync::RwLock<TorrentEngine>>> =
@@ -1297,136 +1330,267 @@ pub async fn torrent_add(
     }
 
     let is_list_only = list_only.unwrap_or(false);
+
+    // ── Non-blocking path for !list_only ───────────────────────────────
+    //
+    // session.add_torrent() can take up to 120 s for magnet URIs while
+    // librqbit fetches metadata from the DHT / trackers. We must NOT
+    // block the Tauri command that long — the frontend shows "Starting
+    // download…" and the modal stays open. Instead:
+    //
+    // 1. Insert a placeholder record immediately (with a temp ID) so the
+    //    frontend sees "Fetching Metadata" right away.
+    // 2. Return the placeholder record to the frontend (the command
+    //    resolves in < 1 ms).
+    // 3. A background tokio task calls add_torrent and, on success,
+    //    derives the REAL frontend ID from handle.shared().info_hash —
+    //    the authoritative hash that librqbit actually uses. The temp
+    //    record is then swapped for the real one via remove + insert.
+    //
+    // Deriving the ID from the handle's info_hash is mandatory:
+    // parse_magnet_hash (old code) could extract a different hash
+    // (Base32 vs hex, v2 vs v1) than what librqbit internally uses.
+    // That mismatch caused the original "stuck at Fetching Metadata"
+    // bug — our record had ID dl_A but the torrent in the session had
+    // ID dl_B, and refresh_stats never matched them.
+    //
+    // For list_only=true ("Fetch Files List" flow), we stay on the
+    // synchronous path below because AddTorrentOptions.list_only
+    // returns quickly (librqbit just registers the infohash) and the
+    // frontend needs the file list immediately before it can show the
+    // file-selection UI.
     if !is_list_only {
-        if let Some(info_hash) = parse_magnet_hash(&trimmed) {
-            let id_str = make_frontend_id_from_hash(&info_hash);
+        // Unique temp id — starts with "dl_" so refresh_stats retain
+        // logic (id.starts_with("dl_")) keeps the placeholder alive.
+        // unix_now() is second-precision; the atomic counter guards
+        // against the (extremely rare) case of two torrent_add calls
+        // within the same second getting the same id.
+        static TEMP_ID_CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let ctr = TEMP_ID_CTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temp_id = format!("dl_pending_{}_{}", unix_now(), ctr);
+
+        let placeholder = TorrentDownload {
+            id: temp_id.clone(),
+            name: "Fetching metadata\u{2026}".to_string(),
+            source_uri: trimmed.clone(),
+            save_path: save_path.clone(),
+            downloaded: 0,
+            total_size: None,
+            progress: Some(0.0),
+            download_speed: 0,
+            upload_speed: 0,
+            seeds: 0,
+            peers: 0,
+            status: DownloadStatus::FetchingMetadata,
+            game_id: game_id.clone(),
+            source_name: source_name.clone(),
+            added_at: unix_now(),
+            files: vec![],
+            auto_extract: Some(auto_extract.unwrap_or(false)),
+            extracted: Some(false),
+            uris: None,
+        };
+
+        {
             let mut guard = engine.write().await;
-            
-            // If it already exists in downloads, update its parameters and return it
-            if guard.downloads_mut().contains_key(&id_str) {
-                let updated = {
-                    let existing = guard.downloads_mut().get_mut(&id_str).unwrap();
-                    existing.save_path = save_path.clone();
-                    existing.game_id = game_id;
-                    existing.source_name = source_name;
-                    existing.auto_extract = Some(auto_extract.unwrap_or(false));
-                    existing.status = DownloadStatus::FetchingMetadata;
-                    existing.added_at = unix_now();
-                    existing.clone()
-                };
-                guard.mark_dirty();
-                guard.emit_progress_force();
-                
-                // Spawn the background task to add it to the session
-                let session_clone = session.clone();
-                let save_path_clone = save_path.clone();
-                let engine_clone = Arc::clone(&engine);
-                let trimmed_clone = trimmed.clone();
-                let id_str_clone = id_str.clone();
-                tokio::spawn(async move {
-                    let add = librqbit::AddTorrent::from_url(trimmed_clone);
-                    let add_opts = librqbit::AddTorrentOptions {
-                        output_folder: Some(save_path_clone.into()),
-                        overwrite: true,
-                        list_only: false,
-                        ..Default::default()
-                    };
-                    match tokio::time::timeout(Duration::from_secs(120), session_clone.add_torrent(add, Some(add_opts))).await {
-                        Ok(Ok(_)) => {
-                            println!("[gamelib] Background magnet add succeeded.");
-                        }
-                        Ok(Err(e)) => {
-                            eprintln!("[gamelib] Background magnet add failed: {}", e);
-                            let mut guard = engine_clone.write().await;
-                            if let Some(d) = guard.downloads_mut().get_mut(&id_str_clone) {
-                                d.status = DownloadStatus::Error(format!("Failed to add torrent: {}", e));
-                                guard.mark_dirty();
-                                guard.emit_progress_force();
-                            }
-                        }
-                        Err(_) => {
-                            eprintln!("[gamelib] Background magnet add timed out fetching metadata.");
-                            let mut guard = engine_clone.write().await;
-                            if let Some(d) = guard.downloads_mut().get_mut(&id_str_clone) {
-                                d.status = DownloadStatus::Error("Timed out fetching metadata".to_string());
-                                guard.mark_dirty();
-                                guard.emit_progress_force();
-                            }
-                        }
-                    }
-                });
-
-                return Ok(updated);
-            }
-
-            // Create new download record
-            let download = TorrentDownload {
-                id: id_str.clone(),
-                name: "Fetching metadata\u{2026}".to_string(),
-                source_uri: trimmed.clone(),
-                save_path: save_path.clone(),
-                downloaded: 0,
-                total_size: None,
-                progress: Some(0.0),
-                download_speed: 0,
-                upload_speed: 0,
-                seeds: 0,
-                peers: 0,
-                status: DownloadStatus::FetchingMetadata,
-                game_id,
-                source_name,
-                added_at: unix_now(),
-                files: Vec::new(),
-                auto_extract: Some(auto_extract.unwrap_or(false)),
-                extracted: Some(false),
-                uris: None,
-            };
-            guard.downloads_mut().insert(id_str.clone(), download.clone());
+            guard.downloads_mut().insert(temp_id.clone(), placeholder.clone());
             guard.mark_dirty();
             guard.emit_progress_force();
+        }
 
-            // Spawn the background task to add it to the session
-            let session_clone = session.clone();
-            let save_path_clone = save_path.clone();
-            let engine_clone = Arc::clone(&engine);
-            let trimmed_clone = trimmed.clone();
-            let id_str_clone = id_str.clone();
-            tokio::spawn(async move {
-                let add = librqbit::AddTorrent::from_url(trimmed_clone);
-                let add_opts = librqbit::AddTorrentOptions {
-                    output_folder: Some(save_path_clone.into()),
-                    overwrite: true,
-                    list_only: false,
-                    ..Default::default()
-                };
-                match tokio::time::timeout(Duration::from_secs(120), session_clone.add_torrent(add, Some(add_opts))).await {
-                    Ok(Ok(_)) => {
-                        println!("[gamelib] Background magnet add succeeded.");
-                    }
-                    Ok(Err(e)) => {
-                        eprintln!("[gamelib] Background magnet add failed: {}", e);
-                        let mut guard = engine_clone.write().await;
-                        if let Some(d) = guard.downloads_mut().get_mut(&id_str_clone) {
-                            d.status = DownloadStatus::Error(format!("Failed to add torrent: {}", e));
+        // Spawn the background task that does the actual
+        // session.add_torrent() without blocking the caller.
+        let engine_clone = Arc::clone(&engine);
+        let temp_id_clone = temp_id.clone();
+        let trimmed_clone = trimmed.clone();
+        let save_path_clone = save_path.clone();
+        let game_id_clone = game_id.clone();
+        let source_name_clone = source_name.clone();
+        let auto_extract_val = auto_extract.unwrap_or(false);
+
+        tokio::spawn(async move {
+            let add = librqbit::AddTorrent::from_url(trimmed_clone.clone());
+            let add_opts = librqbit::AddTorrentOptions {
+                output_folder: Some(save_path_clone.clone().into()),
+                overwrite: true,
+                list_only: false,
+                ..Default::default()
+            };
+
+            match tokio::time::timeout(
+                Duration::from_secs(120),
+                session.add_torrent(add, Some(add_opts)),
+            )
+            .await
+            {
+                Ok(Ok(response)) => {
+                    match response {
+                        librqbit::AddTorrentResponse::Added(_, handle)
+                        | librqbit::AddTorrentResponse::AlreadyManaged(_, handle) =>
+                        {
+                            let info_hash = &handle.shared().info_hash;
+                            let real_id =
+                                make_frontend_id_from_hash(&info_hash.0);
+
+                            let name = handle.name().unwrap_or_else(|| {
+                                "Fetching metadata\u{2026}".to_string()
+                            });
+
+                            let only_files_list = handle.only_files();
+                            let files = handle
+                                .with_metadata(|meta_data| {
+                                    meta_data
+                                        .file_infos
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, info)| {
+                                            let f_selected = match &only_files_list {
+                                                Some(indices) => indices.contains(&i),
+                                                None => true,
+                                            };
+                                            TorrentFile {
+                                                name: info
+                                                    .relative_filename
+                                                    .to_string_lossy()
+                                                    .into_owned(),
+                                                size: info.len,
+                                                downloaded: 0,
+                                                progress: 0.0,
+                                                selected: f_selected,
+                                            }
+                                        })
+                                        .collect::<Vec<TorrentFile>>()
+                                })
+                                .unwrap_or_default();
+
+                            let total_size = handle.stats().total_bytes;
+
+                            // AlreadyManaged may still be paused from a
+                            // prior list_only addition.
+                            let _ = session.unpause(&handle).await;
+
+                            let mut guard = engine_clone.write().await;
+                            // Snapshot the placeholder's state BEFORE
+                            // removing it. If the user paused the
+                            // placeholder while the background task was
+                            // running, we must carry that Paused state
+                            // forward to the real record and actually
+                            // pause the handle in-session.
+                            let was_paused = guard
+                                .downloads_mut()
+                                .get(&temp_id_clone)
+                                .map(|d| {
+                                    matches!(
+                                        d.status,
+                                        DownloadStatus::Paused
+                                    )
+                                })
+                                .unwrap_or(false);
+
+                            // Remove the temp placeholder record.
+                            guard.downloads_mut().remove(&temp_id_clone);
+
+                            if was_paused {
+                                let _ = session.pause(&handle).await;
+                            }
+
+                            // Insert (or update) the record with the
+                            // real, authoritative frontend id.
+                            let download = TorrentDownload {
+                                id: real_id.clone(),
+                                name,
+                                source_uri: trimmed_clone,
+                                save_path: save_path_clone,
+                                downloaded: 0,
+                                total_size: if total_size > 0 {
+                                    Some(total_size)
+                                } else {
+                                    None
+                                },
+                                progress: Some(0.0),
+                                download_speed: 0,
+                                upload_speed: 0,
+                                seeds: 0,
+                                peers: 0,
+                                status: if was_paused {
+                                    DownloadStatus::Paused
+                                } else {
+                                    DownloadStatus::FetchingMetadata
+                                },
+                                game_id: game_id_clone,
+                                source_name: source_name_clone,
+                                added_at: unix_now(),
+                                files,
+                                auto_extract: Some(auto_extract_val),
+                                extracted: Some(false),
+                                uris: None,
+                            };
+                            guard
+                                .downloads_mut()
+                                .insert(real_id, download);
                             guard.mark_dirty();
                             guard.emit_progress_force();
                         }
-                    }
-                    Err(_) => {
-                        eprintln!("[gamelib] Background magnet add timed out fetching metadata.");
-                        let mut guard = engine_clone.write().await;
-                        if let Some(d) = guard.downloads_mut().get_mut(&id_str_clone) {
-                            d.status = DownloadStatus::Error("Timed out fetching metadata".to_string());
+                        librqbit::AddTorrentResponse::ListOnly(_) => {
+                            // Shouldn't happen with list_only=false.
+                            let mut guard = engine_clone.write().await;
+                            if let Some(d) = guard
+                                .downloads_mut()
+                                .get_mut(&temp_id_clone)
+                            {
+                                d.status = DownloadStatus::Error(
+                                    "Internal error: unexpected ListOnly \
+                                     response for non-list_only torrent"
+                                        .to_string(),
+                                );
+                            }
                             guard.mark_dirty();
                             guard.emit_progress_force();
                         }
                     }
                 }
-            });
+                Ok(Err(e)) => {
+                    let mut guard = engine_clone.write().await;
+                    if let Some(d) =
+                        guard.downloads_mut().get_mut(&temp_id_clone)
+                    {
+                        d.status = DownloadStatus::Error(format!(
+                            "Failed to add torrent: {}",
+                            e
+                        ));
+                    }
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
+                }
+                Err(_) => {
+                    let mut guard = engine_clone.write().await;
+                    if let Some(d) =
+                        guard.downloads_mut().get_mut(&temp_id_clone)
+                    {
+                        d.status = DownloadStatus::Error(
+                            "Timed out fetching metadata — no peers \
+                             responded. Check your firewall or try a \
+                             different source."
+                                .to_string(),
+                        );
+                    }
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
+                }
+            }
+        });
 
-            return Ok(download);
-        }
+        return Ok(placeholder);
     }
+
+    // ── Synchronous path (list_only=true only) ──────────────────────────
+    //
+    // list_only doesn't need to fetch metadata from the DHT — librqbit
+    // just registers the infohash and returns immediately. We stay on
+    // the synchronous path here because:
+    //   1. It's fast (returns in milliseconds, not 120 s).
+    //   2. The frontend (DownloadModal "Fetch Files List" step) needs
+    //      the file list immediately so the file-selection UI appears.
 
     let add = librqbit::AddTorrent::from_url(trimmed.clone());
     let add_opts = librqbit::AddTorrentOptions {
@@ -1450,52 +1614,81 @@ pub async fn torrent_add(
     .map_err(|e| format!("Failed to add torrent: {}", e))?;
 
     let (id_str, name, files, total_size, status) = match response {
-        librqbit::AddTorrentResponse::Added(_, handle) | librqbit::AddTorrentResponse::AlreadyManaged(_, handle) => {
+        librqbit::AddTorrentResponse::Added(_, handle)
+        | librqbit::AddTorrentResponse::AlreadyManaged(_, handle) =>
+        {
             let info_hash = &handle.shared().info_hash;
             let id_str = make_frontend_id_from_hash(&info_hash.0);
             let name = handle
                 .name()
                 .unwrap_or_else(|| "Fetching metadata\u{2026}".to_string());
-            
+
             let only_files_list = handle.only_files();
-            let files = handle.with_metadata(|meta_data| {
-                meta_data.file_infos.iter().enumerate().map(|(i, info)| {
-                    let f_selected = match &only_files_list {
-                        Some(indices) => indices.contains(&i),
-                        None => true,
-                    };
-                    TorrentFile {
-                        name: info.relative_filename.to_string_lossy().into_owned(),
-                        size: info.len,
-                        downloaded: 0,
-                        progress: 0.0,
-                        selected: f_selected,
-                    }
-                }).collect::<Vec<TorrentFile>>()
-            }).unwrap_or_default();
-            
+            let files = handle
+                .with_metadata(|meta_data| {
+                    meta_data
+                        .file_infos
+                        .iter()
+                        .enumerate()
+                        .map(|(i, info)| {
+                            let f_selected = match &only_files_list {
+                                Some(indices) => indices.contains(&i),
+                                None => true,
+                            };
+                            TorrentFile {
+                                name: info
+                                    .relative_filename
+                                    .to_string_lossy()
+                                    .into_owned(),
+                                size: info.len,
+                                downloaded: 0,
+                                progress: 0.0,
+                                selected: f_selected,
+                            }
+                        })
+                        .collect::<Vec<TorrentFile>>()
+                })
+                .unwrap_or_default();
+
             let total_size = handle.stats().total_bytes;
 
-            (id_str, name, files, Some(total_size), DownloadStatus::FetchingMetadata)
+            (
+                id_str,
+                name,
+                files,
+                Some(total_size),
+                DownloadStatus::FetchingMetadata,
+            )
         }
         librqbit::AddTorrentResponse::ListOnly(res) => {
             let id_str = make_frontend_id_from_hash(&res.info_hash.0);
-            let name = res.info.name.as_ref()
+            let name = res
+                .info
+                .name
+                .as_ref()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
-            let files = res.info.iter_file_details().ok().map(|iter| {
-                iter.map(|info| {
-                    TorrentFile {
-                        name: info.filename.to_pathbuf().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+            let files = res
+                .info
+                .iter_file_details()
+                .ok()
+                .map(|iter| {
+                    iter.map(|info| TorrentFile {
+                        name: info
+                            .filename
+                            .to_pathbuf()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
                         size: info.len,
                         downloaded: 0,
                         progress: 0.0,
                         selected: true,
-                    }
-                }).collect::<Vec<TorrentFile>>()
-            }).unwrap_or_default();
+                    })
+                    .collect::<Vec<TorrentFile>>()
+                })
+                .unwrap_or_default();
             let total_size = files.iter().map(|f| f.size).sum::<u64>();
-            
+
             (id_str, name, files, Some(total_size), DownloadStatus::Paused)
         }
     };
@@ -1523,7 +1716,11 @@ pub async fn torrent_add(
         source_uri: trimmed,
         save_path,
         downloaded: 0,
-        total_size: if total_size.unwrap_or(0) > 0 { total_size } else { None },
+        total_size: if total_size.unwrap_or(0) > 0 {
+            total_size
+        } else {
+            None
+        },
         progress: Some(0.0),
         download_speed: 0,
         upload_speed: 0,
@@ -1559,23 +1756,38 @@ pub async fn torrent_pause(id: String) -> Result<(), String> {
         return Ok(());
     }
 
+    // Try to find and pause the torrent in the librqbit session
+    // first. If the torrent hasn't been added to the session yet
+    // (e.g. the background task in torrent_add is still fetching
+    // metadata), fall back to a metadata-only pause — update the
+    // status in our map directly. The background task will see
+    // Paused status when it completes and respect it.
     let session = {
         let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
-    let numeric_id = parse_handle_id(&id)?;
-    let handle = find_handle(&session, numeric_id)
-        .ok_or_else(|| format!("Download not found: {}", id))?;
-
-    session.pause(&handle).await.map_err(|e| {
-        format!("Failed to pause: {}", e)
-    })?;
+    let mut session_paused = false;
+    if let Ok(numeric_id) = parse_handle_id(&id) {
+        if let Some(handle) = find_handle(&session, numeric_id) {
+            session.pause(&handle).await.map_err(|e| {
+                format!("Failed to pause: {}", e)
+            })?;
+            session_paused = true;
+        }
+    }
 
     {
         let mut guard = engine.write().await;
         if let Some(d) = guard.downloads_mut().get_mut(&id) {
+            // If the torrent wasn't in the session, still mark it
+            // as paused in our metadata map so the UI reflects the
+            // user's intent. The background task or refresh_stats
+            // will reconcile when the torrent appears in the session.
             d.status = DownloadStatus::Paused;
+            if session_paused {
+                d.download_speed = 0;
+            }
             guard.mark_dirty();
             guard.emit_progress_force();
         }
@@ -1625,30 +1837,55 @@ pub async fn torrent_resume(id: String) -> Result<(), String> {
         return Ok(());
     }
 
+    // Try to find and unpause the torrent in the librqbit session
+    // first. If the torrent hasn't been added to the session yet
+    // (e.g. the background task in torrent_add is still fetching
+    // metadata), fall back to a metadata-only resume — update the
+    // status in our map and reset the grace-period clock.
     let session = {
         let guard = engine.read().await;
         guard.session().ok_or_else(|| "Torrent engine not initialized".to_string())?.clone()
     };
 
-    let numeric_id = parse_handle_id(&id)?;
-    let handle = find_handle(&session, numeric_id)
-        .ok_or_else(|| format!("Download not found: {}", id))?;
-
-    session.unpause(&handle).await.map_err(|e| {
-        format!("Failed to resume: {}", e)
-    })?;
+    let mut session_resumed = false;
+    if let Ok(numeric_id) = parse_handle_id(&id) {
+        if let Some(handle) = find_handle(&session, numeric_id) {
+            session.unpause(&handle).await.map_err(|e| {
+                format!("Failed to resume: {}", e)
+            })?;
+            session_resumed = true;
+        }
+    }
 
     {
         let mut guard = engine.write().await;
-        if let Some(d) = guard.downloads_mut().get_mut(&id) {
+        let d = guard.downloads_mut().get_mut(&id)
+            .ok_or_else(|| format!("Download not found: {}", id))?;
+        if !matches!(d.status, DownloadStatus::Paused | DownloadStatus::Error(_)) {
+            return Err("Download is not paused or in error state".to_string());
+        }
+
+        // When the torrent isn't in the session, do a metadata-
+        // only resume so the UI reflects the user's intent.
+        // Reset added_at to give the FetchingMetadata grace
+        // period a fresh 130 s clock — the background task from
+        // torrent_add (or the next refresh_stats tick) will
+        // reconcile the status when the torrent materialises.
+        if !session_resumed {
+            d.status = DownloadStatus::FetchingMetadata;
+            d.added_at = unix_now();
+        } else {
+            // Session-resumed; added_at doesn't need resetting —
+            // the torrent is actively managed by librqbit and
+            // refresh_stats keeps it alive in alive_set.
             d.status = if d.total_size.unwrap_or(0) > 0 {
                 DownloadStatus::Downloading
             } else {
                 DownloadStatus::FetchingMetadata
             };
-            guard.mark_dirty();
-            guard.emit_progress_force();
         }
+        guard.mark_dirty();
+        guard.emit_progress_force();
     }
 
     Ok(())
