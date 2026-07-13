@@ -31,6 +31,7 @@ mod torrent_engine;
 mod achievements;
 mod downloader;
 mod tray;
+mod system_screenshots;
 use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
 use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
@@ -46,6 +47,7 @@ use steam::auth::{
 };
 use steam::sync::steam_sync_games;
 use size::{detect_game_size, check_paths_exist};
+use system_screenshots::detect_system_screenshot_folders;
 
 /// Serializable game data matching the frontend Game type.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1097,6 +1099,168 @@ async fn fetch_external_reviews(
     game_scraper::fetch_external_reviews(&game_name, &source).await
 }
 
+/// Recursively scan a folder for image files (jpg, jpeg, png, gif, bmp, webp)
+/// and return their paths. Used by the Community → Screenshots tab to let
+/// users browse their screenshot folders.
+#[tauri::command]
+fn list_image_files(folder_path: String) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&folder_path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                paths.extend(list_image_files(p.to_string_lossy().to_string()));
+            } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                let lower = ext.to_lowercase();
+                if lower == "jpg" || lower == "jpeg" || lower == "png" || lower == "gif" || lower == "bmp" || lower == "webp" {
+                    paths.push(p.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths
+}
+
+/// Serializable result for auto-detecting Steam screenshot folders.
+/// Maps to the frontend's per-game screenshot grouping UI on the
+/// Community → Screenshots tab.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SteamScreenshotFolder {
+    /// Steam AppID that owns these screenshots.
+    app_id: u32,
+    /// Display name resolved from the user's library, or a fallback
+    /// like "Unknown Game (730)" when no library entry has this appid.
+    game_name: String,
+    /// The absolute filesystem path to the screenshots folder.
+    folder_path: String,
+    /// Sorted list of absolute paths to image files in this folder.
+    screenshots: Vec<String>,
+}
+
+/// Auto-detect Steam screenshot folders by scanning ALL userdata
+/// directories under `<steam_root>\userdata\*\760\remote\<appId>\screenshots`.
+///
+/// No Steam login required — this scans the filesystem directly,
+/// finding screenshots from every Steam account that has ever signed
+/// in on this machine. Duplicate appIds (same game played by multiple
+/// accounts) are deduplicated: the first account's folder wins.
+///
+/// The frontend cross-references each discovered appid against the
+/// user's library for game names, cover art, and platform badges.
+/// Returns an empty Vec when Steam isn't installed or no screenshot
+/// folders exist yet.
+#[tauri::command]
+fn detect_steam_screenshot_folders() -> Vec<SteamScreenshotFolder> {
+    let steam_root = match steam_game_watcher::find_steam_install_dir() {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+
+    let userdata_root = steam_root.join("userdata");
+    if !userdata_root.exists() || !userdata_root.is_dir() {
+        return Vec::new();
+    }
+
+    let mut results: Vec<SteamScreenshotFolder> = Vec::new();
+
+    // Walk every <userdata>/<steamId>/760/remote/ for screenshot folders.
+    if let Ok(user_entries) = std::fs::read_dir(&userdata_root) {
+        for user_entry in user_entries.flatten() {
+            let user_dir = user_entry.path();
+            if !user_dir.is_dir() {
+                continue;
+            }
+
+            let remote_root = user_dir.join("760").join("remote");
+            if !remote_root.exists() || !remote_root.is_dir() {
+                continue;
+            }
+
+            if let Ok(app_entries) = std::fs::read_dir(&remote_root) {
+                for app_entry in app_entries.flatten() {
+                    let p = app_entry.path();
+                    if !p.is_dir() {
+                        continue;
+                    }
+
+                    let dir_name = match p.file_name().and_then(|n| n.to_str()) {
+                        Some(n) => n.to_string(),
+                        None => continue,
+                    };
+
+                    let app_id: u32 = match dir_name.parse() {
+                        Ok(id) => id,
+                        Err(_) => continue,
+                    };
+
+                    // Deduplicate: same game played by multiple accounts.
+                    if results.iter().any(|r| r.app_id == app_id) {
+                        continue;
+                    }
+
+                    let screenshots_dir = p.join("screenshots");
+                    if !screenshots_dir.exists() || !screenshots_dir.is_dir() {
+                        let loose: Vec<String> = list_image_files_flat(&p);
+                        if loose.is_empty() {
+                            continue;
+                        }
+                        results.push(SteamScreenshotFolder {
+                            app_id,
+                            game_name: format!("Unknown Game ({})", app_id),
+                            folder_path: p.to_string_lossy().to_string(),
+                            screenshots: loose,
+                        });
+                        continue;
+                    }
+
+                    let images: Vec<String> = list_image_files_flat(&screenshots_dir);
+                    if images.is_empty() {
+                        continue;
+                    }
+
+                    results.push(SteamScreenshotFolder {
+                        app_id,
+                        game_name: format!("Unknown Game ({})", app_id),
+                        folder_path: screenshots_dir.to_string_lossy().to_string(),
+                        screenshots: images,
+                    });
+                }
+            }
+        }
+    }
+
+    results.sort_by_key(|r| r.app_id);
+    results
+}
+
+
+/// Non-recursive image-file lister for a single directory.
+fn list_image_files_flat(dir: &std::path::Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                    let lower = ext.to_lowercase();
+                    if lower == "jpg" || lower == "jpeg" || lower == "png" || lower == "gif" || lower == "bmp" || lower == "webp" {
+                        paths.push(p.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    // Sort by modified time, newest first (better for screenshot browsing)
+    paths.sort_by(|a, b| {
+        let ma = std::fs::metadata(a).ok().and_then(|m| m.modified().ok());
+        let mb = std::fs::metadata(b).ok().and_then(|m| m.modified().ok());
+        mb.cmp(&ma)
+    });
+    paths
+}
+
 /// Save screenshot image base64 data to the specified path.
 #[tauri::command]
 fn save_screenshot(file_path: String, base64_data: String) -> Result<(), String> {
@@ -2099,7 +2263,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             // GOG Galaxy library integration. After the 2026 OAuth
