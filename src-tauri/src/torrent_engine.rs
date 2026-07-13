@@ -1311,6 +1311,7 @@ pub async fn torrent_add(
                     existing.source_name = source_name;
                     existing.auto_extract = Some(auto_extract.unwrap_or(false));
                     existing.status = DownloadStatus::FetchingMetadata;
+                    existing.added_at = unix_now();
                     existing.clone()
                 };
                 guard.mark_dirty();
@@ -1506,6 +1507,7 @@ pub async fn torrent_add(
             existing.save_path = save_path;
             existing.game_id = game_id;
             existing.source_name = source_name;
+            existing.added_at = unix_now();
             existing.auto_extract = Some(auto_extract.unwrap_or(false));
             existing.clone()
         };
