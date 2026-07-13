@@ -4,7 +4,6 @@ import BarChart from "../../components/charts/BarChart";
 import LineChart from "../../components/charts/LineChart";
 import DonutChart from "../../components/charts/DonutChart";
 import { GameThumbnail } from "./GameThumbnail";
-import SteamPlayerCount from "../../components/SteamPlayerCount";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import * as Icons from "./Icons";
 
@@ -610,14 +609,6 @@ function ActivitySidebarGameButton({
           name={summary.title}
           className="activity-game-sidebar__icon"
         />
-        {steamAppId != null ? (
-          <div className="activity-game-sidebar__player-chip">
-            <SteamPlayerCount
-              appId={steamAppId}
-              className="activity-game-sidebar__player-chip-badge"
-            />
-          </div>
-        ) : null}
       </div>
       <div className="activity-game-sidebar__info">
         <span className="activity-game-sidebar__name">{summary.title}</span>
