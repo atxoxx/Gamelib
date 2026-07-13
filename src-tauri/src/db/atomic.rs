@@ -1,3 +1,6 @@
+// helper preserves the documented Phase-0 escape hatch.
+#![allow(dead_code)]
+
 //! Phase-0 atomic write helper.
 //!
 //! Every "write a JSON blob to disk" call site before Phase 0 went
@@ -26,6 +29,9 @@
 use std::io::Write;
 use std::path::Path;
 
+// Phase-0 helpers are kept around for any unmigrated JSON file that
+// inevitably surfaces during a future migration window. Suppressing
+// the dead-code lint at the module level rather than deleting each
 /// Serialize `value` as compact JSON (no whitespace) and persist it to
 /// `target_path` atomically ("write to .tmp → fsync → rename").
 ///

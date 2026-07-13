@@ -1,3 +1,6 @@
+// Store-games-detail warm path.
+#![allow(dead_code)]
+
 //! Storefront (IGDB) cache DAO.
 //!
 //! Two tables:
@@ -15,6 +18,10 @@ use rusqlite::params;
 
 use super::pool::Db;
 
+// DAO constants/helpers (`DEFAULT_TTL_SEC`, `read_category_page`,
+// `read_detail`) are kept on stand-by for the planned StoreContext
+// migration off its `<app_data_dir>/store_cache.json` cache file.
+// Suppressing at module level preserves the surface for the upcoming
 const DEFAULT_TTL_SEC: u64 = 6 * 60 * 60; // 6h — matches existing behaviour
 
 /// Upsert a catalog page (compact JSON `payload` for `category` at

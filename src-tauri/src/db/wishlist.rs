@@ -1,3 +1,6 @@
+// the public API surface until that path lands.
+#![allow(dead_code)]
+
 //! Wishlist DAO.
 //!
 //! Stores one row per wishlisted Steam / IGDB-keyed game, keyed by
@@ -15,6 +18,8 @@ use rusqlite::params;
 
 use super::pool::Db;
 
+// DAO helpers (`remove`) are part of the planned WishlistContext
+// "delete from card" drag-out path. Module-level allow preserves
 /// Compact-JSON entry payload (a serialised `StoreGameSummary` plus
 /// the `addedAt` timestamp).
 pub type WishlistEntryJson = String;

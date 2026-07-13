@@ -1,3 +1,6 @@
+// upcoming `ActivityPage` history drill-down invocation paths.
+#![allow(dead_code)]
+
 //! Sessions DAO.
 //!
 //! One row per game-session. Today the React frontend keeps the
@@ -15,6 +18,9 @@ use rusqlite::params;
 
 use super::pool::Db;
 
+// DAO helpers (`list_for_game`, `count_all`) are part of the
+// future Phase-5 frontend migration off localStorage session
+// history. Module-level allow preserves the API surface for the
 /// Insert one finished-session row.
 ///
 /// `metrics_json` carries the serialised `SessionMetrics` payload

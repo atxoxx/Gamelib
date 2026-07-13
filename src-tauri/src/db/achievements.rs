@@ -1,3 +1,6 @@
+// dead-code lint rather than deleting keeps the API stable.
+#![allow(dead_code)]
+
 //! Achievements-cache DAO.
 //!
 //! Stores the cached per-game `GameAchievementData` blob. Replaces
@@ -13,6 +16,10 @@ use rusqlite::params;
 
 use super::pool::Db;
 
+// DAO functions are part of the public storage-migration API surface —
+// callers step in here from Tauri commands or future migration shims
+// and some helpers (e.g. `list_all`, `clear`) are intentionally kept on
+// stand-by for upcoming cache-invalidation paths. Suppressing the
 /// Upsert a game-level achievement payload.
 pub fn upsert(
     db: &Db,

@@ -1,3 +1,6 @@
+// level allow keeps the public API stable for future callers.
+#![allow(dead_code)]
+
 //! Games DAO.
 //!
 //! One row per library game. Many optional `GameData` fields collapse
@@ -12,6 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use super::pool::Db;
 
+// DAO functions are part of the public storage-migration API surface
+// — getters/deleters (`get`, `delete`, `delete_many`) are kept on
+// stand-by for upcoming bulk-edit and sync-conflict paths. Module-
 /// Subset of `lib.rs::GameData` we persist via the DAO. Mirrors the
 /// frontend's `Game` shape after serde camelCase rename.
 #[derive(Debug, Clone, Serialize, Deserialize)]

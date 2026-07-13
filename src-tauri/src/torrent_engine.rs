@@ -941,6 +941,7 @@ impl TorrentEngine {
         // would be silently pruned after 130 s — the user sees
         // the download vanish with no explanation.
         let now = unix_now();
+        let mut error_transitioned = false;
         for (id, d) in self.downloads.iter_mut() {
             if matches!(d.status, DownloadStatus::FetchingMetadata)
                 && id.starts_with("dl_")
@@ -958,8 +959,16 @@ impl TorrentEngine {
                      Check your firewall or try a different source."
                         .to_string(),
                 );
-                save_needed = true;
+                // We can't call `self.mark_dirty()` from inside the
+                // iter_mut() loop — Rust treats the iterator as a
+                // mutable borrow of `self.downloads` even though
+                // `mark_dirty` only touches `self.dirty`. Track the
+                // transition via a local flag and flush below.
+                error_transitioned = true;
             }
+        }
+        if error_transitioned {
+            self.mark_dirty();
         }
 
         self.downloads
@@ -1210,6 +1219,13 @@ fn find_handle(
 /// the stalled torrent stays in the session forever, causing
 /// `refresh_stats` to keep overwriting the Error status the
 /// background task set.
+///
+/// Reserved helper — the current `torrent_add` background task
+/// already removes the placeholder record on success, so no caller
+/// invokes this directly yet. Kept on stand-by for the next round of
+/// add-time-out handling where we may want to clear the librqbit
+/// session entry separately from dropping our metadata row.
+#[allow(dead_code)]
 async fn cleanup_session_torrent(
     session: &Arc<librqbit::Session>,
     id_str: &str,

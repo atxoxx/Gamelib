@@ -48,6 +48,11 @@ struct AllDebridResponse<T> {
 
 #[derive(Deserialize, Debug)]
 struct AllDebridError {
+    /// AllDebrid error code (e.g. `"AUTH_BAD_API_KEY"`). Reserved in
+    /// the deserialised struct so future structured handling in
+    /// `ad_err` keeps the discriminator around. Today only `message`
+    /// is read.
+    #[allow(dead_code)]
     code: String,
     message: String,
 }
@@ -60,10 +65,10 @@ struct AllDebridUserResponse {
 #[derive(Deserialize, Debug)]
 struct AllDebridUser {
     username: String,
-    #[serde(default)]
-    isPremium: bool,
-    #[serde(default)]
-    premiumUntil: u64,
+    #[serde(default, rename = "isPremium")]
+    is_premium: bool,
+    #[serde(default, rename = "premiumUntil")]
+    premium_until: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -74,10 +79,6 @@ struct AllDebridUploadResponse {
 #[derive(Deserialize, Debug)]
 struct AllDebridMagnetUpload {
     id: u64,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    magnet: String,
     /// `instant` is true when the magnet can be served immediately from the
     /// AllDebrid cache; false means it has to be downloaded by their servers.
     #[serde(default)]
@@ -91,17 +92,12 @@ struct AllDebridStatusResponse {
 
 #[derive(Deserialize, Debug)]
 struct AllDebridMagnetStatus {
-    id: u64,
-    #[serde(default)]
-    filename: String,
     #[serde(default)]
     size: u64,
-    #[serde(default)]
-    status: String,
-    #[serde(default)]
-    statusCode: u8,
-    #[serde(default)]
-    statusCodeDescription: String,
+    #[serde(default, rename = "statusCode")]
+    status_code: u8,
+    #[serde(default, rename = "statusCodeDescription")]
+    status_code_description: String,
     #[serde(default)]
     downloaded: u64,
     /// `links` may be empty (or missing) under /v4.1/magnet/status — the API
@@ -170,8 +166,8 @@ impl AllDebridClient {
         let data = body.data.ok_or_else(|| "Empty response data".to_string())?;
         // premiumUntil is documented as 0 for non-premium accounts. Treat 0 as
         // "no expiry" so the UI doesn't surface a meaningless epoch timestamp.
-        let premium_until = if data.user.isPremium && data.user.premiumUntil > 0 {
-            Some(data.user.premiumUntil)
+        let premium_until = if data.user.is_premium && data.user.premium_until > 0 {
+            Some(data.user.premium_until)
         } else {
             None
         };
@@ -288,7 +284,7 @@ impl AllDebridClient {
             .next()
             .ok_or_else(|| "Magnet not found in status response".to_string())?;
 
-        let normalized_status = match mag.statusCode {
+        let normalized_status = match mag.status_code {
             4 => "ready".to_string(),       // Ready/cache complete
             0..=3 => "downloading".to_string(), // Queued → downloading
             _ => "error".to_string(),
@@ -329,11 +325,11 @@ impl AllDebridClient {
             }
         }
 
-        let error_message = if mag.statusCode > 4 {
-            Some(if mag.statusCodeDescription.is_empty() {
-                format!("AllDebrid error code {}", mag.statusCode)
+        let error_message = if mag.status_code > 4 {
+            Some(if mag.status_code_description.is_empty() {
+                format!("AllDebrid error code {}", mag.status_code)
             } else {
-                mag.statusCodeDescription
+                mag.status_code_description
             })
         } else {
             None
@@ -404,7 +400,6 @@ struct TorBoxUser {
 #[derive(Deserialize, Debug)]
 struct TorBoxUploadResponse {
     torrent_id: Option<u64>,
-    hash: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -415,19 +410,19 @@ struct TorBoxInstantResponse {
 #[derive(Deserialize, Debug)]
 struct TorBoxTorrentList {
     id: u64,
-    name: String,
     progress: f32,
     download_finished: bool,
     download_present: bool,
     active: bool,
-    download_speed: u64,
-    upload_speed: u64,
-    seeds: u32,
-    peers: u32,
-    files: Vec<TorBoxFile>,
 }
 
+/// Per-file detail for a TorBox torrent. Documented by the API
+/// but unused today: `get_status` collapses downloads to the
+/// `/zip` aggregate link, so neither the struct nor any of its
+/// fields are read. Kept on stand-by for the per-file unlock
+/// path that would supersede the zip fallback.
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct TorBoxFile {
     id: u64,
     name: String,

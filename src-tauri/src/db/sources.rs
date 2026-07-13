@@ -1,3 +1,6 @@
+// the public API surface.
+#![allow(dead_code)]
+
 //! Sources DAO + FTS5 search.
 //!
 //! The hot path for "search downloads to find the game the user
@@ -25,6 +28,10 @@ use rusqlite::params;
 use super::pool::Db;
 use crate::source_manager::{CachedSource, GameSource, MatchedDownload, SourceLink};
 
+// DAO helpers (`read_cached_source`, `list_sources_with_cache`) are
+// reserved for the upcoming SourceContext migration (today the
+// frontend keeps its own copy of the catalogue) and for the planned
+// `/store/:slug` deep-link warm path. Module-level allow preserves
 // ── Source metadata CRUD ────────────────────────────────────────
 
 /// Insert or update a source's metadata.

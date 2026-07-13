@@ -1,7 +1,16 @@
 use serde::{Deserialize, Serialize};
 
 /// Steam API configuration stored locally.
+///
+/// Deprecated struct kept for one major-version migration window so
+/// the keyring blob loader recognises the legacy `{ steamId, apiKey }`
+/// shape and warns the user before swapping to `SteamSession`. New
+/// code paths use `SteamSession` directly through
+/// `steam/auth::load_or_init_session`; no current call site
+/// constructs a `SteamApiConfig` literal — silence the dead-code
+/// lint while keeping the type exported.
 #[deprecated(since = "0.2.0", note = "Use SteamSession instead — web-token-based auth via WebView login")]
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SteamApiConfig {

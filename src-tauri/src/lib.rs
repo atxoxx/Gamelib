@@ -136,7 +136,7 @@ struct GameData {
     steam_app_id: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     steam_playtime: Option<u32>,
-    // ── GOG Galaxy integration fields ──
+    // â”€â”€ GOG Galaxy integration fields â”€â”€
     /// GOG numeric product id (e.g. `"1207658925"`). Stored as
     /// `String` because `api.gog.com/products` returns IDs as both
     /// ints and strings depending on the endpoint, and we want
@@ -167,7 +167,7 @@ struct GameData {
     /// Unix-millisecond timestamp of when the user most recently exited a
     /// session for this game. `None` until the first session ends. Used by
     /// the Library page's "Continue Playing" rail to surface recently-active
-    /// titles. Persisted via the existing `save_games` round-trip — no
+    /// titles. Persisted via the existing `save_games` round-trip â€” no
     /// separate write path needed. `default` keeps older `games.json` files
     /// (which predate this field) deserializing cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,7 +253,7 @@ fn detect_gpus() -> Vec<GpuInfo> {
 /// Returns a `ForceCloseResult { pid, killed }` so the frontend can
 /// distinguish "we actually terminated the process" (success toast)
 /// from "we cleared the session state but the underlying process
-/// could not be safely killed" (warning toast) — the latter happens
+/// could not be safely killed" (warning toast) â€” the latter happens
 /// when the tracked PID was recycled by the OS to an unrelated
 /// process between the last poll and the click, or when the user
 /// doesn't have `PROCESS_TERMINATE` rights on it.
@@ -263,7 +263,7 @@ fn detect_gpus() -> Vec<GpuInfo> {
 /// guard; see `kill_pid_if_exe_matches`). On every other target the
 /// watcher doesn't track processes at all (the cross-platform
 /// `query_running_processes()` returns empty on non-Windows), so
-/// there is nothing to terminate — but we still run the full
+/// there is nothing to terminate â€” but we still run the full
 /// `finish_session` cleanup so the running indicator clears and the
 /// activity session is recorded.
 #[tauri::command]
@@ -382,7 +382,7 @@ fn launch_elevated(path: &std::path::Path, cwd: &std::path::Path, args: Option<&
 // === Launcher settings (L2/L3/L5) ============================================
 //
 // State that needs to be read on the hot path (every launch, every
-// window-close event) is held in an Arc<Mutex<…>> managed through
+// window-close event) is held in an Arc<Mutex<â€¦>> managed through
 // `tauri::State`. Reads are O(1) and take the std sync lock briefly;
 // writes go through the kv_store so the values survive restarts. Each
 // setter command keeps the in-memory copy and the on-disk copy in sync.
@@ -399,7 +399,7 @@ struct LauncherSettings {
     minimize_on_launch_enabled: bool,
     /// L5: When true, the launch path REFUSES to silently retry with
     /// ShellExecuteExW(runas) on ERROR_ELEVATION_REQUIRED. The launch
-    /// just fails with a clear error message — for users who don't
+    /// just fails with a clear error message â€” for users who don't
     /// want surprise UAC prompts mid-session.
     disable_elevation_prompts: bool,
 }
@@ -416,7 +416,7 @@ impl Default for LauncherSettings {
 
 /// Read the persisted launcher settings on startup so the in-memory
 /// mirror matches the kv_store. Each missing key falls back to the
-/// struct default — a fresh install lands in a fully-default state.
+/// struct default â€” a fresh install lands in a fully-default state.
 fn load_launcher_settings(db: &db::Db) -> LauncherSettings {
     let get = |key: &str| db::kv::get(db, key).ok().flatten();
     LauncherSettings {
@@ -495,7 +495,7 @@ fn if_enabled(b: bool) -> &'static str {
 }
 
 /// L4: Toggle the OS-level auto-launch on boot. Wraps the
-/// tauri-plugin-autostart calls — enabling registers the binary,
+/// tauri-plugin-autostart calls â€” enabling registers the binary,
 /// disabling unregisters it. Errors from the OS layer are surfaced
 /// verbatim so the UI can show "permission denied" vs "already
 /// registered" cleanly.
@@ -545,7 +545,7 @@ fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
 /// UAC elevation prompt.
 ///
 /// The watcher's background poll loop handles all session lifecycle:
-/// process detection → metrics collection → exit detection → game-exited event.
+/// process detection â†’ metrics collection â†’ exit detection â†’ game-exited event.
 #[tauri::command]
 fn launch_game(
     app: tauri::AppHandle,
@@ -576,7 +576,7 @@ fn launch_game(
         && run_as_admin.unwrap_or(false)
     {
         return Err(
-            "Launch with admin elevation is blocked by Settings → Disable UAC elevation prompts. Enable the setting or unset \"Run as administrator\" on the game to launch."
+            "Launch with admin elevation is blocked by Settings â†’ Disable UAC elevation prompts. Enable the setting or unset \"Run as administrator\" on the game to launch."
                 .to_string(),
         );
     }
@@ -603,7 +603,7 @@ fn launch_game(
     // L3: Hide the main window when minimize-on-launch is on, BEFORE
     // spawning the game process, so the OS doesn't briefly flash both
     // windows during the launch transition. Failure to hide isn't fatal
-    // — the launch proceeds anyway.
+    // â€” the launch proceeds anyway.
     if launcher_settings.minimize_on_launch_enabled {
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.hide();
@@ -613,15 +613,15 @@ fn launch_game(
     let mut initial_pid: u32 = 0;
     let exe_path: Option<String>;
 
-    // ── Determine launch strategy ──────────────────────────────────────
+    // â”€â”€ Determine launch strategy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if platform == "Steam" && (game_path.is_empty() || !Path::new(&game_path).exists()) {
-        // Steam game without local exe — use steam:// protocol
+        // Steam game without local exe â€” use steam:// protocol
         let sid = steam_app_id.ok_or("Steam games require a steamAppId")?;
         let url = format!("steam://run/{}", sid);
         tauri_plugin_opener::open_url(url, None::<&str>)
             .map_err(|e| format!("Failed to open Steam URL: {}", e))?;
 
-        // No PID — the watcher will detect the process when it appears
+        // No PID â€” the watcher will detect the process when it appears
         initial_pid = 0;
         exe_path = None;
     } else {
@@ -678,7 +678,7 @@ fn launch_game(
                         if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) {
                             if launcher_settings.disable_elevation_prompts {
                                 return Err(
-                                    "Game requires administrator privileges and Settings → Disable UAC elevation prompts is on. Enable the setting or unset \"Run as administrator\" on the game to launch."
+                                    "Game requires administrator privileges and Settings â†’ Disable UAC elevation prompts is on. Enable the setting or unset \"Run as administrator\" on the game to launch."
                                         .to_string(),
                                 );
                             }
@@ -701,11 +701,11 @@ fn launch_game(
         }
         exe_path = Some(game_path.clone());
         // std::process::Child does not kill on drop, so we can safely
-        // discard the handle — the watcher's WMI poll will track the
+        // discard the handle â€” the watcher's WMI poll will track the
         // real process lifecycle.
     }
 
-    // ── Register with watcher ──────────────────────────────────────────
+    // â”€â”€ Register with watcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Start metrics collection immediately if we have a valid PID.
     // The stop_tx and metrics_rx are stored in the session so the
     // watcher's finish_session can stop collection and read results.
@@ -715,8 +715,8 @@ fn launch_game(
         );
         (tx, rx)
     } else {
-        // No PID yet (Steam protocol launch) — create dummy channels.
-        // Sends will fail silently in finish_session — acceptable
+        // No PID yet (Steam protocol launch) â€” create dummy channels.
+        // Sends will fail silently in finish_session â€” acceptable
         // because metrics were never started for this session.
         let (dummy_stop_tx, _) = std::sync::mpsc::channel::<()>();
         let (_, dummy_metrics_rx) = std::sync::mpsc::channel::<Option<metrics_collector::SessionMetrics>>();
@@ -815,7 +815,7 @@ async fn download_image(url: String) -> Result<Option<String>, String> {
 
 /// Search for game metadata across multiple online sources.
 /// When `skip_launchbox` is true (Steam-synced games), LaunchBox is
-/// skipped — IGDB and Steam provide better metadata for known titles.
+/// skipped â€” IGDB and Steam provide better metadata for known titles.
 #[tauri::command]
 async fn search_game_metadata(game_name: String, skip_launchbox: Option<bool>) -> Vec<GameMetadataResult> {
     game_scraper::search_game_metadata(&game_name, skip_launchbox.unwrap_or(false)).await
@@ -897,7 +897,7 @@ fn load_store_cache(app: tauri::AppHandle) -> Result<String, String> {
         serde_json::Value::Object(serde_json::Map::new()),
     );
 
-    // Categories — list every (category, page=0) row. We don't currently
+    // Categories â€” list every (category, page=0) row. We don't currently
     // paginate beyond 0; if future code adds higher pages this JSON
     // shape will need a `pages` sub-object.
     let conn = db_state.conn().map_err(|e| e.to_string())?;
@@ -1061,10 +1061,10 @@ async fn get_collection_games(
 /// can label them correctly.
 ///
 /// New (post-ReviewViewer-parity) optional filter args, all `None` for "no filter":
-///   - `filter_type`        — "all" (default) | "recent" | "funny"
-///   - `purchase_type`      — "all" (default) | "steam" | "other"
-///   - `playtime_min_hours` — minimum author playtime (client-side filter)
-///   - `playtime_max_hours` — maximum author playtime (client-side filter)
+///   - `filter_type`        â€” "all" (default) | "recent" | "funny"
+///   - `purchase_type`      â€” "all" (default) | "steam" | "other"
+///   - `playtime_min_hours` â€” minimum author playtime (client-side filter)
+///   - `playtime_max_hours` â€” maximum author playtime (client-side filter)
 #[tauri::command]
 async fn fetch_game_reviews(
     game_name: String,
@@ -1100,7 +1100,7 @@ async fn fetch_external_reviews(
 }
 
 /// Recursively scan a folder for image files (jpg, jpeg, png, gif, bmp, webp)
-/// and return their paths. Used by the Community → Screenshots tab to let
+/// and return their paths. Used by the Community â†’ Screenshots tab to let
 /// users browse their screenshot folders.
 #[tauri::command]
 fn list_image_files(folder_path: String) -> Vec<String> {
@@ -1124,7 +1124,7 @@ fn list_image_files(folder_path: String) -> Vec<String> {
 
 /// Serializable result for auto-detecting Steam screenshot folders.
 /// Maps to the frontend's per-game screenshot grouping UI on the
-/// Community → Screenshots tab.
+/// Community â†’ Screenshots tab.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SteamScreenshotFolder {
@@ -1142,7 +1142,7 @@ struct SteamScreenshotFolder {
 /// Auto-detect Steam screenshot folders by scanning ALL userdata
 /// directories under `<steam_root>\userdata\*\760\remote\<appId>\screenshots`.
 ///
-/// No Steam login required — this scans the filesystem directly,
+/// No Steam login required â€” this scans the filesystem directly,
 /// finding screenshots from every Steam account that has ever signed
 /// in on this machine. Duplicate appIds (same game played by multiple
 /// accounts) are deduplicated: the first account's folder wins.
@@ -1366,13 +1366,13 @@ const PLAYER_COUNT_CACHE_TTL: Duration = Duration::from_secs(60);
 /// Fetch the number of players currently in-game on Steam for `app_id`.
 ///
 /// Source: Steam Web API `ISteamUserStats/GetNumberOfCurrentPlayers/v1/`.
-/// Verified reliable & free — no API key required for this endpoint.
+/// Verified reliable & free â€” no API key required for this endpoint.
 ///
 /// Returns:
 ///   - `Ok(Some(count))` on success
 ///   - `Ok(None)` when the API responded but reported no current players
 ///     (e.g. extremely niche titles with a `result != 1`, which the
-///     Steam API uses to signal "no data") — we map that to a clean
+///     Steam API uses to signal "no data") â€” we map that to a clean
 ///     "no players right now" so the badge hides silently rather than
 ///   - `Err` on transport / parse failures (e.g. offline, timeout)
 ///     surfacing an error.
@@ -1383,7 +1383,7 @@ async fn get_steam_player_count(
 ) -> Result<Option<u32>, String> {
     let state: tauri::State<'_, PlayerCountCache> = app.state();
 
-    // ── 1. Return cached value if still fresh ──────────────────────────
+    // â”€â”€ 1. Return cached value if still fresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let cache = state.cache.lock().map_err(|e| e.to_string())?;
         if let Some((count, fetched_at)) = cache.get(&app_id) {
@@ -1396,13 +1396,13 @@ async fn get_steam_player_count(
         }
     }
 
-    // ── 2. Hit the Steam Web API ───────────────────────────────────────
+    // â”€â”€ 2. Hit the Steam Web API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Endpoint: ISteamUserStats/GetNumberOfCurrentPlayers/v1/
     // Format:
     //   { "response": { "player_count": <int>, "result": <int> } }
     //
-    // `result == 1` ⇒ success
-    // `result == 8` ⇒ Steam is returning "no data" for this appid (very
+    // `result == 1` â‡’ success
+    // `result == 8` â‡’ Steam is returning "no data" for this appid (very
     //   rare; usually means an appid Steam never tracked). We map that
     //   to `Ok(None)` so the badge cleanly hides.
     let url = format!(
@@ -1443,7 +1443,7 @@ async fn get_steam_player_count(
         .await
         .map_err(|e| format!("Failed to parse Steam player count JSON: {}", e))?;
 
-    // Cache + return — even on `result != 1` we want to avoid hitting
+    // Cache + return â€” even on `result != 1` we want to avoid hitting
     // the API again within the TTL window, so we store `None` to mean
     // "not currently tracked" (the frontend hides the badge either way).
     let result_ok = payload.response.result == 1;
@@ -1472,7 +1472,7 @@ async fn get_steam_player_count(
     // sparkline polls every 60s even when the badge isn't visible,
     // so the history read path is hotter than the live cache). Two
     // independent `app.state()` calls return independent references
-    // — both shared (immutable) borrows of the AppHandle, so the
+    // â€” both shared (immutable) borrows of the AppHandle, so the
     // borrow checker is happy.
     if result_ok {
         if let Some(count) = player_count {
@@ -1503,21 +1503,21 @@ async fn get_steam_player_count(
 ///
 /// **Confidence gate** for the persistence boundary. The underlying
 /// per-token rule is loose for SINGLE-token short queries like
-/// "Halo", "Steam", or "CSGO" — many Steam candidates contain the
+/// "Halo", "Steam", or "CSGO" â€” many Steam candidates contain the
 /// word, and we'd risk persisting "Halo Infinite" (1240440) onto a
 /// manual "Halo: Reach" library row, locking in a WRONG appid
 /// forever (the live player-count badge would then forever display
 /// the count for the wrong game). To avoid that we refuse to even
 /// run the lookup for queries that are too short to be unambiguous:
 ///
-///   - trimmed length < 3 chars   →  return `None`
-///   - 1 token AND length < 6     →  return `None`
-///   - 2+ tokens                  →  proceed to the token-match lookup
+///   - trimmed length < 3 chars   â†’  return `None`
+///   - 1 token AND length < 6     â†’  return `None`
+///   - 2+ tokens                  â†’  proceed to the token-match lookup
 ///
 /// This gate lives at the Tauri boundary (not in
 /// `game_scraper::lookup_steam_app_id` itself) because that function
 /// is ALSO called by `fetch_game_reviews`, where a permissive match
-/// is the right behavior — Steam reviews are a much better signal
+/// is the right behavior â€” Steam reviews are a much better signal
 /// than "we guessed wrong on the appid". The player-count path gets
 /// the stricter gate because the cost of being wrong is much higher
 /// (a permanently persisted wrong appid on the user's library row).
@@ -1548,16 +1548,16 @@ async fn lookup_steam_app_id_for_game(game_name: String) -> Result<Option<u32>, 
 // a sample. Dedupe is by 5s: if the latest entry is within 5s of now, we
 // OVERWRITE its count rather than appending. This handles the multi-banner
 // case where the Store hero, Store detail, and Library detail all fire
-// `get_steam_player_count` within milliseconds of each other — without
+// `get_steam_player_count` within milliseconds of each other â€” without
 // dedupe, three identical samples would land in the buffer per poll.
 //
-// Cap: 1440 entries/appid (24h × 60s polling). Eviction is FIFO via
+// Cap: 1440 entries/appid (24h Ãâ€” 60s polling). Eviction is FIFO via
 // VecDeque::push_back + pop_front when the cap is hit. We deliberately
 // trust the cap and don't run a separate age-based eviction pass: if the
 // user has been away long enough that 1440 entries have rotated through,
 // the oldest are stale and dropping them silently is the right behavior.
 //
-// All in-memory. No disk persistence — the history is ephemeral by
+// All in-memory. No disk persistence â€” the history is ephemeral by
 // design (a fresh install starts a new history; the OS restart is the
 // cleanest reset point for a UI like this).
 //
@@ -1618,14 +1618,14 @@ impl Default for PlayerCountHistoryCache {
     }
 }
 
-const PLAYER_COUNT_HISTORY_CAP: usize = 1_440; // 24h × 60s polling
+const PLAYER_COUNT_HISTORY_CAP: usize = 1_440; // 24h Ãâ€” 60s polling
 const PLAYER_COUNT_HISTORY_DEDUPE_MS: u64 = 5_000;
 
 /// Append (or overwrite) one sample to a per-appid ring buffer.
 ///
 /// Fire-and-forget: the caller never sees the result. We swallow
 /// mutex-poisoning errors so a poisoned lock can't crash the badge
-/// fetch path — a missed sample is harmless (the next 60s tick will
+/// fetch path â€” a missed sample is harmless (the next 60s tick will
 /// record a fresh one).
 ///
 /// Dedupe rule: if the latest existing entry is within
@@ -1633,7 +1633,7 @@ const PLAYER_COUNT_HISTORY_DEDUPE_MS: u64 = 5_000;
 /// count in place (pop_back + push_back) rather than appending. This
 /// collapses the multi-banner case (3 banners firing within
 /// milliseconds) to a single sample, keeping the chart's x-axis
-/// resolution at ~1 sample per polling tick rather than 3× that.
+/// resolution at ~1 sample per polling tick rather than 3Ãâ€” that.
 fn record_player_count_sample(
     cache: &PlayerCountHistoryCache,
     app_id: u32,
@@ -1664,7 +1664,7 @@ fn record_player_count_sample(
 
     // Cap-based eviction: when the buffer is at its limit, drop the
     // oldest entry to make room. Trusting the cap means we don't need
-    // a separate age-based eviction pass — a steady 60s polling rate
+    // a separate age-based eviction pass â€” a steady 60s polling rate
     // keeps the buffer at exactly 1440 entries, and any gap in polling
     // (user away, network down) just means the oldest entry is older
     // than 24h, which the frontend can't render anyway.
@@ -1689,8 +1689,8 @@ async fn get_player_count_history(
     max_age_ms: Option<u64>,
 ) -> Result<PlayerCountHistory, String> {
     // Default 24h. We accept any positive value; the cap is the
-    // ring buffer itself (1440 entries ≈ 24h at 60s polling), so
-    // asking for more than that is harmless — we'll just return
+    // ring buffer itself (1440 entries â‰ˆ 24h at 60s polling), so
+    // asking for more than that is harmless â€” we'll just return
     // everything we have.
     let max_age = Duration::from_millis(max_age_ms.unwrap_or(24 * 60 * 60 * 1_000));
     let cache: tauri::State<'_, PlayerCountHistoryCache> = app.state();
@@ -1787,14 +1787,14 @@ async fn get_player_count_history(
 // fetches (`appdetails` + `appreviews`) in parallel from Rust.
 //
 // Caching strategy
-// ────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Each section has its own TTL keyed by appid. Static-looking fields
 // (dev / publisher / release date / genres) almost never change, so we
 // cache appdetails for 24h. Reviews change slowly, so 1h. Errors get a
 // short negative cache (5 min) to stop a flapping endpoint from
 // hammering Steam while a transient issue resolves itself.
 //
-// All caches are `std::sync::Mutex<HashMap<…>>` — the critical sections
+// All caches are `std::sync::Mutex<HashMap<â€¦>>` â€” the critical sections
 // are short (HashMap reads/writes + cloning a small payload) and never
 // held across an `.await`, so we don't need the async-aware mutex.
 
@@ -1828,7 +1828,7 @@ struct SteamGameStats {
     details: Option<SteamGameDetails>,
     reviews: Option<SteamGameReviews>,
     /// Per-section error message so the frontend can render a clean
-    /// "—" in place of the failed field rather than blanking the whole
+    /// "â€”" in place of the failed field rather than blanking the whole
     /// popover. The field is `None` on success or when the request
     /// returned `success: false` (which we treat as "no data", not as
     /// an error worth surfacing).
@@ -1861,8 +1861,8 @@ const STEAM_NEG_TTL: Duration = Duration::from_secs(300); //  5 min
 /// Shared HTTP client for every Steam API call (`get_steam_player_count`,
 /// the appdetails/reviews stats helpers, and any future endpoint).
 ///
-/// Building a `reqwest::Client` is expensive — TLS config + connection
-/// pool init runs every time and adds 50–200ms cold. The pre-existing
+/// Building a `reqwest::Client` is expensive â€” TLS config + connection
+/// pool init runs every time and adds 50â€“200ms cold. The pre-existing
 /// `get_steam_player_count` and the new stats helpers were each
 /// rebuilding a fresh client per call (and `get_steam_game_stats` did
 /// it twice via `tokio::join!`), so a single popover open could
@@ -1887,13 +1887,13 @@ fn shared_steam_client() -> &'static reqwest::Client {
 }
 
 /// Internal: appdetails fetch + cache + parse. Stays private to this
-/// module — the public surface is `get_steam_game_stats`, which
+/// module â€” the public surface is `get_steam_game_stats`, which
 /// orchestrates the parallel fetch.
 async fn fetch_steam_game_details_impl(
     cache: &SteamGameStatsCache,
     app_id: u32,
 ) -> Result<Option<SteamGameDetails>, String> {
-    // ── 1. Positive cache ─────────────────────────────────────────────
+    // â”€â”€ 1. Positive cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let map = cache.details.lock().map_err(|e| e.to_string())?;
         if let Some((payload, fetched_at)) = map.get(&app_id) {
@@ -1903,7 +1903,7 @@ async fn fetch_steam_game_details_impl(
         }
     }
 
-    // ── 2. Negative cache (recent transport error → bail early) ─────
+    // â”€â”€ 2. Negative cache (recent transport error â†’ bail early) â”€â”€â”€â”€â”€
     {
         let neg = cache.details_neg.lock().map_err(|e| e.to_string())?;
         if let Some(ts) = neg.get(&app_id) {
@@ -1913,7 +1913,7 @@ async fn fetch_steam_game_details_impl(
         }
     }
 
-    // ── 3. Fetch from store.steampowered.com/api/appdetails ──────────
+    // â”€â”€ 3. Fetch from store.steampowered.com/api/appdetails â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Response shape: `{ "<appid>": { "success": bool, "data": {...} } }`.
     // On `success: false` we treat it as "Steam has no data for this
     // appid" and surface a clean error (no negative cache, since
@@ -1959,7 +1959,11 @@ async fn fetch_steam_game_details_impl(
     #[derive(Deserialize)]
     struct AppReleaseDate {
         date: String,
+        /// Reserved â€” surfaced as the StoreGameCard "Coming soon" badge.
+        /// StoreContext renders the badge from a sibling IGDB payload
+        /// today, so no Rust call site reads this yet.
         #[serde(default)]
+        #[allow(dead_code)]
         coming_soon: bool,
     }
     #[derive(Deserialize)]
@@ -1987,7 +1991,7 @@ async fn fetch_steam_game_details_impl(
         // `success: false` means Steam has no store page for this
         // appid (unlisted tools, demos, soundtracks, removed games,
         // unreleased test apps). This is a legitimate "no metadata"
-        // answer, not a transport failure — surface it as `Ok(None)`
+        // answer, not a transport failure â€” surface it as `Ok(None)`
         // so the popover renders the empty-state message instead of
         // flagging the title as broken. We also do NOT write a
         // negative-cache entry, since the answer is permanent for
@@ -1996,7 +2000,7 @@ async fn fetch_steam_game_details_impl(
     }
 
     let data = wrapper.data.ok_or_else(|| {
-        // success=true but no data block — treat as no data.
+        // success=true but no data block â€” treat as no data.
         "appdetails returned no data block".to_string()
     })?;
 
@@ -2029,7 +2033,7 @@ async fn fetch_steam_game_details_impl(
         genres: data.genres.into_iter().map(|g| g.description).collect(),
     };
 
-    // ── 4. Cache positive ─────────────────────────────────────────────
+    // â”€â”€ 4. Cache positive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let mut map = cache.details.lock().map_err(|e| e.to_string())?;
         map.insert(app_id, (Some(details.clone()), Instant::now()));
@@ -2042,7 +2046,7 @@ async fn fetch_steam_game_reviews_impl(
     cache: &SteamGameStatsCache,
     app_id: u32,
 ) -> Result<Option<SteamGameReviews>, String> {
-    // ── 1. Positive cache ─────────────────────────────────────────────
+    // â”€â”€ 1. Positive cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let map = cache.reviews.lock().map_err(|e| e.to_string())?;
         if let Some((payload, fetched_at)) = map.get(&app_id) {
@@ -2052,7 +2056,7 @@ async fn fetch_steam_game_reviews_impl(
         }
     }
 
-    // ── 2. Negative cache ─────────────────────────────────────────────
+    // â”€â”€ 2. Negative cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let neg = cache.reviews_neg.lock().map_err(|e| e.to_string())?;
         if let Some(ts) = neg.get(&app_id) {
@@ -2062,8 +2066,8 @@ async fn fetch_steam_game_reviews_impl(
         }
     }
 
-    // ── 3. Fetch from store.steampowered.com/appreviews ──────────────
-    // `num_per_page=0` skips the heavy `reviews[]` array — we only
+    // â”€â”€ 3. Fetch from store.steampowered.com/appreviews â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // `num_per_page=0` skips the heavy `reviews[]` array â€” we only
     // want the aggregate counts in `query_summary`. This makes the
     // response dramatically smaller for popular games (e.g. CS2 has
     // 1M+ reviews; the per-review list would be a multi-MB payload
@@ -2110,7 +2114,7 @@ async fn fetch_steam_game_reviews_impl(
 
     if payload.success != 1 {
         // Steam returns `success: 2` (or higher) when the appid has
-        // no reviews page — same "legitimate no data" case as
+        // no reviews page â€” same "legitimate no data" case as
         // appdetails' `success: false`. Map it to `Ok(None)` so the
         // popover renders the empty-state message instead of
         // flagging the title as broken. No negative-cache write:
@@ -2123,8 +2127,8 @@ async fn fetch_steam_game_reviews_impl(
         .ok_or_else(|| "appreviews returned no query_summary".to_string())?;
 
     // An empty `total_reviews` means Steam has no reviews at all for
-    // this title — represent that as `Some(empty)` so the popover
-    // shows "No reviews" rather than the generic "—".
+    // this title â€” represent that as `Some(empty)` so the popover
+    // shows "No reviews" rather than the generic "â€”".
     let score_desc = if summary.review_score_desc.trim().is_empty() {
         None
     } else {
@@ -2139,7 +2143,7 @@ async fn fetch_steam_game_reviews_impl(
         score_desc,
     };
 
-    // ── 4. Cache positive ─────────────────────────────────────────────
+    // â”€â”€ 4. Cache positive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         let mut map = cache.reviews.lock().map_err(|e| e.to_string())?;
         map.insert(app_id, (Some(reviews.clone()), Instant::now()));
@@ -2159,7 +2163,7 @@ async fn fetch_steam_game_reviews_impl(
 /// the badge count and the popover header count are guaranteed to
 /// agree at the moment of click. The badge still keeps its own 60s
 /// polling loop, so by the time the user reopens the popover the
-/// number may have ticked up — that's expected.
+/// number may have ticked up â€” that's expected.
 ///
 /// Each section is returned independently with its own `*_error`
 /// field, so a Steam hiccup on `appdetails` doesn't blank the
@@ -2171,7 +2175,7 @@ async fn get_steam_game_stats(
 ) -> Result<SteamGameStats, String> {
     // Details + reviews in parallel. The State guard is local to this
     // function and the references handed to `tokio::join!` are tied to
-    // its lifetime — the await points are inside the helper functions,
+    // its lifetime â€” the await points are inside the helper functions,
     // never in the outer scope, so the borrow checker is happy.
     //
     // The current concurrent-player count is intentionally NOT fetched
@@ -2181,7 +2185,7 @@ async fn get_steam_game_stats(
     // call we just made, and (b) introduce a small window where the
     // badge and the popover header disagree (the badge polled at T=0,
     // the popover opens at T=2s, the backend returns the count from
-    // T=0 + a fresh round-trip = T=0.1 — a different snapshot than
+    // T=0 + a fresh round-trip = T=0.1 â€” a different snapshot than
     // what's painted on the badge).
     let cache: tauri::State<'_, SteamGameStatsCache> = app.state();
     let (details_res, reviews_res) = tokio::join!(
@@ -2212,7 +2216,7 @@ fn resolve_steam_exe(steam_app_id: u32) -> Option<String> {
 
 /// Rebuild the game watcher's process index from the current library.
 /// Called by the frontend after loading games and after Steam/Epic syncs.
-/// This enables passive detection — the background poll loop can match
+/// This enables passive detection â€” the background poll loop can match
 /// running processes to known games even when launched outside Gamelib.
 #[tauri::command]
 fn rebuild_watcher_index(
@@ -2252,11 +2256,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        // L4: autostart-on-boot. Pass an empty args vec — we don't
+        // L4: autostart-on-boot. Pass an empty args vec â€” we don't
         // currently ship a `--minimized` flag, so the binary just
         // launches into the regular window. The plugin also writes
         // the right per-OS artifact (LaunchAgent on macOS,
-        // `HKCU\…\Run` regkey on Windows, .desktop autostart on
+        // `HKCU\â€¦\Run` regkey on Windows, .desktop autostart on
         // Linux) so calling `enable()` is the only API surface the
         // frontend needs.
         .plugin(tauri_plugin_autostart::init(
@@ -2273,7 +2277,7 @@ pub fn run() {
             // WebView-cookie flow: `gog_start_login` opens a Tauri
             // WebView at gog.com, JS detector posts a bundle back
             // via `gog_webview_callback`, the awaiter returns the
-            // resolved session. Sync uses the same bridge — same
+            // resolved session. Sync uses the same bridge â€” same
             // kind="sync" webview, same callback, just wider bundle.
             gog_start_login, gog_webview_callback, gog_sync_library, gog_is_authenticated, gog_logout,
             gog_debug_log,
@@ -2317,7 +2321,7 @@ pub fn run() {
             downloader::debrid_unrestrict_link,
             // Live Steam concurrent-player count. Powers the player
             // badges on the store hero, store detail, and game detail
-            // banners — see PlayerCountCache above for caching policy.
+            // banners â€” see PlayerCountCache above for caching policy.
             get_steam_player_count,
             lookup_steam_app_id_for_game,
             // Popover payload: developer/publisher/release/price + reviews.
@@ -2325,10 +2329,10 @@ pub fn run() {
             get_steam_game_stats,
             // Per-appid history ring buffer of concurrent-player
             // counts, with server-computed peak/average. Powers the
-            // activity-tab sparkline — see PlayerCountHistoryCache
+            // activity-tab sparkline â€” see PlayerCountHistoryCache
             // above for the 24h cap + 5s dedupe policy.
             get_player_count_history,
-            // New launcher settings — close-to-tray (L2), minimize
+            // New launcher settings â€” close-to-tray (L2), minimize
             // on launch (L3), disable UAC elevation prompts (L5),
             // and OS auto-launch on boot (L4 via tauri-plugin-autostart).
             get_launcher_settings,
@@ -2342,7 +2346,7 @@ pub fn run() {
             // button (or the in-app WindowControls close button, since
             // both end up at the same CloseRequested event). When
             // close_to_tray is on, hide the window instead of letting
-            // it close — the app keeps running with no visible chrome
+            // it close â€” the app keeps running with no visible chrome
             // and the user reopens it from the taskbar. The lock is
             // held briefly (one bool read) and never across an
             // .await, so the std sync Mutex is the simplest correct
@@ -2363,7 +2367,7 @@ pub fn run() {
                     }
                 }
             }
-            // Unpause / unhide from taskbar click — when the window
+            // Unpause / unhide from taskbar click â€” when the window
             // is hidden and the user clicks the dock/taskbar icon,
             // tauri emits a Focused event. Re-show + unminimize so
             // the user sees the app without manual intervention.
@@ -2381,8 +2385,8 @@ pub fn run() {
             // credentials baked in at compile time via option_env!()).
             config::load_env_file();
 
-            // ── Initialize the SQLite database ─────────────────────
-            // Phase 1–4 storage layer. opened & migrated before
+            // â”€â”€ Initialize the SQLite database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Phase 1â€“4 storage layer. opened & migrated before
             // every other state so commands can take a `Db` via
             // `tauri::State`. We register `Db` directly (NOT wrapped
             // in an `Arc`) because the inner `r2d2::Pool` is already
@@ -2405,7 +2409,7 @@ pub fn run() {
             };
             app.manage(db.clone());
 
-            // ── Initialize the launcher settings (L2/L3/L5) ────────
+            // â”€â”€ Initialize the launcher settings (L2/L3/L5) â”€â”€â”€â”€â”€â”€â”€â”€
             // Read the persisted close-to-tray/minimize/disable-UAC
             // toggles from kv, then manage the in-memory mirror so
             // `launch_game`, `force_close_game`, and the
@@ -2418,7 +2422,7 @@ pub fn run() {
             ));
             app.manage(launcher_settings);
 
-            // ── Initialize the GameWatcher ──────────────────────────
+            // â”€â”€ Initialize the GameWatcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Long-lived background service that polls WMI for running
             // game processes. Handles both app-launched sessions and
             // passive detection (games launched outside Gamelib).
@@ -2437,7 +2441,7 @@ pub fn run() {
                 app.handle().clone(),
             );
 
-            // ── Source manager ────────────────────────────────────
+            // â”€â”€ Source manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Phase 2: the in-memory state maps are gone. All reads
             // and writes go through the SQLite pool. The
             // `Arc<SourceManager>` (no Mutex) is shared across
@@ -2449,11 +2453,11 @@ pub fn run() {
             app.manage(store_checker);
 
             // Live Steam concurrent-player count cache. Sized at 0
-            // entries on startup — grows on first miss per-appid and
+            // entries on startup â€” grows on first miss per-appid and
             // is bounded by how many distinct Steam appids the user
             // actually opens (single-digit hundreds at worst for a
             // large library). We never expire old entries: a long-lived
-            // map with O(N) work per banner refresh is fine for N ≤ a
+            // map with O(N) work per banner refresh is fine for N â‰¤ a
             // few hundred, and skipping the cleanup avoids dropping
             // a user's just-fetched count behind their back.
             app.manage(PlayerCountCache::default());
@@ -2471,7 +2475,7 @@ pub fn run() {
             // successful fetch per appid.
             app.manage(PlayerCountHistoryCache::default());
 
-            // ── GOG WebView ↔ Rust async bridge ───────────────────
+            // â”€â”€ GOG WebView â†” Rust async bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // The login and sync flows open runtime-created WebViews
             // (`gog-login`, `gog-sync`). JavaScript inside each
             // WebView fires `gog_webview_callback` to inform an
@@ -2491,7 +2495,7 @@ pub fn run() {
             // immediately and the app window can appear without
             // waiting for the torrent session to open + walk
             // existing torrents from disk. Init failures are
-            // logged but don't block startup — the rest of the
+            // logged but don't block startup â€” the rest of the
             // app works without the engine, and the user can
             // retry by restarting.
             let app_handle = app.handle().clone();

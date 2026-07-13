@@ -1,3 +1,6 @@
+// the dead-code lint preserves the future-proofed surface.
+#![allow(dead_code)]
+
 //! News-feed cache DAO.
 //!
 //! Stores the most-recent fetch per RSS / Atom source URL. The
@@ -12,6 +15,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::pool::Db;
 
+// DAO helpers (`upsert`, `read`, `unix_now`, `DEFAULT_TTL_SEC`) are
+// kept on stand-by — the React frontend reads via `useNewsFeeds`'s
+// localStorage copy today, and Phase 5 is planned to migrate the
+// hook to invoke `news_cache_read` through this DAO. Suppressing
 const DEFAULT_TTL_SEC: u64 = 30 * 60; // 30 min — RSS feeds aren't time-critical
 
 pub fn upsert(db: &Db, source_url: &str, payload_json: &str) -> Result<(), String> {

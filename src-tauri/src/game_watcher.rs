@@ -525,6 +525,16 @@ impl GameWatcher {
     /// selection isn't worth the extra bookkeeping; if a user really
     /// wants per-window labels we'd need a multi-tray setup, not a
     /// single status line.
+    ///
+    /// Reserved accessor — the current tray listener reads the
+    /// game name from the `game-started` / `game-exited` event
+    /// payloads (to avoid a re-lock, see the tray listener
+    /// comments). Re-stored on `GameWatcher` so the planned
+    /// "polling status check" Admin UI command path can read
+    /// "is anything running and what is it" without replaying
+    /// the event log. Silence the dead-code lint until that
+    /// path lands.
+    #[allow(dead_code)]
     pub fn current_session_name(&self) -> Option<String> {
         self.active_sessions
             .values()

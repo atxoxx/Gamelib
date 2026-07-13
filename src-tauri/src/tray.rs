@@ -62,6 +62,12 @@ pub struct TrayHandles {
     /// Disabled when the window is already hidden — the user has no
     /// use for a "Hide to tray" entry if the window isn't visible.
     pub hide_item: MenuItem<Wry>,
+    /// Stored so the `Menu` retains ownership of the click handler
+    /// but kept on `TrayHandles` for symmetry with the other items.
+    /// The tray menu fires the Quit callback directly through the
+    /// `tauri::menu::Menu` event wiring, not through this handle, so
+    /// no consumer ever reads the field — silence the lint.
+    #[allow(dead_code)]
     pub quit_item: MenuItem<Wry>,
 }
 
@@ -145,7 +151,11 @@ pub fn build_tray(app: &App<Wry>) -> tauri::Result<()> {
             // (torrent_engine::cleanup_extractions + std::process::
             // exit(0) inside lib.rs::run). So the librqbit cleanup
             // runs the same way regardless of how the app exits.
-            let app_handle = handle.clone();
+            //
+            // We deliberately don't capture `handle` in the closure:
+            // `app` is passed in by Tauri as the closure's first arg
+            // (the `Receiver` of `Manager`), so cloning the handle
+            // outside the move block just created an unused binding.
             move |app, event| match event.id().as_ref() {
                 "show" => {
                     if let Some(win) = app.get_webview_window("main") {

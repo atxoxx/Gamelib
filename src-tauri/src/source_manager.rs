@@ -179,8 +179,15 @@ pub struct SourceLink {
 
 /// Cached source payload. Persisted to the `sources_cache`
 /// SQLite table (compact JSON of `GameSource`).
+///
+/// Reserved type — the DAO in `db::sources::read_cached_source`
+/// constructs it on read, but no Rust caller today consumes that
+/// path (the planned `SourceContext` migration will). Kept
+/// exported so the upcoming migration can attach the cache
+/// alongside `SourceLink` metadata without a type-shape change.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct CachedSource {
     pub source_id: String,
     /// ID assigned by the Hydra API. Empty string if not yet
@@ -352,6 +359,12 @@ impl SourceManager {
     /// Snapshot of the current source list, optionally with each
     /// source's cached payload. Cheap because `read_cached_source`
     /// is a single indexed SELECT.
+    ///
+    /// Reserved public method — the planned `SourceContext`
+    /// warm-start path is the future caller; today the frontend
+    /// keeps its own copy. Silence the dead-code lint while the
+    /// API surface stabilises.
+    #[allow(dead_code)]
     pub fn list_sources_with_cache(
         &self,
     ) -> Result<Vec<(SourceLink, Option<CachedSource>)>, String> {
