@@ -1285,7 +1285,15 @@ pub fn build_game_refs_from_library(games: &[GameRefInput]) -> Vec<GameRef> {
         .collect()
 }
 
+// Inbound payload from the frontend `rebuild_watcher_index` Tauri
+// command. The JS sender (GameContext.tsx) sends camelCase keys
+// (`gameId`, `gameName`, `exePath`, `steamAppId`); without this
+// attribute serde would reject the payload as missing `game_id`
+// etc. Every other inbound Tauri struct in lib.rs already uses
+// `rename_all = "camelCase"` — this one was the outlier and tripped
+// the IPC deserializer on every startup of a populated library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GameRefInput {
     pub game_id: String,
     pub game_name: String,
