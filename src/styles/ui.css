@@ -437,6 +437,107 @@
   }
 }
 
+/* ── PageError ─────────────────────────────────────────────────────────
+   Phase: defensive. The ErrorBoundary in `<MainContent />` renders this
+   block when a page throws during render. Layout is consistent with
+   `.main-empty` (existing centered, icon-led error pattern) so users
+   who've already seen an "Empty" state on a healthy tab won't feel
+   like they're in unfamiliar territory. */
+.page-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 320px;
+  padding: var(--space-2xl);
+}
+
+.page-error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-md);
+  max-width: 460px;
+  padding: var(--space-2xl) var(--space-2xl) var(--space-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  animation: importMenuIn 240ms var(--ease-standard) both;
+}
+
+.page-error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+  flex-shrink: 0;
+}
+
+.page-error-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.page-error-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.page-error-message {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+  max-width: 380px;
+  /* Preserve long error messages without breaking the card width. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.page-error-component {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.page-error-component-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.page-error-component code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+}
+
+.page-error-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 /* ── KpiTile trailing icons (pencil hover affordance) ──────────────
  * Phase 2.9 PR 3 ("A11y & Micro-Interactions"): the pencil that
  * lives in the Size tile's `trailing` slot is hidden by default
