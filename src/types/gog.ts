@@ -1,15 +1,83 @@
 /**
- * TypeScript types for the GOG Galaxy integration.
+ * TypeScript types for the GOG Galaxy integration — Playnite
+ * `playnite-gog-oss-plugin` parity.
  *
- * These mirror the Rust DTOs in `src-tauri/src/gog/types.rs` and the
- * command signatures in `src-tauri/src/gog/{auth,sync}.rs`. Field
- * names stay camelCase end-to-end because the parent structs use
- * `#[serde(rename_all = "camelCase")]`, so the field comes across
- * the IPC boundary already shaped for the React side.
+ * These mirror the Rust DTOs in `src-tauri/src/gog/types.rs` and
+ * the IPC command shapes in
+ * `src-tauri/src/gog/{auth,sync,webview_capture}.rs`. Field names
+ * stay camelCase end-to-end because the Rust structs use
+ * `#[serde(rename_all = "camelCase")]`.
  */
 
-/** A single GOG game reshaped for the frontend library.
- *  Maps directly to the Rust `GogSyncedGame` in `gog/types.rs`. */
+/** Persistent GOG login marker — read from the OS keychain
+ *  through `gog_is_authenticated` / `gog_session` IPC. */
+export interface GogSession {
+  userId: string;
+  username: string;
+  /** Numeric galaxy user id; used as the stats key in the
+   *  embed.gog.com response and as the gameplay endpoint URL
+   *  segment (`gameplay.gog.com/clients/<userId>/playtime`). */
+  galaxyUserId?: string;
+  /** Unix seconds at which login completed. */
+  loggedInAt: number;
+}
+
+/** Public auth state shape surfaced to the Settings UI. */
+export interface GogAuthState {
+  isAuthenticated: boolean;
+  userId?: string;
+  username?: string;
+  /** Unix seconds of last successful `gog_start_login`. */
+  lastSync?: number;
+}
+
+/** Per-game playtime + last session from GOG. */
+export interface GogGameStats {
+  /** Playtime in MINUTES. */
+  playtime: number;
+  /** Unix SECONDS of last play session. */
+  lastSession?: number;
+}
+
+/** Per-product element of `embed.gog.com/user/data/games` owned[].
+ *  The Rust deserializer coerces GOG's array-vs-object stats
+ *  quirk into the `stats?: GogGameStats` you'll see — empty array
+ *  becomes undefined, the account-keyed object becomes the entry. */
+export interface GogLibraryGame {
+  game: {
+    id: string;
+    title: string;
+    isHidden?: boolean;
+    url?: string;
+  };
+  stats?: GogGameStats;
+}
+
+/** Per-product metadata from `api.gog.com/products`. We always
+ *  prefer `boxArtImage` and fall back to `backgroundImage`. */
+export interface GogProductMeta {
+  id: string;
+  title: string;
+  coverUrl?: string;
+  images?: {
+    boxArtImage?: string;
+    backgroundImage?: string;
+    logo?: string;
+    icon?: string;
+  };
+  /** Install size as reported by the API (MB). */
+  sizeMb?: number;
+  /** Release date as Unix seconds. */
+  releaseDate?: number;
+  developer?: string;
+  publisher?: string;
+  description?: string;
+  genres?: string[];
+  storeUrl?: string;
+}
+
+/** Single synced game entry — what the React side receives via
+ *  `invoke("gog_sync_library")` and feeds into `addGames(...)`. */
 export interface GogSyncedGame {
   id: string;
   title: string;
@@ -19,27 +87,21 @@ export interface GogSyncedGame {
   /** Absolute path to the resolved launchable executable,
    *  `undefined` when the game is owned-but-not-installed. */
   installPath?: string;
-  /** Absolute path to the install dir (audit-able from the
-   *  Storage tab, same as the Steam/Epic pattern). */
   installDir?: string;
-  /** Playtime in MINUTES. Matches `steamPlaytime` semantics. */
+  /** Playtime in MINUTES — frontend multiplies by 60 to render
+   *  against the Steam-style `playtimeForever` formatting. */
   playtimeMinutes?: number;
-  /** Unix SECONDS of the user's last session in this game.
-   *  Rust returns seconds; convert to milliseconds on render
-   *  (`value * 1000`) to match the project-wide `lastPlayed`
-   *  convention in `Game`. */
+  /** Unix SECONDS — frontend converts to ms (×1000) to match the
+   *  project-wide `lastPlayed` convention. */
   lastPlayed?: number;
-  /** Cover image URL on GOG's CDN (`images.gog-static.com`). */
+  /** Cover image URL on GOG's CDN. */
   coverUrl?: string;
-  /** Total install footprint in bytes, measured by the Rust
-   *  sync flow when `isInstalled`. `undefined` when uninstalled
-   *  or the disk walk errored. */
+  /** Install-dir size in bytes (measured when isInstalled). */
   sizeBytes?: number;
-  /** Folder the size was measured against. */
   sizeRootPath?: string;
 }
 
-/** Result of a GOG library sync — mirrors the Rust `GogSyncResult`. */
+/** Result of a GOG library sync. */
 export interface GogSyncResult {
   success: boolean;
   gamesImported: number;
@@ -48,17 +110,4 @@ export interface GogSyncResult {
   /** Unix seconds of when the sync completed. */
   lastSync: number;
   syncedGames: GogSyncedGame[];
-}
-
-/** Auth state surfaced to the Settings UI. Mirrors the shape of
- *  `EpicAuthState` and `SteamAuthState` so the Settings page's
- *  integration list is uniform across the three vendors. */
-export interface GogAuthState {
-  isAuthenticated: boolean;
-  userId?: string;
-  username?: string;
-  /** Unix seconds of last successful `gog_start_login` /
-   *  `gog_finish_login` round-trip. Persisted to the kv_store so
-   *  the Settings page can display "Last connected … ago". */
-  lastSync?: number;
 }

@@ -80,6 +80,12 @@ rand = "0.8"
 sha2 = "0.10"
 num-bigint = "0.4"
 wmi = "0.14"
+# Windows registry reader for GOG installed-game detection
+# (HKLM+HKCU Uninstall entries). Linux/macOS builds pull this in
+# but the cfg-gated code paths silently skip it — keeping the
+# dependency tree uniform across platforms avoids a `#[cfg]` ladder
+# in `gog::installed`.
+winreg = "0.52"
 # Win32_UI_Shell/WindowsAndMessaging are used for UAC elevation when a game
 # executable requires administrator privileges. Win32_System_Registry is a
 # transitive feature required by Win32_UI_Shell in windows crate 0.58.

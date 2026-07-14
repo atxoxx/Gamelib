@@ -37,10 +37,7 @@ use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
 use epic::auth::{epic_start_login, epic_finish_login, epic_is_authenticated, epic_logout};
 use epic::sync::{epic_sync_library, epic_get_filters};
-use gog::auth::{
-    gog_debug_log, gog_is_authenticated, gog_logout, gog_start_login,
-    gog_webview_callback, GogWebviewCallbackSlot,
-};
+use gog::auth::{gog_is_authenticated, gog_logout, gog_start_login};
 use gog::sync::gog_sync_library;
 use steam::auth::{
     steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
@@ -2270,17 +2267,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
-            // GOG Galaxy library integration. After the 2026 OAuth
-            // client_id rotation (auth.gog.com now rejects every
-            // known Galaxy client_id with `invalid_client`), the
-            // integration pivoted to the Playnite-style
-            // WebView-cookie flow: `gog_start_login` opens a Tauri
-            // WebView at gog.com, JS detector posts a bundle back
-            // via `gog_webview_callback`, the awaiter returns the
-            // resolved session. Sync uses the same bridge â€” same
-            // kind="sync" webview, same callback, just wider bundle.
-            gog_start_login, gog_webview_callback, gog_sync_library, gog_is_authenticated, gog_logout,
-            gog_debug_log,
+            gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,
             // Download-feature commands. The torrent engine manages
             // its own global session; the source manager and store
             // checker are passed through `tauri::State`.
@@ -2475,19 +2462,6 @@ pub fn run() {
             // successful fetch per appid.
             app.manage(PlayerCountHistoryCache::default());
 
-            // â”€â”€ GOG WebView â†” Rust async bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            // The login and sync flows open runtime-created WebViews
-            // (`gog-login`, `gog-sync`). JavaScript inside each
-            // WebView fires `gog_webview_callback` to inform an
-            // awaiting `gog_start_login` / `gog_sync_library` that
-            // its work is done. The slot maps per-request UUIDs to
-            // `mpsc::Sender<serde_json::Value>` so overlapping
-            // login+sync calls (or a re-invoked login during a
-            // pending one) don't stomp each other's senders. See
-            // `gog::auth::GogWebviewCallbackSlot` for the data
-            // model and `capabilities/default.json` for the
-            // webhook window allowlist.
-            app.manage(GogWebviewCallbackSlot::default());
 
             // Spin the torrent engine up on the async runtime.
             // We use `spawn` (fire-and-forget) rather than

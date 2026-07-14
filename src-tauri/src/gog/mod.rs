@@ -1,17 +1,25 @@
 //! GOG Galaxy library integration.
 //!
-//! Public surface mirrors the Epic integration: `types.rs` defines the
-//! serializable wire DTOs (serde camelCase so the React frontend can
-//! `invoke()` them directly), `auth.rs` owns the Galaxy OAuth WebView
-//! flow + token persistence, and `sync.rs` reads the user's owned
-//! library and merges it with locally-installed games.
+//! Module surface (full Playnite-parity stack, OAuth2 bearer-token auth):
+//! - `types` — wire DTOs + OAuth token types (camelCase).
+//! - `auth` — OAuth2 WebView login, token exchange, refresh,
+//!   keychain persistence, session marker.
+//! - `client` — pure-Rust `reqwest`-backed GOG HTTP client
+//!   carrying `Authorization: Bearer <token>`.
+//! - `installed` — Windows registry + `goggame-<id>.info` parsing
+//!   + primary-exe resolution.
+//! - `sync` — pure-Rust orchestrator. Refreshes tokens, probes
+//!   `account/basic`, fetches owned + metadata + playtime,
+//!   merges with installed scan into `GogSyncResult`.
 //!
-//! All entry points are flat — `pub mod x;` lists all three. Commands
-//! hang off these modules; the registration happens in the root
-//! `lib.rs::run()` `invoke_handler!` block.
+//! The `webview_capture` module has been removed (JS probe →
+//! on_navigation callback). The `cookies` module remains —
+//! `embed.gog.com/user/data/games` requires session cookies
+//! even with OAuth2 Bearer auth on other endpoints.
 
-// `pub mod types;` first so that `auth.rs` / `sync.rs` can
-// `use super::types::GogAuthTokens;` without a circular import.
-pub mod types;
 pub mod auth;
+pub mod client;
+pub mod cookies;
+pub mod installed;
 pub mod sync;
+pub mod types;

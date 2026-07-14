@@ -1,619 +1,495 @@
-//! GOG Galaxy authentication + sync — WebView-cookie flow.
+//! GOG authentication — OAuth2 WebView login + token exchange.
 //!
-//! ## Why this is the WebView path (not OAuth)
+//! Flow (Comet / Playnite parity):
+//! 1. `gog_start_login` opens a Tauri WebView at
+//!    `https://login.gog.com/auth?client_id=46899977096215655&layout=galaxy&...`
+//!    with an `on_navigation` callback that watches for the
+//!    redirect to `embed.gog.com/on_login_success?origin=client&code=...`.
+//! 2. The callback extracts the authorization `code` and sends it
+//!    through an `mpsc` channel — no JS probe needed (the Epic
+//!    auth module uses the exact same pattern).
+//! 3. Rust exchanges the code for tokens at `auth.gog.com/token`
+//!    (GET with query params — GOG's implementation uses GET,
+//!    unlike standard OAuth POST).
+//! 4. Tokens are persisted in the SQLite `kv_store` table under
+//!    key `gog_tokens`. Sync reads them to build a
+//!    Bearer-authenticated `GogClient`. The OS keychain was
+//!    previously used but the `keyring` crate's Windows backend
+//!    (`CredWriteW`) silently fails to persist credentials when
+//!    the service name contains a slash (`gamelib/gamelib-app`).
+//! 5. A follow-up probe of `menu.gog.com/v1/account/basic` with
+//!    the fresh access token returns the user identity bundle,
+//!    which becomes the `GogSession` returned to the frontend.
 //!
-//! Every documented GOG Galaxy client_id has been rejected as
-//! `invalid_client — Unknown client` in 2026:
-//!
-//! | client_id                            | response           |
-//! |--------------------------------------|--------------------|
-//! | `46899977096215655`                  | `redirect_uri_mismatch` |
-//! | `46899972096215655` + `?origin=client` | `invalid_client`  |
-//! | `46886977419688439` (gogapidocs "Galaxy Client ID", empty secret) | `invalid_client` |
-//!
-//! GOG has decided to no longer authenticate third-party launcher
-//! clients via OAuth. The credentials that the official Galaxy
-//! desktop launcher uses are now app-bound and rotate server-side
-//! without a public discoverable schema. We can't pin them and we
-//! can't register a partner OAuth app for our domain in a
-//! sandbox-of-sandboxes.
-//!
-//! The pivot is the Playnite `GogLibrary` pattern: open a Tauri
-//! WebView at `https://www.gog.com/account/`, let the user log in there//!    (HttpOnly `gog_login` cookies land in the WebView's cookie jar),
-//!    then let JavaScript inside the WebView run `fetch()` against
-//!    `menu.gog.com` / `api.gog.com` / `gameplay.gog.com` — cookies
-//! auto-attach because the WebView and gog.com share the same
-//! cookie store by default in Tauri 2. JS posts the resulting JSON
-//! bundle back to Rust via Tauri IPC (`gog_webview_callback`).
-//!
-//! **What this avoids**: OAuth client_id/secret agreement with
-//! auth.gog.com, fingerprinting headers, and the entire token
-//! refresh dance.
-//!
-//! ## Flow:
-//!
-//! 1. `gog_start_login(requestId?)` — Rust-side entry point.
-//!    Generates a per-request UUID (or accepts one from the frontend
-//!    so external test harnesses can pre-key callbacks), opens a
-//!    Tauri WebView labelled `gog-login` at `https://www.gog.com/account/`
-//!    with an `initialization_script` injected that:
-//!    a) sets `window.__GOG_REQUEST_ID__` and `window.__GOG_KIND__` so
-//!       the JS knows where to post back,
-//!    b) polls `https://menu.gog.com/v1/account/basic` every 1s
-//!       (HttpOnly cookies auto-attach),
-//!    c) on `isLoggedIn: true`, fires `invoke('gog_webview_callback', {
-//!          requestId: window.__GOG_REQUEST_ID__, value: { userId,
-//!          username } })` and returns.
-//!
-//!    Rust registers a `mpsc::Sender` keyed by `requestId` BEFORE
-//!    opening the WebView, then awaits on the matching `recv`
-//!    with a 5-minute timeout — identical UX to the Epic flow.
-//!
-//! 2. `gog_webview_callback(requestId, value)` — JS-side entry
-//!    point. Sync `#[tauri::command]` callable from inside the
-//!    WebView. Looks up the `mpsc::Sender` slot keyed by
-//!    `requestId` and ships the `value` through it. Drops the
-//!    slot after the send so a stale callback can't deliver to
-//!    a different consumer.
-//!
-//!    Capability is granted via `capabilities/default.json`'s
-//!    `windows` list — `gog-login` and `gog-sync` are both listed
-//!    so the two WebViews inherit the same allowlist as `main`.
-//!
-//! 3. `gog_finish_login` is GONE. Two-phase OAuth (open WebView +
-//!    token exchange round-trip) is replaced by a single
-//!    `gog_start_login` returning `GogSession { user_id, username,
-//!    logged_in_at }` directly. The frontend's `handleGogLogin`
-//!    collapses to one `await invoke('gog_start_login')`.
-//!
-//! ## Persistence
-//!
-//! Persistent artifacts in the OS keychain (account `gog_session`):
-//! - `user_id` (for the "Connected as" subtitle on the integration
-//!   tile and the playtime endpoint
-//!   `https://gameplay.gog.com/clients/<user_id>/playtime`
-//!   the next time we sync — though sync now hits that endpoint
-//!   from the WebView directly).
-//! - `username` (display only).
-//! - `logged_in_at` (unix seconds — drives the "Last connected"
-//!   tooltip in Settings).
-//!
-//! The OAuth bearer tokens are gone entirely. The cookie jar in the
-//! WebView's user data dir (which Tauri 2 keeps on every platform —
-//! `%APPDATA%/<bundle-id>/EBWebView/` on Windows, the app data dir's
-//! Cookies subdir on macOS, etc.) is the actual session. We don't
-//! intentionally touch or rotate those cookies — they expire on
-//! GOG's schedule.
-//!
-//! ## Legacy keychain cleanup
-//!
-//! Previous (OAuth-era) secrets lived under the account `gog_tokens`
-//! as a JSON blob with `access_token`, `refresh_token`, etc. After
-//! this pivot those values are no longer consulted. `gog_logout`
-//! removes `gog_session` AND `gog_tokens` so a user updating from
-//! a previous build doesn't carry a now-useless keychain entry
-//! around for visual clutter or low-value credential-popup noise.
+//! The old cookie-based flow (WebView JS probe + cookie capture +
+//! reqwest cookie jar) is removed. The `gog::cookies` and
+//! `gog::webview_capture` modules are no longer needed and have
+//! been removed from the module tree.
 
-use std::collections::HashMap;
-use std::sync::mpsc;
-
+use reqwest::Client;
 use serde_json::Value;
+use std::sync::mpsc;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use super::types::{GogSession, GogWebviewCallbackBody};
+use super::cookies::{self, GogCookies};
+use super::types::{GogAuthTokens, GogSession};
 use crate::db;
 
-/// Persistent keychain account name for the GOG session marker.
-///
-/// Distinct from the legacy `gog_tokens` (an OAuth blob) and the
-/// per-vendor display strings in the `kv_store` (`gog_username`,
-/// `gog_display_name`, `gog_last_login_unix`) which still work as
-/// fast probes without keyring I/O.
-const GOG_SESSION_KEYRING_ACCOUNT: &str = "gog_session";
+// ── OAuth constants (Comet / Playnite parity) ───────────────────────
 
-/// Legacy `gog_tokens` OAuth blob — kept here ONLY so `gog_logout`
-/// can clear it for users upgrading across the OAuth→WebView
-/// pivot. Reads from this account are NEVER made.
+/// Well-known GOG Galaxy client_id — used by every open-source
+/// GOG integration (Comet, Heroic, Lutris, galaxyDL-Python).
+const GOG_CLIENT_ID: &str = "46899977096215655";
+
+/// Hardcoded client_secret paired with the Galaxy client_id.
+/// Source: Lutris, Heroic gogdl, galaxyDL-Python.
+const GOG_CLIENT_SECRET: &str =
+    "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9";
+
+/// OAuth authorization page — `login.gog.com/auth` (NOT
+/// `auth.gog.com/auth`). The `layout=galaxy` parameter is
+/// required; without it, GOG rejects this client_id with
+/// `invalid_client`.
+const GOG_AUTH_URL: &str = concat!(
+    "https://login.gog.com/auth",
+    "?client_id=46899977096215655",
+    "&layout=galaxy",
+    "&redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient",
+    "&response_type=code",
+);
+
+/// Token exchange endpoint — GOG accepts GET with query params
+/// (non-standard but consistent across all open-source impls).
+const GOG_TOKEN_URL: &str = "https://auth.gog.com/token";
+
+/// Redirect URI we watch for in the `on_navigation` callback.
+const GOG_REDIRECT_MARKER: &str = "embed.gog.com/on_login_success";
+
+const GOG_TOKENS_KV_KEY: &str = "gog_tokens";
+const GOG_SESSION_KV_KEY: &str = "gog_session";
+const LEGACY_GOG_COOKIES_KEYRING_ACCOUNT: &str = "gog_cookies";
+const LEGACY_GOG_SESSION_KEYRING_ACCOUNT: &str = "gog_session";
 const LEGACY_GOG_TOKENS_KEYRING_ACCOUNT: &str = "gog_tokens";
 
-/// GOG login / sync entry point. 
-///
-/// `https://www.gog.com/account/` is the Playnite-proven URL:
-/// - If the user isn't logged in, GOG auto-redirects to the login
-///   form (no need to hunt for a "Sign In" button on the store
-///   homepage).
-/// - After successful login, GOG redirects back to `/account/`,
-///   giving the JS probe a clean navigation event to latch onto.
-/// - The page is same-origin to `menu.gog.com` (both are `.gog.com`
-///   subdomains), so cookies auto-attach on cross-origin fetch.
-///
-/// Both the login and sync WebViews navigate here — the JS probe
-/// injected via `initialization_script` drives the rest.
-const GOG_HOMEPAGE_URL: &str = "https://www.gog.com/account/";
-
-/// 5-minute timeout on `gog_start_login` — same UX as the Epic and
-/// old-GOG-OAuth flows so the user sees consistent toasts.
 const LOGIN_TIMEOUT_SECS: u64 = 300;
 
-/// JS-side auto-detection runs for 10 minutes before giving up and
-/// posting the "Timed out waiting for GOG login" error. The Rust
-/// `LOGIN_TIMEOUT_SECS` timer is the canonical end of the wait —
-/// this multiplication is a defensive ceiling in case Rust's
-/// `recv_timeout` fires but the JS has already sent a value that
-/// was missed by an unlucky race. 600 × 1s = 10 minutes.
-const JS_PROBE_MAX_ATTEMPTS: u32 = 600;
+/// Browser UA for the token-exchange HTTP client — match a
+/// recent Chrome desktop profile so the server doesn't
+/// side-grade us to a bot response.
+const GOG_USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-/// Window label for the login WebView. Listed in
-/// `capabilities/default.json` => inherits the same Tauri
-/// permission grants as the main window.
-const LOGIN_WEBVIEW_LABEL: &str = "gog-login";
+// ── Tauri commands ──────────────────────────────────────────────────
 
-// ── Bridge state — installed by `setup()` ──────────────────────────
-
-/// Bridge between JS-side `gog_webview_callback` invocations and
-/// the awaiting Rust async fn it has to unblock. The slot is a map
-/// keyed by per-request UUID so overlapping in-flight calls (login
-/// + sync simultaneously, or a re-invoked `gog_start_login` while
-/// the first is still hanging on the WebView) don't stomp on each
-/// other's senders.
+/// Open the GOG OAuth WebView, capture the authorization code,
+/// exchange it for tokens, persist them, probe account/basic for
+/// identity, and return the typed `GogSession`.
 ///
-/// We use `std::sync::Mutex<HashMap<…>>` rather than
-/// `tokio::sync::Mutex` because:
-///
-/// - The critical section is short (HashMap insert / remove + clone
-///   of a small `serde_json::Value`).
-/// - Neither end of the bridge holds the mutex across an `.await`
-///   point — `gog_webview_callback` is a sync command that takes
-///   the mutex, copies out the sender, drops the mutex, then sends.
-/// - Avoiding `tokio::sync::Mutex`'s async-acquire semantics here
-///   saves a `Send` boundary and keeps the dependency graph lighter.
-///
-/// `pub(crate)` visibility so `gog::sync::gog_sync_library` can arm
-/// its sender through `arm()` and look up via `take()` without
-/// breaking encapsulation (the `pending` field stays private — only
-/// these two accessors escape the module, matching the same
-/// pattern `Mutex<HashMap<…, oneshot::Sender<…>>>` uses elsewhere).
-pub struct GogWebviewCallbackSlot {
-    pending: std::sync::Mutex<HashMap<String, mpsc::Sender<Value>>>,
-}
-
-impl Default for GogWebviewCallbackSlot {
-    fn default() -> Self {
-        Self {
-            pending: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl GogWebviewCallbackSlot {
-    /// Arm a sender under `request_id`. Returns the previous sender
-    /// (if any) so the caller can choose to log a warning when
-    /// overlap occurs.
-    pub(crate) fn arm(
-        &self,
-        request_id: String,
-        sender: mpsc::Sender<Value>,
-    ) -> Result<Option<mpsc::Sender<Value>>, String> {
-        let mut map = self.pending.lock().map_err(|e| format!("slot mutex: {e}"))?;
-        Ok(map.insert(request_id, sender))
-    }
-
-    /// Drain the sender for `request_id`. Returns None if no slot
-    /// is found — the typical cause is a Rust-side timeout/drop
-    /// happened first and the receiver is gone.
-    pub(crate) fn take(&self, request_id: &str) -> Result<Option<mpsc::Sender<Value>>, String> {
-        let mut map = self.pending.lock().map_err(|e| format!("slot mutex: {e}"))?;
-        Ok(map.remove(request_id))
-    }
-}
-
-/// Generate a stable per-call UUID-shaped string. We don't pull in
-/// the `uuid` crate because the value never leaves the in-process
-/// bridge — it just has to be unique within the HashMap during the
-/// call's lifetime. 16 random bytes (RFC 4122 v4 bit pattern) is
-/// more than enough for collision avoidance at the rate GOG logins
-/// happen.
-///
-/// Format: `xxxxxxxx-xxxx-Mxxx-Nxxx-xxxxxxxxxxxx` with `M` indicating
-/// the version (4) and the top two bits of `N` indicating the variant
-/// (10x), per RFC 4122 §4.4. JS-side `crypto.randomUUID()` produces
-/// the same shape, so the values are visually consistent if the
-/// frontend ever logs them.
-///
-/// Sibling module `sync.rs` calls this through `super::auth::request_id_v4`
-/// to arm the same bridge the login flow uses; exposing as
-/// `pub(crate)` keeps the API surface narrow.
-pub(crate) fn request_id_v4() -> String {
-    let mut bytes = [0u8; 16];
-    rand::Rng::fill(&mut rand::thread_rng(), &mut bytes[..]);
-    bytes[6] = (bytes[6] & 0x0F) | 0x40;
-    bytes[8] = (bytes[8] & 0x3F) | 0x80;
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5],
-        bytes[6], bytes[7],
-        bytes[8], bytes[9],
-        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-    )
-}
-
-// ── Public Tauri commands ──────────────────────────────────────────
-
-/// Open a Tauri WebView at gog.com, wait for the user to log in,
-/// resolve the GOG session marker, return it. This is the new
-/// `gog_start_login` — replaces both the old two-phase OAuth
-/// handshake (start_login + finish_login) AND the now-dead OAuth
-/// client_id/secret dance.
-///
-/// `request_id` is the per-call UUID keying the WebView → Rust
-/// callback bridge. Optional: if absent (frontend didn't pass one
-/// — the default `gog_start_login` invocation does NOT pass it),
-/// Rust generates a fresh UUID internally. Passing it externally
-/// is useful for tests / logging.
-//
-// The function name mirrors the old OAuth `gog_start_login` for
-// frontend-compat — SettingsPage still calls `invoke('gog_start_login')`
-// and gets back a session-shaped object.
+/// Single-command flow (unlike Epic's two-phase `start_login` +
+/// `finish_login`) — the token exchange happens internally so the
+/// frontend doesn't need to manage an intermediate auth code.
 #[tauri::command]
 pub async fn gog_start_login(
     app: AppHandle,
     request_id: Option<String>,
 ) -> Result<GogSession, String> {
-    let req_id = request_id.unwrap_or_else(request_id_v4);
+    let _ = request_id;
+    eprintln!("[gog-auth] gog_start_login: opening OAuth WebView...");
 
-    // 1. Arm the slot BEFORE opening the WebView so the
-    //    JS-side callback (which can fire in milliseconds if the
-    //    user is already logged in from a prior session in the
-    //    same WebView user-data dir) has somewhere to land.
-    //    `arm()` returns the displaced sender on overlap; we drop
-    //    it intentionally because the previous awaiter will surface
-    //    a timeout to the user on its own and we don't care about
-    //    recovery — overlap is the rare race, not the steady state.
-    let (tx, rx) = mpsc::channel::<Value>();
-    let slot: tauri::State<'_, GogWebviewCallbackSlot> = app.state();
-    let _prior = slot.arm(req_id.clone(), tx).map_err(|e| format!("slot arm: {e}"))?;
+    // ── 1. Open WebView + capture auth code via on_navigation ──
+    let auth_code = open_oauth_webview(&app).await?;
+    eprintln!("[gog-auth] got auth code (len={}), exchanging for tokens...", auth_code.len());
 
-    // 2. Open the WebView at gog.com with the JS auto-detector
-    //    script injected. The script fires immediately on page
-    //    load and posts back the { userId, username } bundle
-    //    via `gog_webview_callback`.
-    let init_script = gog_init_script_for("login", &req_id);
-    let home: url::Url = GOG_HOMEPAGE_URL
-        .parse()
-        .map_err(|e| format!("invalid gog homepage url: {e}"))?;
-    let webview = WebviewWindowBuilder::new(
-        &app,
-        LOGIN_WEBVIEW_LABEL,
-        WebviewUrl::External(home),
-    )
-    .title("GOG Galaxy Login")
-    .inner_size(580.0, 700.0)
-    .resizable(false)
-    .initialization_script(&init_script)
-    .build()
-    .map_err(|e| format!("Failed to create GOG login window: {e}"))?;
+    // ── 2. Exchange auth code for tokens ──────────────────────
+    let tokens = exchange_code_for_tokens(&auth_code).await?;
+    eprintln!("[gog-auth] token exchange OK — user_id={}, expires_at={}", tokens.user_id, tokens.expires_at);
 
-    // 3. Block on the channel. The closure-style `spawn_blocking`
-    //    shuttles the sync `mpsc::Receiver` (which doesn't have
-    //    a `.recv_timeout().await`) onto Tokio's executor; the
-    //    outer `.await` then unblocks the async command. Same
-    //    pattern the old OAuth flow used.
-    let bundle = tokio::task::spawn_blocking(move || {
-        rx.recv_timeout(std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS))
-    })
-    .await
-    .map_err(|e| format!("Join error: {e}"))?
-    .map_err(|_| format!("Login timed out after {LOGIN_TIMEOUT_SECS} seconds"))?;
+    // ── 3. Persist tokens to SQLite kv_store ─────────────────
+    save_tokens(&app, &tokens)?;
+    eprintln!("[gog-auth] tokens saved to kv_store under '{}'", GOG_TOKENS_KV_KEY);
 
-    // 4. Tear down the WebView regardless of outcome. The user
-    //    saw a successful login OR an error toast — either way
-    //    the window is no longer needed.
-    let _ = webview.close();
-
-    // Parse the body and short-circuit on JS-side errors.
-    let body: GogWebviewCallbackBody =
-        serde_json::from_value(bundle).map_err(|e| format!("parse callback body: {e}"))?;
-    if let Some(err) = body.error {
-        return Err(format!("GOG login failed: {err}"));
+    // ── 3b. Capture cookies for embed.gog.com requests ──────
+    // embed.gog.com/user/data/games requires cookie-based auth
+    // even with OAuth2 — capture session cookies from the
+    // WebView (still open) before closing it.
+    match capture_cookies_from_auth_webview(&app).await {
+        Ok(cookies) => {
+            if let Some(db_state) = try_db_state(&app) {
+                if let Err(e) = cookies::persist(db_state.inner(), &cookies) {
+                    eprintln!("[gog-auth] persist cookies: {e}");
+                } else {
+                    eprintln!("[gog-auth] {} cookies captured and persisted", cookies.records.len());
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[gog-auth] cookie capture skipped: {e}");
+        }
     }
-    let user_id = body
-        .user_id
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| "GOG login completed but no userId was returned".to_string())?;
-    let username = body
-        .username
-        .ok_or_else(|| "GOG login completed but no username was returned".to_string())?;
+    // Close the WebView now that we've captured cookies.
+    if let Some(wv) = app.get_webview_window("gog-login") {
+        let _ = wv.close();
+    }
+
+    // ── 4. Probe account/basic for user identity ──────────────
+    let client = Client::builder()
+        .user_agent(GOG_USER_AGENT)
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("build HTTP client: {e}"))?;
+
+    let resp = client
+        .get("https://menu.gog.com/v1/account/basic")
+        .bearer_auth(&tokens.access_token)
+        .send()
+        .await
+        .map_err(|e| format!("account/basic probe: {e}"))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "GOG account probe HTTP {status} — token may be invalid: {body_text}"
+        ));
+    }
+    let body: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("decode account/basic: {e}"))?;
+
+    let is_logged_in = body["isLoggedIn"].as_bool().unwrap_or(false);
+    if !is_logged_in {
+        // Shouldn't happen with a fresh access token, but GOG
+        // sometimes returns isLoggedIn=false on brand-new accounts
+        // or accounts with privacy settings that hide basic info.
+        // Use the token's user_id as fallback.
+    }
+    let user_id = value_to_string(body.get("userId"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| tokens.user_id.clone());
+    let username = value_to_string(body.get("username"))
+        .unwrap_or_else(|| format!("GOG User {user_id}"));
+
     let session = GogSession {
-        user_id,
-        username,
+        user_id: user_id.clone(),
+        username: username.clone(),
+        galaxy_user_id: Some(user_id),
         logged_in_at: current_unix(),
     };
-    save_session(&app, &session)?;
+    persist_session(&app, &session)?;
+    eprintln!("[gog-auth] login complete — username='{}', user_id={}", session.username, session.user_id);
     Ok(session)
 }
 
-/// Whether a `gog_session` blob exists in the OS keychain.
-///
-/// Cheap boolean probe — no WebView, no network, no JWT decode.
-/// Callers that need to know whether the cookie jar is *still*
-/// valid (cookies expire server-side independent of our keychain)
-/// should open the WebView once and probe `menu.gog.com/v1/account/basic`
-/// — see `gog_sync_library` for the pattern.
+/// Cheap boolean probe — checks the kv_store for tokens.
 #[tauri::command]
 pub fn gog_is_authenticated(app: AppHandle) -> bool {
-    load_session_inner(&app).is_ok()
+    load_tokens_inner(&app).is_ok()
 }
 
-/// Wipe the `gog_session` keychain entry AND, defensively, the
-/// legacy `gog_tokens` blob from the OAuth era so users upgrading
-/// across the pivot don't carry around now-useless credentials.
-/// Also clears the per-vendor kv-store display strings so the
-/// integration tile renders "Not connected" cleanly on the next
-/// paint.
+/// Wipe tokens and session from the kv_store, plus legacy
+/// keychain entries for users upgrading from the old cookie
+/// flow or the broken keyring-based OAuth flow.
 #[tauri::command]
 pub fn gog_logout(app: AppHandle) -> Result<(), String> {
+    // Clean up legacy keychain entries (may not exist — delete is idempotent).
     let store = db::secrets::SecretStore::new();
-    // `delete` on a missing account returns Ok(()) on every
-    // platform we support — we don't care if either entry was
-    // never present.
-    store.delete(GOG_SESSION_KEYRING_ACCOUNT)?;
-    store.delete(LEGACY_GOG_TOKENS_KEYRING_ACCOUNT)?;
+    let _ = store.delete(LEGACY_GOG_TOKENS_KEYRING_ACCOUNT);
+    let _ = store.delete(LEGACY_GOG_SESSION_KEYRING_ACCOUNT);
+    let _ = store.delete(LEGACY_GOG_COOKIES_KEYRING_ACCOUNT);
+    // Clean up kv_store entries (the current persistence layer).
     if let Some(db_state) = try_db_state(&app) {
+        let _ = db::kv::delete(db_state.inner(), GOG_TOKENS_KV_KEY);
+        let _ = db::kv::delete(db_state.inner(), GOG_SESSION_KV_KEY);
+        let _ = db::kv::delete(db_state.inner(), cookies::GOG_COOKIES_KV_KEY);
         let _ = db::kv::delete(db_state.inner(), "gog_last_login_unix");
         let _ = db::kv::delete(db_state.inner(), "gog_username");
         let _ = db::kv::delete(db_state.inner(), "gog_display_name");
+        let _ = db::kv::delete(db_state.inner(), "gog_galaxy_user_id");
     }
     Ok(())
 }
 
-/// JS-side callback installed as a Tauri command. Fires when the
-/// `initialization_script` running inside a `gog-*` labelled
-/// WebView posts its detected-login / sync-result bundle back to
-/// Rust. Looks up the sender keyed by `request_id` (so overlapping
-/// login + sync requests don't stomp each other) and ships the
-/// value through. Returns an error if no slot is found —
-/// ordinarily that means the Rust-side `gog_start_login` /
-/// `gog_sync_library` already timed out and dropped the receiver,
-/// so the JS gets a soft-failure response it can ignore.
-///
-/// Sync command — Tauri will not place it on the async runtime.
-/// Capability to invoke this from inside the WebView is granted
-/// via `capabilities/default.json` `windows: ["gog-login", "gog-sync"]`.
-#[tauri::command]
-pub fn gog_webview_callback(
-    slot: tauri::State<'_, GogWebviewCallbackSlot>,
-    request_id: String,
-    value: Value,
-) -> Result<(), String> {
-    let tx = slot
-        .take(&request_id)
-        .map_err(|e| format!("slot mutex: {e}"))?;
-    match tx {
-        Some(tx) => {
-            // `send` only fails if the receiver was dropped (Rust
-            // async fn bailed). That's an OK outcome — we'd surface
-            // the underlying timeout error to the user, not this
-            // "receiver dropped" string.
-            tx.send(value).map_err(|_| "receiver already dropped".to_string())
+// ── Token persistence ───────────────────────────────────────────────
+
+fn save_tokens(app: &AppHandle, tokens: &GogAuthTokens) -> Result<(), String> {
+    let json = serde_json::to_string(tokens).map_err(|e| format!("serialize tokens: {e}"))?;
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized — cannot persist GOG tokens".to_string())?;
+    eprintln!(
+        "[gog-auth] save_tokens: writing {} bytes to kv_store key='{}'",
+        json.len(),
+        GOG_TOKENS_KV_KEY
+    );
+    db::kv::set(db_state.inner(), GOG_TOKENS_KV_KEY, &json)?;
+
+    // ── Verify the write actually persisted ──────────────────
+    match db::kv::get(db_state.inner(), GOG_TOKENS_KV_KEY) {
+        Ok(Some(readback)) if readback == json => {
+            eprintln!("[gog-auth] save_tokens: readback verified — {} bytes match", readback.len());
         }
-        None => Err(format!(
-            "no pending GOG callback for requestId={request_id} (already resolved or timed out)"
-        )),
+        Ok(Some(readback)) => {
+            eprintln!(
+                "[gog-auth] save_tokens: WARNING — readback MISMATCH! wrote {} bytes, read {} bytes",
+                json.len(), readback.len()
+            );
+        }
+        Ok(None) => {
+            eprintln!("[gog-auth] save_tokens: CRITICAL — kv set returned Ok but get returned None!");
+        }
+        Err(e) => {
+            eprintln!("[gog-auth] save_tokens: CRITICAL — kv set returned Ok but get failed: {e}");
+        }
     }
+
+    let now = current_unix().to_string();
+    let _ = db::kv::set(db_state.inner(), "gog_last_login_unix", &now);
+    Ok(())
 }
 
-/// Diagnostic passthrough fired from inside the WebView. The JS
-/// detector logs every transition here so the user can see the live
-/// state of the probe by watching the terminal that ran
-/// `npm run tauri dev` — no DevTools required. The `eprintln!` shows
-/// up in the native stderr stream that Tauri forwards in dev mode.
-///
-/// This pattern (rather than a `WebviewWindowBuilder::on_console_message`
-/// Rust-side listener) is the canonical Tauri 2 path: app-defined
-/// commands are exposed to every WebView window the moment they're
-/// registered in `tauri::generate_handler!`, and the JS side just
-/// does `invoke('gog_debug_log', { message: '...' })`.
-///
-/// No `Result` return — a logging call can't fail in any meaningful
-/// way. If the WebView never invokes us, we just see fewer log
-/// lines. If it invokes us 10×/sec, native stderr is plenty fast.
-#[tauri::command]
-pub fn gog_debug_log(message: String) {
-    eprintln!("[gog-webview] {}", message);
+fn persist_session(app: &AppHandle, session: &GogSession) -> Result<(), String> {
+    let json = serde_json::to_string(session).map_err(|e| format!("serialize session: {e}"))?;
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized — cannot persist GOG session".to_string())?;
+    db::kv::set(db_state.inner(), GOG_SESSION_KV_KEY, &json)?;
+    let login_unix = session.logged_in_at.to_string();
+    let _ = db::kv::set(db_state.inner(), "gog_last_login_unix", login_unix.as_str());
+    let _ = db::kv::set(db_state.inner(), "gog_username", session.username.as_str());
+    let _ = db::kv::set(db_state.inner(), "gog_display_name", session.username.as_str());
+    if let Some(uid) = session.galaxy_user_id.as_deref() {
+        let _ = db::kv::set(db_state.inner(), "gog_galaxy_user_id", uid);
+    }
+    Ok(())
 }
 
-// ── JS auto-detection script (one true string) ─────────────────────
+// ── Public token accessors (used by sync) ──────────────────────────
 
-/// Build the `initialization_script` payload that runs on every
-/// page navigation inside a GOG WebView. Two responsibilities:
+pub(crate) fn load_session_pub(app: &AppHandle) -> Result<GogSession, String> {
+    load_session_inner(app)
+}
+
+/// Load tokens from the keychain. Returns error when not
+/// authenticated — sync uses this as the short-circuit check.
+pub(crate) fn load_tokens(app: &AppHandle) -> Result<GogAuthTokens, String> {
+    load_tokens_inner(app)
+}
+
+/// Refresh the access token if it's within 5 minutes of expiry.
+/// Returns the (possibly refreshed) tokens. Used by sync before
+/// making any API calls.
+pub(crate) async fn refresh_tokens_if_needed(
+    app: &AppHandle,
+) -> Result<GogAuthTokens, String> {
+    let tokens = load_tokens_inner(app)?;
+    if tokens.expires_at > current_unix() + 300 {
+        return Ok(tokens);
+    }
+    let client = Client::builder()
+        .user_agent(GOG_USER_AGENT)
+        .build()
+        .map_err(|e| format!("build HTTP client: {e}"))?;
+    let refresh_url = format!(
+        "{}?client_id={}&client_secret={}&grant_type=refresh_token&refresh_token={}",
+        GOG_TOKEN_URL,
+        urlencoding::encode(GOG_CLIENT_ID),
+        urlencoding::encode(GOG_CLIENT_SECRET),
+        urlencoding::encode(&tokens.refresh_token),
+    );
+    let resp = client
+        .get(&refresh_url)
+        .send()
+        .await
+        .map_err(|e| format!("token refresh: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode refresh response: {e}"))?;
+    if !status.is_success() {
+        let err_msg = body["error"].as_str().unwrap_or("unknown");
+        return Err(format!("Token refresh failed (HTTP {status}): {err_msg}"));
+    }
+    let access_token = body["access_token"]
+        .as_str()
+        .ok_or("missing access_token in refresh response")?
+        .to_string();
+    let refresh_token = body["refresh_token"]
+        .as_str()
+        .unwrap_or(&tokens.refresh_token)
+        .to_string();
+    let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
+    let new_tokens = GogAuthTokens {
+        access_token,
+        refresh_token,
+        expires_at: current_unix() + expires_in,
+        user_id: tokens.user_id.clone(),
+    };
+    save_tokens(app, &new_tokens)?;
+    Ok(new_tokens)
+}
+
+// ── Cookie capture from OAuth WebView ────────────────────────────
+
+/// Capture session cookies from the still-open `gog-login`
+/// WebView. embed.gog.com/user/data/games requires cookie-based
+/// auth even with OAuth2 — this bridges the gap.
 ///
-/// 1. Pin `window.__GOG_REQUEST_ID__` and `window.__GOG_KIND__` so
-///    the rest of the script knows WHERE to send its result. These
-///    globals are set BEFORE the probe loop starts, so any
-///    navigation that happens DURING the loop won't lose them.
-///    (Tauri 2's `initialization_script` runs on every page load —
-//    see https://v2.tauri.app/reference/javascript/api/namespacewebview/
-///    — so we re-set them on each load as a defensive measure.)
-///
-/// 2. Run the probe loop. `kind="login"` ends as soon as
-///    `menu.gog.com/v1/account/basic` returns `isLoggedIn: true`; `kind="sync"` additionally fetches
-///    the full library bundle (owned + metadata + playtime) before
-///    posting back. The success and failure paths both call
-///    `gog_webview_callback` so the Rust side always gets a
-///    terminator event within `LOGIN_TIMEOUT_SECS` plus a small
-///    grace window — the timeouts are belt-and-suspenders, the
-///    REAL end-of-await is the callback firing.
-///
-/// The guard on `window.__GOG_PROBE_RAN__` is present so a navigation
-/// that re-injects the script doesn't fire the probe a second
-/// time. If the user is mid-login when the page navigates, the
-/// original probe keeps running (its `request_id` keys are still
-/// valid in Rust); the new injection is a silent no-op so we don't
-/// double-callback.
-///
-/// `pub(crate)` so `sync.rs::gog_sync_library` can build its own
-/// `kind="sync"` variant using the same probe template.
-pub(crate) fn gog_init_script_for(kind: &str, request_id: &str) -> String {
-    // Sub-second escapes: the format!() injects two untrusted
-    // strings (kind + request_id). They're constrained to:
-    //   - kind: a Rust literal ("login" / "sync") — no user input.
-    //   - request_id: a `[0-9a-f-]{36}` UUID, never contains
-    //     characters that would break JSON parsing, but we still
-    //     JSON-encode to be safe against future request_id formats.
-    let kind_json = serde_json::to_string(kind)
-        .expect("kind is always a fixed string literal");
-    let request_id_json = serde_json::to_string(request_id)
-        .expect("request_id is always ASCII-safe from format! macros");
-    // Hard upper bound identical to LOGIN_TIMEOUT_SECS for Rust,
-    // expressed as `MAX_ATTEMPTS × 1s`. Counts down from this cap
-    // on each probe attempt.
-    let max_attempts_json = serde_json::to_string(&JS_PROBE_MAX_ATTEMPTS)
-        .expect("static literal");
-    format!(
-        r#"
-(function () {{
-    if (window.__GOG_PROBE_RAN__) return;
-    window.__GOG_PROBE_RAN__ = true;
-    window.__GOG_REQUEST_ID__ = {request_id_json};
-    window.__GOG_KIND__ = {kind_json};
+/// Must be called BEFORE the WebView is closed (WebView2 purges
+/// cookies on window destruction).
+async fn capture_cookies_from_auth_webview(
+    app: &AppHandle,
+) -> Result<GogCookies, String> {
+    // The gog-login WebView should still be open at this point —
+    // `gog_start_login` calls us after token exchange but before
+    // `open_oauth_webview` closes the window.
+    let webview = app
+        .get_webview_window("gog-login")
+        .ok_or_else(|| "gog-login WebView not found — may have been closed early".to_string())?;
+    cookies::capture_from_webview(&webview).await
+}
 
-    // safe_invoke: every Rust-side call goes through this helper so
-    // a single failing invoke (Tauri not yet initialized, bad arg
-    // shape, missing __TAURI__ global on this Tauri build) cannot
-    // abort the probe — we stay best-effort throughout. Returns
-    // `null` on failure; callers should treat null as "no answer
-    // from Rust right now" and keep going.
-    //
-    // DO NOT extract `window.__TAURI__.core.invoke` to a local — the
-    // `this` binding would be lost on call and Tauri 2 throws
-    // `TypeError: Illegal invocation`. Always invoke through the
-    // full member chain so `this === window.__TAURI__.core`.
-    async function safe_invoke(cmd, args) {{
-        try {{
-            if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {{
-                return await window.__TAURI__.core.invoke(cmd, args);
-            }}
-            return await window.__TAURI_INTERNALS__.invoke(cmd, args);
-        }} catch (e) {{
-            try {{ console.error('[GOG] invoke(' + cmd + ') failed:', e); }} catch (_) {{}}
-            return null;
-        }}
-    }}
+// ── WebView + on_navigation code capture ───────────────────────────
 
-    // banner_inject: drop a fixed red banner at the very top of the
-    // page when probing has stalled long enough that the user
-    // probably hasn't signed in to GOG yet. Updating the same
-    // banner across attempts keeps page noise low.
-    function banner_inject(text) {{
-        try {{
-            var existing = document.getElementById('__GOG_BANNER__');
-            if (existing) {{ existing.textContent = text; return; }}
-            var b = document.createElement('div');
-            b.id = '__GOG_BANNER__';
-            b.textContent = text;
-            b.style.cssText = 'color:#fff;background:#c33;padding:14px 16px;text-align:center;position:fixed;top:0;left:0;width:100%;z-index:2147483647;font:600 14px system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4);';
-            (document.body || document.documentElement).appendChild(b);
-        }} catch (_) {{}}
-    }}
+async fn open_oauth_webview(app: &AppHandle) -> Result<String, String> {
+    eprintln!("[gog-auth] opening OAuth WebView at login.gog.com/auth...");
+    let (tx, rx) = mpsc::channel::<Option<String>>();
 
-    // Tell Rust we're alive. Reaches native stderr via gog_debug_log
-    // so the user can `tail` the terminal they launched `npm run
-    // tauri dev` in and watch the probe live.
-    safe_invoke('gog_debug_log', {{
-        message: '[GOG] init running on ' + location.href + ' (kind=' + window.__GOG_KIND__ + ', requestId=' + window.__GOG_REQUEST_ID__ + ')'
-    }});
-
-    (async function probe() {{
-        var MAX_ATTEMPTS = {max_attempts_json};
-        var KIND = window.__GOG_KIND__;
-        var start_ms = Date.now();
-
-        async function j(url) {{
-            var r = await fetch(url, {{ credentials: 'include' }});
-            if (r.status !== 200) throw new Error('HTTP ' + r.status);
-            return await r.json();
-        }}
-
-        for (var attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {{
-            try {{
-                var me = await j('https://menu.gog.com/v1/account/basic');
-                if (!me || !me.isLoggedIn) throw new Error('not logged in (isLoggedIn=' + (me && me.isLoggedIn) + ')');
-                safe_invoke('gog_debug_log', {{
-                    message: '[GOG] account/basic OK: userId=' + (me.userId || '') + ' username=' + (me.username || '')
-                }});
-                // menu.gog.com/v1/account/basic MAY not include userId —
-                // Playnite only reads isLoggedIn + username from it.
-                // Fall-back through common alternative keys so the Rust
-                // handler receives a non-empty value.
-                var resolvedUserId = me.userId || me.id || me.galaxyUserId || me.user_id || '';
-                var payload = {{
-                    userId: String(resolvedUserId),
-                    username: me.username || ''
-                }};
-                if (KIND === 'sync') {{
-                    var owned = await j('https://embed.gog.com/user/data/games');
-                    var ids = (owned && owned.owned) || [];
-                    payload.owned = ids;
-                    if (ids.length > 0) {{
-                        var csv = ids.slice(0, 50).join(',');
-                        try {{
-                            var meta = await j('https://api.gog.com/products?ids=' + encodeURIComponent(csv) + '&expand=description,images,releaseDate');
-                            payload.metadata = Array.isArray(meta) ? meta : [];
-                        }} catch (e) {{ payload.metadata = []; }}
-                        try {{
-                            var pt = await j('https://gameplay.gog.com/clients/' + encodeURIComponent(String(me.userId)) + '/playtime');
-                            payload.playtime = Array.isArray(pt) ? pt : [];
-                        }} catch (e) {{ payload.playtime = []; }}
-                    }} else {{
-                        payload.metadata = [];
-                        payload.playtime = [];
-                    }}
-                }} else {{
-                    payload.owned = [];
-                    payload.metadata = [];
-                    payload.playtime = [];
-                }}
-                var cb = await safe_invoke('gog_webview_callback', {{
-                    requestId: window.__GOG_REQUEST_ID__,
-                    value: payload
-                }});
-                safe_invoke('gog_debug_log', {{
-                    message: '[GOG] callback fired; Rust returned: ' + JSON.stringify(cb) + ' (' + (Date.now() - start_ms) + 'ms total)'
-                }});
-                return;
-            }} catch (e) {{
-                if (attempt % 5 === 0) {{
-                    var secs = Math.round((Date.now() - start_ms)/1000);
-                    var hint = (attempt === 5) ? ' — if you see a "Sign In" button on this page, click it!' : ' — still waiting';
-                    safe_invoke('gog_debug_log', {{
-                        message: '[GOG] attempt ' + attempt + ' failed: ' + (e && e.message || String(e)) + ' (' + secs + 's elapsed)' + hint
-                    }});
-                    if (attempt === 5 || attempt === 30 || attempt === 60) {{
-                        banner_inject('Not signed in to GOG yet — click the "Sign In" button to log in.');
-                    }}
-                }}
-                await new Promise(function (r) {{ setTimeout(r, 1000); }});
-            }}
-        }}
-        safe_invoke('gog_debug_log', {{
-            message: '[GOG] timed out after ' + MAX_ATTEMPTS + ' attempts (' + Math.round((Date.now() - start_ms)/1000) + 's elapsed)'
-        }});
-        banner_inject('GOG login timed out. Close this window and retry from Gamelib Settings.');
-        await safe_invoke('gog_webview_callback', {{
-            requestId: window.__GOG_REQUEST_ID__,
-            value: {{ error: 'Timed out waiting for GOG session' }}
-        }});
-    }})();
-}})();
-"#,
-        kind_json = kind_json,
-        request_id_json = request_id_json,
-        max_attempts_json = max_attempts_json,
+    let webview = WebviewWindowBuilder::new(
+        app,
+        "gog-login",
+        WebviewUrl::External(
+            GOG_AUTH_URL
+                .parse()
+                .map_err(|e| format!("invalid GOG auth URL: {e}"))?,
+        ),
     )
+    .title("GOG Galaxy Login")
+    .inner_size(580.0, 700.0)
+    .resizable(false)
+    .on_navigation(move |url| {
+        let url_str = url.as_str();
+        if url_str.contains(GOG_REDIRECT_MARKER) {
+            eprintln!("[gog-auth] on_navigation hit redirect: {url_str}");
+            let code = extract_code_from_url(url_str);
+            eprintln!("[gog-auth] extracted code: {}", code.as_deref().unwrap_or("<none>"));
+            let _ = tx.send(Some(code.unwrap_or_default()));
+            return false; // stop navigation — we got what we need
+        }
+        true // allow navigation
+    })
+    .build()
+    .map_err(|e| format!("Failed to create GOG login window: {e}"))?;
+
+    let auth_code = match tokio::task::spawn_blocking(move || {
+        rx.recv_timeout(std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS))
+    })
+    .await
+    .map_err(|e| format!("join error: {e}"))?
+    {
+        Ok(Some(code)) if !code.is_empty() => code,
+        Ok(_) => {
+            let _ = webview.close();
+            return Err(
+                "GOG login failed — no authorization code received. The redirect may have been blocked.".to_string(),
+            );
+        }
+        Err(_) => {
+            let _ = webview.close();
+            return Err(format!(
+                "GOG login timed out after {LOGIN_TIMEOUT_SECS} seconds"
+            ));
+        }
+    };
+
+    // WebView stays open — caller MUST close it after cookie capture.
+    Ok(auth_code)
 }
 
-// ── helpers (private) ──────────────────────────────────────────────
+// ── Token exchange ──────────────────────────────────────────────────
+
+async fn exchange_code_for_tokens(auth_code: &str) -> Result<GogAuthTokens, String> {
+    eprintln!("[gog-auth] exchanging auth code for tokens (code len={})...", auth_code.len());
+    let client = Client::builder()
+        .user_agent(GOG_USER_AGENT)
+        .build()
+        .map_err(|e| format!("build HTTP client: {e}"))?;
+
+    let token_url = format!(
+        "{}?client_id={}&client_secret={}&grant_type=authorization_code&code={}&redirect_uri={}",
+        GOG_TOKEN_URL,
+        urlencoding::encode(GOG_CLIENT_ID),
+        urlencoding::encode(GOG_CLIENT_SECRET),
+        urlencoding::encode(auth_code),
+        urlencoding::encode("https://embed.gog.com/on_login_success?origin=client"),
+    );
+
+    let resp = client
+        .get(&token_url)
+        .send()
+        .await
+        .map_err(|e| format!("token exchange request: {e}"))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+    eprintln!("[gog-auth] token exchange HTTP {status}");
+    let body: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("decode token response: {e} (body: {})", &body_text[..body_text.len().min(500)]))?;
+
+    if !status.is_success() {
+        let err = body["error"].as_str().unwrap_or("unknown");
+        let desc = body["error_description"]
+            .as_str()
+            .unwrap_or("no description");
+        return Err(format!(
+            "GOG token exchange failed (HTTP {status}): {err} — {desc}"
+        ));
+    }
+
+    let access_token = body["access_token"]
+        .as_str()
+        .ok_or("missing access_token in token response")?
+        .to_string();
+    let refresh_token = body["refresh_token"]
+        .as_str()
+        .ok_or("missing refresh_token in token response")?
+        .to_string();
+    let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
+    let user_id = value_to_string(body.get("user_id"))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Ok(GogAuthTokens {
+        access_token,
+        refresh_token,
+        expires_at: current_unix() + expires_in,
+        user_id,
+    })
+}
+
+// ── Internal helpers ───────────────────────────────────────────────
+
+fn load_session_inner(app: &AppHandle) -> Result<GogSession, String> {
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized".to_string())?;
+    let secret = db::kv::get(db_state.inner(), GOG_SESSION_KV_KEY)?
+        .ok_or_else(|| "No GOG session stored".to_string())?;
+    serde_json::from_str(&secret).map_err(|e| format!("Failed to parse session: {e}"))
+}
+
+fn load_tokens_inner(app: &AppHandle) -> Result<GogAuthTokens, String> {
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized".to_string())?;
+    eprintln!(
+        "[gog-auth] load_tokens_inner: reading from kv_store key='{}'",
+        GOG_TOKENS_KV_KEY
+    );
+    let raw = db::kv::get(db_state.inner(), GOG_TOKENS_KV_KEY)?;
+    match &raw {
+        Some(s) => eprintln!("[gog-auth] load_tokens_inner: found {} bytes", s.len()),
+        None => eprintln!("[gog-auth] load_tokens_inner: kv_store returned None — entry does NOT exist"),
+    }
+    let secret = raw.ok_or_else(|| {
+        "No GOG tokens stored — you may need to reconnect your account. Click 'Connect GOG Account' in Settings to re-authenticate.".to_string()
+    })?;
+    serde_json::from_str(&secret).map_err(|e| format!("Failed to parse tokens: {e}"))
+}
 
 fn current_unix() -> u64 {
     std::time::SystemTime::now()
@@ -622,50 +498,30 @@ fn current_unix() -> u64 {
         .as_secs()
 }
 
-fn save_session(app: &AppHandle, session: &GogSession) -> Result<(), String> {
-    let json = serde_json::to_string(session).map_err(|e| format!("serialize session: {e}"))?;
-    let store = db::secrets::SecretStore::new();
-    store.set(GOG_SESSION_KEYRING_ACCOUNT, &json)?;
-    // Per-vendor display strings for the Settings tile ("Connected as"
-    // subtitle + "Last connected" tooltip). `db::kv::set` accepts
-    // `&str` for the value; we bind explicit `String`s and pass
-    // `.as_str()` so the compiler never has to infer a `&String` →
-    // `&str` coercion (which depending on the rustc version + lints
-    // can produce E0308 "expected reference, found u32" when a
-    // coerce-then-asm-block intermediate gets re-mapped). Matching
-    // pattern used by `gog_logout` above.
-    if let Some(db_state) = try_db_state(app) {
-        let login_unix = current_unix().to_string();
-        let username_str = session.username.as_str();
-        let _ = db::kv::set(
-            db_state.inner(),
-            "gog_last_login_unix",
-            login_unix.as_str(),
-        );
-        let _ = db::kv::set(db_state.inner(), "gog_username", username_str);
-        let _ = db::kv::set(db_state.inner(), "gog_display_name", username_str);
+fn extract_code_from_url(url: &str) -> Option<String> {
+    let query = url.find('?').map(|i| &url[i + 1..])?;
+    for param in query.split('&') {
+        let mut kv = param.splitn(2, '=');
+        if kv.next()? == "code" {
+            let val = kv.next()?;
+            return Some(
+                urlencoding::decode(val)
+                    .unwrap_or_else(|_| val.into())
+                    .into_owned(),
+            );
+        }
     }
-    Ok(())
+    None
 }
 
-/// Public load_session entry point for sibling modules.
-/// `sync.rs` calls this before opening the sync WebView so a
-/// missing `gog_session` keychain entry can short-circuit into a
-/// "Connect GOG first" toast instead of spinning up a useless
-/// WebView that flashes open and closes.
-pub(crate) fn load_session_pub(_app: &AppHandle) -> Result<GogSession, String> { load_session_inner(_app) }
-
-fn load_session_inner(_app: &AppHandle) -> Result<GogSession, String> {
-    let store = db::secrets::SecretStore::new();
-    let secret = store
-        .get(GOG_SESSION_KEYRING_ACCOUNT)?
-        .ok_or_else(|| "No GOG session stored".to_string())?;
-    serde_json::from_str(&secret).map_err(|e| format!("Failed to parse session: {e}"))
-}
-
-/// Mirror of `epic::auth::try_db_state` — the runner registers `db::Db`
-/// during `setup()`, which completes before any command runs, so the
-/// `try_state` lookup is the safe pattern.
 fn try_db_state(app: &AppHandle) -> Option<tauri::State<'_, db::Db>> {
     app.try_state::<db::Db>()
+}
+
+fn value_to_string(v: Option<&Value>) -> Option<String> {
+    match v? {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }

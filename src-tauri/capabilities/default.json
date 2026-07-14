@@ -5,8 +5,7 @@
   "windows": [
     "main",
     "source-fetcher-*",
-    "gog-login",
-    "gog-sync"
+    "gog-login"
   ],
   "permissions": [
     "core:default",
