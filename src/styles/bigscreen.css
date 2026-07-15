@@ -466,3 +466,253 @@
     scroll-behavior: auto;
   }
 }
+
+/* ============================================================
+   Virtual Mouse Cursor (right-stick pointer)
+   ============================================================
+ *
+ * Drifts on top of every other element via a fixed position +
+ * portal mount to document.body. `pointer-events: none` keeps it
+ * out of the real mouse hit-test so synthetic click dispatch
+ * from useGamepad targets the actual element underneath.
+ *
+ * `transform: translate3d()` is GPU-composited and avoids
+ * invalidating layout on every frame. The rAF loop in
+ * VirtualCursor recomputes position incrementally (only when x/y
+ * actually change) so the hot loop stays cheap.
+ */
+
+.virtual-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  z-index: 9700; /* above focus-ring (9000) + bigscreen-nav (9100) */
+  pointer-events: none;
+  user-select: none;
+  transition: filter var(--duration-fast) var(--ease-standard);
+  will-change: transform, opacity;
+  /* `transform` is set imperatively from the rAF loop. */
+}
+
+.virtual-cursor-body {
+  position: absolute;
+  inset: 0;
+  /* Classic arrow-pointer silhouette — black drop-shadow + white fill
+   * gives crisp contrast on light AND dark backgrounds without a
+   * filter inversion. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'><path d='M4 3 L4 18 L9 14 L11.5 19 L14 18 L11 13 L18 13 Z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='round'/></svg>");
+  background-size: contain;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+/* Hot-spot indicator — a subtle 4 px ring that highlights where the
+ * click lands. Slightly tinted accent so the user can intuit it's
+ * the "aim" point, not just decoration. */
+.virtual-cursor-hot {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 4px var(--color-accent-glow);
+  pointer-events: none;
+}
+
+/* Drag ring pulse — fades in when RT/LT is held down so the user
+ * gets tactile feedback that a click-and-drag is live. Pinned to
+ * --drag-opacity (default 0.7) so VirtualCursor.tsx can smooth it
+ * in/out without flicker. */
+.virtual-cursor-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 0 12px var(--color-accent-glow);
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.virtual-cursor--dragging .virtual-cursor-ring {
+  opacity: var(--drag-opacity, 0.7);
+  animation: virtualCursorDragPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes virtualCursorDragPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 12px var(--color-accent-glow);
+  }
+  50% {
+    transform: scale(1.18);
+    box-shadow: 0 0 20px var(--color-accent-glow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .virtual-cursor--dragging .virtual-cursor-ring {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   Gamepad Hint Legend (controller mapping reference)
+   ============================================================
+ *
+ * Bottom-left card. Two opacity modes:
+ *   • `.gamepad-hint--prominent` after a controller connects — a
+ *     4-second full-opacity teaser so the user can immediately see
+ *     the bindings.
+ *   • `.gamepad-hint` standalone — settles to 0.32 opacity so the
+ *     legend is always available without competing for attention.
+ *
+ * Dismiss button (top-right X) hides the legend until the next
+ * disconnect→reconnect cycle.
+ */
+
+.gamepad-hint {
+  position: fixed;
+  bottom: 92px; /* sits above the bottom nav (72px) with breathing room */
+  left: 24px;
+  z-index: 9050;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  min-width: 280px;
+  max-width: 360px;
+  opacity: 0.32;
+  transition: opacity var(--duration-slow) var(--ease-standard),
+              transform var(--duration-slow) var(--ease-bounce);
+  pointer-events: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.gamepad-hint--prominent {
+  opacity: 1;
+  transform: translateY(0);
+  animation: gamepadHintProminentIn 0.45s var(--ease-bounce);
+}
+
+@keyframes gamepadHintProminentIn {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.gamepad-hint:hover {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gamepad-hint--prominent {
+    animation: none;
+  }
+}
+
+.gamepad-hint-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-weight: var(--font-weight-semibold);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+}
+
+.gamepad-hint-header svg {
+  color: var(--color-accent);
+}
+
+.gamepad-hint-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-standard),
+              background-color var(--duration-fast) var(--ease-standard);
+}
+
+.gamepad-hint-dismiss:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-raised);
+}
+
+.gamepad-hint-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+}
+
+.gamepad-hint-row {
+  display: contents;
+}
+
+.gamepad-hint-row-label {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  font-size: 11px;
+  align-self: center;
+}
+
+.gamepad-hint-row-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gamepad-hint-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.gamepad-hint-entry-label {
+  color: var(--color-text-secondary);
+}
+
+.gamepad-hint-entry svg {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.gamepad-hint-facebtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #051018;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  /* Monospace fallback chain — picked directly because this
+   * codebase doesn't define --font-family-mono in App.css. */
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+  letter-spacing: -0.3px;
+  line-height: 1;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}

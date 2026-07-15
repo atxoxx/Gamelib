@@ -9,16 +9,21 @@
 //   │                                          │
 //   │  BigScreenNav  (fixed bottom bar)        │
 //   │  FocusRing     (controller focus ring)   │
+//   │  VirtualCursor (right-stick pointer)     │
+//   │  GamepadHint   (live button-mapping card)│
 //   └─────────────────────────────────────────┘
 //
 // BigScreenLayout wraps children in GamepadProvider so
-// BigScreenNav, BigScreenGameCard, FocusRing, and any page
-// component that calls useBigScreenHook() all share the same
-// gamepad instance — one focus registry, one focused element.
+// BigScreenNav, BigScreenGameCard, FocusRing, VirtualCursor,
+// GamepadHint, and any page component that calls
+// useBigScreenHook() all share the same gamepad instance — one
+// focus registry, one virtual cursor, one focused element.
 
 import { Outlet } from "react-router-dom";
 import BigScreenNav from "./BigScreenNav";
 import FocusRing from "./ui/FocusRing";
+import VirtualCursor from "./ui/VirtualCursor";
+import GamepadHint from "./ui/GamepadHint";
 import { useBigScreenHook } from "../hooks/useBigScreen";
 import { GamepadProvider } from "../hooks/GamepadProvider";
 
@@ -62,6 +67,12 @@ export default function BigScreenLayout() {
 
         {/* Controller focus ring overlay */}
         <FocusRing gamepad={gamepad} />
+
+        {/* Virtual mouse pointer (right stick) */}
+        <VirtualCursor gamepad={gamepad} />
+
+        {/* Live button-mapping legend (low-opacity reference card) */}
+        <GamepadHint gamepad={gamepad} />
       </div>
     </GamepadProvider>
   );

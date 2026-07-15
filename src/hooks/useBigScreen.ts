@@ -43,11 +43,25 @@ export function useBigScreenHook(): BigScreenHook {
     gamepad = useGamepadCtx();
   } catch {
     // GamepadProvider not mounted yet (e.g. desktop mode). Return a
-    // stub so components don't crash.
+    // stub so components don't crash. Includes the virtual-mouse
+    // fields so callers can read `gamepad.virtualMouse` without
+    // needing a separate type guard.
     gamepad = {
       connected: false,
       focusedElement: null,
       registerAction: () => () => {},
+      virtualMouse: {
+        visible: false,
+        x: 0,
+        y: 0,
+        leftDown: false,
+        rightDown: false,
+        moving: false,
+        lastInputMs: 0,
+      },
+      toggleVirtualMouse: () => {},
+      recenterVirtualMouse: () => {},
+      registerTabCycler: () => () => {},
     };
   }
 

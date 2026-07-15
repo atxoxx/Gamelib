@@ -4,11 +4,14 @@
 // focus support via the shared GamepadProvider context.
 //
 // Navigation uses react-router-dom's useNavigate() for clean,
-// direct routing rather than DOM querySelector tricks.
+// direct routing rather than DOM querySelector tricks. Bumpers
+// (LB / RB) cycle through tabs directly via the GamepadProvider's
+// tab-cycler registration so users can hop tabs without having to
+// spatially navigate the full bar.
 
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useGamepadCtx } from "../hooks/GamepadProvider";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 // ── Tab icons ──────────────────────────────────────────────────
 
@@ -175,6 +178,27 @@ export default function BigScreenNav() {
     },
     [gamepad, navigate],
   );
+
+  // ── LB / RB: cycle tabs directly ─────────────────────────────
+  // Bumpers skip the spatial-nav scan and jump straight to the next
+  // / previous tab in declared order. Wrap-around so RB past the
+  // last tab returns to the first (the bottom-nav is a one-dimensional
+  // list — wrap is more intuitive than end-stop). Updates `location`
+  // via `navigate()` so the BigScreenNav's active-indicator
+  // re-renders against the new route.
+  useEffect(() => {
+    return gamepad.registerTabCycler((direction) => {
+      const currentIndex = tabs.findIndex((t) =>
+        location.pathname.startsWith(t.path),
+      );
+      const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+      const nextIndex =
+        direction === "forward"
+          ? (baseIndex + 1) % tabs.length
+          : (baseIndex - 1 + tabs.length) % tabs.length;
+      navigate(tabs[nextIndex].path);
+    });
+  }, [gamepad, location.pathname, navigate]);
 
   return (
     <nav className="bigscreen-nav" role="navigation" aria-label="Main navigation">
