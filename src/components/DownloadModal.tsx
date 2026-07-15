@@ -202,6 +202,9 @@ export default function DownloadModal({
     setError(null);
     try {
       const match = matches[selectedIndex];
+      // Respect the user's explicit mirror pick — the dropdown is the
+      // affordance the modal uses for "this CDN is faster" /
+      // "the .torrent URL has embedded trackers" overrides.
       const sourceUri = match.uris[selectedMirrorIdx] || match.magnet || match.uris[0];
       if (!sourceUri) {
         throw new Error("Selected source has no downloadable URI");

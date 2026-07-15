@@ -1565,7 +1565,15 @@ const DEFAULT_TRACKERS: &[&str] = &[
 /// Minimum number of trackers a magnet must have before we skip
 /// augmentation. If the source already provided 3+ trackers, the
 /// swarm is likely well-announced and adding more would just
-/// generate unnecessary announce traffic.
+/// generate unnecessary announce traffic. Magnets with 1-2 trackers
+/// still get the fallback defaults from `DEFAULT_TRACKERS` below
+/// because a single source-provided tracker is often defunct or
+/// unreliable — the documented defence against the
+/// "stuck at FetchingMetadata" failure mode. The bare-magnet
+/// case (0 trackers) is handled on the source-resolution side in
+/// `source_manager::search_online` and `db::sources::search`,
+/// which rearrange `match.uris` so a `.torrent` URL — which has
+/// an embedded announce-list — wins over a bare magnet sibling.
 const MIN_TRACKERS_BEFORE_AUGMENT: usize = 3;
 
 /// Augment a magnet URI with default public trackers if it has fewer
@@ -1692,6 +1700,20 @@ pub async fn torrent_add(
 ) -> Result<TorrentDownload, String> {
     let engine = wait_for_engine().await?;
     let save_path = normalize_path(&save_path);
+
+    // Refuse an empty download folder before it reaches librqbit.
+    // librqbit accepts `output_folder: Some(PathBuf::from(""))`
+    // silently, and then its file writer dies with the cryptic
+    //   `error writing to file [] "Game.version.txt": Caused by: file is None`
+    // when the first piece arrives. Catching it here gives the user
+    // a clear, actionable error and prevents the librqbit panic
+    // from propagating as an opaque `DownloadStatus::Error`.
+    if save_path.trim().is_empty() {
+        return Err(
+            "No download folder selected. Please pick a folder before starting a download."
+                .to_string(),
+        );
+    }
 
     // Step 1: Clone the session Arc while holding the lock briefly.
     let session = {
@@ -2721,7 +2743,36 @@ pub async fn torrent_start_selected(
             source_name = d.source_name.clone();
             existing_files = d.files.clone();
         }
-        guard.emit_progress_force();
+    // Block scoped close gave us `save_path`; now validate before
+    // handing it to libqbit's file writer. A torrent with an empty
+    // save_path can land here if it was added in an earlier app
+    // version, added by the auto-discovery branch in
+    // `sync_from_session` (which intentionally sets
+    // `save_path: String::new()`), or restored from `downloads.json`
+    // where the field was never persisted. libqbit's writer dies
+    // with a cryptic `error writing to file [] "...": Caused by:
+    // file is None` when handed an empty `output_folder`; re-add
+    // with a real folder here so the user gets a clear, actionable
+    // error and we don't waste 90 s of metadata-fetch time.
+        if save_path.trim().is_empty() {
+            eprintln!(
+                "[gamelib] torrent_start_selected aborted: empty save_path for {id}; \
+                 refusing to re-add to the libqbit session"
+            );
+            let mut guard = engine.write().await;
+            if let Some(d) = guard.downloads_mut().get_mut(&id) {
+                d.status = DownloadStatus::Error(
+                    "Save folder missing — please remove and re-add this download \
+                     with a folder selected."
+                        .to_string(),
+                );
+                guard.mark_dirty();
+                guard.emit_progress_force();
+            }
+            return Err(format!(
+                "Download \"{id}\" has no save folder. Remove it and re-add with a folder."
+            ));
+        }
     }
 
     let session = {
