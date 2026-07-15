@@ -467,14 +467,17 @@ impl SourceManager {
                 // but the mirror selector shows nothing and direct
                 // links in the same array are lost.
                 let mut uris = repack.uris.clone();
-                if let Some(ref mag) = repack.magnet {
-                    if !uris.iter().any(|u| u == mag) {
-                        uris.insert(0, mag.clone());
-                    }
-                }
-                let magnet = repack.magnet.clone().or_else(|| {
-                    uris.iter().find(|u| u.starts_with("magnet:")).cloned()
-                });
+                // Combined merge + best-URI promotion. Single source
+                // of truth shared with `db::sources::search` — both
+                // paths go through `merge_and_pick_best`.
+                merge_and_pick_best(&mut uris, repack.magnet.as_ref());
+                // Recompute `match.magnet` AFTER the promotion:
+                // tracks the new uris[0] (which may be a `.torrent`
+                // URL after a swap, with the bare magnet demoted to
+                // position 1+). Any caller using `match.magnet` as
+                // the primary URI after this point stays consistent
+                // with what the modal will see.
+                let magnet = uris.iter().find(|u| u.starts_with("magnet:")).cloned();
                 results.push(MatchedDownload {
                     source_name: repack.download_source_name.clone(),
                     source_id: local_id,
@@ -1018,6 +1021,135 @@ fn score_match(query_tokens: &[String], raw_query: &str, title: &str) -> f32 {
         0.0
     };
     (token_score * 0.8 + substring_bonus).min(1.0)
+}
+
+/// Count `tr=` parameter occurrences in a magnet URI.
+/// Case-insensitive on the parameter name — magnet URI parameter
+/// names are nominally case-sensitive per RFC 6230, but real-world
+/// sources (older Hydra caches, drive-stak dumps) occasionally
+/// emit `TR=` or `Tr=`. Both `is_bare_magnet` and
+/// `is_tracker_bearing_magnet` route through this so a lowered
+/// comparison matches the same source bytes.
+fn count_tr_params(uri: &str) -> usize {
+    uri.to_ascii_lowercase()
+        .split('&')
+        .filter(|p| p.starts_with("tr=") && p.len() > 3)
+        .count()
+}
+
+/// `true` if `uri` is a `magnet:` URI with no `tr=` parameters.
+/// Everything else (non-magnet URIs, magnets with at least one
+/// `tr=`) returns `false`.
+pub(crate) fn is_bare_magnet(uri: &str) -> bool {
+    if !uri.starts_with("magnet:") {
+        return false;
+    }
+    count_tr_params(uri) == 0
+}
+
+/// `true` if `uri` is a `magnet:` URI carrying at least one `tr=`
+/// parameter — i.e. the source has already done the tracker work
+/// and we should pass the magnet through unchanged.
+pub(crate) fn is_tracker_bearing_magnet(uri: &str) -> bool {
+    if !uri.starts_with("magnet:") {
+        return false;
+    }
+    count_tr_params(uri) > 0
+}
+
+/// `true` if `uri` looks like an `http(s)://…/.torrent` file URL
+/// (with or without query string). librqbit parses the announce-list
+/// out of the `.torrent` metadata, so a `.torrent` URL never needs
+/// tracker augmentation.
+pub(crate) fn is_torrent_file(uri: &str) -> bool {
+    uri.ends_with(".torrent") || uri.contains(".torrent?")
+}
+
+/// Insert `magnet` at position 0 of `uris` if it isn't already
+/// present (exact-string match). `None` and empty strings are
+/// no-ops — empty strings would collide with the modal picker
+/// chain's `|| match.magnet || match.uris[0]` falsy-string fallback.
+pub(crate) fn merge_magnet_into_uris(uris: &mut Vec<String>, magnet: Option<&String>) {
+    if let Some(mag) = magnet {
+        if !mag.is_empty() && !uris.iter().any(|u| u == mag) {
+            uris.insert(0, mag.clone());
+        }
+    }
+}
+
+/// Promote the most tracker-bearing URI in `uris` to position 0.
+///
+/// ## Why
+///
+/// The DownloadModal's default mirror pick is
+/// `match.uris[selectedMirrorIdx]` where `selectedMirrorIdx = 0`.
+/// Many sources (Hydra repacks especially) return a bare
+/// `magnet:?xt=…&dn=…` URI alongside a sibling `.torrent` URL that
+/// already carries an embedded announce-list. Without promotion,
+/// the modal's default picks the bare magnet and
+/// `augment_magnet_with_trackers` in `torrent_engine.rs` emits
+/// `[gamelib] Magnet had 0 tracker(s) — added 8 default public
+/// tracker(s)` even though a tracker-bearing alternative was a
+/// click away in the mirror selector.
+///
+/// ## What it does — strict `.torrent` over magnet precedence
+///
+/// 1. If `uris[0]` is already acceptable as-is (a `.torrent` URL or
+///    a trackered magnet), do nothing.
+/// 2. Otherwise (`uris[0]` is a bare magnet), look at positions
+///    1..N in two passes:
+///    * First pass: the first `.torrent` URL (preferred — works
+///      even when DHT hasn't bootstrapped).
+///    * Second pass (only if step 2 found no `.torrent`): the
+///      first trackered magnet.
+/// 3. Move the chosen URI to position 0; the bare magnet stays in
+///    the list (one index later) so the user can still pick it
+///    explicitly from the mirror selector.
+///
+/// The two-pass split matters: a single
+/// `position(|u| is_torrent_file(u) || is_tracker_bearing_magnet(u))`
+/// would return the FIRST element satisfying EITHER predicate, so a
+/// trackered magnet at position 1 would beat a `.torrent` at
+/// position 2 — contradicting this function's documented priority.
+pub(crate) fn promote_best_uri_to_front(uris: &mut Vec<String>) {
+    if uris.is_empty() || !is_bare_magnet(&uris[0]) {
+        return;
+    }
+    // Wrap each predicate in a closure so the compiler can apply
+    // `&String → &str` deref coercion — passing the function
+    // pointer directly leaves it as `&&String` and skips the
+    // coercion Rust would otherwise insert.
+    let picked = uris
+        .iter()
+        .skip(1)
+        .position(|u| is_torrent_file(u))
+        .or_else(|| uris.iter().skip(1).position(|u| is_tracker_bearing_magnet(u)));
+    if let Some(rel_idx) = picked {
+        let abs_idx = rel_idx + 1;
+        let better = uris.remove(abs_idx);
+        let preview = if better.len() > 60 {
+            format!("{}…", &better[..60])
+        } else {
+            better.clone()
+        };
+        eprintln!(
+            "[gamelib] promote_best_uri_to_front: promoted {preview} to uris[0] \
+             (was a bare magnet at position 0)"
+        );
+        uris.insert(0, better);
+    }
+}
+
+/// Compound helper for callers that don't need to keep the merge
+/// and promotion steps separate. Both `source_manager::search_online`
+/// (online / Hydra) and `db::sources::search` (offline / FTS5) call
+/// this so the rule set stays in one place — apply a fix once and
+/// both paths pick it up. Callers SHOULD re-derive their `match.magnet`
+/// from the new `uris` after this returns to avoid pointing at a
+/// magnet that just got demoted from position 0.
+pub(crate) fn merge_and_pick_best(uris: &mut Vec<String>, magnet: Option<&String>) {
+    merge_magnet_into_uris(uris, magnet);
+    promote_best_uri_to_front(uris);
 }
 
 // ─── Tauri commands ─────────────────────────────────────────────────────────

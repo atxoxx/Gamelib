@@ -26,7 +26,7 @@
 use rusqlite::params;
 
 use super::pool::Db;
-use crate::source_manager::{CachedSource, GameSource, MatchedDownload, SourceLink};
+use crate::source_manager::{CachedSource, GameSource, MatchedDownload, SourceLink, merge_and_pick_best};
 
 // DAO helpers (`read_cached_source`, `list_sources_with_cache`) are
 // reserved for the upcoming SourceContext migration (today the
@@ -351,19 +351,14 @@ pub fn search(db: &Db, query: &str, limit: usize) -> Result<Vec<MatchedDownload>
             let source_name: String = r.get(6)?;
             let score: f32 = r.get::<_, f64>(7)? as f32;
             let mut uris: Vec<String> = serde_json::from_str(&uris_json).unwrap_or_default();
-            // Merge: if the source stored a `magnet` field but the
-            // `uris` array is empty (or doesn't already contain the
-            // magnet), insert it so the frontend's mirror selector and
-            // the `match.uris[idx] || match.magnet || match.uris[0]`
-            // fallback chain always resolves to a non-empty value.
-            if let Some(ref mag) = magnet {
-                if !uris.iter().any(|u| u == mag) {
-                    uris.insert(0, mag.clone());
-                }
-            }
-            let resolved_magnet = magnet.or_else(|| {
-                uris.iter().find(|u| u.starts_with("magnet:")).cloned()
-            });
+            // Combined merge + best-URI promotion. Same code path as
+            // the online (`source_manager::search_online`) search;
+            // `merge_and_pick_best` keeps both routes in sync.
+            merge_and_pick_best(&mut uris, magnet.as_ref());
+            // Recompute the resolved magnet AFTER the promotion so
+            // it tracks the new uris[0] (a `.torrent` URL after a
+            // swap, with the bare magnet demoted to position 1+).
+            let resolved_magnet = uris.iter().find(|u| u.starts_with("magnet:")).cloned();
             Ok(MatchedDownload {
                 source_name,
                 source_id,
