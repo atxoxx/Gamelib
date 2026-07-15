@@ -1,3 +1,23 @@
+//! Epic Games authentication — OAuth WebView login + token exchange.
+//!
+//! Token persistence: SQLite `kv_store` table under key `epic_tokens`.
+//! The OS keychain (`db::secrets::SecretStore`) was previously used but
+//! the `keyring` crate's Windows backend (`CredWriteW`) **silently fails
+//! to persist credentials when the service name contains a slash**
+//! (`gamelib/gamelib-app`). This caused the exact symptom where login
+//! appeared to succeed (the HTTP token exchange returned 200 + tokens)
+//! but the subsequent sync said "not connected" — `save_tokens` wrote
+//! to the keychain, `CredWriteW` silently dropped it, `load_tokens`
+//! found nothing, and `epic_is_authenticated` returned false.
+//!
+//! The GOG integration already migrated to `kv_store` for the same
+//! reason; this module now mirrors that pattern. A readback check
+//! after every `save_tokens` catches any future silent persistence
+//! failure so we never return `Ok(())` without verified storage.
+//!
+//! Legacy keychain entries (from macOS/Linux where `keyring` works)
+//! are auto-migrated to `kv_store` on first `load_tokens` call.
+
 use std::sync::mpsc;
 
 use reqwest::Client;
@@ -19,6 +39,14 @@ const EPIC_LOGIN_URL: &str =
 
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher";
+
+// ── Persistence keys ────────────────────────────────────────────────
+/// SQLite `kv_store` key for the Epic OAuth tokens blob (compact JSON).
+const EPIC_TOKENS_KV_KEY: &str = "epic_tokens";
+/// Legacy OS-keychain account name. Used for one-time migration
+/// (macOS/Linux where `keyring` actually works) and for cleanup in
+/// `epic_logout`.
+const LEGACY_EPIC_TOKENS_KEYRING_ACCOUNT: &str = "epic_tokens";
 
 // ── Tauri commands ──────────────────────────────────────────────────
 
@@ -133,8 +161,9 @@ pub async fn epic_finish_login(app: AppHandle, auth_code: String) -> Result<Epic
 /// `isAuthenticated == false` AND localStorage has a parseable
 /// `refreshToken`.
 ///
-/// On success: writes the resulting fresh tokens to the keychain via
-/// `save_tokens` AND returns the same `EpicAuthTokens` struct to
+/// On success: writes the resulting fresh tokens to the SQLite `kv_store`
+/// via `save_tokens` (with readback verification) AND returns the same
+/// `EpicAuthTokens` struct to
 /// the frontend (which is expected to overwrite its localStorage
 /// copy with the safe metadata-only shape immediately afterward —
 /// see `handleEpicRecoverSession` in `SettingsPage.tsx`).
@@ -218,15 +247,20 @@ pub fn epic_is_authenticated(app: AppHandle) -> bool {
     load_tokens(&app).is_ok()
 }
 
+/// Wipe Epic tokens from both the current kv_store layer and the
+/// legacy OS-keychain entry (for users upgrading from the
+/// keychain-based persistence that silently failed on Windows).
+///
+/// Also drops the `epic_last_login_unix` kv entry so the next
+/// login triggers a fresh library fetch.
 #[tauri::command]
-pub fn epic_logout(_app: AppHandle) -> Result<(), String> {
-    // Phase 4: tokens live in the OS keychain under
-    // `service=gamelib/gamelib-app, account=epic_tokens`. We also
-    // drop the kv-stored Epic-side sync timestamp so the next login
-    // triggers a fresh library fetch.
+pub fn epic_logout(app: AppHandle) -> Result<(), String> {
+    // Clean up legacy keychain entry (may not exist — delete is idempotent).
     let store = db::secrets::SecretStore::new();
-    store.delete("epic_tokens")?;
-    if let Some(db_state) = try_db_state(&_app) {
+    let _ = store.delete(LEGACY_EPIC_TOKENS_KEYRING_ACCOUNT);
+    // Clean up the current kv_store entry.
+    if let Some(db_state) = try_db_state(&app) {
+        let _ = db::kv::delete(db_state.inner(), EPIC_TOKENS_KV_KEY);
         let _ = db::kv::delete(db_state.inner(), "epic_last_login_unix");
     }
     Ok(())
@@ -315,34 +349,122 @@ fn current_unix() -> u64 {
         .as_secs()
 }
 
-/// Phase 4: persist Epic OAuth tokens in the OS keychain. The
-/// keyring serialises our store as a `String`; we use compact JSON
-/// (no pretty) to keep the blob tiny. Non-sensitive metadata
-/// (login timestamps) goes into the `kv_store` SQLite table when
-/// the DB has been initialised.
+/// Persist Epic OAuth tokens to the SQLite `kv_store` table.
+///
+/// This replaces the previous OS-keychain storage, which silently
+/// failed on Windows because the `keyring` crate's `CredWriteW`
+/// backend drops credentials when the service name contains a
+/// slash (`gamelib/gamelib-app`). That caused login to appear to
+/// succeed (the HTTP exchange returned tokens) but sync to report
+/// "not connected" because `load_tokens` found nothing.
+///
+/// A readback check catches any future silent persistence failure
+/// so we never return `Ok(())` without verified storage — mirrors
+/// the GOG integration's defensive pattern.
 fn save_tokens(app: &AppHandle, tokens: &EpicAuthTokens) -> Result<(), String> {
-    let json = serde_json::to_string(tokens).map_err(|e| e.to_string())?;
-    let store = db::secrets::SecretStore::new();
-    store.set("epic_tokens", &json)?;
-    if let Some(db_state) = try_db_state(app) {
-        let now_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let _ = db::kv::set(db_state.inner(), "epic_last_login_unix", &now_secs.to_string());
+    let json = serde_json::to_string(tokens).map_err(|e| format!("serialize tokens: {e}"))?;
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized — cannot persist Epic tokens".to_string())?;
+    eprintln!(
+        "[epic-auth] save_tokens: writing {} bytes to kv_store key='{}'",
+        json.len(),
+        EPIC_TOKENS_KV_KEY
+    );
+    db::kv::set(db_state.inner(), EPIC_TOKENS_KV_KEY, &json)?;
+
+    // ── Verify the write actually persisted ──────────────────
+    // Without this, a silent persistence failure (like the
+    // keychain `CredWriteW` bug) would make login appear to
+    // succeed while sync later reports "not connected".
+    match db::kv::get(db_state.inner(), EPIC_TOKENS_KV_KEY) {
+        Ok(Some(readback)) if readback == json => {
+            eprintln!(
+                "[epic-auth] save_tokens: readback verified — {} bytes match",
+                readback.len()
+            );
+        }
+        Ok(Some(readback)) => {
+            eprintln!(
+                "[epic-auth] save_tokens: WARNING — readback MISMATCH! wrote {} bytes, read {} bytes",
+                json.len(),
+                readback.len()
+            );
+            return Err("Epic token persistence failed — readback mismatch. The database may be read-only or corrupted.".to_string());
+        }
+        Ok(None) => {
+            eprintln!("[epic-auth] save_tokens: CRITICAL — kv set returned Ok but get returned None!");
+            return Err("Epic token persistence failed — write succeeded but readback returned nothing.".to_string());
+        }
+        Err(e) => {
+            eprintln!("[epic-auth] save_tokens: CRITICAL — kv set returned Ok but get failed: {e}");
+            return Err(format!("Epic token persistence failed — readback error: {e}"));
+        }
     }
+
+    // Stash the login timestamp as non-sensitive metadata.
+    let now_secs = current_unix().to_string();
+    let _ = db::kv::set(db_state.inner(), "epic_last_login_unix", &now_secs);
     Ok(())
 }
 
-fn load_tokens(_app: &AppHandle) -> Result<EpicAuthTokens, String> {
+/// Load Epic OAuth tokens from the SQLite `kv_store` table.
+///
+/// Falls back to the legacy OS-keychain entry (if present) for
+/// one-time migration on macOS/Linux where `keyring` actually
+/// works. On Windows the keychain entry was never written
+/// (silent `CredWriteW` failure), so this fallback is a no-op
+/// there — the user simply re-logs in once.
+fn load_tokens(app: &AppHandle) -> Result<EpicAuthTokens, String> {
+    let db_state = try_db_state(app)
+        .ok_or_else(|| "Database not initialized".to_string())?;
+
+    // ── Primary: SQLite kv_store ────────────────────────────
+    match db::kv::get(db_state.inner(), EPIC_TOKENS_KV_KEY) {
+        Ok(Some(raw)) => {
+            eprintln!("[epic-auth] load_tokens: found {} bytes in kv_store", raw.len());
+            return serde_json::from_str(&raw)
+                .map_err(|e| format!("Failed to parse Epic tokens: {e}"));
+        }
+        Ok(None) => {
+            eprintln!("[epic-auth] load_tokens: kv_store returned None — checking legacy keychain");
+        }
+        Err(e) => {
+            eprintln!("[epic-auth] load_tokens: kv_store get failed: {e} — checking legacy keychain");
+        }
+    }
+
+    // ── Fallback: legacy OS-keychain (one-time migration) ───
+    // On macOS/Linux the keychain works, so a user who logged in
+    // before the kv_store migration still has a valid entry here.
+    // We pull it, persist it to kv_store (so future loads skip
+    // the keychain), and return it. On Windows the keychain
+    // entry was never written, so this returns None and the user
+    // falls through to the "not logged in" error.
     let store = db::secrets::SecretStore::new();
-    let secret = store
-        .get("epic_tokens")?
-        .ok_or_else(|| {
-            r#"Not logged in to Epic Games. Open Settings → Integrations → Epic Games and click "Connect Epic Account" to authenticate before syncing."#
-                .to_string()
-        })?;
-    serde_json::from_str(&secret).map_err(|e| format!("Failed to parse tokens: {e}"))
+    if let Ok(Some(legacy_raw)) = store.get(LEGACY_EPIC_TOKENS_KEYRING_ACCOUNT) {
+        eprintln!(
+            "[epic-auth] load_tokens: found {} bytes in legacy keychain, migrating to kv_store",
+            legacy_raw.len()
+        );
+        if let Ok(tokens) = serde_json::from_str::<EpicAuthTokens>(&legacy_raw) {
+            // Best-effort migration — don't fail the load if the
+            // write errors (the user still has the tokens in
+            // memory for this session).
+            let json = serde_json::to_string(&tokens).unwrap_or_default();
+            if !json.is_empty() {
+                let _ = db::kv::set(db_state.inner(), EPIC_TOKENS_KV_KEY, &json);
+            }
+            // Clean up the legacy keychain entry so we don't
+            // migrate again next time.
+            let _ = store.delete(LEGACY_EPIC_TOKENS_KEYRING_ACCOUNT);
+            return Ok(tokens);
+        }
+    }
+
+    Err(
+        r#"Not logged in to Epic Games. Open Settings → Integrations → Epic Games and click "Connect Epic Account" to authenticate before syncing."#
+            .to_string(),
+    )
 }
 
 /// Returns the live `Arc<Db>` if it has been registered with
