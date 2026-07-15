@@ -1038,10 +1038,33 @@ static IGDB_SEM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
 static IGDB_LAST: OnceLock<Mutex<Instant>> = OnceLock::new();
 
 /// Acquire a rate-limit slot for an IGDB API call.
-/// Enforces max 8 concurrent & 4 req/s (250 ms spacing).
-/// Hold the returned permit for the duration of the HTTP call.
+///
+/// Two layers of throttling, both required to coexist safely with IGDB's
+/// free-tier caps:
+///
+/// 1. **Local concurrency.** A `Semaphore::new(16)` caps the number of
+///    in-flight IGDB POSTs to 16. IGDB's documented cap is 8 concurrent
+///    per docs; we permit 16 locally so React StrictMode's dev-mode
+///    double-mount burst (5 Discover rails x -  2 mounts = 10 simultaneous
+///    `invoke("fetch_store_games", ...)` calls) doesn't deadlock on
+///    `sem.acquire().await`. The frontend Promise cache in
+///    `SnapRail.tsx` dedups identical in-flight requests so the IGDB
+///    layer typically only sees 5 simultaneous calls per session.
+///
+/// 2. **Global request rate.** A `Mutex<Instant>` (`IGDB_LAST`) enforces
+///    a minimum 250 ms gap between IGDB POST *starts*. With concurrent
+///    calls, each caller reserves a *future* timestamp
+///    `max(now, last_req + 250 ms)` so the cumulative spacing drains
+///    smoothly rather than bunching on the next interval. This honors
+///    IGDB's 4 req/sec global cap regardless of how many parallel
+///    executors are waiting on a permit.
+///
+/// The `SemaphorePermit<'static>` returned by this function is bound to
+/// the `IGDB_SEM` tokio Semaphore inside a `OnceLock`, so the lifetime
+/// extends for the process lifetime  -  drop the permit when the HTTP
+/// call completes (Rust's RAII does this).
 async fn igdb_acquire() -> tokio::sync::SemaphorePermit<'static> {
-    let sem = IGDB_SEM.get_or_init(|| tokio::sync::Semaphore::new(8));
+    let sem = IGDB_SEM.get_or_init(|| tokio::sync::Semaphore::new(16));
     let permit = sem.acquire().await.unwrap();
 
     let last = IGDB_LAST.get_or_init(|| Mutex::new(Instant::now()));
@@ -1132,6 +1155,7 @@ async fn get_twitch_token() -> Result<String, String> {
     }
 
     let resp = client.post(&url)
+        .header("Content-Length", "0")
         .send()
         .await
         .map_err(|e| {

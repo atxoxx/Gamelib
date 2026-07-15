@@ -3,6 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary, StoreCategory } from "../../types/game";
 import StoreGameCard from "./StoreGameCard";
 
+// Module-level in-flight cache for `fetch_store_games` calls keyed by
+// `${category}:${limit}`. React 18 StrictMode runs each effect's mount
+// phase twice in development, so without this dedup the 5 Discover rails
+// would issue 10 simultaneous backend calls (one per strictmount +
+// real mount). Sharing the Promise means both effects render the same
+// result from a single backend round-trip, which keeps the IGDB permit
+// semaphore from starving under the strict-mount burst (8-permit cap ×
+// 10 simultaneous = 2 calls forced into the cumulative-sleep queue).
+const inflightStoreFetches = new Map<string, Promise<StoreGameSummary[]>>();
+
 interface SnapRailProps {
   /** Display heading (e.g. "Trending", "Coming Soon"). */
   title: string;
@@ -42,18 +52,30 @@ export default function SnapRail({
   const trackRef = useRef<HTMLDivElement>(null);
 
   // ── Fetch on mount and when category changes ───────────────────────
+  // React StrictMode fires this useEffect twice in dev mode. The dedup
+  // cache at module scope (above the component) makes the second copy
+  // `await` the first's Promise instead of issuing a duplicate invoke,
+  // so backend load doesn't double per rail.
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `${category}:${limit}`;
     (async () => {
       try {
-        const results = await invoke<StoreGameSummary[]>(
-          "fetch_store_games",
-          {
-            category,
-            offset: 0,
-            limit,
-          }
-        );
+        let pending = inflightStoreFetches.get(cacheKey);
+        if (!pending) {
+          pending = invoke<StoreGameSummary[]>(
+            "fetch_store_games",
+            {
+              category,
+              offset: 0,
+              limit,
+            }
+          ).finally(() => {
+            inflightStoreFetches.delete(cacheKey);
+          });
+          inflightStoreFetches.set(cacheKey, pending);
+        }
+        const results = await pending;
         if (!cancelled) {
           setGames(results);
           setError(null);
@@ -95,8 +117,50 @@ export default function SnapRail({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // ── Hide rail when errored out or empty after fetch ────────────────
-  if (games !== null && games.length === 0) return null;
+  // ── Render rail state (loading skeleton / error banner / empty / list)
+  //
+  // Previously this branch silently returned `null` on either an errored-out
+  // fetch OR a legitimately empty result. That made IGDB / Twitch token
+  // failures completely invisible to the user: every SnapRail just
+  // disappeared from the Discover landing and the user was left staring at
+  // what looked like a fully-rendered page with no rails and no obvious
+  // signal that anything was wrong. Show the error inline instead so the
+  // problem is at least visible during debugging.
+  if (games !== null && games.length === 0) {
+    if (error) {
+      return (
+        <section
+          className="store-rail store-rail-error"
+          aria-label={`${title} rail (error)`}
+        >
+          <header className="store-rail-header">
+            <h3 className="store-rail-title">
+              {badge && <span className="store-rail-badge">{badge}</span>}
+              {title}
+            </h3>
+          </header>
+          <p
+            className="store-rail-error-message"
+            style={{
+              padding: "0.75rem 1rem",
+              margin: "0.5rem 0",
+              borderRadius: "var(--radius-md, 6px)",
+              background: "rgba(220, 50, 50, 0.12)",
+              border: "1px solid rgba(220, 50, 50, 0.35)",
+              fontSize: "0.85rem",
+              fontFamily: "var(--font-mono, monospace)",
+              color: "var(--text-error, #fca5a5)",
+              wordBreak: "break-word",
+            }}
+          >
+            ⚠️ Failed to load:{" "}
+            {error.length > 240 ? error.slice(0, 240) + "…" : error}
+          </p>
+        </section>
+      );
+    }
+    return null;
+  }
 
   return (
     <section className="store-rail" aria-label={`${title} rail`}>
