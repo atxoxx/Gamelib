@@ -1,5 +1,6 @@
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
@@ -118,8 +119,14 @@ pub fn epic_get_filters() -> EpicFilterOptions {
 /// Fetch owned game assets from Epic's internal library API.
 /// Uses cursor-based pagination to fetch ALL owned items (not just the first page).
 ///
-/// Epic's library API returns a `cursor` field in the response when more pages
-/// are available. We loop until the cursor is null/missing or we hit a safety limit.
+/// Epic's library API returns a `responseMetaData.nextCursor` (most API shapes)
+/// or top-level `cursor` (legacy shapes) when more pages are available. We
+/// walk the cursor until it is null/empty — empty `records[]` mid-stream is
+/// NOT a terminator because Epic can legitimately serve a transient empty
+/// page while still advertising a follow-up cursor (region-filtered items,
+/// purchase-migration transitions, etc.). The only true end-of-stream signal
+/// is `nextCursor == null/""`. Playnite's EpicLibrary uses the same cursor-only
+/// termination rule.
 async fn fetch_owned_assets(
     client: &Client,
     tokens: &EpicAuthTokens,
@@ -127,9 +134,16 @@ async fn fetch_owned_assets(
     let base_url = "https://library-service.live.use1a.on.epicgames.com/library/api/public/items?includeMetadata=true&platform=Windows";
     let mut all_assets: Vec<EpicGameAsset> = Vec::new();
     let mut cursor: Option<String> = None;
-    let max_pages = 50; // safety limit (50 pages × ~100 items = 5,000 games)
+    let mut page_idx: u32 = 0;
+    // Hot-loop guard: track cursors we've already consumed. If Epic ever
+    // returns the same `nextCursor` value twice in a row (server-side bug,
+    // redirect loop, etc.) we'd otherwise loop forever; a one-off duplicate
+    // is enough to call it done. Replaces the prior `max_pages = 50` cap
+    // with a token-stable termination signal.
+    let mut seen_cursors: HashSet<String> = HashSet::new();
 
-    for page in 0..max_pages {
+    loop {
+        page_idx += 1;
         let url = if let Some(ref c) = cursor {
             format!("{}&cursor={}", base_url, urlencoding::encode(c))
         } else {
@@ -141,17 +155,17 @@ async fn fetch_owned_assets(
             .bearer_auth(&tokens.access_token)
             .send()
             .await
-            .map_err(|e| format!("Failed to fetch owned assets (page {}): {}", page + 1, e))?;
+            .map_err(|e| format!("Failed to fetch owned assets (page {}): {}", page_idx, e))?;
 
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
         if !status.is_success() {
-            return Err(format!("Epic assets API returned HTTP {} (page {}): {}", status, page + 1, body));
+            return Err(format!("Epic assets API returned HTTP {} (page {}): {}", status, page_idx, body));
         }
 
         let json: Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse assets response (page {}): {}", page + 1, e))?;
+            .map_err(|e| format!("Failed to parse assets response (page {}): {}", page_idx, e))?;
 
         let page_assets: Vec<EpicGameAsset> = json["records"]
             .as_array()
@@ -175,22 +189,32 @@ async fn fetch_owned_assets(
             })
             .unwrap_or_default();
 
-        if page_assets.is_empty() {
-            break;
-        }
-
+        // Empty `records[]` mid-stream is BENIGN — keep walking the cursor.
+        // The old behaviour (`if page_assets.is_empty() { break }`) could
+        // truncate a user's library when Epic emitted a transient empty
+        // page (region-restricted preview items being moved, etc.).
         all_assets.extend(page_assets);
 
-        // Epic nests pagination under responseMetaData.nextCursor on recent API versions.
-        // Fall back to top-level "cursor" for older API shapes.
+        // Epic nests pagination under responseMetaData.nextCursor on recent
+        // API versions. Fall back to top-level "cursor" for older shapes.
         let next_cursor = json["responseMetaData"]["nextCursor"]
             .as_str()
             .or_else(|| json["cursor"].as_str())
             .map(|s| s.to_string());
-        if next_cursor.is_none() || next_cursor.as_deref() == Some("") {
-            break;
+
+        // Only `nextCursor == null/""` terminates; any other value advances,
+        // UNLESS we've already seen that exact cursor value (degenerate-loop
+        // defence).
+        match next_cursor {
+            Some(c) if !c.is_empty() => {
+                if !seen_cursors.insert(c.clone()) {
+                    // Repeated cursor — give up defensively rather than spin.
+                    break;
+                }
+                cursor = Some(c);
+            }
+            _ => break,
         }
-        cursor = next_cursor;
     }
 
     Ok(all_assets)
@@ -331,7 +355,18 @@ fn item_key_image(item: &Value) -> Option<String> {
 }
 
 /// Filter out non-owned, non-launchable items.
-/// Based on Playnite's EpicLibrary filtering logic.
+///
+/// Two-stage filter, mirrored from Playnite's EpicLibrary extension:
+///   Stage 1: launchability allow-list — the asset's category list MUST
+///            contain `applications` exactly (Playnite's categorisation
+///            gate). This is the gate that excludes items whose category
+///            is `games/editors/base`, `plugins`, `addons`, `bundles/*`,
+///            `experiences`, `digitalextras` or an empty list — which is
+///            how Unreal Marketplace plugins, Quixel Megascans packs, and
+///            Fortnite Creative experiences appear when distributed via
+///            a third-party namespace.
+///   Stage 2: deny-list defence-in-depth — keep the prior denials so a
+///            miscategorised plugin-in-applications item still drops.
 fn filter_owned_games(
     assets: &[EpicGameAsset],
     catalog_items: &[EpicCatalogItem],
@@ -344,29 +379,47 @@ fn filter_owned_games(
     assets
         .iter()
         .filter_map(|asset| {
-            // Exclude Unreal Engine namespace
+            // ── Stage 1: structural exclusions ────────────────────────
+            // Epic's "Unreal Engine" primary namespace — never a launchable game.
             if asset.namespace.eq_ignore_ascii_case("ue") {
                 return None;
             }
 
-            // Exclude private sandbox types (test/dev builds)
+            // ── Stage 2: launchability allow-list (Playnite parity) ───
+            // Require `applications` (or any `applications/<sub>` subcategory) in
+            // the category list. This rejects:
+            //   • Unreal Marketplace plugins shipped under 3rd-party namespaces
+            //     (category `games/editors/base`, `plugins`, or `[]`).
+            //   • Asset/template bundles (category `bundles/*`).
+            //   • DLC entries (category `addons/addonFor` without `applications`).
+            //   • Fortnite Creative "experiences" (category `experiences/*`).
+            // Playnite's EpicLibrary uses strict `==`, but Epic does occasionally
+            // serve `applications/<sub>` for hierarchical categories, so we
+            // widen slightly with `starts_with("applications/")` to avoid
+            // over-filtering legitimate games.
+            let is_applications = asset.categories
+                .iter()
+                .any(|c| c == "applications" || c.starts_with("applications/"));
+            let is_bundle = asset.categories.iter().any(|c| c.starts_with("bundles"));
+            if !is_applications || is_bundle {
+                return None;
+            }
+
+            // ── Stage 3: deny-list (defence in depth) ─────────────────
+            // Belt-and-suspenders: if Epic ever miscategorises a plugin
+            // OR a digital-extra as `applications`, drop it anyway.
+            let is_plugin = asset.categories.iter().any(|c| c.contains("plugins"));
+            let is_extra = asset.categories.iter().any(|c| c.contains("digitalextras"));
+            if is_plugin || is_extra {
+                return None;
+            }
+
+            // PRIVATE sandbox types are test/dev builds, never launchable.
             if asset.sandbox_type.as_deref() == Some("PRIVATE") {
                 return None;
             }
 
-            // Exclude plugins
-            let is_plugin = asset.categories.iter().any(|c| c.contains("plugins"));
-            if is_plugin {
-                return None;
-            }
-
-            // Exclude digital extras
-            let is_extra = asset.categories.iter().any(|c| c.contains("digitalextras"));
-            if is_extra {
-                return None;
-            }
-
-            // Exclude Unreal Engine tools (appName starts with "UE_")
+            // Unreal Engine tools (manifest-side identifier, e.g. `UE_*`).
             if asset.app_name.to_uppercase().starts_with("UE_") {
                 return None;
             }
