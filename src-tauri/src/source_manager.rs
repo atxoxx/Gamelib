@@ -145,6 +145,13 @@ struct HydraRepack {
     id: String,
     title: String,
     file_size: Option<String>,
+    /// `#[serde(default)]` is critical here: some Hydra API responses
+    /// omit the `uris` array when the repack only has a `magnet` field
+    /// (or vice-versa). Without `default`, a single missing `uris` key
+    /// causes the **entire** `Vec<HydraRepack>` deserialization to fail,
+    /// which means *every* repack in the response is lost — not just
+    /// the one with the missing field.
+    #[serde(default)]
     uris: Vec<String>,
     #[serde(default)]
     magnet: Option<String>,
@@ -450,19 +457,30 @@ impl SourceManager {
                     .get(&repack.download_source_id)
                     .cloned()
                     .unwrap_or_default();
+                // Merge: if `magnet` is present but `uris` is empty
+                // (or vice-versa), combine them so the frontend always
+                // has a non-empty `uris` array to pick from. Without
+                // this merge, a repack that only has a `magnet` field
+                // arrives at the frontend with `uris: []`, and the
+                // DownloadModal's `match.uris[selectedMirrorIdx] ||
+                // match.magnet || match.uris[0]` chain still works —
+                // but the mirror selector shows nothing and direct
+                // links in the same array are lost.
+                let mut uris = repack.uris.clone();
+                if let Some(ref mag) = repack.magnet {
+                    if !uris.iter().any(|u| u == mag) {
+                        uris.insert(0, mag.clone());
+                    }
+                }
                 let magnet = repack.magnet.clone().or_else(|| {
-                    repack
-                        .uris
-                        .iter()
-                        .find(|u| u.starts_with("magnet:"))
-                        .cloned()
+                    uris.iter().find(|u| u.starts_with("magnet:")).cloned()
                 });
                 results.push(MatchedDownload {
                     source_name: repack.download_source_name.clone(),
                     source_id: local_id,
                     title: repack.title.clone(),
                     file_size: repack.file_size.clone().unwrap_or_default(),
-                    uris: repack.uris.clone(),
+                    uris,
                     magnet,
                     upload_date: repack.upload_date.clone(),
                     match_score: score,

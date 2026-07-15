@@ -310,7 +310,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       let downloadUrl = url;
       const debridProvider = localStorage.getItem("gamelib-debrid-provider") || "none";
       const debridApiKey = localStorage.getItem("gamelib-debrid-apikey") || "";
-      
+
       if (debridProvider !== "none" && debridApiKey) {
         try {
           downloadUrl = await invoke<string>("debrid_unrestrict_link", {
@@ -320,7 +320,16 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
           });
           console.log("[DownloadContext] Unrestricted link successfully:", downloadUrl);
         } catch (e) {
-          console.error("[DownloadContext] Failed to unrestrict link via debrid:", e);
+          // Surface the debrid error to the user instead of silently
+          // falling through to the original URL. The original URL is
+          // typically a hoster link that requires a premium account —
+          // downloading it directly will fail with HTTP 403/402 and
+          // the user sees a generic "Connection failed" error with no
+          // indication that their debrid service is the problem.
+          throw new Error(
+            `Debrid unrestrict failed (${debridProvider}): ${e}. ` +
+            `Check your API key or try disabling debrid in Settings.`,
+          );
         }
       }
 

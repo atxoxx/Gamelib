@@ -350,7 +350,17 @@ pub fn search(db: &Db, query: &str, limit: usize) -> Result<Vec<MatchedDownload>
             let magnet: Option<String> = r.get(5)?;
             let source_name: String = r.get(6)?;
             let score: f32 = r.get::<_, f64>(7)? as f32;
-            let uris: Vec<String> = serde_json::from_str(&uris_json).unwrap_or_default();
+            let mut uris: Vec<String> = serde_json::from_str(&uris_json).unwrap_or_default();
+            // Merge: if the source stored a `magnet` field but the
+            // `uris` array is empty (or doesn't already contain the
+            // magnet), insert it so the frontend's mirror selector and
+            // the `match.uris[idx] || match.magnet || match.uris[0]`
+            // fallback chain always resolves to a non-empty value.
+            if let Some(ref mag) = magnet {
+                if !uris.iter().any(|u| u == mag) {
+                    uris.insert(0, mag.clone());
+                }
+            }
             let resolved_magnet = magnet.or_else(|| {
                 uris.iter().find(|u| u.starts_with("magnet:")).cloned()
             });

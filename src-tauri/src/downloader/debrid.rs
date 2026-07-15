@@ -588,35 +588,152 @@ impl TorBoxClient {
         "".to_string()
     }
 
+    /// "Unrestrict" a web download link via TorBox.
+    ///
+    /// TorBox does not have an `/unrestrict/link` endpoint (that was a
+    /// wrong assumption from the AllDebrid API shape). The correct flow
+    /// for turning a hoster URL into a TorBox direct-download URL is:
+    ///
+    ///   1. `POST /v1/api/webdl/createwebdownload` — submit the link.
+    ///      Returns a `webdl_id` (the TorBox-internal download job).
+    ///   2. `GET  /v1/api/webdl/mylist` — poll until the job is ready.
+    ///   3. `GET  /v1/api/webdl/requestdl?webid={id}` — get the direct
+    ///      download URL.
+    ///
+    /// For the unrestrict use case (the frontend calls this right before
+    /// handing the URL to the direct downloader), we need the *final*
+    /// direct link. We create the web download, poll until it's ready,
+    /// then request the direct link. This can take a few seconds if
+    /// TorBox's servers need to fetch the file from the hoster.
     pub async fn unrestrict_link(apikey: &str, url: &str) -> Result<String, String> {
-        let client = reqwest::Client::new();
-        let payload = serde_json::json!({
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+        // 1. Create the web download.
+        let create_payload = serde_json::json!({
             "link": url,
         });
-
-        let resp = client
-            .post("https://api.torbox.app/v1/api/unrestrict/link")
+        let create_resp = client
+            .post("https://api.torbox.app/v1/api/webdl/createwebdownload")
             .header("Authorization", format!("Bearer {}", apikey))
-            .json(&payload)
+            .json(&create_payload)
             .send()
             .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        let body: TorBoxResponse<TorBoxUnlockData> = resp
-            .json()
+            .map_err(|e| format!("Request failed: {}", e))?
+            .json::<TorBoxResponse<TorBoxWebDlCreateData>>()
             .await
-            .map_err(|e| format!("Failed to parse TorBox unlock response: {}", e))?;
+            .map_err(|e| format!("Failed to parse createwebdownload response: {}", e))?;
+        if !create_resp.success {
+            return Err(create_resp.detail.unwrap_or_else(|| {
+                "Failed to create TorBox web download".to_string()
+            }));
+        }
+        let webdl_id: u64 = create_resp
+            .data
+            .ok_or("No data returned from createwebdownload")?
+            .webdl_id
+            .ok_or("No webdl_id returned from createwebdownload")?;
 
-        if !body.success {
-            return Err(body.detail.unwrap_or_else(|| "Failed to unlock link".to_string()));
+        // 2. Poll until the web download is ready (up to 60s).
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        let mut ready = false;
+        for _ in 0..30 {
+            interval.tick().await;
+            let list_resp = client
+                .get("https://api.torbox.app/v1/api/webdl/mylist?bypass=true")
+                .header("Authorization", format!("Bearer {}", apikey))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to poll webdl list: {}", e))?;
+            let body: TorBoxResponse<Vec<TorBoxWebDlListEntry>> =
+                list_resp.json().await.map_err(|e| {
+                    format!("Failed to parse webdl mylist response: {}", e)
+                })?;
+            if let Some(entries) = body.data {
+                if let Some(entry) = entries.iter().find(|e| e.id == webdl_id) {
+                    if entry.download_finished && entry.download_present {
+                        ready = true;
+                        break;
+                    }
+                    if let Some(ref err) = entry.error {
+                        return Err(format!("TorBox web download failed: {}", err));
+                    }
+                }
+            }
+        }
+        if !ready {
+            return Err("TorBox web download timed out (60s)".to_string());
         }
 
-        let data = body.data.ok_or("Empty response data")?;
-        Ok(data.link)
+        // 3. Request the direct download link.
+        //
+        // TorBox's `requestdl` endpoint uses `web_id` (not `webid`) as
+        // the query parameter. There is no `as_url` parameter — the
+        // API returns a JSON object with the download link in the
+        // `data` field. The `redirect=true` parameter would cause an
+        // HTTP redirect instead of a JSON response, which we don't
+        // want here (we need the URL as a string to pass to the
+        // direct downloader).
+        let dl_resp = client
+            .get(format!(
+                "https://api.torbox.app/v1/api/webdl/requestdl?web_id={}",
+                webdl_id
+            ))
+            .header("Authorization", format!("Bearer {}", apikey))
+            .send()
+            .await
+            .map_err(|e| format!("Failed to request webdl download link: {}", e))?;
+        let dl_body: TorBoxResponse<TorBoxWebDlLinkData> = dl_resp.json().await.map_err(|e| {
+            format!("Failed to parse webdl requestdl response: {}", e)
+        })?;
+        if !dl_body.success {
+            return Err(dl_body.detail.unwrap_or_else(|| {
+                "Failed to get direct download link from TorBox".to_string()
+            }));
+        }
+        dl_body
+            .data
+            .and_then(|d| d.download_link)
+            .ok_or_else(|| "No direct link returned by TorBox".to_string())
     }
 }
 
+/// Response from `POST /v1/api/webdl/createwebdownload`.
+/// `webdl_id` is the primary field name, but we add `alias = "id"`
+/// as a safety net in case TorBox returns the download ID under a
+/// different key.
 #[derive(Deserialize, Debug)]
-struct TorBoxUnlockData {
-    link: String,
+struct TorBoxWebDlCreateData {
+    #[serde(default, alias = "id")]
+    webdl_id: Option<u64>,
+}
+
+/// Entry in the `GET /v1/api/webdl/mylist` response array.
+/// `#[serde(default)]` on the bool fields guards against TorBox
+/// returning a pending entry before those fields are populated —
+/// without it the entire `mylist` response would fail to deserialize
+/// and kill the poll loop.
+#[derive(Deserialize, Debug)]
+struct TorBoxWebDlListEntry {
+    id: u64,
+    #[serde(default)]
+    download_finished: bool,
+    #[serde(default)]
+    download_present: bool,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Response from `GET /v1/api/webdl/requestdl`.
+///
+/// TorBox returns the direct-download link in the `data` field as an
+/// object with a `download_link` key. We use `#[serde(alias)]` to
+/// also accept `link` in case TorBox's response shape varies across
+/// API versions.
+#[derive(Deserialize, Debug)]
+struct TorBoxWebDlLinkData {
+    #[serde(default, alias = "link")]
+    download_link: Option<String>,
 }
