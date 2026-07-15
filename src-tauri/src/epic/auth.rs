@@ -120,6 +120,99 @@ pub async fn epic_finish_login(app: AppHandle, auth_code: String) -> Result<Epic
     Ok(tokens)
 }
 
+/// Recover a lost Epic session by exchanging a previously-saved
+/// `refreshToken` (from localStorage legacy state before the
+/// security fix) for fresh tokens.
+///
+/// This is the one-click recovery path for users whose OS
+/// keychain entry was wiped (Credential Manager rebuild, secret-service
+/// daemon restart with a stale collection, etc.) but who still have
+/// a valid `refreshToken` lingering in `gamelib-epic-sync-info` from
+/// a prior login. The frontend's recovery banner surfaces this
+/// command automatically when the mount probe detects
+/// `isAuthenticated == false` AND localStorage has a parseable
+/// `refreshToken`.
+///
+/// On success: writes the resulting fresh tokens to the keychain via
+/// `save_tokens` AND returns the same `EpicAuthTokens` struct to
+/// the frontend (which is expected to overwrite its localStorage
+/// copy with the safe metadata-only shape immediately afterward —
+/// see `handleEpicRecoverSession` in `SettingsPage.tsx`).
+///
+/// On Epic revocation (`HTTP 400 invalid_grant`): the caller bubbles
+/// the error verbatim, the frontend clears the stale banner, and the
+/// user falls back to a normal `Connect Epic Account` WebView flow.
+#[tauri::command]
+pub async fn epic_login_with_refresh_token(
+    app: AppHandle,
+    refresh_token: String,
+    account_id: String,
+    display_name: Option<String>,
+) -> Result<EpicAuthTokens, String> {
+    let client = Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+    let response = client
+        .post(EPIC_TOKEN_URL)
+        .header("Authorization", format!("basic {EPIC_AUTH_ENCODED}"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "grant_type=refresh_token&refresh_token={refresh_token}&token_type=eg1"
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("Token refresh request failed: {e}"))?;
+
+    let status = response.status();
+    let body_text = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(format!(
+            "Token refresh failed (HTTP {status}): {body_text}"
+        ));
+    }
+
+    let json: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Failed to parse refresh response: {e}"))?;
+
+    let access_token = json["access_token"]
+        .as_str()
+        .ok_or_else(|| "Missing access_token in response".to_string())?
+        .to_string();
+    let new_refresh_token = json["refresh_token"]
+        .as_str()
+        .ok_or_else(|| "Missing refresh_token in response".to_string())?
+        .to_string();
+    let expires_in = json["expires_in"].as_u64().unwrap_or(3600);
+
+    // Prefer the supplied account_id/display_name so the recovered
+    // session stays attributed to the user the frontend cached. Only
+    // fall back to whatever Epic returns if the caller genuinely
+    // doesn't have one (legacy localStorage entries predate this
+    // expectation).
+    let resolved_account_id = if account_id.is_empty() || account_id == "unknown" {
+        json["account_id"].as_str().unwrap_or("unknown").to_string()
+    } else {
+        account_id
+    };
+    let resolved_display_name = display_name.or_else(|| {
+        json["displayName"].as_str().map(|s| s.to_string())
+    });
+
+    let tokens = EpicAuthTokens {
+        access_token,
+        refresh_token: new_refresh_token,
+        expires_at: current_unix() + expires_in,
+        account_id: resolved_account_id,
+        display_name: resolved_display_name,
+    };
+
+    save_tokens(&app, &tokens)?;
+    Ok(tokens)
+}
+
 #[tauri::command]
 pub fn epic_is_authenticated(app: AppHandle) -> bool {
     load_tokens(&app).is_ok()
@@ -245,7 +338,10 @@ fn load_tokens(_app: &AppHandle) -> Result<EpicAuthTokens, String> {
     let store = db::secrets::SecretStore::new();
     let secret = store
         .get("epic_tokens")?
-        .ok_or_else(|| "No Epic tokens stored".to_string())?;
+        .ok_or_else(|| {
+            r#"Not logged in to Epic Games. Open Settings → Integrations → Epic Games and click "Connect Epic Account" to authenticate before syncing."#
+                .to_string()
+        })?;
     serde_json::from_str(&secret).map_err(|e| format!("Failed to parse tokens: {e}"))
 }
 

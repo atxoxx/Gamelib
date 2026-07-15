@@ -248,6 +248,19 @@ export default function SettingsPage() {
   const [epicSyncResult, setEpicSyncResult] = useState<EpicSyncResult | null>(null);
   const [isEpicLoggingIn, setIsEpicLoggingIn] = useState(false);
   const [isEpicSyncing, setIsEpicSyncing] = useState(false);
+  // Tracks a "previous session is unreachable" state where the OS keychain
+  // entry was wiped externally (Credential Manager rebuild, secret-service
+  // daemon restart with stale collection, etc.) but localStorage still
+  // holds a legacy refresh token from before the security fix. Surfaced as
+  // a one-click recovery banner so the user reconnects via a refresh-grant
+  // OAuth round-trip rather than the full WebView `Connect Epic Account`
+  // flow.
+  const [epicStaleSession, setEpicStaleSession] = useState<{
+    refreshToken: string;
+    accountId: string;
+    displayName?: string;
+  } | null>(null);
+  const [isEpicRecovering, setIsEpicRecovering] = useState(false);
 
   // GOG Galaxy integration state. The probe at mount mirrors the
   // pattern Epic uses: a cheap `gog_is_authenticated` boolean call
@@ -307,6 +320,26 @@ export default function SettingsPage() {
         const authenticated: boolean = await invoke("epic_is_authenticated");
         if (cancelled) return;
         setEpicAuth({ isAuthenticated: authenticated });
+        if (!authenticated) {
+          // Keychain probe failed, but localStorage still holds a legacy
+          // refresh token from before the security fix wiped tokens.
+          // Surface a one-click recovery banner instead of forcing the full
+          // OAuth round-trip through Connect Epic Account.
+          const savedRaw = localStorage.getItem("gamelib-epic-sync-info");
+          if (savedRaw) {
+            try {
+              const info = JSON.parse(savedRaw);
+              if (info?.refreshToken && info?.accountId) {
+                setEpicStaleSession({
+                  refreshToken: info.refreshToken,
+                  accountId: info.accountId,
+                  displayName: info.displayName,
+                });
+                return;
+              }
+            } catch { /* malformed legacy entry — ignore */ }
+          }
+        }
         if (authenticated) {
           const saved = localStorage.getItem("gamelib-epic-sync-info");
           if (saved) {
@@ -570,7 +603,22 @@ export default function SettingsPage() {
         accountId: tokens.accountId,
         displayName: tokens.displayName,
       });
-      localStorage.setItem("gamelib-epic-sync-info", JSON.stringify(tokens));
+      // Persist ONLY the metadata-only shape. The full OAuth tokens
+      // (accessToken + refreshToken) belong in the OS keychain, which
+      // epic_finish_login wrote via save_tokens. localStorage is
+      // js-readable, never store bearer tokens there. The subsequent
+      // handleEpicSync call overwrites this with the same safe shape.
+      // On launch, the mount probe detects legacy full-payload entries
+      // (pre-security-fix) and surfaces the recovery banner via
+      // setEpicStaleSession.
+      localStorage.setItem(
+        "gamelib-epic-sync-info",
+        JSON.stringify({
+          accountId: tokens.accountId,
+          displayName: tokens.displayName,
+          lastSync: Date.now(),
+        })
+      );
       showToast(`Connected to Epic Games${tokens.displayName ? ` as ${tokens.displayName}` : ""}`, "success");
       // Auto-sync after login
       await handleEpicSync();
@@ -670,8 +718,77 @@ export default function SettingsPage() {
       setEpicSyncResult(null);
       localStorage.removeItem("gamelib-epic-sync-info");
       showToast("Epic Games disconnected", "info");
+      // Clear any pending stale-session banner so the recovery prompt
+      // doesn't linger after an explicit Disconnect — the user picked
+      // the logout path on purpose.
+      setEpicStaleSession(null);
     } catch (err) {
       showToast(`Failed: ${err}`, "error");
+    }
+  }
+
+  // One-click recovery from a wiped keychain entry. The Rust side
+  // epic_login_with_refresh_token re-exchanges the localStorage
+  // refresh_token for fresh tokens, persists them to the keychain,
+  // and returns them for the canonical overwrite step.
+  async function handleEpicRecover() {
+    const stale = epicStaleSession;
+    if (!stale) return;
+    setIsEpicRecovering(true);
+    try {
+      const fresh = await invoke<{ accountId: string; displayName?: string }>(
+        "epic_login_with_refresh_token",
+        {
+          refreshToken: stale.refreshToken,
+          accountId: stale.accountId,
+          displayName: stale.displayName,
+        }
+      );
+      setEpicAuth({
+        isAuthenticated: true,
+        accountId: fresh.accountId,
+        displayName: fresh.displayName,
+      });
+      // SECURITY: overwrite localStorage with the safe metadata-only shape.
+      // The legacy refreshToken is one-shot \u2014 Epic issues a new one on each
+      // refresh-grant. Storing the old token would be a pure regression.
+      localStorage.setItem(
+        "gamelib-epic-sync-info",
+        JSON.stringify({
+          accountId: fresh.accountId,
+          displayName: fresh.displayName,
+          lastSync: Date.now(),
+        })
+      );
+      setEpicStaleSession(null);
+      showToast(
+        `Recovered Epic Games session${fresh.displayName ? ` as ${fresh.displayName}` : ""}`,
+        "success"
+      );
+      await handleEpicSync();
+    } catch (err) {
+      // The refresh token was exhausted / revoked \u2014 clear the stale
+      // banner so it doesn't loop on the next mount. Strip the dead
+      // refreshToken from localStorage to prevent future false banners.
+      showToast(`Recovery failed \u2014 please re-login: ${err}`, "error");
+      setEpicStaleSession(null);
+      try {
+        const raw = localStorage.getItem("gamelib-epic-sync-info");
+        if (raw) {
+          const info = JSON.parse(raw);
+          if (info?.refreshToken) {
+            localStorage.setItem(
+              "gamelib-epic-sync-info",
+              JSON.stringify({
+                accountId: info.accountId,
+                displayName: info.displayName,
+              })
+            );
+          }
+        }
+      } catch { /* ignore */ }
+    } finally {
+      setIsEpicRecovering(false);
     }
   }
 
@@ -1455,6 +1572,24 @@ export default function SettingsPage() {
                     Log in with your Epic Games account to import your
                     library. A login window will open inside the app.
                   </p>
+                )}
+
+                {epicStaleSession && (
+                  <div className="epic-stale-banner">
+                    <p className="epic-stale-banner-text">
+                      <strong>Previous Epic session unreachable.</strong>{" "}
+                      Local tokens were cleared, but a stored refresh
+                      token can restore your connection with one click.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={handleEpicRecover}
+                      isLoading={isEpicRecovering}
+                    >
+                      Reconnect with stored token
+                    </Button>
+                  </div>
                 )}
 
                 <div className="integration-tile-actions">
