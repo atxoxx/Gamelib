@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useDensityContext } from "../context/DensityContext";
+import { useBigScreen } from "../context/BigScreenContext";
 import { useToast } from "../context/ToastContext";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
 import LibraryFilterChips from "../components/library/LibraryFilterChips";
@@ -10,6 +11,7 @@ import LibraryHero from "../components/library/LibraryHero";
 import RecentlyAddedRail from "../components/library/RecentlyAddedRail";
 import ContinuePlayingRail from "../components/library/ContinuePlayingRail";
 import LibraryEmptyState from "../components/library/LibraryEmptyState";
+import BigScreenGameCard from "../components/library/BigScreenGameCard";
 import DensityToggle from "../components/DensityToggle";
 import { Card, Badge, Button } from "../components/ui";
 import type { Game } from "../types/game";
@@ -23,6 +25,7 @@ export default function LibraryPage() {
   // App.tsx, so toggling here also affects the rest of the app — the same
   // UX as the Store tab.
   const { density, setDensity } = useDensityContext();
+  const { isBigScreen } = useBigScreen();
 
   const {
     filters,
@@ -141,7 +144,7 @@ export default function LibraryPage() {
                 hasFilters ? `${filteredGames.length} of ${games.length}` : games.length
               })`}
         </h2>
-        {!isLibraryEmpty && (
+        {!isLibraryEmpty && !isBigScreen && (
           <div className="library-density-toolbar" aria-label="Layout controls">
             <span className="library-density-toolbar-label">Density</span>
             <DensityToggle density={density} onChange={setDensity} />
@@ -169,6 +172,7 @@ export default function LibraryPage() {
         <LibraryEmptyState />
       ) : (
         <div className="library-layout">
+          {!isBigScreen && (
           <LibraryFilterSidebar
             search={filters.search}
             selectedGenres={filters.genres}
@@ -193,6 +197,7 @@ export default function LibraryPage() {
             onSortChange={setSort}
             onReset={reset}
           />
+          )}
 
           <div className="library-main">
             {filteredGames.length === 0 ? (
@@ -218,18 +223,26 @@ export default function LibraryPage() {
                 </Button>
               </div>
             ) : (
-              <div className={`library-cards density-${density}`}>
-                {filteredGames.map((game, index) => (
-                  <LibraryGameCard
-                    key={game.id}
-                    game={game}
-                    density={density}
-                    isRunning={runningGameIds.includes(game.id)}
-                    onClick={() => handleCardClick(game)}
-                    onContextMenu={(e) => handleGameContextMenu(e, game)}
-                    className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}
-                  />
-                ))}
+              <div className={`library-cards density-${density}${isBigScreen ? " bigscreen-cards" : ""}`}>
+                {filteredGames.map((game, index) =>
+                  isBigScreen ? (
+                    <BigScreenGameCard
+                      key={game.id}
+                      game={game}
+                      onClick={() => handleCardClick(game)}
+                    />
+                  ) : (
+                    <LibraryGameCard
+                      key={game.id}
+                      game={game}
+                      density={density}
+                      isRunning={runningGameIds.includes(game.id)}
+                      onClick={() => handleCardClick(game)}
+                      onContextMenu={(e) => handleGameContextMenu(e, game)}
+                      className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}
+                    />
+                  )
+                )}
               </div>
             )}
           </div>

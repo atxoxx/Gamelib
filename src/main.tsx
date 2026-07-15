@@ -10,6 +10,7 @@ import "./styles/download.css";
 import "./styles/source-manager.css";
 import "./library.css";
 import "./pages/deals/DealsPage.css";
+import "./styles/bigscreen.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

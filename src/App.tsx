@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import TopNav from "./components/TopNav";
 import Sidebar from "./components/Sidebar";
 import MainContent from "./components/MainContent";
+import BigScreenLayout from "./components/BigScreenLayout";
 import LibraryPage from "./pages/LibraryPage";
 import GamePage from "./pages/GamePage";
 import StorePage from "./pages/StorePage";
@@ -27,12 +28,22 @@ import { SourceProvider } from "./context/SourceContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { AchievementProvider } from "./context/AchievementContext";
 import { SettingsProvider } from "./context/SettingsContext";
+import { BigScreenProvider, useBigScreen } from "./context/BigScreenContext";
 import { LandingRedirect } from "./components/LandingRedirect";
 import Splashscreen from "./components/Splashscreen";
 import "./App.css";
 import "./store.css";
 
 function AppLayout() {
+  const { isBigScreen } = useBigScreen();
+
+  // When Big Screen Mode is active, render the PS5-inspired layout
+  // instead of the standard desktop grid. The BigScreenLayout handles
+  // its own <Outlet /> so routes work identically in both layouts.
+  if (isBigScreen) {
+    return <BigScreenLayout />;
+  }
+
   return (
     <div className="app-layout">
       <div className="app-topnav">
@@ -62,6 +73,7 @@ function App() {
                   <SourceProvider>
                     <DownloadProvider>
                       <SettingsProvider>
+                      <BigScreenProvider>
                       <Routes>
                         <Route element={<AppLayout />}>
                           {/* L6: default landing page — read from
@@ -88,6 +100,7 @@ function App() {
                           <Route path="plugins" element={<PluginsPage />} />
                         </Route>
                       </Routes>
+                      </BigScreenProvider>
                       </SettingsProvider>
                     </DownloadProvider>
                   </SourceProvider>

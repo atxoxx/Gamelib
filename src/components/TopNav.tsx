@@ -3,6 +3,7 @@ import type { MouseEvent } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useActiveDownloadCount } from "../context/DownloadContext";
+import { useBigScreen } from "../context/BigScreenContext";
 import DownloadPopover from "./DownloadPopover";
 import WindowControls from "./WindowControls";
 
@@ -273,6 +274,7 @@ const tabs: Tab[] = [
 
 export default function TopNav() {
   const activeDownloads = useActiveDownloadCount();
+  const { isBigScreen, setBigScreen } = useBigScreen();
   const location = useLocation();
 
   // Download popover state. We keep the trigger element and the
@@ -411,6 +413,27 @@ export default function TopNav() {
           >
             <SettingsIcon />
           </NavLink>
+          <button
+            type="button"
+            className={`topnav-btn topnav-btn-bigscreen${isBigScreen ? " active" : ""}`}
+            onClick={() => setBigScreen(!isBigScreen)}
+            aria-label={isBigScreen ? "Exit Big Screen Mode" : "Enter Big Screen Mode"}
+            title={isBigScreen ? "Exit Big Screen Mode" : "Enter Big Screen Mode"}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ width: 18, height: 18 }}
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </button>
         </div>
 
         {/* Custom window controls (min / max / close) — see
