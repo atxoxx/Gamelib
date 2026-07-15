@@ -94,6 +94,13 @@ pub struct SavedMetadata {
     pub files: Vec<TorrentFile>,
     pub status: Option<DownloadStatus>,
     pub uris: Option<Vec<String>>,
+    /// Set true once we've observed non-zero downloaded bytes or
+    /// non-zero download speed for this torrent. Persisted across
+    /// restarts as a stable "this torrent has actually transferred
+    /// data" proof. See `gate_completion` and `refresh_stats` for
+    /// how this gates the transition to `DownloadStatus::Completed`.
+    #[serde(default)]
+    pub had_real_downloads: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -139,6 +146,22 @@ pub struct TorrentDownload {
     pub auto_extract: Option<bool>,
     pub extracted: Option<bool>,
     pub uris: Option<Vec<String>>,
+    /// `true` once we've observed non-zero `downloaded` bytes or
+    /// non-zero `download_speed` (or `upload_speed`) at any tick.
+    /// Acts as a proof gate for the transition to
+    /// `DownloadStatus::Completed`: librqbit can briefly report
+    /// `stats.progress_bytes == stats.total_bytes` immediately after
+    /// metadata arrives (a transient state quirk that we observed
+    /// empirically on a number of public torrents), and without
+    /// this gate the first refresh tick post-metadata would mark the
+    /// torrent as Completed — instantly filling the progress bar to
+    /// 100% and moving the row into the "history" group without a
+    /// single data byte having been transferred. The flag flips to
+    /// `true` on the first tick that observes real activity and
+    /// stays `true` for the torrent's lifetime. `None` on torrents
+    /// created before this field was added.
+    #[serde(default)]
+    pub had_real_downloads: Option<bool>,
 }
 
 // ─── Engine wrapper ─────────────────────────────────────────────────────────
@@ -373,6 +396,27 @@ impl TorrentEngine {
                 status,
                 DownloadStatus::FetchingMetadata | DownloadStatus::Paused
             );
+            // Backwards-compat default: old-build rows
+            // (`meta.had_real_downloads == None`) get `true` iff
+            // their restored status is `Completed` — by
+            // definition they have downloaded before, so the gate
+            // accepts the status — and `false` for everything else
+            // (FetchingMetadata / Paused / Error / etc.). The
+            // activity flag will flip back to `true` here the
+            // moment a subsequent refresh tick observes
+            // `downloaded > 0` or non-zero speed.
+            //
+            // Implementation note: `matches!` consumes the
+            // scrutinee and DownloadStatus isn't `Copy`, so we
+            // match against a clone. The closure below captures
+            // `was_completed` (a Copy `bool`) rather than the
+            // status enum, which keeps status available for
+            // `gate_completion` further down.
+            let was_completed = matches!(status.clone(), DownloadStatus::Completed);
+            let restored_had_real_downloads: Option<bool> = match meta.had_real_downloads {
+                Some(b) => Some(b),
+                None => Some(was_completed),
+            };
             self.downloads.insert(id.clone(), TorrentDownload {
                 id: id.clone(),
                 name,
@@ -385,9 +429,22 @@ impl TorrentEngine {
                 upload_speed: 0,
                 seeds: 0,
                 peers: 0,
-                status,
+                // `gate_completion` takes both args by value, so
+                // status can be moved in (last use) and we clone
+                // `restored_had_real_downloads` so the same value
+                // is also assigned to the field below.
+                status: gate_completion(status, restored_had_real_downloads.clone()),
                 game_id: meta.game_id.clone(),
                 source_name: meta.source_name.clone(),
+                // Backwards-compat default: torrents saved by old
+                // builds (without `had_real_downloads`) get `true` if
+                // their restored status is `Completed` — by
+                // definition they have downloaded before, so the
+                // gate accepts the status — and `false` for
+                // everything else. The activity flag will flip to
+                // `true` on the next refresh tick that observes
+                // `downloaded > 0` or non-zero speed.
+                had_real_downloads: restored_had_real_downloads,
                 // Cold-start re-stamp for FetchingMetadata / Paused rows:
                 // the FetchingMetadata grace-arm in `refresh_stats` keeps
                 // rows by `(now - added_at) < 300`, so if a user closed
@@ -495,6 +552,22 @@ impl TorrentEngine {
                     .or_else(|| meta.map(|m| m.files.clone()).filter(|v| !v.is_empty()))
                     .unwrap_or_default();
 
+                // Hoist the activity-flag default to a single
+                // value so the gate and the field share the same
+                // reasoning. Source priority: (1) what we saved
+                // before. We DO NOT fall back to `downloaded > 0`
+                // because librqbit briefly reports
+                // `progress_bytes == total_bytes > 0` immediately
+                // after metadata arrives for some torrents — the
+                // same quirk we defend against in `refresh_stats`
+                // — so trusting librqbit's byte count alone here
+                // would re-introduce the Bug 3 regression at
+                // cold-start time. Trusting saved metadata is
+                // safe: `had_real_downloads` is only `true` on a
+                // row whose previous `refresh_stats` tick observed
+                // non-zero speed (the gate's only flip path).
+                let restored_had_real_downloads = meta.and_then(|m| m.had_real_downloads);
+
                 results.push(TorrentDownload {
                     id: fid,
                     name,
@@ -507,7 +580,18 @@ impl TorrentEngine {
                     upload_speed,
                     seeds,
                     peers,
-                    status,
+                    // Apply the completion gate here too — a
+                    // librqbit-restored torrent can briefly report
+                    // progress_bytes == total_bytes right after the
+                    // session is reopened with persistence, exactly
+                    // the same quirk we defend against in
+                    // `refresh_stats`. The companion
+                    // `had_real_downloads` value is
+                    // `restored_had_real_downloads`, computed once
+                    // above. `Option<bool>` isn't `Copy`, so we
+                    // clone for the gate call and move into the
+                    // field.
+                    status: gate_completion(status, restored_had_real_downloads.clone()),
                     game_id,
                     source_name,
                     added_at,
@@ -515,6 +599,11 @@ impl TorrentEngine {
                     auto_extract: Some(auto_extract),
                     extracted: Some(extracted),
                     uris: meta.and_then(|m| m.uris.clone()),
+                    // Restore the activity flag from disk so a
+                    // process restart doesn't accidentally demote a
+                    // torrent whose librqbit session is still alive
+                    // and has legitimately seen transfers.
+                    had_real_downloads: restored_had_real_downloads,
                 });
             }
             results
@@ -588,6 +677,7 @@ impl TorrentEngine {
                 files: d.files.clone(),
                 status: Some(d.status.clone()),
                 uris: d.uris.clone(),
+                had_real_downloads: d.had_real_downloads,
             })
         }).collect();
         // Serialize in memory, then write. The write itself is
@@ -789,6 +879,42 @@ impl TorrentEngine {
                 d.upload_speed = entry.upload_speed;
                 d.seeds = entry.seeds;
                 d.peers = entry.peers;
+                // Flip the activity gate ONLY on live data
+                // transfer — NOT on `entry.downloaded > 0` alone.
+                //
+                // Earlier revisions included `entry.downloaded > 0`
+                // as a flip condition. That signal is unreliable:
+                // librqbit 8.x briefly reports
+                // `stats.progress_bytes == stats.total_bytes > 0`
+                // *immediately after metadata arrives* for many
+                // torrents, with no actual data having been
+                // transferred yet. Trading that bogus state for a
+                // real "this torrent has downloaded something" bit
+                // would let the completion gate accept the
+                // very next refresh tick's `Completed` status and
+                // move the torrent prematurely into "history".
+                //
+                // Live transfer speeds (`download_speed > 0` /
+                // `upload_speed > 0`) are NOT subject to that quirk
+                // — librqbit only reports non-zero speed when real
+                // bytes are actually flowing — so they're the
+                // trustworthy signal. Trade-off: a torrent that
+                // finishes in <2 s (faster than our 2 s poll
+                // interval) might never see speed > 0 during this
+                // session, leaving `had_real_downloads` stuck at
+                // `Some(false)` and the torrent's UI in the
+                // "downloading" group rather than "completed"
+                // even after the bytes are on disk. This is the
+                // correct trade-off for a game-library client:
+                // false positives (we never claim a torrent that
+                // didn't actually download is done) are far worse
+                // than false negatives (the user can verify by
+                // looking at the save folder).
+                if entry.download_speed > 0
+                    || entry.upload_speed > 0
+                {
+                    d.had_real_downloads = Some(true);
+                }
                 // Preserve an explicit Error status set by a background
                 // task (e.g. torrent_add timeout handler). Without this
                 // guard, refresh_stats would see a stalled torrent still
@@ -803,7 +929,13 @@ impl TorrentEngine {
                 if !matches!(&d.status, DownloadStatus::Error(_))
                     || matches!(&entry.status, DownloadStatus::Error(_))
                 {
-                    d.status = entry.status;
+                    // Apply the completion gate before persisting
+                    // the status. See `gate_completion` for the
+                    // rationale (Bug 3: librqbit can briefly
+                    // report `progress_bytes == total_bytes` right
+                    // after metadata arrives, which would falsely
+                    // mark the torrent as Completed).
+                    d.status = gate_completion(entry.status, d.had_real_downloads);
                 }
                 // Only overwrite the file list when we have a live
                 // snapshot from librqbit. A `None` snapshot preserves
@@ -846,6 +978,18 @@ impl TorrentEngine {
             } else {
                 // Auto-discovery
                 let name = entry.name.unwrap_or_else(|| "Restored".to_string());
+                // New entries start with no proof of real
+                // downloads. We require live data transfer —
+                // NOT a non-zero byte count, which librqbit can
+                // fake in its post-metadata transient "progress
+                // looks complete" state (Bug 3 follow-up). A
+                // fresh torrent inserted via auto-discovery in
+                // librqbit's bogus state would otherwise land in
+                // the map as `had_real_downloads = Some(true)`
+                // AND with `entry.status = Completed`, bypassing
+                // the gate.
+                let had_activity = entry.download_speed > 0
+                    || entry.upload_speed > 0;
                 let download = TorrentDownload {
                     id: entry.fid.clone(),
                     name,
@@ -858,7 +1002,16 @@ impl TorrentEngine {
                     upload_speed: entry.upload_speed,
                     seeds: entry.seeds,
                     peers: entry.peers,
-                    status: entry.status,
+                    // Apply the completion gate at insert time
+                    // too. Without this, a torrent auto-discovered
+                    // in the librqbit session while librqbit is in
+                    // its post-metadata "everything looks
+                    // complete" transient state would land in the
+                    // map as Completed without ever having seen a
+                    // byte of real data — and the next refresh
+                    // tick's `if let Some(d)` branch would then
+                    // lock that status in.
+                    status: gate_completion(entry.status, Some(had_activity)),
                     game_id: None,
                     source_name: "Discovered".to_string(),
                     added_at: unix_now(),
@@ -866,6 +1019,7 @@ impl TorrentEngine {
                     auto_extract: Some(false),
                     extracted: Some(false),
                     uris: None,
+                    had_real_downloads: Some(had_activity),
                 };
                 self.downloads.insert(entry.fid.clone(), download);
                 save_needed = true;
@@ -895,6 +1049,21 @@ impl TorrentEngine {
                 }
 
                 if let Some(d) = self.downloads.get_mut(&id) {
+                    // Flip the Bug 3 gate flag as soon as we
+                    // observe actual bytes flowing through the
+                    // direct-download counter. Without this,
+                    // direct-download ids (`dd_*` / `db_*`) never
+                    // get past `had_real_downloads = Some(false)`
+                    // — the per-torrent `entry.downloaded`
+                    // branch in the librqbit-walk above doesn't
+                    // touch their records because they live
+                    // outside the librqbit session. We only
+                    // profit from this when an eventual
+                    // completion code path respects the gate;
+                    // until then it's harmless.
+                    if current_bytes > 0 || speed > 0 {
+                        d.had_real_downloads = Some(true);
+                    }
                     if matches!(d.status, DownloadStatus::Downloading) {
                         if d.downloaded != current_bytes {
                             d.downloaded = current_bytes;
@@ -904,7 +1073,7 @@ impl TorrentEngine {
                             d.download_speed = speed;
                             direct_save_needed = true;
                         }
-                        
+
                         if let Some(total) = d.total_size {
                             if total > 0 {
                                 let prog = Some((current_bytes as f32 / total as f32).min(1.0));
@@ -928,11 +1097,32 @@ impl TorrentEngine {
             self.mark_dirty();
         }
 
-        // 130s = librqbit `add_torrent` background timeout (120s)
-        // + 10s buffer. Guarantees the FetchingMetadata keep-arm
-        // hands off cleanly to the Error(_) keep-arm when the
-        // timeout fires instead of having the row pruned.
-        const FETCHING_METADATA_GRACE_SECS: u64 = 130;
+        // 90s = typical-metadata-fetch-latency (~30s) +
+        // 60s of cushion for slow trackers (Hydra repacks with
+        // sparse tracker responses can take 60–90s honestly).
+        // Gives the user a clearly observable "this isn't
+        // working" signal when the trackers/DHT don't respond,
+        // instead of leaving the placeholder stuck on screen for
+        // the full 120s libqbit add_torrent timeout. The
+        // previous value (130 s) made the user wait over two
+        // minutes before seeing an Error; 90 s shaves ~40 s off
+        // the failure-feedback path while still covering the
+        // realistic long tail.
+        //
+        // Trade-off: a slow-tracker torrent that finishes
+        // metadata at, say, 100 s will briefly flash the Error
+        // row before the real record appears (the background
+        // task's success path always `remove(temp_id_clone)` then
+        // `insert(real_id, …)` unconditionally, so the new row
+        // pops up regardless). Acceptable because (a) the
+        // placeholder-to-real-record swap in `torrent_add`'s
+        // background task now derives status from libqbit's
+        // post-unpause snapshot (NOT hard-coded FetchingMetadata),
+        // so the user's primary "stuck" complaint is already
+        // addressed even before the grace expires, and (b) the
+        // user has the × button to cancel if they give up on
+        // the row.
+        const FETCHING_METADATA_GRACE_SECS: u64 = 90;
 
         // Transition stale FetchingMetadata rows to Error BEFORE
         // the retain pass, so the Error keep-arm catches them.
@@ -1091,6 +1281,13 @@ fn hash_downloads(downloads: &[TorrentDownload]) -> u64 {
             }
         }
         d.name.hash(&mut hasher);
+        // `had_real_downloads` flips exactly once per torrent
+        // (false → true on the first tick that observes real
+        // activity). Hashing it costs nothing and means the dedup
+        // guard won't accidentally suppress the very emit that
+        // transitions the gate, leaving the UI to render a stale
+        // status.
+        d.had_real_downloads.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -1147,7 +1344,7 @@ fn extract_live_stats(
 
 /// Map `TorrentStatsState` to our `DownloadStatus` enum.
 ///
-/// ## Completion semantics (Bug 2 fix)
+/// ## Completion semantics (Bug 2 fix + Bug 3 fix)
 ///
 /// We deliberately ignore `librqbit::TorrentStats.finished`
 /// (hence the absence of a `finished` parameter) and instead key
@@ -1164,6 +1361,25 @@ fn extract_live_stats(
 /// which implies `downloaded > 0` automatically. A 0-bytes
 /// torrent can never be Completed, regardless of how the bits
 /// are flipped inside librqbit.
+///
+/// **However**, librqbit 8.1.1 can briefly satisfy this condition
+/// (`downloaded >= total`) spuriously for some torrents *immediately
+/// after* metadata arrives, even though no data has been transferred.
+/// We saw this empirically: the progress bar snapped straight to
+/// 100% on the first refresh tick post-metadata, and the torrent
+/// was moved into the "history" group as if the download had
+/// completed. The byte counts then settle to the real values on
+/// subsequent ticks, but by then the user had already seen a false
+/// completion.
+///
+/// We don't try to fix this inside `map_state_to_status` — it remains
+/// a pure byte-counting helper. Instead, every caller that applies
+/// the resulting `DownloadStatus` also runs `gate_completion`,
+/// which requires per-torrent evidence (`TorrentDownload::had_real_downloads`)
+/// before honouring a `Completed` transition. The flag is flipped
+/// to `true` once `downloaded > 0` or non-zero `download_speed` is
+/// observed at any tick, which librqbit can't fabricate right at
+/// metadata arrival.
 fn map_state_to_status(
     state: &librqbit::TorrentStatsState,
     total: u64,
@@ -1189,6 +1405,28 @@ fn map_state_to_status(
             }
         }
     }
+}
+
+/// Gate `DownloadStatus::Completed` against the per-torrent
+/// "we have seen real activity" flag. Returns `Downloading` when
+/// the engine reported Completed but we have no evidence of real
+/// bytes having flowed for this torrent yet. This prevents the
+/// observed librqbit 8.1.1 behaviour where `progress_bytes ==
+/// total_bytes` is briefly reported right after metadata arrives
+/// for a number of public torrents, which would otherwise flip the
+/// UI status to Completed, fill the progress bar to 100%, and move
+/// the row into the "history" group before any real download
+/// happened. See `map_state_to_status` for the full post-mortem.
+fn gate_completion(
+    status: DownloadStatus,
+    had_real_downloads: Option<bool>,
+) -> DownloadStatus {
+    if matches!(status, DownloadStatus::Completed)
+        && !had_real_downloads.unwrap_or(false)
+    {
+        return DownloadStatus::Downloading;
+    }
+    status
 }
 
 /// Find a `ManagedTorrent` by its numeric id. Returns `None` if not found.
@@ -1537,6 +1775,11 @@ pub async fn torrent_add(
             auto_extract: Some(auto_extract.unwrap_or(false)),
             extracted: Some(false),
             uris: None,
+            // Placeholders haven't seen a single byte yet —
+            // explicitly seed the gate flag so the very first
+            // refresh tick after metadata arrives can't falsely
+            // promote this entry to `Completed`.
+            had_real_downloads: Some(false),
         };
 
         {
@@ -1624,6 +1867,40 @@ pub async fn torrent_add(
                             // prior list_only addition.
                             let _ = session.unpause(&handle).await;
 
+                            // Snapshot libqbit state AFTER `unpause`
+                            // returns so we derive the new record's
+                            // status from the truth on the ground
+                            // rather than hard-coding FetchingMetadata.
+                            //
+                            // Without this, a magnet torrent whose
+                            // metadata had already been fetched at
+                            // `add_torrent` return-time (e.g. any
+                            // magnet whose DHT lookup returned within a
+                            // few hundred ms, or any `tr=`-bearing
+                            // repack with healthy trackers) would still
+                            // show "Fetching Metadata" until the next
+                            // 2 s refresh tick corrected it — and on
+                            // slow add paths could strand the row in
+                            // FetchingMetadata indefinitely.
+                            //
+                            // `gate_completion` here also defuses the
+                            // Bug 3 spurious `progress == total` quirk
+                            // that librqbit can briefly emit right after
+                            // metadata arrives — we haven't transferred
+                            // any bytes yet, so the gate demotes any
+                            // bogus `Completed` to `Downloading` and the
+                            // very first refresh tick can flip the
+                            // activity flag once real speed is observed.
+                            let live_after_unpause = handle.stats();
+                            let initial_status_unfiltered = map_state_to_status(
+                                &live_after_unpause.state,
+                                live_after_unpause.total_bytes,
+                                live_after_unpause.progress_bytes,
+                                live_after_unpause.error.as_deref(),
+                            );
+                            let initial_status_gated =
+                                gate_completion(initial_status_unfiltered, Some(false));
+
                             let mut guard = engine_clone.write().await;
                             // Snapshot the placeholder's state BEFORE
                             // removing it. If the user paused the
@@ -1670,7 +1947,19 @@ pub async fn torrent_add(
                                 status: if was_paused {
                                     DownloadStatus::Paused
                                 } else {
-                                    DownloadStatus::FetchingMetadata
+                                    // Derived from the live libqbit
+                                    // snapshot above (NOT hard-coded to
+                                    // FetchingMetadata) so a torrent whose
+                                    // metadata already arrived lands in
+                                    // the "Downloading" row from this
+                                    // very first tick. The grace-arm in
+                                    // `refresh_stats` keeps the placeholder
+                                    // alive while libqbit is still in
+                                    // Initializing — that's the
+                                    // placeholder UI the user sees when
+                                    // metadata legitimately hasn't
+                                    // arrived yet.
+                                    initial_status_gated
                                 },
                                 game_id: game_id_clone,
                                 source_name: source_name_clone,
@@ -1679,6 +1968,17 @@ pub async fn torrent_add(
                                 auto_extract: Some(auto_extract_val),
                                 extracted: Some(false),
                                 uris: None,
+                                // Fresh torrent post-metadata: no
+                                // genuine bytes have flowed yet (the
+                                // unpause on the line above has
+                                // barely any time to report any).
+                                // `false` keeps the gate honest so
+                                // the very next refresh tick can't
+                                // promote this to `Completed` based
+                                // on librqbit's transient
+                                // `progress_bytes == total_bytes`
+                                // quirk.
+                                had_real_downloads: Some(false),
                             };
                             guard
                                 .downloads_mut()
@@ -1887,7 +2187,16 @@ pub async fn torrent_add(
         upload_speed: 0,
         seeds: 0,
         peers: 0,
-        status,
+        // Apply the completion gate at insert time for the
+        // list_only path too. Otherwise a synchronous
+        // `torrent_add(list_only=true)` that returns just after
+        // metadata arrives could land in the map with
+        // Completed + `total = Some(...)` + `downloaded = 0`
+        // (the only legitimate state), only for the next
+        // refresh tick to confirm that and — under the buggy
+        // librqbit behaviour — promote to Completed without
+        // ever having choked a real byte through.
+        status: gate_completion(status, Some(false)),
         game_id,
         source_name,
         added_at: unix_now(),
@@ -1895,6 +2204,7 @@ pub async fn torrent_add(
         auto_extract: Some(auto_extract.unwrap_or(false)),
         extracted: Some(false),
         uris: None,
+        had_real_downloads: Some(false),
     };
     guard.downloads_mut().insert(key, download.clone());
     guard.mark_dirty();
@@ -2731,6 +3041,15 @@ pub async fn torrent_start_selected(
                         initial_status
                     };
 
+                    // Final defense in depth: even if the SAFETY NET
+                    // above didn't fire (e.g. `retry_attempted ==
+                    // false` on the first pass), librqbit can still
+                    // briefly satisfy the byte-count completion
+                    // check before any download has started. Apply
+                    // the gate here so the very first emit of this
+                    // row can never advertise a false completion.
+                    let initial_status = gate_completion(initial_status, Some(false));
+
                     let mut guard = engine_clone.write().await;
                     if new_id_str != id {
                         guard.downloads_mut().remove(&id);
@@ -2813,6 +3132,15 @@ pub async fn torrent_start_selected(
                         upload_speed: 0,
                         seeds: 0,
                         peers: 0,
+                        // Bug 3 — see `gate_completion`. The activity
+                        // flag starts `false`: no real bytes have
+                        // flowed yet by construction (we just
+                        // transitioned off `list_only`). The flag
+                        // flips on the first `refresh_stats` tick
+                        // that observes non-zero `downloaded` /
+                        // speed, which is exactly when the gate
+                        // becomes trustworthy.
+                        had_real_downloads: Some(false),
                         // Don't hardcode `Downloading` — trust the
                         // librqbit state. If the torrent is still
                         // `Initializing` we'll show FetchingMetadata

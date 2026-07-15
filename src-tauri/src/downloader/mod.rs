@@ -75,6 +75,12 @@ pub async fn direct_download_start(
         auto_extract: Some(auto_extract.unwrap_or(false)),
         extracted: Some(false),
         uris,
+        // Bug 3 — see `gate_completion`. Direct downloads
+        // haven't moved a single byte through the wire yet, so
+        // the completion gate stays closed here. `refresh_stats`
+        // flips it to `true` once `direct_counters[id]` reports
+        // `current_bytes > 0`.
+        had_real_downloads: Some(false),
     };
 
     {
@@ -136,6 +142,12 @@ pub async fn debrid_download_start(
         auto_extract: Some(auto_extract.unwrap_or(false)),
         extracted: Some(false),
         uris: None,
+        // Bug 3 — the debrid record hasn't completed the
+        // magnet upload yet, so the completion gate stays
+        // closed until `refresh_stats` confirms real
+        // `current_bytes > 0` or non-zero download-speed
+        // activity on the resulting direct link.
+        had_real_downloads: Some(false),
     };
 
     {
