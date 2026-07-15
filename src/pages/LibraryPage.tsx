@@ -12,6 +12,7 @@ import RecentlyAddedRail from "../components/library/RecentlyAddedRail";
 import ContinuePlayingRail from "../components/library/ContinuePlayingRail";
 import LibraryEmptyState from "../components/library/LibraryEmptyState";
 import BigScreenGameCard from "../components/library/BigScreenGameCard";
+import BigScreenLibrary from "../components/library/BigScreenLibrary";
 import DensityToggle from "../components/DensityToggle";
 import { Card, Badge, Button } from "../components/ui";
 import type { Game } from "../types/game";
@@ -109,7 +110,20 @@ export default function LibraryPage() {
   }
 
   return (
-    <div className="library-grid">
+    <div className={`library-grid${isBigScreen ? " library-grid--bigscreen" : ""}`}>
+      {/* When Big Screen Mode is active and the library has any games,
+          swap the entire desktop layout (hero + rails + grid) for the
+          PS5-style focal spotlight + horizontal rails layout.
+          BigScreenLibrary hides itself only on empty libraries so the
+          regular hero/empty-state surfaces stay as fallback surfaces. */}
+      {isBigScreen && !isLibraryEmpty ? (
+        <BigScreenLibrary
+          filteredGames={filteredGames}
+          totalGames={games.length}
+          onSelectGame={handleCardClick}
+        />
+      ) : (
+        <>
       <LibraryHero games={games} />
 
       {/* Continue Playing rail: surfaces games the user has launched
@@ -259,6 +273,8 @@ export default function LibraryPage() {
           onViewDetails={() => handleViewDetails(contextMenu.game)}
           onRemove={() => handleRemove(contextMenu.game)}
         />
+      )}
+        </>
       )}
     </div>
   );

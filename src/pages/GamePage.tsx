@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -7,6 +7,8 @@ import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useActivity } from "../context/ActivityContext";
 import { useToast } from "../context/ToastContext";
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenGamePage from "../components/game/BigScreenGamePage";
 import { type Game, type GameMetadataResult, type LaunchBoxImageResult, type GameSession, type SimilarGame, type ReleaseDateInfo, type IgdbReview, type LanguageSupportInfo, formatPlayTime, formatSize, type PlayStatus, PLAY_STATUS_DETAILS } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import BarChart from "../components/charts/BarChart";
@@ -1759,6 +1761,7 @@ function GameDetail({ game }: { game: Game }) {
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const { getGame, setSelectedGameId } = useGames();
+  const { isBigScreen } = useBigScreen();
 
   useEffect(() => {
     if (gameId) {
@@ -1772,7 +1775,61 @@ export default function GamePage() {
     return <GameNotFound />;
   }
 
+  // When Big Screen Mode is active, render the PS5 single-page Game
+  // Hub instead of the desktop tabbed layout. BigScreenGamePage owns
+  // its own hero, metadata strip, and inline sections so we don't
+  // have to rebuild the tabs.
+  if (isBigScreen) {
+    return <BigScreenGamePageRouter game={game} />;
+  }
+
   return <GameDetail key={game.id} game={game} />;
+}
+
+/**
+ * Thin router-aware wrapper around BigScreenGamePage that wires
+ * "Back / Edit / Remove" to actual navigation / modal flows.
+ * Extracted so the default export stays simple and so the
+ * bigscreen variant's wiring is contained in one place.
+ */
+function BigScreenGamePageRouter({ game }: { game: Game }) {
+  const navigate = useNavigate();
+  const { setBigScreen } = useBigScreen();
+  // Drill-in listener: the BigScreenGamePage's "Explore" cards fire
+  // a `gamelib:drill-in` event when the user wants to open a full-fat
+  // tab (Reviews / Achievements / Web Links) that doesn't fit on the
+  // single-page Game Hub. We handle it by exiting Big Screen Mode so
+  // the regular desktop GamePage tab UI takes over without us having
+  // to fork those tabs for both modes.
+  useEffect(() => {
+    function onDrillIn() {
+      setBigScreen(false);
+    }
+    window.addEventListener("gamelib:drill-in", onDrillIn);
+    return () => window.removeEventListener("gamelib:drill-in", onDrillIn);
+  }, [setBigScreen]);
+  const handleBack = useCallback(() => {
+    navigate("/library");
+  }, [navigate]);
+  const handleEdit = useCallback(() => {
+    // Flip out of Big Screen so the parent GamePage re-renders the
+    // desktop GameDetail (which owns the existing edit modal).
+    setBigScreen(false);
+  }, [setBigScreen]);
+  const handleRemove = useCallback(() => {
+    // Same drill-in pattern as Edit — the actual confirm/remove
+    // lives in the desktop GameDetail.
+    window.dispatchEvent(new CustomEvent("gamelib:drill-in"));
+  }, []);
+
+  return (
+    <BigScreenGamePage
+      game={game}
+      onBack={handleBack}
+      onEdit={handleEdit}
+      onRemove={handleRemove}
+    />
+  );
 }
 
 // ─── Game Activity Tab Component (Redesigned) ──────────────────────────────────

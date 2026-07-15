@@ -15,6 +15,15 @@ import { useGames } from "../../context/GameContext";
 interface BigScreenGameCardProps {
   game: Game;
   onClick: () => void;
+  /**
+   * Optional stable id burned onto the root element as a
+   * `data-game-id="…"` attribute. Used by sibling components
+   * (BigScreenRail's focus watcher in particular) to map the global
+   * `gamepad.focusedElement` back to its owning game without having
+   * to register a separate listener per card. Defaults to
+   * `game.id` so existing callers keep working without changes.
+   */
+  "data-game-id"?: string;
 }
 
 export default function BigScreenGameCard({ game, onClick }: BigScreenGameCardProps) {
@@ -44,6 +53,7 @@ export default function BigScreenGameCard({ game, onClick }: BigScreenGameCardPr
       tabIndex={0}
       role="option"
       onClick={onClick}
+      data-game-id={game.id}
     >
       <div className="bigscreen-game-card-cover">
         {game.coverArtUrl ? (

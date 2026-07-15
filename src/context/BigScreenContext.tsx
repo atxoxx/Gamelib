@@ -41,7 +41,13 @@ function lsSet(key: string, value: string): void {
 async function setTauriFullscreen(on: boolean): Promise<void> {
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().setFullscreen(on);
+    const win = getCurrentWindow();
+    // Read the current state first so toggling from a fullscreen
+    // window that the user just exited with Escape doesn't make a
+    // redundant IPC call that would re-enter fullscreen by accident.
+    const isCurrentlyFullscreen = await win.isFullscreen().catch(() => false);
+    if (isCurrentlyFullscreen === on) return;
+    await win.setFullscreen(on);
   } catch {
     // Tauri API not available (e.g. `npm run dev` in browser).
     // Silently no-op — Big Screen still works in windowed mode.
@@ -79,6 +85,42 @@ export function BigScreenProvider({ children }: { children: ReactNode }) {
       setTauriFullscreen(true);
     }
   }, []);
+
+  // ── Escape inside fullscreen → exit Big Screen Mode ─────────
+  // Tauri intercepts Escape at the OS level when the window is in
+  // native fullscreen (Windows + macOS), so the OS already pops us
+  // out of fullscreen. When that happens we also want to drop out of
+  // Big Screen Mode so the user lands back in the regular desktop
+  // layout (TopNav + Sidebar + MainContent), not the Big Screen
+  // layout rendered in a maximized window. We listen for the WindowEvent
+  // 'resize' (fullscreen exit fires it) plus a keydown-Escape path
+  // for the in-app case where fullscreen is bypassed (browser dev).
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Only react to bare Escape — F11 / Ctrl+B are still handled by
+      // the listener further below which toggles Big Screen Mode.
+      if (e.key !== "Escape") return;
+      if (!isBigScreen) return;
+      // Skip when the user is typing — let the field swallow Escape.
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        if (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          target.closest("[contenteditable]")
+        ) {
+          return;
+        }
+      }
+      e.preventDefault();
+      setIsBigScreenState(false);
+      lsSet(LS_BIG_SCREEN, "false");
+      setTauriFullscreen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isBigScreen]);
 
   const setBigScreen = useCallback(async (on: boolean) => {
     setIsBigScreenState(on);

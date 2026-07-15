@@ -294,6 +294,1102 @@
   .focus-ring-overlay {
     transition: none;
   }
+  .bigscreen-spotlight-glow,
+  .bigscreen-gamepage-hero-glow {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   Big Screen Library — PS5 / Steam Big-Picture layout
+   ============================================================
+ *
+ *   ┌────────────────┬─────────────────────────────────────┐
+ *   │   Spotlight    │   Continue Playing rail             │
+ *   │   (40%)        │   Recently Added rail               │
+ *   │                │   Library rail                      │
+ *   └────────────────┴─────────────────────────────────────┘
+ *
+ * Two-column flex, generous gutters. The grid scoped inside
+ * `.library-grid--bigscreen` collapses the existing LibraryPage
+ * padding/hero so the layout fills the viewport.
+ */
+
+[data-bigscreen="true"] .library-grid--bigscreen {
+  padding: 0;
+  gap: 0;
+  display: block;
+}
+
+.bigscreen-library {
+  display: grid;
+  grid-template-columns: minmax(380px, 38%) 1fr;
+  gap: 32px;
+  padding: 24px 32px 120px;
+  min-height: calc(100vh - 72px); /* leave space for the BigScreenNav */
+}
+
+/* ── Spotlight ──────────────────────────────────────────── */
+
+.bigscreen-spotlight {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 24px 28px;
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  min-height: 540px;
+}
+
+.bigscreen-spotlight--empty {
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--color-accent) 8%, var(--color-surface)) 0%,
+    var(--color-surface) 60%
+  );
+}
+
+.bigscreen-spotlight-glow {
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 30% 20%,
+    color-mix(in srgb, var(--color-accent) 35%, transparent) 0%,
+    transparent 60%
+  );
+  opacity: 0.55;
+  filter: blur(40px);
+  animation: spotlightGlowBreath 8s ease-in-out infinite;
+  z-index: 0;
+}
+
+@keyframes spotlightGlowBreath {
+  0%, 100% { opacity: 0.45; transform: translate(0, 0); }
+  50%      { opacity: 0.65; transform: translate(2%, -2%); }
+}
+
+.bigscreen-spotlight-cover {
+  position: relative;
+  z-index: 1;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.bigscreen-spotlight-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bigscreen-spotlight-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--color-accent) 18%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+.bigscreen-spotlight-cover-placeholder svg {
+  width: 92px;
+  height: 92px;
+  opacity: 0.35;
+}
+
+.bigscreen-spotlight-running-dot {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 12px;
+  height: 12px;
+  background: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--color-success);
+  animation: spotlightRunningPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes spotlightRunningPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.25); }
+}
+
+.bigscreen-spotlight-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bigscreen-spotlight-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.bigscreen-spotlight-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.bigscreen-spotlight-pill--platform {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  color: var(--color-accent);
+}
+
+.bigscreen-spotlight-pill--players {
+  background: color-mix(in srgb, var(--color-info, var(--color-accent)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-info, var(--color-accent)) 40%, transparent);
+  color: var(--color-info, var(--color-accent));
+}
+
+.bigscreen-spotlight-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.bigscreen-spotlight-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+}
+
+.bigscreen-spotlight-developer {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.bigscreen-spotlight-description {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  /* Clamp to 4 lines on TV so the spotlight stays a glanceable
+   * overview rather than overflowing into the rails. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bigscreen-spotlight-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.bigscreen-spotlight-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: var(--radius-lg);
+  font-size: 17px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  transition: transform var(--duration-normal) var(--ease-standard),
+              box-shadow var(--duration-normal) var(--ease-standard),
+              border-color var(--duration-normal) var(--ease-standard);
+}
+
+.bigscreen-spotlight-btn:hover,
+.bigscreen-spotlight-btn[data-focused="true"] {
+  transform: translateY(-2px);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 18px var(--color-accent-glow);
+}
+
+.bigscreen-spotlight-btn--play {
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent-hover) 100%
+  );
+  border-color: transparent;
+  color: var(--color-accent-contrast, #fff);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.bigscreen-spotlight-btn--play:hover,
+.bigscreen-spotlight-btn--play[data-focused="true"] {
+  box-shadow: 0 10px 32px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.bigscreen-spotlight-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.bigscreen-spotlight-stats {
+  display: flex;
+  gap: 24px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-light) 60%, transparent);
+}
+
+.bigscreen-spotlight-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bigscreen-spotlight-stat-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.bigscreen-spotlight-stat-value {
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+/* ── Rails column ───────────────────────────────────────── */
+
+.bigscreen-library-rails {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.bigscreen-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bigscreen-rail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.bigscreen-rail-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+}
+
+.bigscreen-rail-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bigscreen-rail-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.01em;
+  color: var(--color-text-primary);
+}
+
+.bigscreen-rail-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.bigscreen-rail-viewport {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+
+.bigscreen-rail-track {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 8px 4px 16px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.bigscreen-rail-track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.bigscreen-rail-track::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 40%, transparent);
+  border-radius: 999px;
+}
+
+.bigscreen-rail-item {
+  flex: 0 0 auto;
+  width: 168px;
+  scroll-snap-align: start;
+}
+
+.bigscreen-rail-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bigscreen-rail-fade--left {
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-primary) 0%,
+    transparent 100%
+  );
+}
+
+.bigscreen-rail-fade--right {
+  right: 0;
+  background: linear-gradient(
+    270deg,
+    var(--color-bg-primary) 0%,
+    transparent 100%
+  );
+}
+
+.bigscreen-rail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 24px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  border: 1px dashed var(--color-border-light);
+  border-radius: var(--radius-lg);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ── Big-screen game card overrides (used inside rails) ─── */
+
+[data-bigscreen="true"] .bigscreen-game-card {
+  width: 100%;
+  height: 100%;
+}
+
+[data-bigscreen="true"] .bigscreen-game-card .bigscreen-game-card-name {
+  font-size: 14px;
+}
+
+[data-bigscreen="true"]
+  .bigscreen-game-card[data-focused="true"] {
+  /* Soft lift instead of the default 8px translate — the rail
+   * scroll-snap reads "snapping" already, so an oversized lift
+   * overwhelms the rest of the strip. */
+  transform: translateY(-4px) scale(1.03);
+}
+
+/* ============================================================
+   Big Screen Game Page — single-page PS5 Game Hub
+   ============================================================
+ *
+ *   ┌── Hero (full-bleed banner) ──────────────────────────┐
+ *   │   Back · Logo · subtitle   ▶ Play · Trailer · Edit │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │ Meta strip                                            │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │ Sections: Storyline · About · Screenshots · Specs ·  │
+ *   │           Releases · Languages · Explore            │
+ *   └──────────────────────────────────────────────────────┘
+ */
+
+.bigscreen-gamepage {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 0 32px 120px;
+  min-height: calc(100vh - 72px);
+}
+
+/* ── Hero ───────────────────────────────────────────────── */
+
+.bigscreen-gamepage-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: clamp(360px, 42vh, 540px);
+  padding: 36px 40px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  margin-top: 24px;
+}
+
+.bigscreen-gamepage-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: saturate(1.05);
+  z-index: 0;
+}
+
+.bigscreen-gamepage-hero-mask {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.0) 0%,
+      rgba(0, 0, 0, 0.45) 40%,
+      rgba(0, 0, 0, 0.85) 100%
+    );
+  z-index: 1;
+}
+
+.bigscreen-gamepage-hero-glow {
+  position: absolute;
+  inset: -25%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 80% 80%,
+    color-mix(in srgb, var(--color-accent) 30%, transparent) 0%,
+    transparent 70%
+  );
+  filter: blur(48px);
+  z-index: 1;
+  opacity: 0.55;
+}
+
+[data-theme="light"] .bigscreen-gamepage-hero-mask {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.0) 0%,
+      rgba(255, 255, 255, 0.45) 40%,
+      rgba(255, 255, 255, 0.85) 100%
+    );
+}
+
+.bigscreen-gamepage-hero-content {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 24px;
+  width: 100%;
+}
+
+.bigscreen-gamepage-hero-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-standard);
+  z-index: 3;
+}
+
+.bigscreen-gamepage-hero-back:hover,
+.bigscreen-gamepage-hero-back[data-focused="true"] {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px var(--color-accent-glow);
+}
+
+.bigscreen-gamepage-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bigscreen-gamepage-hero-logo {
+  max-width: 360px;
+  max-height: 110px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.55));
+}
+
+.bigscreen-gamepage-hero-title {
+  margin: 0;
+  font-size: 56px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="light"] .bigscreen-gamepage-hero-title {
+  color: var(--color-text-primary);
+  text-shadow: 0 4px 16px rgba(255, 255, 255, 0.45);
+}
+
+.bigscreen-gamepage-hero-subtitle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bigscreen-gamepage-hero-subtitle {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+[data-theme="light"] .bigscreen-gamepage-hero-subtitle {
+  color: var(--color-text-secondary);
+}
+
+.bigscreen-gamepage-hero-subtitle-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.bigscreen-gamepage-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ── Action button (Trailer / Edit / Remove) ─────────── */
+
+.bigscreen-gamepage-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-light);
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-standard);
+}
+
+.bigscreen-gamepage-hero-btn:hover,
+.bigscreen-gamepage-hero-btn[data-focused="true"] {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 18px var(--color-accent-glow);
+  transform: translateY(-2px);
+}
+
+.bigscreen-gamepage-hero-btn--danger:hover,
+.bigscreen-gamepage-hero-btn--danger[data-focused="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--color-danger) 60%, transparent);
+}
+
+/* ── Metadata strip ─────────────────────────────────────── */
+
+.bigscreen-gamepage-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 24px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.bigscreen-gamepage-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.bigscreen-gamepage-meta-pill--platform {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  color: var(--color-accent);
+}
+
+.bigscreen-gamepage-meta-pill--ready {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  color: var(--color-success);
+}
+
+.bigscreen-gamepage-meta-pill--absent {
+  color: var(--color-text-muted);
+}
+
+.bigscreen-gamepage-meta-pill--running {
+  background: color-mix(in srgb, var(--color-success) 22%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+  color: var(--color-success);
+}
+
+.bigscreen-gamepage-meta-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* ── Section title (Explore) ──────────────────────────── */
+
+.bigscreen-gamepage-section-title {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+/* ── Two-column layout for Specs + Releases ──────────── */
+
+.bigscreen-gamepage-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+[data-bigscreen="true"] .game-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+/* If only one of (Specs, Releases) has data, that single child
+ * expands across the full grid instead of being cramped into
+ * half-width. The `:empty` selector handles the case where both
+ * return null and the grid stays but renders nothing. */
+.bigscreen-gamepage-2col:empty,
+.bigscreen-gamepage-2col > :only-child {
+  grid-column: 1 / -1;
+}
+
+/* ── Explore grid ──────────────────────────────────────── */
+
+.bigscreen-gamepage-more {
+  display: flex;
+  flex-direction: column;
+}
+
+.bigscreen-gamepage-more-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.bigscreen-gamepage-more-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text-secondary);
+  transition: all var(--duration-normal) var(--ease-standard);
+}
+
+.bigscreen-gamepage-more-card:hover,
+.bigscreen-gamepage-more-card[data-focused="true"] {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface));
+  transform: translateY(-2px);
+  box-shadow: 0 0 18px var(--color-accent-glow);
+}
+
+.bigscreen-gamepage-more-card-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+}
+
+.bigscreen-gamepage-more-card-title {
+  font-size: 17px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.bigscreen-gamepage-more-card-subtitle {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* ── Lightbox ──────────────────────────────────────────── */
+
+.bigscreen-gamepage-lightbox-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  cursor: zoom-out;
+  border: none;
+  padding: 32px;
+}
+
+.bigscreen-gamepage-lightbox-frame {
+  max-width: min(1200px, 90vw);
+  max-height: 90vh;
+  display: block;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.bigscreen-gamepage-lightbox-frame img,
+.bigscreen-gamepage-lightbox-frame video {
+  display: block;
+  max-width: 100%;
+  max-height: 90vh;
+}
+
+/* ── Responsive: when the viewport is narrow (TV-landscape
+ *     16:9 vs. tablet) collapse the two-column library into
+ *     a stacked layout so the spotlight never gets squeezed
+ *     below its 380 px minimum. ─────────────────────────── */
+
+@media (max-width: 1100px) {
+  .bigscreen-library {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .bigscreen-spotlight {
+    min-height: 0;
+  }
+  .bigscreen-gamepage-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Big Screen Hero Background — parallax cycle + Liquid Glass
+   ============================================================
+ *
+ * Owned by `<BigScreenHeroBackground>` (see ./components/game).
+ * The hero's bg layer renders ONE of:
+ *   - a parallax cycle (2 stacked slides + Ken Burns + cross-fade)
+ *   - a video (muted autoplay loop)
+ *   - a single static image (screenshot / banner / cover)
+ *
+ * The foreground glass lives on `.bigscreen-gamepage-hero-info`
+ * and `.bigscreen-gamepage-hero-actions` — neither layer is allowed
+ * to apply backdrop-filter to the BG itself because a giant
+ * blurred-then-animated pixel buffer murders TV GPU framerates.
+ */
+
+.bigscreen-gamepage-hero-bg-static,
+.bigscreen-gamepage-hero-bg-cycle,
+.bigscreen-gamepage-hero-bg-video {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-tertiary);
+}
+
+.bigscreen-gamepage-hero-bg-static {
+  background-size: cover;
+  background-position: center;
+  filter: saturate(1.05);
+}
+
+/* ── Cycle ──────────────────────────────────────────────── */
+
+.bigscreen-gamepage-hero-bg-cycle > .bigscreen-gamepage-hero-bg-slide {
+  position: absolute;
+  inset: 0;
+  /* Scale > 1.0 from the start so the slide has pixels to spare
+   * during the Ken Burns pan. Without it, the translate would
+   * expose a transparent edge halfway through the animation. */
+}
+
+.bigscreen-gamepage-hero-bg-slide img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(1.05);
+  /* GPU-friendly transform layer. */
+  transform: translate3d(0, 0, 0);
+}
+
+/* The two `even` / `odd` keyframe sets are mirror images — even
+ * slides pan up/left, odd slides pan down/right, so consecutive
+ * transitions don't feel like continuous scatter. The 1.05→1.10
+ * scale hides the translate without cropping. */
+
+.bigscreen-gamepage-hero-bg-slide--even img {
+  animation: heroKenBurnsEven 14s ease-out forwards;
+}
+
+.bigscreen-gamepage-hero-bg-slide--odd img {
+  animation: heroKenBurnsOdd 14s ease-out forwards;
+}
+
+/* The Ken Burns magnitudes were tuned for the original 8 s cycle.
+ * After bumping to 14 s we increased the translate + scale so each
+ * slide reads as ACTUAL motion over its full visible lifetime
+ * instead of a near-imperceptible pan. The natural-feeling window
+ * for TV viewing is around ±2.5% / ±1.5% translation paired with
+ * a 1.05 → 1.14 scale; below that and the slide feels static. */
+@keyframes heroKenBurnsEven {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  to {
+    transform: translate3d(-2.5%, -1.5%, 0) scale(1.14);
+  }
+}
+
+@keyframes heroKenBurnsOdd {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  to {
+    transform: translate3d(2.5%, 1.5%, 0) scale(1.14);
+  }
+}
+
+/* Cross-fade between the two stacked slides. We don't remount the
+ * React trees on each tick — the second slide is always mounted
+ * with opacity 0 until JS flips its class, so the browser has the
+ * next frame decoded before opacity changes. */
+
+.bigscreen-gamepage-hero-bg-slide {
+  opacity: 0;
+  transition: opacity 1.5s ease-in-out;
+}
+
+.bigscreen-gamepage-hero-bg-slide--visible {
+  opacity: 1;
+}
+
+.bigscreen-gamepage-hero-bg-slide--fading {
+  opacity: 0;
+}
+
+/* Stop animating a slide the moment it's classified `--fading` —
+ * it's about to fade to 0% opacity, so any leftover scale/translate
+ * motion would be wasted GPU work. The complementary rule below
+ * RE-APPLIES the Ken Burns keyframe the next time the same DOM
+ * node gets reclassified `--visible` (i.e. it was `--fading`
+ * before the cycle's setTimeout advances `current`). React keys
+ * the two slot divs by index, so when the index changes, the
+ * previously-`--fading` div remounts and gets a fresh keyframe
+ * start automatically — no manual reflow trick required. */
+
+.bigscreen-gamepage-hero-bg-slide--fading img {
+  animation-name: none !important;
+}
+
+/* ── Video ──────────────────────────────────────────────── */
+
+.bigscreen-gamepage-hero-bg-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(1.05);
+}
+
+/* ── Reduced motion: disable Ken Burns + parallax, keep cycle
+ * opacity-only. We KEEP the cross-fade so reduced-motion users
+ * still see the next screenshot arrive, but pull the
+ * scale+translate animations so the camera doesn't disorient. */
+
+@media (prefers-reduced-motion: reduce) {
+  .bigscreen-gamepage-hero-bg-slide--even img,
+  .bigscreen-gamepage-hero-bg-slide--odd img {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* ============================================================
+   Liquid Glass — applied to foreground panels, never the BG
+   ============================================================ */
+
+/* Hero backdrop mask is partially transparent at the top so the
+ * cycling BG shows through, but fully tinted near the bottom
+ * where the title sits — this is what makes the title readable
+ * over bright screenshots while still letting the art breathe. */
+
+.bigscreen-gamepage-hero-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    /* Top fade: lighter for back-button legibility. */
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.25) 0%,
+      rgba(0, 0, 0, 0.0) 18%,
+      rgba(0, 0, 0, 0.0) 38%,
+      rgba(0, 0, 0, 0.55) 70%,
+      rgba(0, 0, 0, 0.92) 100%
+    );
+  pointer-events: none;
+}
+
+/* Liquid Glass panels: frosted glass effect that blurs the
+ * animated BG behind them. Applied to the title/info card and
+ * the actions toolbar so the foreground floats over the moving
+ * BG with an Apple-style refractive feel. The '.back' button
+ * already uses a softer glass treatment further down — we DO
+ * NOT add `position: relative` to it here because the original
+ * `.bigscreen-gamepage-hero-back` rule pins it absolutely to the
+ * top-left corner of the hero, and overriding its `position`
+ * would send it into document flow. */
+
+.bigscreen-gamepage-hero-info,
+.bigscreen-gamepage-hero-actions {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Soft inner-stroke + specular highlight via layered box-shadow
+ * (avoids a hard `border` which would feel cheaper than glass).
+ * The `color-mix` calls let the panel take on the dimmed color
+ * of whatever's behind it without a literal rgb(). */
+
+.bigscreen-gamepage-hero-info,
+.bigscreen-gamepage-hero-actions {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.10) 0%,
+      rgba(255, 255, 255, 0.03) 100%
+    );
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 12px 28px rgba(0, 0, 0, 0.35);
+  padding: 22px 28px;
+  transition: transform var(--duration-normal) var(--ease-standard),
+              box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+/* When a button inside `hero-actions` gets focus, we lift the
+ * whole panel slightly + brighten the highlight to communicate
+ * "the user has interacted with this surface." Keeps the
+ * Liquid-Glass aesthetic from feeling static. */
+
+.bigscreen-gamepage-hero-actions:hover,
+.bigscreen-gamepage-hero-actions:has(button[data-focused="true"]) {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.36),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.10),
+    0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+/* Light theme flips the glass palette so it reads as a lighter
+ * frosted surface against the same cycling BG. */
+
+[data-theme="light"] .bigscreen-gamepage-hero-info,
+[data-theme="light"] .bigscreen-gamepage-hero-actions {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.45) 0%,
+      rgba(255, 255, 255, 0.18) 100%
+    );
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="light"] .bigscreen-gamepage-hero-mask {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.20) 0%,
+      rgba(0, 0, 0, 0.0) 18%,
+      rgba(0, 0, 0, 0.0) 38%,
+      rgba(0, 0, 0, 0.30) 70%,
+      rgba(0, 0, 0, 0.62) 100%
+    );
 }
 
 /* ============================================================
