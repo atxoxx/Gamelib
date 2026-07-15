@@ -36,6 +36,7 @@ import {
   getStatusError,
   getStatusLabel,
   getStatusClassSuffix,
+  getActivityMessage,
   isActiveStatus,
   formatEta,
   type TorrentDownload,
@@ -98,6 +99,19 @@ const DownloadCard = React.memo(({
   const isPaused = status.kind === "paused";
   const isCompleted = status.kind === "completed";
   const isError = status.kind === "error";
+  const isDirect =
+    download.id.startsWith("dd_") || download.id.startsWith("db_");
+  const activity = getActivityMessage(download);
+  // Same stalled-detect heuristic as the row — peers connected but
+  // zero bytes/sec while status === "downloading". Tints the
+  // activity line warning-yellow so a user glancing at the popover
+  // notices the row needs attention without opening the full page.
+  const isStalledActivity =
+    !isDirect &&
+    status.kind === "downloading" &&
+    download.peers > 0 &&
+    download.downloadSpeed === 0 &&
+    (download.totalSize ?? 0) > 0;
 
   // Border tint + indeterminate bar animation
   const cardClass = [
@@ -132,6 +146,18 @@ const DownloadCard = React.memo(({
           style={{ width: indeterminate ? "30%" : `${(download.progress ?? 0) * 100}%` }}
         />
       </div>
+
+      {activity && (
+        <div
+          className={`dl-progress-card-activity dl-progress-card-activity--${status.kind}${
+            isStalledActivity ? " dl-progress-card-activity--stalled" : ""
+          }`}
+          title={activity}
+        >
+          <span className="dl-progress-card-activity-dot" aria-hidden />
+          <span className="dl-progress-card-activity-text">{activity}</span>
+        </div>
+      )}
 
       <div className="dl-progress-card-footer">
         <div className="dl-progress-card-stats">
@@ -273,7 +299,13 @@ const DownloadCard = React.memo(({
     a.uploadSpeed !== b.uploadSpeed ||
     a.peers !== b.peers ||
     a.seeds !== b.seeds ||
-    a.status.kind !== b.status.kind
+    a.status.kind !== b.status.kind ||
+    // `sourceUri` drives the direct-download hostname in
+    // `getActivityMessage` — must invalidate when the mirror
+    // dropdown switches hosters, otherwise the activity line
+    // would stay stuck on the previous host until the next
+    // progress tick.
+    a.sourceUri !== b.sourceUri
   ) {
     return false;
   }

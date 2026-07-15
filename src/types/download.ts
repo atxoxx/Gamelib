@@ -244,3 +244,123 @@ export function formatEta(downloaded: number, totalSize: number | null, speed: n
   const remainingHours = hours % 24;
   return `${days}d ${remainingHours}h remaining`;
 }
+
+/**
+ * Best-effort, status-aware description of what this torrent is
+ * CURRENTLY doing, derived entirely from DTO fields the backend
+ * already publishes (status + speeds + peer counts + extracted
+ * flag). Used by the Downloads page row to give the user a
+ * one-line answer to "why is the byte counter stuck at 0?" —
+ * without forcing the row to grow another column.
+ *
+ * Returns `null` when the status chip + error/speed columns
+ * already convey enough (paused, error). Returns a string for
+ * every state where the user is left wondering whether the
+ * torrent is making progress:
+ *
+ *   queued             → "Waiting in queue…"
+ *   fetchingMetadata   → "Contacting trackers & bootstrapping DHT…"
+ *                        (or "Resolving metadata (N peers contacted)…"
+ *                        once some peers have responded)
+ *   downloading        → "Searching for peers…" / "Connecting to known peers…"
+ *                        / "Stalled — peer connections idle" /
+ *                        "Downloading from N peers (M known)"
+ *   completed          → "Extracting archives…" (during autoExtract phase)
+ *                        or "Ready to play" (final state)
+ *
+ * For direct-debrib downloads (id prefix `dd_*` / `db_*`) the
+ * hostname of `sourceUri` is substituted for "peers", giving the
+ * user the answer to "which mirror is this hitting right now?".
+ */
+export function getActivityMessage(download: TorrentDownload): string | null {
+  const status = download.status;
+  const isDirect =
+    download.id.startsWith("dd_") || download.id.startsWith("db_");
+  const speed = download.downloadSpeed;
+  const peers = download.peers;
+  const seeds = download.seeds;
+
+  switch (status.kind) {
+    case "queued":
+      return "Waiting in queue…";
+
+    case "fetchingMetadata":
+      // Total size + file list won't arrive until we've fetched the
+      // .torrent metadata from either a DHT node or a tracker.
+      return peers > 0
+        ? `Resolving metadata (${peers} peer${peers === 1 ? "" : "s"} contacted)…`
+        : "Contacting trackers & bootstrapping DHT…";
+
+    case "downloading": {
+      // Direct downloads don't have peer counts — surface the mirror
+      // hostname (the equivalent of "who am I pulling from right now")
+      // and a connecting/data distinction based on byte flow.
+      if (isDirect) {
+        const host = extractHostname(download.sourceUri);
+        if (speed > 0) {
+          return host ? `Downloading from ${host}` : "Downloading…";
+        }
+        return host ? `Connecting to ${host}…` : "Awaiting host…";
+      }
+      // Torrent: sense the librqbit state via bytes/sec + peer counts.
+      // `peers` = currently-connected peers (`LiveStats.live`);
+      // `seeds` = known-but-not-currently-connected (`seen - live`).
+      if (download.totalSize == null) {
+        // Metadata hasn't landed yet but librqbit already promoted
+        // us out of FetchingMetadata — rare; the message is for
+        // the lint-friendly branch, not a real codepath.
+        return "Resolving metadata…";
+      }
+      if (peers === 0 && seeds === 0) {
+        return "Searching for peers…";
+      }
+      if (peers === 0 && speed === 0) {
+        // We have peer addresses cached from a prior session but no
+        // active connections yet — librqbit is reconnecting.
+        return "Connecting to known peers…";
+      }
+      if (peers === 0 && speed > 0) {
+        // No live peers but bytes are flowing — typical during the
+        // last few KB of a download when we're flushing the disk
+        // cache before closing the stream.
+        return "Flushing remaining bytes…";
+      }
+      // peers > 0
+      if (speed === 0) {
+        return "Stalled — peer connections idle";
+      }
+      // speed > 0 AND peers > 0 — the happy path. Mention the swarm
+      // size when we have one so the user can see whether their
+      // download is pulling from a healthy pool.
+      return `Downloading from ${peers} peer${peers === 1 ? "" : "s"}${
+        seeds > 0 ? ` (${seeds} in swarm)` : ""
+      }`;
+    }
+
+    case "paused":
+      // The status chip + speed column already say "Paused"; an
+      // additional line here would be triple-info.
+      return null;
+
+    case "completed":
+      if (download.autoExtract && !download.extracted) {
+        return "Extracting archives…";
+      }
+      return "Ready to play";
+
+    case "error":
+      // Errors have their own dedicated `dl-row-error` line.
+      return null;
+  }
+}
+
+/** Safe hostname extractor for direct-download URIs. Returns "" for
+ *  magnet links / non-URL inputs. */
+function extractHostname(uri: string): string {
+  if (!uri || uri.startsWith("magnet:")) return "";
+  try {
+    return new URL(uri).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}

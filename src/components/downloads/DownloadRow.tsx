@@ -34,6 +34,7 @@ import {
   getStatusError,
   getStatusLabel,
   getStatusClassSuffix,
+  getActivityMessage,
   isActiveStatus,
   formatEta,
   type TorrentDownload,
@@ -96,6 +97,21 @@ const DownloadRow = React.memo(({
   const isCompleted = status.kind === "completed";
   const isError = status.kind === "error";
   const errorMessage = getStatusError(status);
+  const isDirect =
+    download.id.startsWith("dd_") || download.id.startsWith("db_");
+  const activity = getActivityMessage(download);
+  // One-line answer to "is the torrent actually making progress?"
+  // becomes extra-emphasised when the swarm reports active peers but
+  // zero bytes/sec — that's the classic "stalled" failure mode and
+  // we want the user to notice it without us shouting in a separate
+  // banner. (The colour tint alone isn't enough because Downloading
+  // and Stalled share the same `accent` family.)
+  const isStalledActivity =
+    !isDirect &&
+    status.kind === "downloading" &&
+    download.peers > 0 &&
+    download.downloadSpeed === 0 &&
+    (download.totalSize ?? 0) > 0;
 
   const rowClass = [
     "dl-row",
@@ -167,6 +183,16 @@ const DownloadRow = React.memo(({
               )}
             </span>
           </div>
+          {activity && (
+            <div
+              className={`dl-row-activity dl-row-activity--${status.kind}${
+                isStalledActivity ? " dl-row-activity--stalled" : ""
+              }`}
+            >
+              <span className="dl-row-activity-dot" aria-hidden />
+              <span className="dl-row-activity-text">{activity}</span>
+            </div>
+          )}
           {isError && errorMessage && (
             <div className="dl-row-error" role="alert">
               {errorMessage}
