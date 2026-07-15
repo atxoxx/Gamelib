@@ -24,6 +24,18 @@ pub struct EpicGameAsset {
     pub item_type: Option<String>,
 }
 
+/// Reference to a parent game for DLC / add-on catalog items.
+///
+/// Epic's catalog API returns `mainGameItem: { namespace, id }` on
+/// add-on entries. A `None` value means the item is a base game.
+/// Used by the sync filter to require `addons/launchable` on DLC.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EpicMainGameItem {
+    pub namespace: Option<String>,
+    pub id: Option<String>,
+}
+
 /// Detailed catalog metadata for a game.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +51,11 @@ pub struct EpicCatalogItem {
     pub release_date: Option<String>,
     pub cover_url: Option<String>,
     pub custom_attributes: Option<std::collections::HashMap<String, String>>,
+    /// Parent game reference — present when this catalog item is a
+    /// DLC / add-on. Used by the sync filter to require
+    /// `addons/launchable` on DLC entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_game_item: Option<EpicMainGameItem>,
 }
 
 /// A processed Epic game ready for the library.
