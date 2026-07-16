@@ -1151,6 +1151,11 @@
   width: var(--sidebar-icon-rail-width);
 }
 
+/* The inner .sidebar keeps its own width: var(--sidebar-width) (full-width), which leaves every game row ~280px wide inside the now-68px .app-sidebar. The row uses justify-content: center, so the 56px cover is centered in the 280px row at ~112px -- well outside the visible 68px column -- and overflow: hidden clips it away (the list reads as empty even though rows stay clickable). Collapsing the inner sidebar to the rail width lets the centered cover land inside the visible column. */
+.app-sidebar.sidebar-icon-rail .sidebar {
+  width: 100%;
+}
+
 .app-sidebar.sidebar-icon-rail .sidebar-search,
 .app-sidebar.sidebar-icon-rail .sidebar-filter-btn,
 .app-sidebar.sidebar-icon-rail .sidebar-import-wrapper {
@@ -1646,6 +1651,11 @@
  * toggle visible so the user can revert with one click. */
 .app-sidebar.sidebar-icon-rail {
   width: var(--sidebar-icon-rail-width);
+}
+
+/* The inner .sidebar keeps its own width: var(--sidebar-width) (full-width), which leaves every game row ~280px wide inside the now-68px .app-sidebar. The row uses justify-content: center, so the 56px cover is centered in the 280px row at ~112px -- well outside the visible 68px column -- and overflow: hidden clips it away (the list reads as empty even though rows stay clickable). Collapsing the inner sidebar to the rail width lets the centered cover land inside the visible column. */
+.app-sidebar.sidebar-icon-rail .sidebar {
+  width: 100%;
 }
 
 .app-sidebar.sidebar-icon-rail .sidebar-search,
