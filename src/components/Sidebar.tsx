@@ -1,18 +1,234 @@
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useGames, NO_IGDB_MATCH_SOURCE } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import { useLibraryFilters } from "../hooks/useLibraryFilters";
-import { gameNameFromPath, type Game, type GameMetadataResult } from "../types/game";
+import { useSidebarCollapse } from "../context/SidebarCollapseContext";
+import {
+  gameNameFromPath,
+  PLAY_STATUS_DETAILS,
+  type Game,
+  type GameMetadataResult,
+  type PlayStatus,
+} from "../types/game";
 import ImportModal, { type ExeInfo } from "./ImportModal";
 import SidebarFilterPopover from "./SidebarFilterPopover";
+import {
+  SidebarHoverPreview,
+  buildSidebarAnchorSelector,
+} from "./SidebarHoverPreview";
 import { Button } from "./ui";
+
+/**
+ * Read the persisted pinned-id set from localStorage. Wrapped in
+ * try/catch because private-browsing / sandboxed contexts can throw
+ * on access — returning an empty Set keeps the sidebar renderable.
+ * Per-entry type filtering defends against a corrupt payload (e.g.
+ * a future schema migration that wrote numbers instead of strings):
+ * one bad entry cannot poison the whole set.
+ */
+function loadPinnedIds(): Set<string> {
+  try {
+    if (typeof localStorage === "undefined") return new Set();
+    const raw = localStorage.getItem("gamelib.sidebar.pinned_ids:v1");
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v): v is string => typeof v === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * HighlightedName
+ * ───────────────
+ * Renders `name` with any substring matching `query` (case-
+ * insensitive) wrapped in a <mark> tag for the matched substring.
+ * React's JSX renders <mark> as a real text element so the wrapped
+ * chunk can NEVER escape as raw HTML — XSS-safe by construction.
+ *
+ * Multiple matches are handled: the function walks the string with
+ * `String.prototype.indexOf` from the last cursor. Empty/whitespace
+ * queries fall through to an unhighlighted render so the search
+ * experience feels "clean" once the user clears the input.
+ */
+function HighlightedName({ name, query }: { name: string; query: string }) {
+  const trimmed = query.trim();
+  if (!trimmed) return <>{name}</>;
+  const qLower = trimmed.toLowerCase();
+  const lower = name.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  while (last < name.length) {
+    const idx = lower.indexOf(qLower, last);
+    if (idx === -1) {
+      parts.push(name.substring(last));
+      break;
+    }
+    if (idx > last) parts.push(name.substring(last, idx));
+    parts.push(
+      <mark key={`${name}-${idx}`}>{name.substring(idx, idx + qLower.length)}</mark>
+    );
+    last = idx + qLower.length;
+  }
+  return <>{parts}</>;
+}
+
+/**
+ * ActiveFilterChips
+ * ─────────────────
+ * The horizontal strip of removable chips below the search row.
+ * Each chip represents one advanced filter facet (status, source,
+ * play status, genres, platforms, year, rating) plus a virtual
+ * "Clear all" affordance at the start when more than one chip is
+ * active. The strip scrolls horizontally on overflow rather than
+ * wrapping, so it never pushes the divider down. Hidden entirely
+ * when no filters are active.
+ *
+ * The remove button calls the corresponding `removeXxx` handler
+ * passed from `useLibraryFilters` — we keep the chip's rendering
+ * dumb so the filter hook remains the single source of truth.
+ */
+function ActiveFilterChips({
+  filterState,
+  onRemoveStatus,
+  onRemoveSource,
+  onRemovePlayStatus,
+  onRemoveGenre,
+  onRemovePlatform,
+  onRemoveYear,
+  onRemoveRating,
+  onReset,
+}: {
+  filterState: {
+    status: string;
+    source: string;
+    playStatus: string;
+    genres: string[];
+    platforms: string[];
+    yearMin: number | null;
+    yearMax: number | null;
+    ratingMin: number | null;
+  };
+  onRemoveStatus: () => void;
+  onRemoveSource: () => void;
+  onRemovePlayStatus: () => void;
+  onRemoveGenre: (g: string) => void;
+  onRemovePlatform: (p: string) => void;
+  onRemoveYear: () => void;
+  onRemoveRating: () => void;
+  onReset: () => void;
+}) {
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  if (filterState.status !== "all") {
+    chips.push({
+      key: "status",
+      label: filterState.status === "installed" ? "Installed" : "Uninstalled",
+      remove: onRemoveStatus,
+    });
+  }
+  if (filterState.source !== "all") {
+    chips.push({
+      key: `source-${filterState.source}`,
+      label: `Source: ${filterState.source}`,
+      remove: onRemoveSource,
+    });
+  }
+  if (filterState.playStatus !== "all") {
+    const meta = PLAY_STATUS_DETAILS[filterState.playStatus as PlayStatus];
+    chips.push({
+      key: "play-status",
+      label: meta?.label || filterState.playStatus,
+      remove: onRemovePlayStatus,
+    });
+  }
+  for (const g of filterState.genres) {
+    chips.push({ key: `g-${g}`, label: g, remove: () => onRemoveGenre(g) });
+  }
+  for (const p of filterState.platforms) {
+    chips.push({ key: `p-${p}`, label: p, remove: () => onRemovePlatform(p) });
+  }
+  if (filterState.yearMin != null || filterState.yearMax != null) {
+    chips.push({
+      key: "year",
+      label: `${filterState.yearMin ?? "any"}–${filterState.yearMax ?? "any"}`,
+      remove: onRemoveYear,
+    });
+  }
+  if (filterState.ratingMin != null) {
+    chips.push({
+      key: "rating",
+      label: `≥${filterState.ratingMin}%`,
+      remove: onRemoveRating,
+    });
+  }
+  if (chips.length === 0) return null;
+  return (
+    <div
+      className="sidebar-active-filters"
+      role="region"
+      aria-label="Active advanced filters"
+    >
+      {chips.length > 1 && (
+        <span className="sidebar-active-filter">
+          Clear all
+          <button
+            type="button"
+            onClick={onReset}
+            className="sidebar-active-filter__remove"
+            aria-label="Clear all active filters"
+            title="Clear all filters"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
+        </span>
+      )}
+      {chips.map((c) => (
+        <span key={c.key} className="sidebar-active-filter">
+          {c.label}
+          <button
+            type="button"
+            onClick={c.remove}
+            className="sidebar-active-filter__remove"
+            aria-label={`Remove filter: ${c.label}`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { games, selectedGameId, setSelectedGameId, removeGame, runningGameIds, launchGame, importLocalGames } =
+  const { games, selectedGameId, setSelectedGameId, removeGame, runningGameIds, launchGame, importLocalGames, updateGame } =
     useGames();
   const { showToast } = useToast();
 
@@ -20,7 +236,9 @@ export default function Sidebar() {
   // the Library page uses, so search + status + genres + platforms +
   // release year + rating all narrow the list in real time. The
   // popover exposes everything except search (which lives in the
-  // sidebar itself).
+  // sidebar itself). The per-facet `removeX` callbacks below power
+  // the ActiveFilterChips strip — each chip's × unmounts the
+  // matching facet without clearing the others.
   const {
     filters: filterState,
     filteredGames,
@@ -33,6 +251,13 @@ export default function Sidebar() {
     setRatingMin,
     setStatus,
     setSort,
+    removeGenre,
+    removePlatform,
+    removeYear,
+    removeRating,
+    removeStatus,
+    removePlayStatus,
+    removeSource,
     reset,
   } = useLibraryFilters(games);
 
@@ -53,6 +278,110 @@ export default function Sidebar() {
   const [contextMenu, setContextMenu] = useState<{ game: Game; x: number; y: number } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [scannedExes, setScannedExes] = useState<ExeInfo[]>([]);
+
+  // ── Sidebar collapse (icon-rail mode) ─────────────────────────────
+  // The SidebarCollapseProvider in App.tsx owns the persisted
+  // boolean. We read it here so the header can render the toggle
+  // button and the main JSX can switch to a compact rail layout
+  // for the cover-only rows.
+  const { isIconRail, toggle: toggleIconRail } = useSidebarCollapse();
+
+  // ── Pinned Games (Feature #12) ───────────────────────────────────
+  // Module-scope loader handles try/catch + corrupt-payload defense.
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinnedIds());
+  // Persist on every change. Reads-then-writes is fine here — the
+  // single Set instance is mutated locally and serialized once.
+  useEffect(() => {
+    try {
+      if (typeof localStorage === "undefined") return;
+      localStorage.setItem(
+        "gamelib.sidebar.pinned_ids:v1",
+        JSON.stringify(Array.from(pinnedIds))
+      );
+    } catch {
+      /* quota / sandboxed contexts / private browsing — ignore */
+    }
+  }, [pinnedIds]);
+
+  // ── Multi-select (Feature #13) ───────────────────────────────────
+  // `bulkSelectedIds` is the canonical "what's checked" set.
+  // `lastClickedId` is the shift-click anchor. Both are local
+  // state — no need to lift into GameContext because the sidebar
+  // is the only consumer and the selection clears on action.
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set());
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+
+  // Escape clears bulk selection — single key to back out without
+  // having to click each row off. Listener is bound only when the
+  // selection is non-empty so an idle sidebar carries no handler.
+  useEffect(() => {
+    if (bulkSelectedIds.size === 0) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setBulkSelectedIds(new Set());
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [bulkSelectedIds.size]);
+
+  // ── Auto-scroll selected row into view (Feature #4) ──────────────
+  // When selectedGameId changes via deep navigation (e.g. click on a
+  // wishlist card → /library/:id), the matching row may be off-screen
+  // because of filter or scroll position. We use `block: "nearest"`
+  // so an already-visible row does NOT scroll (clicking inside the
+  // sidebar thus doesn't trigger a twitch). The setTimeout defers
+  // to the next paint cycle so the row has rendered before we
+  // measure it.
+  useEffect(() => {
+    if (!selectedGameId) return;
+    const handle = setTimeout(() => {
+      try {
+        const el = document.querySelector<HTMLElement>(
+          `[data-sidebar-game-id="${CSS.escape(selectedGameId)}"]`
+        );
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } catch {
+        /* CSS.escape unavailable — skip */
+      }
+    }, 0);
+    return () => clearTimeout(handle);
+  }, [selectedGameId]);
+
+  // ── Hover preview (Feature #9) ───────────────────────────────────
+  // Single source of truth: the row's onMouseEnter sets the id,
+  // onMouseLeave clears it. The SidebarHoverPreview component
+  // handles its own delay timer + visibility.
+  const [hoveredGameId, setHoveredGameId] = useState<string | null>(null);
+  const hoveredGame = useMemo(
+    () => (hoveredGameId ? (games.find((g) => g.id === hoveredGameId) ?? null) : null),
+    [hoveredGameId, games]
+  );
+
+  // Pre-compute the selector so SidebarHoverPreview doesn't have to
+  // re-derive the CSS escape each render.
+  const hoverPreviewAnchor = useMemo(
+    () => buildSidebarAnchorSelector(hoveredGameId),
+    [hoveredGameId]
+  );
+
+  // ── Derived lists for rendering ──────────────────────────────────
+  // Pinned games keep their insertion order via Set iteration
+  // (matches "pin new = top of pinned section"). Filtering from
+  // games (not filteredGames) keeps pins visible above any active
+  // search filter so a user can always jump back to a pinned title
+  // they've hidden by typing.
+  const pinnedGames = useMemo(() => {
+    return Array.from(pinnedIds)
+      .map((id) => games.find((g) => g.id === id))
+      .filter((g): g is Game => !!g);
+  }, [pinnedIds, games]);
+
+  // Main list dedupes against the pinned section so users don't see
+  // the same row twice when a game is both pinned and matches the
+  // current filter.
+  const filteredNonPinned = useMemo(() => {
+    if (pinnedIds.size === 0) return filteredGames;
+    return filteredGames.filter((g) => !pinnedIds.has(g.id));
+  }, [filteredGames, pinnedIds]);
 
   const importMenuRef = useRef<HTMLDivElement>(null);
   const importBtnRef = useRef<HTMLButtonElement>(null);
@@ -161,14 +490,242 @@ export default function Sidebar() {
     showToast(`Removed ${game.name}`, "info");
   }
 
-  function handleGameClick(game: Game) {
+  // ──────────────────────────────────────────────────────────────────
+  // Multi-select + plain/click row handler (Feature #13)
+  // ──────────────────────────────────────────────────────────────────
+  // Behavior:
+  //   • Shift-click → select a contiguous range from the last
+  //     clicked/selected row to the current row. Works across
+  //     both pinned + main sections because the iteration uses
+  //     the canonical flat list the user is currently looking
+  //     at.
+  //   • Ctrl/Cmd-click → toggle the row's membership in the selection
+  //     set without changing selectedGameId or navigating.
+  //   • Plain click → if a selection is active, clear it and fall
+  //     through to the original "select + navigate" semantics.
+  //     Otherwise just navigate.
+  // We intentionally do NOT collapse the selection into the global
+  // `selectedGameId` — the bulk action bar reads `bulkSelectedIds`
+  // directly, and individual-vs-bulk are two orthogonal intents.
+  const combinedVisibleGames = useMemo<Game[]>(
+    () => [...pinnedGames, ...filteredNonPinned],
+    [pinnedGames, filteredNonPinned]
+  );
+
+  function handleRowClick(game: Game, e: React.MouseEvent) {
+    // Shift-click range: compute indices in the canonical list.
+    if (e.shiftKey && lastClickedId) {
+      e.preventDefault();
+      e.stopPropagation();
+      const ids = combinedVisibleGames.map((g) => g.id);
+      const fromIdx = ids.indexOf(lastClickedId);
+      const toIdx = ids.indexOf(game.id);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        setBulkSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (let i = lo; i <= hi; i++) next.add(ids[i]);
+          return next;
+        });
+      }
+      return;
+    }
+    // Ctrl/Cmd-click toggle.
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      setLastClickedId(game.id);
+      setBulkSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(game.id)) next.delete(game.id);
+        else next.add(game.id);
+        return next;
+      });
+      return;
+    }
+    // Plain click: clear any bulk selection so a stray click
+    // doesn't accidentally carry selections into the new screen,
+    // then navigate. Setting lastClickedId so a follow-up
+    // shift-click anchors against the just-clicked row rather
+    // than whatever was last toggled.
+    setLastClickedId(game.id);
+    if (bulkSelectedIds.size > 0) setBulkSelectedIds(new Set());
     setSelectedGameId(game.id);
     navigate(`/library/${game.id}`);
   }
 
+  // ── Pin/unpin single game (Feature #12) ──────────────────────────
+  // Used by the context-menu toggle. We use the functional updater
+  // pattern so two rapid clicks on the same row can't read a stale
+  // Set and accidentally double-pin (write-after-write race).
+  const togglePin = useCallback((game: Game) => {
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(game.id)) next.delete(game.id);
+      else next.add(game.id);
+      return next;
+    });
+  }, []);
+
+  // ── Bulk action helpers (Feature #13) ─────────────────────────────
+  // Each bulk operation intentionally clears the selection AFTER
+  // running — leaving the check overlay up after the action is
+  // done reads as "the action is still pending" and most users
+  // will reflexively click another row before realizing the
+  // first action completed.
+  const bulkPin = useCallback(() => {
+    const ids = Array.from(bulkSelectedIds);
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    setBulkSelectedIds(new Set());
+  }, [bulkSelectedIds]);
+
+  const bulkUnpin = useCallback(() => {
+    const ids = Array.from(bulkSelectedIds);
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+    setBulkSelectedIds(new Set());
+  }, [bulkSelectedIds]);
+
+  const bulkRemove = useCallback(() => {
+    const count = bulkSelectedIds.size;
+    if (count === 0) return;
+    bulkSelectedIds.forEach((id) => removeGame(id));
+    setBulkSelectedIds(new Set());
+    showToast(
+      `Removed ${count} game${count !== 1 ? "s" : ""} from library`,
+      "info"
+    );
+  }, [bulkSelectedIds, removeGame, showToast]);
+
+  const bulkSetPlayStatus = useCallback(
+    (status: PlayStatus) => {
+      const count = bulkSelectedIds.size;
+      if (count === 0) return;
+      bulkSelectedIds.forEach((id) => updateGame(id, { playStatus: status }));
+      setBulkSelectedIds(new Set());
+      const meta = PLAY_STATUS_DETAILS[status];
+      showToast(
+        `Marked ${count} game${count !== 1 ? "s" : ""} as ${meta?.label || status}`,
+        "success"
+      );
+    },
+    [bulkSelectedIds, updateGame, showToast]
+  );
+
+  // ── Context menu actions (Feature #18) ───────────────────────────
+  // Show-in-folder: uses the same `openPath` pattern as InfoKpiCard
+  // — accepts a directory path and shells out to the OS file
+  // manager (Explorer / Finder / Nautilus). Disabled when the
+  // game has no on-disk path (Steam-owned titles without a local
+  // install can't be revealed because there's nothing to point at).
+  async function handleShowInFolder(game: Game) {
+    setContextMenu(null);
+    if (!game.path) {
+      showToast(
+        `${game.name} has no local path to reveal`,
+        "info"
+      );
+      return;
+    }
+    try {
+      const parent = game.path.replace(/[\\/][^\\/]+$/, "");
+      await openPath(parent);
+    } catch (err) {
+      showToast(`Couldn't open folder: ${err}`, "error");
+    }
+  }
+
+  // Open Store page: if we have a metadataUrl (IGDB / Steam) jump
+  // to that external browser URL via plugin-opener. Falls back to
+  // the in-app store search by name otherwise.
+  function handleOpenStore(game: Game) {
+    setContextMenu(null);
+    if (game.metadataUrl) {
+      openUrl(game.metadataUrl).catch(() => undefined);
+      return;
+    }
+    navigate(`/store?q=${encodeURIComponent(game.name)}`);
+  }
+
+  // Copy launch path: best-effort clipboard via the browser API,
+  // falling back to Tauri's clipboard-manager plugin. The toast
+  // confirms so the user knows the action succeeded.
+  async function handleCopyPath(game: Game) {
+    setContextMenu(null);
+    const text = game.path || game.name;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {
+      /* fall through */
+    }
+    if (!copied) {
+      try {
+        await invoke("plugin:clipboard-manager|write_text", {
+          label: null,
+          text,
+        });
+        copied = true;
+      } catch {
+        /* clipboard unavailable in this sandbox */
+      }
+    }
+    showToast(
+      copied ? "Copied to clipboard" : "Couldn't copy to clipboard",
+      copied ? "success" : "error"
+    );
+  }
+
+  // Set play status (single row, used by the context-menu submenu)
+  function handleSetPlayStatus(game: Game, status: PlayStatus) {
+    updateGame(game.id, { playStatus: status });
+    setContextMenu(null);
+    const meta = PLAY_STATUS_DETAILS[status];
+    showToast(
+      `${game.name} → ${meta?.label || status}`,
+      "success"
+    );
+  }
+
   return (
     <aside className="sidebar">
+      {/* Sidebar header. In icon-rail mode we render ONLY a small
+       * collapse-to-full button so the 68px column stays clean —
+       * the search / filter / import controls are hidden via the
+       * `.app-sidebar.sidebar-icon-rail .sidebar-search → display:none`
+       * rules but the JSX is still mounted for a clean toggle
+       * without remounting React trees on collapse/expand. The
+       * icon-rail collapse toggle sits at the top of the sidebar
+       * header and is rotated 180° to read as "expand" — same
+       * arrow direction as the rail-mode affordance in PS5/Steam
+       * Big Picture. */}
       <div className="sidebar-header">
+        <button
+          type="button"
+          className="sidebar-collapse-toggle"
+          onClick={toggleIconRail}
+          aria-label={isIconRail ? "Expand sidebar" : "Collapse sidebar"}
+          aria-pressed={isIconRail}
+          title={isIconRail ? "Expand sidebar" : "Collapse to icon rail"}
+        >
+          {isIconRail ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          )}
+        </button>
         <div className="sidebar-search-row">
           <div className="sidebar-search">
             <svg
@@ -326,15 +883,73 @@ export default function Sidebar() {
         </div>
       </div>
 
+      {/* Active-filter chips strip. Hidden when nothing advanced is
+       * active (returns null). Wrapping with a fragment so we
+       * don't add an extra div-level box; the chips strip itself
+       * owns its padding. */}
+      <ActiveFilterChips
+        filterState={filterState}
+        onRemoveStatus={removeStatus}
+        onRemoveSource={removeSource}
+        onRemovePlayStatus={removePlayStatus}
+        onRemoveGenre={removeGenre}
+        onRemovePlatform={removePlatform}
+        onRemoveYear={removeYear}
+        onRemoveRating={removeRating}
+        onReset={reset}
+      />
+
       <hr className="sidebar-divider" />
+
+      {/* Pinned section. Renders above the main list so the
+       * pinned titles are always reachable even when an active
+       * filter narrows the main list to zero rows. Each pinned
+       * row is the same SidebarGameItem component the main list
+       * uses, just rendered separately so the section header
+       * makes the affordance obvious. */}
+      {pinnedGames.length > 0 && (
+        <>
+          <div className="sidebar-section-header">
+            <span>
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+                style={{ display: "inline-block", verticalAlign: "-2px", marginRight: 4 }}
+              >
+                <path d="M12 2 9 9 2 9.5l5.5 4.5L5 22l7-4 7 4-2.5-8 5.5-4.5L15 9z" />
+              </svg>
+              Pinned
+            </span>
+            <span className="sidebar-list-count">{pinnedGames.length}</span>
+          </div>
+          <div className="sidebar-pinned-list">
+            {pinnedGames.map((game) => (
+              <SidebarGameItem
+                key={`pinned-${game.id}`}
+                game={game}
+                isSelected={selectedGameId === game.id}
+                isRunning={runningGameIds.includes(game.id)}
+                bulkSelected={bulkSelectedIds.has(game.id)}
+                searchQuery={filterState.search}
+                onClick={handleRowClick}
+                onContextMenu={(e) => handleGameContextMenu(e, game)}
+                onPointerEnter={(g) => setHoveredGameId(g.id)}
+                onPointerLeave={() => setHoveredGameId((id) => (id === game.id ? null : id))}
+              />
+            ))}
+          </div>
+          <hr className="sidebar-divider sidebar-divider--thin" />
+        </>
+      )}
 
       <div className="sidebar-list-header">
         <span>Games</span>
-        <span className="sidebar-list-count">{filteredGames.length}</span>
+        <span className="sidebar-list-count">{filteredNonPinned.length}</span>
       </div>
 
       <div className="sidebar-list">
-        {filteredGames.length === 0 ? (
+        {filteredNonPinned.length === 0 ? (
           <div className="sidebar-empty">
             <svg
               viewBox="0 0 24 24"
@@ -354,16 +969,43 @@ export default function Sidebar() {
             )}
           </div>
         ) : (
-          filteredGames.map((game) => (
-            <SidebarGameItem
-              key={game.id}
-              game={game}
-              isSelected={selectedGameId === game.id}
-              isRunning={runningGameIds.includes(game.id)}
-              onClick={() => handleGameClick(game)}
-              onContextMenu={(e) => handleGameContextMenu(e, game)}
-            />
-          ))
+          <>
+            {filteredNonPinned.map((game) => (
+              <SidebarGameItem
+                key={game.id}
+                game={game}
+                isSelected={selectedGameId === game.id}
+                isRunning={runningGameIds.includes(game.id)}
+                bulkSelected={bulkSelectedIds.has(game.id)}
+                searchQuery={filterState.search}
+                onClick={handleRowClick}
+                onContextMenu={(e) => handleGameContextMenu(e, game)}
+                onPointerEnter={(g) => setHoveredGameId(g.id)}
+                onPointerLeave={() => setHoveredGameId((id) => (id === game.id ? null : id))}
+              />
+            ))}
+            {/* Floating bulk-action bar — sticky to the bottom of
+             * the scroll container so it stays visible while the
+             * user mouses over selected rows far down the list.
+             * Hidden when no bulk selection is active. Actions:
+             * Pin / Unpin (toggles depending on whether the entire
+             * selection is already pinned), Set Status, Remove.
+             * Escape closes the selection. */}
+            {bulkSelectedIds.size > 0 && (
+              <BulkActionBar
+                count={bulkSelectedIds.size}
+                allPinned={
+                  pinnedIds.size > 0 &&
+                  Array.from(bulkSelectedIds).every((id) => pinnedIds.has(id))
+                }
+                onPin={bulkPin}
+                onUnpin={bulkUnpin}
+                onSetStatus={bulkSetPlayStatus}
+                onRemove={bulkRemove}
+                onCancel={() => setBulkSelectedIds(new Set())}
+              />
+            )}
+          </>
         )}
       </div>
       {contextMenu && (
@@ -372,9 +1014,18 @@ export default function Sidebar() {
           y={contextMenu.y}
           game={contextMenu.game}
           isRunning={runningGameIds.includes(contextMenu.game.id)}
+          isPinned={pinnedIds.has(contextMenu.game.id)}
           onLaunch={() => handleLaunchFromContextMenu(contextMenu.game)}
           onViewDetails={() => handleViewDetailsFromContextMenu(contextMenu.game)}
           onRemove={() => handleRemoveFromContextMenu(contextMenu.game)}
+          onTogglePin={() => {
+            togglePin(contextMenu.game);
+            setContextMenu(null);
+          }}
+          onSetStatus={(s) => handleSetPlayStatus(contextMenu.game, s)}
+          onShowInFolder={() => handleShowInFolder(contextMenu.game)}
+          onOpenStore={() => handleOpenStore(contextMenu.game)}
+          onCopyPath={() => handleCopyPath(contextMenu.game)}
         />
       )}
 
@@ -410,6 +1061,16 @@ export default function Sidebar() {
           onClose={() => setShowFilterPopover(false)}
         />
       )}
+
+      {/* Hover preview (Feature #9). Portal-based, anchored to the
+       * closest `data-sidebar-game-id` row via CSS selector. The
+       * component mounts nothing when `game === null` so this
+       * line is a zero-cost no-op outside the hover window. */}
+      <SidebarHoverPreview
+        game={hoveredGame}
+        anchorSelector={hoverPreviewAnchor}
+        active={hoveredGameId !== null}
+      />
     </aside>
   );
 }
@@ -419,9 +1080,18 @@ interface SidebarContextMenuProps {
   y: number;
   game: Game;
   isRunning: boolean;
+  /** True when this game is in the pinned set. Drives the Pin/Unpin
+   *  label switch and lets the menu read "already pinned now?" without
+   *  needing the parent to compute it. */
+  isPinned: boolean;
   onLaunch: () => void;
   onViewDetails: () => void;
   onRemove: () => void;
+  onTogglePin: () => void;
+  onSetStatus: (status: PlayStatus) => void;
+  onShowInFolder: () => void;
+  onOpenStore: () => void;
+  onCopyPath: () => void;
 }
 
 function ContextMenu({
@@ -429,14 +1099,38 @@ function ContextMenu({
   y,
   game,
   isRunning,
+  isPinned,
   onLaunch,
   onViewDetails,
   onRemove,
+  onTogglePin,
+  onSetStatus,
+  onShowInFolder,
+  onOpenStore,
+  onCopyPath,
 }: SidebarContextMenuProps) {
-  const menuWidth = 190;
-  const menuHeight = 130;
+  // Width grew from 190 with the new items (Pin, Status submenu,
+  // Show in folder, Open store, Copy path). Height grew similarly
+  // because of the Status submenu expander. Update the
+  // viewport-edge adjusters to match.
+  const menuWidth = 230;
+  const menuHeight = 360;
   const adjustedX = window.innerWidth - x < menuWidth ? x - menuWidth : x;
   const adjustedY = window.innerHeight - y < menuHeight ? y - menuHeight : y;
+
+  // Status submenu open state. Click on the "Set Status" item to
+  // toggle; click any submenu option commits + closes both
+  // submenu and parent context menu. We deliberately use click
+  // rather than hover because hover-submenus have a latency
+  // cost that's not worth a two-deep menu.
+  const [statusOpen, setStatusOpen] = useState(false);
+
+  // When the menu sits flush against the right viewport edge
+  // (because the original X was close to the screen edge), we want
+  // the status submenu to fly out to the LEFT — otherwise it
+  // overflows the window. The `flip` flag is derived from the
+  // post-adjust X coordinate.
+  const submenuFlipped = adjustedX < 12;
 
   return (
     <div
@@ -464,6 +1158,85 @@ function ContextMenu({
           <line x1="12" y1="8" x2="12.01" y2="8" />
         </svg>
         View Details
+      </button>
+      <button className="context-menu-item" onClick={onTogglePin}>
+        <svg viewBox="0 0 24 24" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2 9 9 2 9.5l5.5 4.5L5 22l7-4 7 4-2.5-8 5.5-4.5L15 9z" />
+        </svg>
+        {isPinned ? "Unpin" : "Pin to Top"}
+      </button>
+      {/* Set Status — toggles a fly-out submenu to the right (or
+       *  left, when on the right viewport edge) of this row. The
+       *  `.has-submenu` class adds a chevron via CSS. */}
+      <div
+        className={`context-menu-item has-submenu${statusOpen ? " submenu-open" : ""}`}
+        onClick={() => setStatusOpen((v) => !v)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setStatusOpen((v) => !v);
+          }
+        }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m21.64 3-2.28 2.28" />
+          <path d="M3 21l9-9" />
+          <path d="M14.5 6.5 21 13" />
+          <circle cx="9" cy="7" r="3" />
+        </svg>
+        Set Status
+        <div
+          className={`sidebar-context-submenu${statusOpen ? " open" : ""}${submenuFlipped ? " sidebar-context-submenu--flip" : ""}`}
+          role="menu"
+          aria-label="Play status options"
+        >
+          {(["backlog", "playing", "completed", "on_hold", "abandoned"] as PlayStatus[]).map(
+            (s) => {
+              const meta = PLAY_STATUS_DETAILS[s];
+              const active = (game.playStatus || "backlog") === s;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  className={`sidebar-context-submenu__item${active ? " active" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSetStatus(s);
+                  }}
+                >
+                  <span
+                    className="dot"
+                    style={{ background: meta.color }}
+                  />
+                  {meta.label}
+                </button>
+              );
+            }
+          )}
+        </div>
+      </div>
+      <button className="context-menu-item" onClick={onShowInFolder}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+        Show in Folder
+      </button>
+      <button className="context-menu-item" onClick={onOpenStore}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="9" cy="21" r="1" />
+          <circle cx="20" cy="21" r="1" />
+          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+        </svg>
+        Open in Store
+      </button>
+      <button className="context-menu-item" onClick={onCopyPath}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </svg>
+        Copy Path
       </button>
       <div className="context-menu-separator" />
       <button className="context-menu-item remove-action" onClick={onRemove}>
@@ -501,14 +1274,22 @@ function SidebarGameItem({
   game,
   isSelected,
   isRunning,
+  bulkSelected,
+  searchQuery,
   onClick,
   onContextMenu,
+  onPointerEnter,
+  onPointerLeave,
 }: {
   game: Game;
   isSelected: boolean;
   isRunning: boolean;
-  onClick: () => void;
+  bulkSelected: boolean;
+  searchQuery: string;
+  onClick: (game: Game, e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  onPointerEnter: (game: Game) => void;
+  onPointerLeave: () => void;
 }) {
   const { updateGame, enrichGameMetadata } = useGames();
   // The ref is attached to the OUTER `<button className="sidebar-game-item">`,
@@ -555,9 +1336,12 @@ function SidebarGameItem({
     <button
       type="button"
       ref={coverRef}
-      className={`sidebar-game-item${isSelected ? " active" : ""}`}
-      onClick={onClick}
+      data-sidebar-game-id={game.id}
+      className={`sidebar-game-item${isSelected ? " active" : ""}${bulkSelected ? " bulk-selected" : ""}`}
+      onClick={(e) => onClick(game, e)}
       onContextMenu={onContextMenu}
+      onMouseEnter={() => onPointerEnter(game)}
+      onMouseLeave={onPointerLeave}
     >
       <div className="sidebar-game-icon">
         {game.iconUrl ? (
@@ -606,9 +1390,24 @@ function SidebarGameItem({
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
           </svg>
         )}
+        {/* Bulk-select check badge — pinned to the row's top-right.
+         *  Always present in the DOM so the entrance animation
+         *  (`opacity 0→1, scale 0.6→1`) can run when the class flips.
+         *  `pointer-events: none` so the badge can't intercept a
+         *  click meant for the row underneath. */}
+        <div className="sidebar-game-item__check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
       </div>
       <div className="sidebar-game-info">
-        <div className="sidebar-game-name">{game.name}</div>
+        <div className="sidebar-game-name">
+          {/* Wraps the matched substring in <mark> for the search
+           *  highlight (Feature #5). React renders the mark as a
+           *  real element so XSS is impossible by construction. */}
+          <HighlightedName name={game.name} query={searchQuery} />
+        </div>
         <div className="sidebar-game-meta">
           {game.platform} · {game.playTime}
         </div>
@@ -632,5 +1431,134 @@ function SidebarGameItem({
         }
       />
     </button>
+  );
+}
+
+/**
+ * BulkActionBar
+ * ─────────────
+ * Floating bar that renders inside the sidebar list area at
+ * `position: sticky; bottom: 0` so it always floats above the
+ * last visible row, regardless of how far down the list the
+ * user has scrolled. Each action runs the corresponding
+ * `useCallback`-wrapped handler from the parent Sidebar —
+ * kept terse here so all bulk-action logic lives in one place.
+ *
+ * The `Cancel` button (× icon) clears the selection WITHOUT
+ * running an action — same effect as Escape but visualized
+ * for users who don't try the keyboard.
+ *
+ * The "Pin / Unpin" toggle swaps based on `allPinned` so a
+ * user pressing it twice doesn't end up making the entire
+ * selection pinned, then immediately un-pinned: the button
+ * label clearly communicates what the next click will do.
+ */
+function BulkActionBar({
+  count,
+  allPinned,
+  onPin,
+  onUnpin,
+  onSetStatus,
+  onRemove,
+  onCancel,
+}: {
+  count: number;
+  allPinned: boolean;
+  onPin: () => void;
+  onUnpin: () => void;
+  onSetStatus: (s: PlayStatus) => void;
+  onRemove: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="sidebar-bulk-action-bar"
+      role="region"
+      aria-label={`Bulk actions for ${count} selected games`}
+    >
+      <div className="sidebar-bulk-action-bar__count" aria-live="polite">
+        <span>{count} selected</span>
+      </div>
+      <div className="sidebar-bulk-action-bar__actions">
+        <button
+          type="button"
+          className="sidebar-bulk-action-bar__btn"
+          onClick={allPinned ? onUnpin : onPin}
+          title={allPinned ? "Unpin selected" : "Pin selected"}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2 9 9 2 9.5l5.5 4.5L5 22l7-4 7 4-2.5-8 5.5-4.5L15 9z" />
+          </svg>
+          <span>{allPinned ? "Unpin" : "Pin"}</span>
+        </button>
+        <PlayStatusMenuButton
+          onSelect={(s) => onSetStatus(s)}
+          ariaLabel="Set play status for selection"
+        />
+        <button
+          type="button"
+          className="sidebar-bulk-action-bar__btn sidebar-bulk-action-bar__btn--danger"
+          onClick={onRemove}
+          title="Remove from library"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+          <span>Remove</span>
+        </button>
+        <button
+          type="button"
+          className="sidebar-bulk-action-bar__btn"
+          onClick={onCancel}
+          title="Cancel selection (Esc)"
+          aria-label="Cancel selection"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Compact play-status select button used by the bulk action bar.
+ * Renders the chip as a <select> for native, accessible keyboard
+ * support. Visual styling matches the surrounding bulk-action
+ * buttons so the bar reads as a single language.
+ */
+function PlayStatusMenuButton({
+  onSelect,
+  ariaLabel,
+}: {
+  onSelect: (s: PlayStatus) => void;
+  ariaLabel: string;
+}) {
+  const options: PlayStatus[] = ["backlog", "playing", "completed", "on_hold", "abandoned"];
+  return (
+    <select
+      className="sidebar-bulk-action-bar__btn"
+      onChange={(e) => {
+        const v = e.target.value as PlayStatus;
+        if (v) onSelect(v);
+        // Reset to placeholder so picking the same status twice
+        // still fires onChange.
+        e.currentTarget.value = "";
+      }}
+      aria-label={ariaLabel}
+      defaultValue=""
+    >
+      <option value="" disabled>
+        Status…
+      </option>
+      {options.map((s) => (
+        <option key={s} value={s}>
+          {PLAY_STATUS_DETAILS[s].label}
+        </option>
+      ))}
+    </select>
   );
 }

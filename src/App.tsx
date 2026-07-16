@@ -29,6 +29,10 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { AchievementProvider } from "./context/AchievementContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import { BigScreenProvider, useBigScreen } from "./context/BigScreenContext";
+import {
+  SidebarCollapseProvider,
+  useSidebarCollapse,
+} from "./context/SidebarCollapseContext";
 import { GamepadProvider } from "./hooks/GamepadProvider";
 import { LandingRedirect } from "./components/LandingRedirect";
 import Splashscreen from "./components/Splashscreen";
@@ -46,11 +50,33 @@ function AppLayout() {
   }
 
   return (
-    <div className="app-layout">
+    <SidebarCollapseProvider>
+      <AppShellLayout />
+    </SidebarCollapseProvider>
+  );
+}
+
+/**
+ * Inner shell mounted inside <SidebarCollapseProvider> so it can
+ * read the icon-rail collapse state via `useSidebarCollapse()`
+ * and apply it to the layout grid. Kept separate from `AppLayout`
+ * so the Big-Screen branch doesn't pay for the provider mount.
+ *
+ * The grid collapse is a CSS class swap (no state in this
+ * component) so we just read once and pass it down — there is no
+ * reason to useEffect and re-toggle: the IconRail toggle inside
+ * the sidebar mutates the same context value, and React re-renders
+ * this component on the next render of the provider value.
+ */
+function AppShellLayout() {
+  const { isIconRail } = useSidebarCollapse();
+
+  return (
+    <div className={`app-layout${isIconRail ? " sidebar-icon-rail" : ""}`}>
       <div className="app-topnav">
         <TopNav />
       </div>
-      <div className="app-sidebar">
+      <div className={`app-sidebar${isIconRail ? " sidebar-icon-rail" : ""}`}>
         <Sidebar />
       </div>
       <div className="app-main">

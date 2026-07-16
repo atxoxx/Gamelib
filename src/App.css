@@ -126,6 +126,18 @@
   --topnav-height: 56px;
   --sidebar-width: 280px;
   --sidebar-collapsed-width: 0px;
+  /* Icon-rail partial collapse: 64px is wide enough for a 36px
+   * cover thumbnails with breathing room, but narrow enough to
+   * reclaim ~215px of horizontal real estate for the main panel.
+   * `--sidebar-icon-rail-width` is consumed by
+   * `.app-layout.sidebar-icon-rail` (grid columns) and by the
+   * Sidebar component's own `width` rule when in rail mode. */
+  --sidebar-icon-rail-width: 68px;
+  /* Sidebar hover preview width constant — duplicated in
+   * SidebarHoverPreview.tsx so the JS position manager and the
+   * CSS layout stay in sync. Any width change here must be
+   * mirrored in the TS layout effect's `PREVIEW_WIDTH`. */
+  --sidebar-hover-preview-width: 260px;
   --content-max-width: 1440px;
 }
 
@@ -380,6 +392,18 @@
 
 .app-layout.sidebar-collapsed {
   grid-template-columns: var(--sidebar-collapsed-width) 1fr;
+}
+
+/* Icon-rail partial collapse. Activated by SidebarCollapseContext
+ * via the `.sidebar-icon-rail` modifier on `.app-sidebar`, and
+ * mirrored here for the grid template columns so the main panel
+ * widens slightly while the sidebar stays visible (e.g. cover
+ * thumbnails + status dots). The grid transition is inherited from
+ * `.app-layout` so the column swap animates in 250ms instead of
+ * snapping — same duration the cover-grid uses elsewhere so the
+ * visual tempo stays consistent. */
+.app-layout.sidebar-icon-rail {
+  grid-template-columns: var(--sidebar-icon-rail-width) 1fr;
 }
 
 .app-topnav {
@@ -1107,6 +1131,656 @@
 
 .sidebar-empty button:hover {
   background: var(--color-accent-hover);
+}
+
+/* ==============================
+   Sidebar — Enhanced Features
+   ============================== */
+
+/* Body-level toggle of the inner sidebar between full-width and
+ * icon-only-rail mode. The `.app-sidebar` wrapper reads
+ * `SidebarCollapseContext` and adds `.sidebar-icon-rail` when active.
+ * The two classes below force `width` to the icon-rail variable,
+ * hide the chrome that would crowd a 68px column (search box,
+ * filter button label, import button), and tighten the row markup
+ * so it collapses to just (cover · status-dot). The sidebar root
+ * is a flex column so inner elements with `flex: 0 0 auto` keep
+ * their layout; the icon rail keeps the header's collapse-to-full
+ * toggle visible so the user can revert with one click. */
+.app-sidebar.sidebar-icon-rail {
+  width: var(--sidebar-icon-rail-width);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-search,
+.app-sidebar.sidebar-icon-rail .sidebar-filter-btn,
+.app-sidebar.sidebar-icon-rail .sidebar-import-wrapper {
+  display: none;
+}
+
+/* In rail mode, the row shows only the cover thumbnail and the
+ * tiny status dot. The title/meta are hidden but remain in the
+ * DOM so the row keeps its semantic structure (good for
+ * screen readers via the `aria-label` on `.sidebar-game-status`).
+ * The 36px-wide cover sits centered in the rail and gains a soft
+ * outline on hover so it doesn't read as a flat icon button. */
+.app-sidebar.sidebar-icon-rail .sidebar-game-item {
+  justify-content: center;
+  padding: var(--space-xs);
+  gap: 0;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item .sidebar-game-info,
+.app-sidebar.sidebar-icon-rail .sidebar-game-item .sidebar-game-status {
+  display: none;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast),
+    border-color var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item:hover .sidebar-game-icon {
+  transform: scale(1.08);
+  border-color: var(--color-accent);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-divider {
+  margin: var(--space-xs) var(--space-xs);
+}
+
+/* PinnedGames section header (above the pinned rows). Renders as
+ * a tiny uppercase label with a small 📌 inline SVG so the
+ * intent reads at a glance even when the section is collapsed.
+ * The horizontal rule above the section is rendered by the parent
+ * Sidebar component via `.sidebar-pinned-section::before` (added
+ * by Sidebar.tsx inline because pure-CSS hooks are simpler than
+ * restructuring the divider HTML). */
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-sm) 4px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.sidebar-section-header svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+/* Hide the pinned section header in icon-rail mode — it would
+ * crowd the 68px column. The covers alone read clearly. */
+.app-sidebar.sidebar-icon-rail .sidebar-section-header {
+  display: none;
+}
+
+/* Search match highlight. Applied by the Sidebar's
+ * HighlightedName component (regex split, <mark> wrap). Uses
+ * accent-soft fill + accent text, with no padding tweak so the
+ * name keeps the same baseline whether highlighted or not. */
+.sidebar-game-name mark {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-radius: var(--radius-xs);
+  padding: 0 2px;
+}
+
+/* Active-filter pill row. Renders BELOW the search/filter button
+ * row and is hidden whenever no advanced filter is active. Each
+ * chip mirrors the Library page's LibraryFilterChips pattern:
+ * pill, label, removable × — a single "Clear all" affordance at
+ * the start rolls every facet back via the existing `reset()`
+ * on useLibraryFilters. Horizontal scroll on overflow via
+ * `overflow-x: auto` keeps the chips on one row. */
+.sidebar-active-filters {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-xs) 0 var(--space-xs);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sidebar-active-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-active-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sidebar-active-filter__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  transition: color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.sidebar-active-filter__remove:hover {
+  color: var(--color-danger);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-active-filter__remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-active-filters {
+  display: none;
+}
+
+/* Multi-select bulk action bar. Sits a fixed distance from the
+ * bottom of the sidebar's list area, painting above any rows
+ * obscured by scroll. Hidden when nothing is selected. Pinned
+ * to the bottom of the visible sidebar surface using
+ * `position: sticky` so the bar never floats away from the rows
+ * the user is interacting with. */
+.sidebar-bulk-action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-top: 1px solid var(--color-border-light);
+  border-bottom: none;
+  z-index: 50;
+  animation: sidebarBulkBarIn 180ms var(--ease-enter);
+}
+
+@keyframes sidebarBulkBarIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sidebar-bulk-action-bar__count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+.sidebar-bulk-action-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.sidebar-bulk-action-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  gap: 4px;
+}
+
+.sidebar-bulk-action-bar__btn svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.sidebar-bulk-action-bar__btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-bulk-action-bar__btn--danger:hover {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border));
+}
+
+.sidebar-bulk-action-bar__btn--accent {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.sidebar-bulk-action-bar__btn--accent:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar {
+  /* In rail mode the bulk action buttons would crowd the 68px
+   * column; collapse the bar to a single transparent icon
+   * cluster that fully expands on hover. The pin + remove + exit
+   * actions stay — the user only ever multi-selects from rail
+   * mode by accident, so a compact bar is safe. */
+  justify-content: center;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar__count,
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar__btn span {
+  display: none;
+}
+
+/* Multi-select checkmark. Lives in the corner of every row that
+ * is part of the current bulk selection. .sidebar-game-item's
+ * `position: relative` (already present) lets us absolutely
+ * position the badge without introducing new positioning
+ * contracts. */
+.sidebar-game-item.bulk-selected {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-tertiary));
+  border-left-color: var(--color-accent);
+}
+
+.sidebar-game-item__check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 6px var(--color-accent-glow);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.sidebar-game-item.bulk-selected .sidebar-game-item__check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sidebar-game-item__check svg {
+  width: 10px;
+  height: 10px;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item.bulk-selected .sidebar-game-item__check {
+  top: 8px;
+  right: 8px;
+}
+
+/* Context menu submenu container (used by the Set Status
+ * hover-flyout). Positioned absolutely relative to its parent
+ * context-menu item so it appears on the right of the trigger
+ * item. Hidden by default; `.open` flips it into view after a
+ * short hover delay. Auto-flip to the LEFT half of the screen
+ * on the right edge via .sidebar-context-submenu--flip. */
+.sidebar-context-submenu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 160px;
+  margin-left: 4px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.sidebar-context-submenu.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.sidebar-context-submenu--flip {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 4px;
+  transform: translateX(4px);
+}
+
+.sidebar-context-submenu--flip.open {
+  transform: translateX(0);
+}
+
+.sidebar-context-submenu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+  gap: var(--space-xs);
+}
+
+.sidebar-context-submenu__item:hover {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-context-submenu__item.active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.sidebar-context-submenu__item .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Replace the row's "Search highlight" caret so the open
+ * submenu parent gets an arrow pointing into the submenu. */
+.context-menu-item.has-submenu::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--color-text-secondary);
+  border-top: 1.5px solid var(--color-text-secondary);
+  transform: rotate(45deg);
+  margin-left: auto;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.context-menu-item.has-submenu:hover::after {
+  border-color: var(--color-accent);
+}
+
+/* Sidebar collapse toggle (replaces import button in icon-rail
+ * mode header). Round button, hover-glows the accent. */
+.sidebar-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: var(--space-xs) auto;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: 0 4px 12px var(--color-accent-glow);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.sidebar-collapse-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Sidebar hover preview (portal-based, anchored right) ── */
+.sidebar-hover-preview {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: var(--sidebar-hover-preview-width);
+  overflow: hidden;
+  pointer-events: auto;
+  animation: sidebarHoverPreviewIn 160ms var(--ease-enter);
+  font-family: var(--font-system, system-ui);
+}
+
+@keyframes sidebarHoverPreviewIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.sidebar-hover-preview--left {
+  animation-name: sidebarHoverPreviewInLeft;
+}
+
+@keyframes sidebarHoverPreviewInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.sidebar-hover-preview__cover {
+  position: relative;
+  height: 110px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.sidebar-hover-preview__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sidebar-hover-preview__cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.sidebar-hover-preview__cover-placeholder svg {
+  width: 36px;
+  height: 36px;
+  opacity: 0.3;
+}
+
+.sidebar-hover-preview__status-pill {
+  position: absolute;
+  top: var(--space-xs);
+  right: var(--space-xs);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.sidebar-hover-preview__body {
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-hover-preview__name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-hover-preview__developer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-hover-preview__meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  padding: var(--space-xs) 0;
+  margin-top: 4px;
+}
+
+.sidebar-hover-preview__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+}
+
+.sidebar-hover-preview__meta-label {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sidebar-hover-preview__meta-value {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-hover-preview__actions {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.sidebar-hover-preview__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  padding: 6px var(--space-sm);
+  background: var(--color-accent);
+  color: #fff;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-hover-preview__btn:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.sidebar-hover-preview__btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sidebar-hover-preview__btn--ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.sidebar-hover-preview__btn--ghost:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+}
+
+/* Performance: defer off-screen sidebar rows using
+ * `content-visibility: auto` so the browser skips paint /
+ * layout work for items that haven't scrolled into view. The
+ * `contain-intrinsic-size` reserves ~52px of vertical space so
+ * the persistent scrollbar height tracks roughly with row count
+ * rather than the visible subset. Respects
+ * `prefers-reduced-motion` indirectly because content-visibility
+ * is a layout optimization — there is no animation, only a
+ * paint skip. */
+.sidebar-game-item {
+  content-visibility: auto;
+  /* 52px ≈ 8px top pad + 36px cover + 8px bottom pad; the
+   * estimated intrinsic-size MUST be close to the actual row
+   * height, otherwise the scrollbar jerks as rows
+   * enter/leave the visible viewport. */
+  contain-intrinsic-size: 52px;
 }
 
 /* ==============================
