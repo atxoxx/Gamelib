@@ -21,19 +21,49 @@
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  width: 240px;
+  width: 250px;
   flex-shrink: 0;
   align-self: flex-start;
   position: sticky;
-  top: var(--space-md);
-  max-height: calc(100vh - 2 * var(--space-md));
+  top: var(--space-lg);
+  max-height: calc(100vh - 2 * var(--space-lg));
   overflow-y: auto;
+  box-shadow: var(--shadow-md);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.library-filter-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.library-filter-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.library-filter-sidebar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.library-filter-sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-light);
+  background-clip: padding-box;
 }
 
 .library-filter-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.library-filter-section:last-of-type {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .library-filter-heading {
@@ -225,20 +255,23 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin-right: var(--space-xs);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .library-filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-accent);
+  gap: 6px;
+  padding: 5px var(--space-sm);
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
   color: var(--color-text-primary);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   font-size: var(--font-size-sm);
   line-height: 1.2;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .library-filter-chip button {
@@ -283,11 +316,38 @@
   border-color: var(--color-text-secondary);
 }
 
-/* ── Library Page Layout: sidebar + grid ─────────────────────────── */
+/* ── Library Page Layout: container, sidebar + grid ─────────────── */
+
+/* The page container. Fills the full width of the main content area
+ * (the app already constrains it to the sidebar/main grid column) so
+ * the hero, rails and grid use all available horizontal space instead
+ * of being capped at a narrow centered column. */
+.library-grid {
+  width: 100%;
+  padding: var(--space-xl) var(--space-2xl) var(--space-3xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.library-grid--bigscreen {
+  display: block;
+  max-width: none;
+  padding: 0;
+  gap: 0;
+}
+
+.library-heading {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  letter-spacing: -0.2px;
+}
 
 .library-layout {
   display: flex;
-  gap: var(--space-md);
+  gap: var(--space-lg);
   align-items: flex-start;
 }
 
@@ -304,18 +364,17 @@
 .library-hero {
   position: relative;
   margin: 0 0 var(--space-md) 0;
-  padding: var(--space-md) var(--space-lg);
-  border-radius: var(--radius-xl);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--color-accent) 10%, var(--color-surface)),
-    var(--color-surface-glass) 90%
-  );
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: var(--space-lg) var(--space-xl);
+  border-radius: var(--radius-2xl);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-accent) 16%, transparent) 0%, transparent 55%),
+    radial-gradient(120% 140% at 100% 100%, color-mix(in srgb, var(--color-info) 10%, transparent) 0%, transparent 50%),
+    var(--color-surface-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);
   overflow: hidden;
-  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   isolation: isolate;
   animation: libraryHeroIn 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -352,7 +411,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-lg);
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-lg);
   flex-wrap: wrap;
 }
 
@@ -452,12 +511,7 @@
 
 .library-hero-stats {
   display: grid;
-  /* Tighter minmax (150 -> 180) lets all 4 tiles fit on one row above
-     ~1100px wide, giving the hero a single horizontal "info strip"
-     feeling instead of a 2x2 grid that wraps early on common laptop
-     widths. Combined with the gap shrink below, the bar reads as a
-     unified surface rather than 4 separate cards. */
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-sm);
 }
 
@@ -470,11 +524,10 @@
   align-items: center;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
-  background: var(--color-surface-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--color-bg-secondary) 70%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--color-border);
-  border-top-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
   border-radius: var(--radius-md);
   transition: all var(--transition-normal);
   opacity: 0;
@@ -485,15 +538,12 @@
 .library-stat-card::after {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--color-accent) 40%, transparent),
-    transparent
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 120% at 0% 0%,
+    color-mix(in srgb, var(--color-accent) 10%, transparent),
+    transparent 60%
   );
   pointer-events: none;
 }
@@ -1388,24 +1438,153 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Library Card Polish — smoother hover, better transitions
+   Library Cards — base card, cover, body, density variants
    ════════════════════════════════════════════════════════════════════ */
 
+/* The Card primitive renders its children inside a `.ui-card__body`
+ * wrapper that ships with a default padding. Override it so the cover
+ * sits flush against the card's top edge. */
+.library-card .ui-card__body {
+  padding: 0;
+}
+
 .library-card {
-  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 240ms ease,
-    border-color var(--transition-fast);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: transform var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard);
 }
 
 .library-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent),
-    0 0 28px var(--color-accent-glow);
+  transform: translateY(-6px);
+  border-color: var(--color-accent);
+  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.6),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent),
+    0 0 30px var(--color-accent-glow);
 }
 
 .library-card:active {
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(0.985);
+}
+
+.library-card.running {
+  border-color: var(--color-success) !important;
+  box-shadow: 0 0 25px color-mix(in srgb, var(--color-success) 45%, transparent) !important;
+}
+
+.library-card-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--color-surface);
+  overflow: hidden;
+  position: relative;
+}
+
+.library-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 1;
+  filter: none;
+}
+
+.library-card:hover .library-card-cover img {
+  transform: scale(1.08);
+}
+
+.library-card-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.library-card-cover-placeholder svg {
+  width: 40px;
+  height: 40px;
+  opacity: 0.3;
+}
+
+.library-card-body {
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.library-card-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.library-card-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.library-card-platform {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.library-card-developer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-card-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.library-card-genre-tag {
+  font-size: 10px;
+}
+
+.library-card-notes {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.library-card-notes-empty {
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 .library-main {
@@ -1413,33 +1592,53 @@
   min-width: 0;
 }
 
-/* ── Library Density Toolbar ─────────────────────────────────────── */
+/* ── Library Toolbar (heading + density + result context) ─────────── */
 
+/* Sticky toolbar that keeps the section title and density control in
+ * view while the grid scrolls. A hairline bottom border + subtle
+ * surface tint separates it from the content without a heavy block. */
+.library-header {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.library-header h2 {
+  margin: 0;
+}
+
+/* Density segmented control — compact pill group with an active glow. */
 .library-density-toolbar {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-  padding: var(--space-xs) var(--space-md);
-  background: var(--color-bg-secondary);
+  padding: 3px var(--space-sm) 3px var(--space-md);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   width: fit-content;
 }
 
 .library-density-toolbar-label {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  font-weight: var(--font-weight-semibold);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-bold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 .library-density-toggle {
   display: inline-flex;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   padding: 2px;
   gap: 2px;
 }
@@ -1449,14 +1648,14 @@
   border: none;
   color: var(--color-text-secondary);
   padding: var(--space-xs);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  transition: all 0.15s ease;
+  transition: all var(--transition-fast);
 }
 
 .library-density-btn svg {
@@ -1466,32 +1665,18 @@
 
 .library-density-btn:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-hover);
 }
 
 .library-density-btn.active {
   background: var(--color-accent);
   color: #fff;
+  box-shadow: 0 2px 8px var(--color-accent-glow);
 }
 
 .library-density-btn:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-}
-
-/* ── Library Header (heading + density) ──────────────────────────── */
-
-.library-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.library-header h2 {
-  margin: 0;
 }
 
 /* ── Library Empty State (filtered but no results) ───────────────── */
@@ -1501,19 +1686,21 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-2xl) var(--space-md);
+  padding: var(--space-3xl) var(--space-md);
   text-align: center;
   color: var(--color-text-secondary);
   gap: var(--space-sm);
   border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-secondary);
+  animation: libraryEmptyIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .library-empty-filtered-icon {
   width: 48px;
   height: 48px;
   opacity: 0.4;
+  color: var(--color-accent);
 }
 
 .library-empty-filtered-title {
@@ -1536,17 +1723,18 @@
   background: transparent;
   color: var(--color-accent);
   border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   font-family: inherit;
-  transition: all 0.15s ease;
+  transition: all var(--transition-fast);
 }
 
 .library-empty-filtered-reset:hover {
   background: var(--color-accent);
   color: #fff;
+  box-shadow: 0 4px 14px var(--color-accent-glow);
 }
 
 /* ── Library Card Density Variants ───────────────────────────────── */
@@ -1554,34 +1742,30 @@
 /*
  * The grid column minmax changes per density:
  *   - compact   : cover-only cards, tighter columns
- *   - cozy      : default — current behavior preserved
- *   - cinematic : larger columns, more whitespace, more body content
+ *   - cozy      : default — comfortable card size
+ *   - cinematic : larger columns, more whitespace, overlay body
  */
 .library-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: var(--space-md);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-lg);
 }
 
 .library-cards.density-compact {
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: var(--space-sm);
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--space-md);
 }
 
 .library-cards.density-cinematic {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--space-lg);
-  /* Center cards when a column is wider than `max-width: 280px` (e.g. on
-     ultrawide displays) so the cap leaves a balanced gap on both sides
-     instead of a dead zone on the right. */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-xl);
   justify-items: center;
 }
 
 /*
  * Card-level width guards. Without these, hardcoded cover widths or
  * unbreakable body text (long platform strings, long genre chains) push
- * the grid item past its column boundary, which is the same root cause
- * the Store cards hit in Phase 2.8e.
+ * the grid item past its column boundary.
  */
 .library-cards > .library-card {
   min-width: 0;
@@ -1590,11 +1774,11 @@
 }
 
 .library-card.density-compact {
-  max-width: 130px;
+  max-width: 140px;
 }
 
 .library-card.density-cinematic {
-  max-width: 280px;
+  max-width: 300px;
 }
 
 /* Compact: cover only, hide everything below */
@@ -1619,7 +1803,7 @@
   bottom: 0;
   left: 0;
   right: 0;
-  padding: var(--space-md);
+  padding: var(--space-lg);
   background: linear-gradient(
     to top,
     rgba(0, 0, 0, 0.95) 0%,
@@ -1631,11 +1815,6 @@
   flex-direction: column;
   gap: var(--space-xs);
   z-index: 1;
-  /* The overlay absorbs clicks so the gradient and any text it contains
-     bubble up to the card's outer onClick (which navigates to the game
-     page). Mirrors the same rule on `.store-game-card.density-cinematic
-     .store-card-body`. Without this, the gradient blocks the card click
-     handler and the user can't navigate. */
   pointer-events: none;
 }
 
@@ -1662,7 +1841,6 @@
 .library-card.density-cinematic .library-card-genres {
   font-size: var(--font-size-xs);
   color: rgba(255, 255, 255, 0.85);
-  /* Cap to 2 genres via existing slice(0, 3) — the visual style hint: */
 }
 
 .library-card.density-cinematic .library-card-genre-tag {
@@ -1683,8 +1861,21 @@
   z-index: 2;
 }
 
+/* ── Responsive ──────────────────────────────────────────────────── */
+
+/* Tablet: slightly narrower rail/sidebar gutter */
+@media (max-width: 1100px) {
+  .library-grid {
+    padding: var(--space-lg) var(--space-xl) var(--space-2xl);
+  }
+}
+
 /* Mobile: stack the sidebar above the grid */
 @media (max-width: 800px) {
+  .library-grid {
+    padding: var(--space-md) var(--space-lg) var(--space-xl);
+  }
+
   .library-layout {
     flex-direction: column;
   }
@@ -1697,6 +1888,12 @@
 
   .library-cards.density-cinematic {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .library-header {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: transparent;
   }
 }
 
