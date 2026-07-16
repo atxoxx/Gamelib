@@ -3,6 +3,7 @@ import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { useFocusable } from "../../hooks/useFocusable";
+import { useGamepad } from "../../hooks/GamepadProvider";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
 import BigScreenRail from "./BigScreenRail";
@@ -51,8 +52,14 @@ export default function BigScreenLibrary({
   onSelectGame,
 }: BigScreenLibraryProps) {
   const { launchGame, runningGameIds } = useGames();
+  // Single source of truth for "what card is the user currently
+  // hovering/navigating on". The GamepadProvider already publishes
+  // `focusedElement` as a React state and the BigScreenGameCard
+  // attaches `data-game-id={game.id}` to its root element — together
+  // they're enough to drive the spotlight without per-rail plumbing.
+  const gamepad = useGamepad();
 
-  // Compute rails
+  // Compute rails (unchanged shape from previous commits)
   const continuePlaying = useMemo(() => {
     const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
     return filteredGames
@@ -67,19 +74,68 @@ export default function BigScreenLibrary({
       .slice(0, 12);
   }, [filteredGames]);
 
-  // Featured game (focus-tracked)
-  const [featuredGame, setFeaturedGame] = useState<Game | null>(() => {
-    return continuePlaying[0] ?? recentlyAdded[0] ?? filteredGames[0] ?? null;
-  });
-
   const [logoError, setLogoError] = useState(false);
+
+  // ── Featured game ──────────────────────────────────────────────
+  // Flipped by the focus-watcher below. Initial value lands on the
+  // Continue Playing rail's first card so the spotlight has
+  // something useful to show before the user touches a gamepad.
+  const initialFeatured = useMemo(
+    () =>
+      continuePlaying[0] ?? recentlyAdded[0] ?? filteredGames[0] ?? null,
+    // Intentionally depends on the rail lists themselves so the
+    // initial value re-derives when filteredGames reloads.
+    [continuePlaying, recentlyAdded, filteredGames]
+  );
+  const [featuredGame, setFeaturedGame] = useState<Game | null>(initialFeatured);
+
+  // Reset the logo fallback whenever the featured game changes.
   useEffect(() => {
     setLogoError(false);
   }, [featuredGame?.id]);
 
-  const handleFocusedGameChange = useCallback((g: Game | null) => {
-    if (g) setFeaturedGame(g);
-  }, []);
+  // Flat lookup of every game rendered in any rail this page owns.
+  // The focus-watcher below keys on the focused element's
+  // `data-game-id` and resolves it back to a `Game`. One map per
+  // page is the smallest amount of state we need to make the
+  // spotlight follow the current rail.
+  const allGamesById = useMemo(() => {
+    const map = new Map<string, Game>();
+    for (const list of [continuePlaying, recentlyAdded, filteredGames]) {
+      for (const g of list) map.set(g.id, g);
+    }
+    return map;
+  }, [continuePlaying, recentlyAdded, filteredGames]);
+
+  // ── Focus-watcher ──────────────────────────────────────────────
+  // Subscribes directly to the GamepadProvider's `focusedElement`
+  // and updates `featuredGame` whenever focus lands on a card in
+  // any rail. This is the single source of truth for "spotlight
+  // follows the current rail":
+  //
+  //   • User focuses a Continue Playing card → featuredGame = that game
+  //   • User navigates down to Recently Added → featuredGame = recent card
+  //   • User navigates down to the Library · All Games rail → featuredGame = that card
+  //   • User clicks the Play button in the Details pane → focus
+  //     leaves any card; `data-game-id` is empty so we leave
+  //     featuredGame alone (the button launches the same game
+  //     anyway, so the spotlight stays correct).
+  //
+  // Note: the previous design used a per-rail `onFocusedGameChange`
+  // callback chain. That wiring depended on every rail reacting to
+  // the same `focusedElement` ref, and could drift when focus
+  // hopped through non-card focusables. Centralizing here means
+  // there's one place doing the work.
+  useEffect(() => {
+    const el = gamepad.focusedElement;
+    if (!el) return;
+    const id = el.getAttribute("data-game-id");
+    if (!id) return;
+    const game = allGamesById.get(id);
+    if (game && game !== featuredGame) {
+      setFeaturedGame(game);
+    }
+  }, [gamepad.focusedElement, allGamesById, featuredGame]);
 
   // Steam details for player count
   const { appId: featuredSteamAppId } = useSteamAppId(featuredGame);
@@ -113,11 +169,11 @@ export default function BigScreenLibrary({
   // Keep featuredGame synced with context updates (e.g. Steam appid writes, metadata changes)
   useEffect(() => {
     if (!featuredGame) return;
-    const updated = filteredGames.find((g) => g.id === featuredGame.id);
+    const updated = allGamesById.get(featuredGame.id);
     if (updated && updated !== featuredGame) {
       setFeaturedGame(updated);
     }
-  }, [filteredGames, featuredGame]);
+  }, [allGamesById, featuredGame]);
 
 
   return (
@@ -144,7 +200,7 @@ export default function BigScreenLibrary({
             games={continuePlaying.length > 0 ? continuePlaying : filteredGames.slice(0, 12)}
             emptyLabel="Play a game to start tracking sessions — they'll show up here."
             onCardClick={onSelectGame}
-            onFocusedGameChange={handleFocusedGameChange}
+            railId="continue-playing"
           />
         </div>
 
@@ -253,7 +309,7 @@ export default function BigScreenLibrary({
             games={recentlyAdded}
             emptyLabel="No newly added games."
             onCardClick={onSelectGame}
-            onFocusedGameChange={handleFocusedGameChange}
+            railId="recently-added"
           />
           <BigScreenRail
             title={`Library · All Games (${totalGames})`}
@@ -261,7 +317,7 @@ export default function BigScreenLibrary({
             games={filteredGames}
             emptyLabel="No games in library."
             onCardClick={onSelectGame}
-            onFocusedGameChange={handleFocusedGameChange}
+            railId="library-all"
           />
         </div>
       </div>

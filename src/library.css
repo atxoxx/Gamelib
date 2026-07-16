@@ -992,7 +992,13 @@
    * to compete for vertical space inside the Card flex container. */
   height: 200px;
   flex-shrink: 0;
-  background: var(--color-bg-tertiary);
+  /* Light "loading" fallback (NOT `--color-bg-tertiary`). The dark
+   * tertiary showed through every half-loaded Steam CDN cover and
+   * the Continue Playing / Recently Added rails ended up reading as
+   * nearly black. The Card primitive's `.ui-card--surface` rule
+   * gives the card root a surface bg; the cover mustn't be darker
+   * than that or the image looks inset-into-a-hole. */
+  background: var(--color-surface);
   overflow: hidden;
 }
 
@@ -1001,6 +1007,15 @@
   height: 100%;
   object-fit: cover;
   transition: transform var(--transition-slow);
+  /* Defensive guard against future rule changes that might dim
+   * cover art (the symptom reported on 2026-07-16 was that the
+   * Continue Playing + Recently Added cards read as nearly black
+   * even with a working `<img>`). Pin `opacity` + `filter` so any
+   * upstream rule setting `opacity < 1` / `filter: brightness(<1)`
+   * loses. The general `.library-rail-card` rule still has the
+   * `:hover` lift transition untouched. */
+  opacity: 1;
+  filter: none;
 }
 
 .library-rail-card:hover .library-rail-card-cover img {

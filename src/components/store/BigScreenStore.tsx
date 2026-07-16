@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../../types/game";
 import { useFocusable } from "../../hooks/useFocusable";
+import { useGamepad } from "../../hooks/GamepadProvider";
 import BigScreenStoreRail from "./BigScreenStoreRail";
 import BigScreenPill from "../bigscreen/BigScreenPill";
 
@@ -25,6 +26,7 @@ const DetailsIcon = (
 );
 
 export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
+  const gamepad = useGamepad();
   const [trending, setTrending] = useState<StoreGameSummary[]>([]);
   const [popular, setPopular] = useState<StoreGameSummary[]>([]);
   const [top, setTop] = useState<StoreGameSummary[]>([]);
@@ -32,7 +34,6 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
   const [newReleases, setNewReleases] = useState<StoreGameSummary[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [featuredGame, setFeaturedGame] = useState<StoreGameSummary | null>(null);
 
   // Fetch all rails concurrently on mount
   useEffect(() => {
@@ -61,9 +62,6 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
           setTop(tp);
           setComingSoon(cs);
           setNewReleases(nr);
-
-          const initial = tr[0] || pop[0] || tp[0] || null;
-          setFeaturedGame(initial);
         }
       } catch (err) {
         console.error("Failed to load store categories:", err);
@@ -77,9 +75,64 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
     };
   }, []);
 
-  const handleFocusedGameChange = useCallback((g: StoreGameSummary | null) => {
-    if (g) setFeaturedGame(g);
-  }, []);
+  // ── Featured game & focus-watcher ─────────────────────────────
+  // Same architecture as BigScreenLibrary:
+  //
+  //   1. Build a flat Map<id, StoreGameSummary> across every rail.
+  //   2. Subscribe directly to `gamepad.focusedElement` and read
+  //      `data-game-id` off the focused card to resolve the
+  //      currently-featured game.
+  //   3. Update `featuredGame` only when the focused element really
+  //      points at a different game.
+  //
+  // Initial featuredGame: the first item from `trending` (falling
+  // back through the standard heatmap order) so the Details pane
+  // has something to render before the user touches a gamepad.
+  const initialFeatured = useMemo<StoreGameSummary | null>(
+    () =>
+      trending[0] ?? popular[0] ?? top[0] ?? comingSoon[0] ?? newReleases[0] ?? null,
+    [trending, popular, top, comingSoon, newReleases]
+  );
+  const [featuredGame, setFeaturedGame] = useState<StoreGameSummary | null>(null);
+
+  // Re-anchor the featured game to the freshest rail each time new
+  // store data lands. If a featured game is already showing and a
+  // fresh copy of the SAME id arrives in a rail, the lookup below
+  // swaps in the new reference (so platform / rating updates
+  // picked up via IGDB propagate immediately).
+  useEffect(() => {
+    if (featuredGame) {
+      const updated = [trending, popular, top, comingSoon, newReleases]
+        .flat()
+        .find((g) => g.id === featuredGame.id);
+      if (updated && updated !== featuredGame) {
+        setFeaturedGame(updated);
+        return;
+      }
+    }
+    if (!featuredGame && initialFeatured) {
+      setFeaturedGame(initialFeatured);
+    }
+  }, [featuredGame, initialFeatured, trending, popular, top, comingSoon, newReleases]);
+
+  const allGamesById = useMemo(() => {
+    const map = new Map<string, StoreGameSummary>();
+    for (const list of [trending, popular, top, comingSoon, newReleases]) {
+      for (const g of list) map.set(String(g.id), g);
+    }
+    return map;
+  }, [trending, popular, top, comingSoon, newReleases]);
+
+  useEffect(() => {
+    const el = gamepad.focusedElement;
+    if (!el) return;
+    const id = el.getAttribute("data-game-id");
+    if (!id) return;
+    const game = allGamesById.get(id);
+    if (game && game !== featuredGame) {
+      setFeaturedGame(game);
+    }
+  }, [gamepad.focusedElement, allGamesById, featuredGame]);
 
   const handleDetails = useCallback(() => {
     if (featuredGame) {
@@ -88,16 +141,6 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
   }, [featuredGame, onCardClick]);
 
   const detailsFocusable = useFocusable(handleDetails);
-
-  // Sync featuredGame with lists when rails update
-  useEffect(() => {
-    if (!featuredGame) return;
-    const allStoreGames = [...trending, ...popular, ...top, ...comingSoon, ...newReleases];
-    const updated = allStoreGames.find((g) => g.id === featuredGame.id);
-    if (updated && updated !== featuredGame) {
-      setFeaturedGame(updated);
-    }
-  }, [trending, popular, top, comingSoon, newReleases, featuredGame]);
 
   if (loading) {
     return (
@@ -192,7 +235,7 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
               icon={StoreIcon}
               games={trending}
               onCardClick={onCardClick}
-              onFocusedGameChange={handleFocusedGameChange}
+              railId="trending"
             />
           )}
 
@@ -202,7 +245,7 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
               icon={StoreIcon}
               games={popular}
               onCardClick={onCardClick}
-              onFocusedGameChange={handleFocusedGameChange}
+              railId="popular"
             />
           )}
 
@@ -212,7 +255,7 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
               icon={StoreIcon}
               games={top}
               onCardClick={onCardClick}
-              onFocusedGameChange={handleFocusedGameChange}
+              railId="top"
             />
           )}
 
@@ -222,7 +265,7 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
               icon={StoreIcon}
               games={comingSoon}
               onCardClick={onCardClick}
-              onFocusedGameChange={handleFocusedGameChange}
+              railId="coming-soon"
             />
           )}
 
@@ -232,7 +275,7 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
               icon={StoreIcon}
               games={newReleases}
               onCardClick={onCardClick}
-              onFocusedGameChange={handleFocusedGameChange}
+              railId="new-releases"
             />
           )}
         </div>

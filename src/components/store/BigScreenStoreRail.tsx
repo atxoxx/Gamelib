@@ -9,7 +9,14 @@ interface BigScreenStoreRailProps {
   games: StoreGameSummary[];
   emptyLabel?: string;
   onCardClick: (game: StoreGameSummary) => void;
-  onFocusedGameChange: (game: StoreGameSummary | null) => void;
+  /**
+   * Stable identifier for this rail. Rendered on the section as
+   * `data-rail-id="..."`. Doesn't drive the spotlight today (the
+   * parent reads `data-game-id` directly off the focused element),
+   * but is useful for downstream state like a per-rail header
+   * highlight and for debug inspection in the DOM.
+   */
+  railId?: string;
 }
 
 export default function BigScreenStoreRail({
@@ -18,28 +25,13 @@ export default function BigScreenStoreRail({
   games,
   emptyLabel = "No games to show yet",
   onCardClick,
-  onFocusedGameChange,
+  railId,
 }: BigScreenStoreRailProps) {
   const gamepad = useGamepad();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const lastFocusedIdRef = useRef<string | null>(null);
 
-  // Monitor gamepad focus changes to update the parent backdrop/spotlight
-  useEffect(() => {
-    const el = gamepad.focusedElement;
-    if (!el || !scrollRef.current || !scrollRef.current.contains(el)) return;
-    const id = el.getAttribute("data-game-id");
-    const game = id ? games.find((g) => String(g.id) === id) ?? null : null;
-    if (id !== lastFocusedIdRef.current) {
-      lastFocusedIdRef.current = id;
-      onFocusedGameChange(game);
-    } else {
-      // Publish the fresh game reference on sibling list updates
-      onFocusedGameChange(game);
-    }
-  }, [gamepad.focusedElement, games, onFocusedGameChange]);
-
-  // Center active element in the viewport rail
+  // Auto-scroll a focused card into view (same logic as the
+  // Library rail — see the math note in BigScreenRail.tsx).
   useEffect(() => {
     const el = gamepad.focusedElement;
     if (!el || !scrollRef.current) return;
@@ -59,7 +51,11 @@ export default function BigScreenStoreRail({
   }, [gamepad.focusedElement]);
 
   return (
-    <section className="bigscreen-rail" aria-label={title}>
+    <section
+      className="bigscreen-rail"
+      aria-label={title}
+      data-rail-id={railId}
+    >
       <div className="bigscreen-rail-header">
         {icon ? (
           <span className="bigscreen-rail-icon" aria-hidden>

@@ -1,18 +1,25 @@
 // BigScreenRail — horizontal scrollable rail of BigScreenGameCard
-// tiles for the new Big Screen library. Each card registers its
-// focus with the parent via the `onFocusedChange` callback so a
-// sibling Spotlight component can mirror the focused game's
-// overview/Play button — the same pattern Steam Big Picture and
-// PS5 use for their "focused game's detail updates on entry".
+// tiles for the new Big Screen library.
 //
-// Why a dedicated rail (vs. reusing BigScreenGameCard in a div)
-// ──────────────────────────────────────────────────────────────
-// BigScreenGameCard carries its own `data-focused` focus state via
-// the GamepadProvider. BigScreenRail takes advantage of that to
-// surface focus changes: when a card gains focus (D-pad Left/Right
-// lands here, an LB/RB tab-cycler was the indirect cause, or a
-// pointer hover) we bubble the game up so the parent can update a
-// shared "spotlight" panel without us having to duplicate state.
+// Spotlight tracking
+// ──────────────────
+// As of the "spotlight follows the current rail" pass, the spotlight
+// is owned by the parent page (BigScreenLibrary / BigScreenStore),
+// which subscribes directly to the GamepadProvider's
+// `focusedElement` and resolves the focused card's `data-game-id`
+// against a flat game lookup map. This rail no longer publishes its
+// focus changes via a callback prop — the central watcher is the
+// single source of truth, so the spotlight stays in lockstep with
+// whichever rail the user is currently navigating in (and doesn't
+// get stuck on a previously-focused card when focus hops through
+// non-card focusables like the Details pane buttons or the header
+// tab bar).
+//
+// Auto-scroll
+// ───────────
+// When a card inside THIS rail gains focus, the viewport nudges the
+// scroll position so the focused card lands at ~25% from the left
+// edge — see the math comment below.
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { useGamepad } from "../../hooks/GamepadProvider";
@@ -35,13 +42,13 @@ interface BigScreenRailProps {
   /** Invoked when the user clicks / activates a card. */
   onCardClick: (game: Game) => void;
   /**
-   * Invoked whenever the focused card CHANGES (not on every focus
-   * tick — only on rising-edge changes, so a re-render of the
-   * focused element for styling reasons doesn't trigger an
-   * unnecessary parent re-render). The parent typically uses this
-   * to update a Spotlight's "currently featured" game.
+   * Stable identifier for this rail. Rendered on the section as
+   * `data-rail-id="..."`. Doesn't drive the spotlight today (the
+   * parent reads `data-game-id` directly off the focused element),
+   * but is useful for downstream state like a per-rail header
+   * highlight and for debug inspection in the DOM.
    */
-  onFocusedGameChange: (game: Game | null) => void;
+  railId?: string;
 }
 
 export default function BigScreenRail({
@@ -50,53 +57,20 @@ export default function BigScreenRail({
   games,
   emptyLabel = "No games to show yet",
   onCardClick,
-  onFocusedGameChange,
+  railId,
 }: BigScreenRailProps) {
   const gamepad = useGamepad();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Last-published focused game id so we can dedupe and only emit on
-  // rising-edge changes (prevents the parent Spotlight from
-  // re-rendering every time the focus ring's internal state ticks).
-  const lastFocusedIdRef = useRef<string | null>(null);
 
-  // ── Watch the focused element; surface changes ───────────────
-  // The GamepadProvider exposes `focusedElement` as a React state
-  // value updated on focus changes. We poll a derived "is one of
-  // OUR cards focused?" predicate via a small effect that listens
-  // for that state move and looks up the owning game by a
-  // `data-game-id` attribute we set on each card below.
-  useEffect(() => {
-    const el = gamepad.focusedElement;
-    if (!el || !scrollRef.current || !scrollRef.current.contains(el)) return;
-    const id = el.getAttribute("data-game-id");
-    const game = id ? games.find((g) => g.id === id) ?? null : null;
-    if (id !== lastFocusedIdRef.current) {
-      lastFocusedIdRef.current = id;
-      onFocusedGameChange(game);
-    } else {
-      // Publish the fresh game reference on sibling list updates
-      onFocusedGameChange(game);
-    }
-  }, [gamepad.focusedElement, games, onFocusedGameChange]);
-
-  // Auto-scroll the rail when the focus ring's owner scrolls into
-  // view would normally happen via the GamepadProvider's
-  // `scrollIntoView` (see useGamepad.ts). We add ONE extra bit of
-  // behavior here: after a focus change inside the rail, nudge the
-  // scroll position so the focused card lands at ~25% from the left
-  // edge (instead of the provider's default "nearest-edge" snap,
-  // which on a horizontal rail keeps the card pinned to the left
-  // until it goes off-screen and snaps to the right).
-  //
-  // Math note: we deliberately use `getBoundingClientRect` rather
-  // than `el.offsetLeft` — the latter is measured against the
-  // nearest positioned ancestor (`offsetParent`), which is NOT
-  // necessarily our scroll container. `getBoundingClientRect` is
+  // ── Auto-scroll a focused card into view ─────────────────────
+  // We deliberately use `getBoundingClientRect` rather than
+  // `el.offsetLeft` — the latter is measured against the nearest
+  // positioned ancestor (`offsetParent`), which is NOT necessarily
+  // our scroll container. `getBoundingClientRect` is
   // viewport-relative, so subtracting the rail's viewport-relative
   // rect and adding its current `scrollLeft` gives the card's true
   // offset inside the scroll container, regardless of how the DOM
-  // is nested (see the focus-watcher in BigScreenLibrary which
-  // works against the same assumption).
+  // is nested.
   useEffect(() => {
     const el = gamepad.focusedElement;
     if (!el || !scrollRef.current) return;
@@ -119,6 +93,7 @@ export default function BigScreenRail({
     <section
       className="bigscreen-rail"
       aria-label={title}
+      data-rail-id={railId}
     >
       <div className="bigscreen-rail-header">
         {icon ? (
