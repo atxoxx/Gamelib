@@ -33,15 +33,13 @@ import { IconClock, IconPlatform, IconUsers } from "./icons";
  *
  *  Steam player count
  *  ──────────────────
- *  Previously the badge + "Players Now" KPI tile were gated on
- *  `game.steamAppId != null`, so non-Steam games (manual imports,
- *  games added from the Store, Epic-synced, GOG-synced) showed
- *  nothing. Now `<SteamPlayerCount appId={steamAppId} />` and the
- *  KPI tile read off the `useSteamAppId` hook, which falls back to
- *  a one-shot Steam name lookup on first mount. The resolved
- *  appid is persisted back onto `game.steamAppId` so subsequent
- *  library loads skip the lookup; the badge "just appears" for
- *  every game Steam has a matching entry for.
+ *  The "Players Now" KPI tile is gated on `useSteamAppId`, which
+ *  resolves `game.steamAppId` for non-Steam games (manual imports,
+ *  games added from the Store, Epic-synced, GOG-synced) via a
+ *  one-shot Steam store-search fallback. The resolved appid is
+ *  persisted back onto `game.steamAppId` so subsequent library
+ *  loads skip the lookup; the tile "just appears" for every game
+ *  Steam has a matching entry for.
  */
 
 interface GameHeroProps {
@@ -80,10 +78,6 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
           />
         )}
 
-        <div className="hero-player-count">
-          <SteamPlayerCount appId={steamAppId} />
-        </div>
-
         <div className="game-banner">
           {!bannerErrored && (game.bannerUrl || game.coverArtUrl) ? (
             <img
@@ -119,7 +113,7 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
               size="sm"
               label="Players Now"
               icon={<IconUsers size={12} />}
-              value={<SteamPlayerCountHero appId={steamAppId} />}
+              value={<SteamPlayerCount appId={steamAppId} />}
               intent="accent"
             />
           ) : null}
@@ -208,14 +202,4 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
       </div>
     </div>
   );
-}
-
-/**
- * Inline KPI value for "Players Now". Reuses the existing
- * SteamPlayerCount badge so the count stays in sync with the
- * popover. The click-to-open popover is suppressed in the hero
- * context — the tile's tooltip / value is the primary surface.
- */
-function SteamPlayerCountHero({ appId }: { appId: number }) {
-  return <SteamPlayerCount appId={appId} />;
 }
