@@ -2507,7 +2507,13 @@
 .library-card-cover {
   width: 100%;
   aspect-ratio: 2 / 3;
-  background: var(--color-bg-tertiary);
+  /* Light "loading" fallback (NOT `--color-bg-tertiary`). The dark
+   * tertiary showed through every half-loaded cover and made the
+   * library cards read as nearly black before/around the image paint.
+   * The Card primitive's `.ui-card--surface` rule gives the card root a
+   * surface bg; the cover mustn't be darker than that or the image
+   * looks inset-into-a-hole. Mirrors the rail-card cover fix. */
+  background: var(--color-surface);
   overflow: hidden;
   position: relative;
 }
@@ -2518,6 +2524,9 @@
   object-fit: cover;
   transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
               filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Defensive guard against upstream rules that might dim cover art. */
+  opacity: 1;
+  filter: none;
 }
 
 .library-card:hover .library-card-cover img {

@@ -274,7 +274,7 @@
   }
 }
 
-.animate-fade-in {
+:root[data-bigscreen="true"] .animate-fade-in {
   animation: backdropTransition 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
