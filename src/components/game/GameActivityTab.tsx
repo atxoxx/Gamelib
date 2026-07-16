@@ -370,8 +370,17 @@ export function GameActivityTab({ game }: { game: Game }) {
       if (!Number.isFinite(v) || v < 0 || v > 1000) return 0;
       return Math.round(v);
     };
-    const avgFps = Math.round(sessionsWithHw.reduce((sum, s) => sum + clampFps(s.metrics!.avgFps), 0) / len);
-    const maxFps = sessionsWithHw.reduce((max, s) => Math.max(max, clampFps(s.metrics!.maxFps)), 0);
+    // FPS average must only consider sessions that actually recorded FPS.
+    // Sessions whose avgFps sanitized to 0 (e.g. FPS telemetry not captured
+    // but CPU/GPU/RAM were) must be excluded, otherwise they pollute the
+    // average with 0s and under-report perf — matching the Activity main
+    // tab's `hwSessions` filter (s.metrics.avgFps > 0).
+    const fpsSessions = sessionsWithHw.filter((s) => (s.metrics!.avgFps ?? 0) > 0);
+    const fpsLen = fpsSessions.length || 1;
+    const avgFps = Math.round(
+      fpsSessions.reduce((sum, s) => sum + clampFps(s.metrics!.avgFps), 0) / fpsLen
+    );
+    const maxFps = fpsSessions.reduce((max, s) => Math.max(max, clampFps(s.metrics!.maxFps)), 0);
     const avgCpu = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.metrics!.avgCpuUsage, 0) / len);
     const maxCpu = sessionsWithHw.reduce((max, s) => Math.max(max, s.metrics!.avgCpuUsage), 0);
     const avgGpu = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.metrics!.avgGpuUsage, 0) / len);
