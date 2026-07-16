@@ -893,6 +893,36 @@
   font-weight: var(--font-weight-semibold);
 }
 
+/* Game row inside the sidebar list.
+ *
+ * Layout (left → right):
+ *   ┌─ border-left (accent on selection) ─┐
+ *   │  icon → text → · dot (status, right)│
+ *   └─────────────────────────────────────┘
+ *
+ * The status dot is the LAST flex child in SidebarGameItem
+ * markup — see sidebar.tsx — so it lands on the right edge of
+ * each row with the title and meta to its left. No `order`
+ * override is needed; `.sidebar-game-info { flex: 1 }` absorbs
+ * the horizontal slack, and the dot rides flush against the
+ * row's right padding. Every dot lines up on the same X
+ * coordinate because the row layout is uniform across the list.
+ *
+ * Selection / hover:
+ *   - On hover, the entire row paints with `--color-bg-hover`.
+ *     No horizontal translate, so the rounded right corner stays
+ *     flush against the sidebar edge and the highlight clearly
+ *     spans the full width of the game list (not just the title
+ *     text width — the previous gradient faded to ~2% opacity
+ *     on the right edge, fooling the eye into reading the
+ *     highlight as title-width only).
+ *   - On active (selected) the row paints a uniform accent tint
+ *     across the full width with a soft glow on the left edge,
+ *     paired with a `border-left` accent indicator. Only ONE
+ *     border treatment is applied — stacking the border-left
+ *     with an inset 1px ring produces a fuzzy seam on light
+ *     themes, so the inset ring was dropped.
+ */
 .sidebar-game-item {
   display: flex;
   align-items: center;
@@ -900,26 +930,54 @@
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-standard);
+  transition: background var(--duration-normal) var(--ease-standard),
+              border-color var(--duration-normal) var(--ease-standard),
+              box-shadow var(--duration-normal) var(--ease-standard);
   margin-bottom: 4px;
   border-left: 3px solid transparent;
   position: relative;
+  /* Full-width guarantee: combined with `box-sizing: border-box`
+   * ensures the row paints edge-to-edge of its container. */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sidebar-game-item:hover {
   background: var(--color-bg-hover);
-  transform: translateX(4px);
+  /* No translateX: the previous 4px slide visually clipped the
+   * right edge against the sidebar wall — making the highlight
+   * look like it stopped at the title. Hover now just paints the
+   * full row background so the highlight reads as the full list
+   * width. */
 }
 
 .sidebar-game-item.active {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--color-accent) 14%, transparent),
-    color-mix(in srgb, var(--color-accent) 2%, transparent)
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 14%,
+    var(--color-bg-tertiary)
   );
   border-left-color: var(--color-accent);
+  /* Re-derive the padding so the border-left does NOT shift the
+   * icon/text off their resting X coordinate (otherwise the icon
+   * column visibly jitters by 3px on selection). */
   padding-left: calc(var(--space-md) - 3px);
+  /* Single accent treatment on the left edge: a soft glow that
+   * bleeds outward 12px from the border. Combined with the
+   * border-left this reads as a clear "selected" affordance
+   * across every theme without any stacked border-like shadow. */
   box-shadow: inset 4px 0 12px -4px var(--color-accent-glow);
+}
+
+/* Hover after active: bump the tint a touch so the user can tell
+ * the selected row also responds to hover, without losing the
+ * "selected" affordance. */
+.sidebar-game-item.active:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent) 20%,
+    var(--color-bg-tertiary)
+  );
 }
 
 .sidebar-game-icon {
@@ -966,33 +1024,51 @@
   margin-top: 2px;
 }
 
+/* ───── Installation / running status dot ─────
+ *
+ * The dot is the LAST flex child in SidebarGameItem markup
+ * (`.sidebar-game-info` before `.sidebar-game-icon` before
+ * `.sidebar-game-status`) so:
+ *   - every row's dot lines up vertically in a single column
+ *     on the RIGHT side, regardless of title length;
+ *   - the parent's `gap: var(--space-md)` controls the spacing
+ *     between icon → text → dot uniformly (no extra margin
+ *     to fight the gap calculation);
+ *   - `.sidebar-game-info { flex: 1 }` absorbs the horizontal
+ *     slack, so the dot rides flush against the row's right
+ *     padding regardless of icon-size or title length.
+ *
+ * `flex-shrink: 0` so a long title can never squeeze the dot
+ * off the right edge. `align-self: center` vertically centers
+ * the dot against the 36px icon even when meta line-wraps.
+ *
+ * Note: the `.running` variant and its `runningStatusPulse`
+ * keyframes live further down in the LaunchBox Card section
+ * (line ~5511). Both selectors evaluate globally; the
+ * later-rule-wins source-order cascade means the LaunchBox
+ * definition is what actually animates the sidebar dot. We
+ * deliberately do NOT add a competing running rule here —
+ * doing so would either shadow the LaunchBox animation via
+ * source order OR itself be dead code. Shared class names,
+ * shared meaning.
+ */
 .sidebar-game-status {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  transition: all var(--duration-normal) var(--ease-standard);
-}
-
-@keyframes statusPulseSlow {
-  0%, 100% {
-    opacity: 0.95;
-    box-shadow: 0 0 4px var(--color-success);
-  }
-  50% {
-    opacity: 0.6;
-    box-shadow: 0 0 2px var(--color-success);
-  }
+  align-self: center;
+  transition: box-shadow var(--duration-normal) var(--ease-standard);
 }
 
 .sidebar-game-status.installed {
   background: var(--color-success);
-  box-shadow: 0 0 5px var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
 }
 
 .sidebar-game-status.not-installed {
   background: var(--color-text-muted);
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
 .sidebar-empty {
@@ -5421,6 +5497,20 @@
   background: var(--color-success);
   box-shadow: 0 0 6px var(--color-success), 0 0 12px var(--color-success-glow, rgba(0, 214, 143, 0.4));
   animation: runningStatusPulse 1.4s infinite alternate ease-in-out;
+}
+
+/* Honor prefers-reduced-motion for the running-dot pulse. The
+ * keyframe `runningStatusPulse` scales the dot 0.9 → 1.3, which is
+ * exactly the kind of motion reduced-motion users opt out of.
+ * Without this override, the dot pulses on the sidebar AND in any
+ * other surface that re-uses `.sidebar-game-status.running`
+ * regardless of the user's preference. Placed RIGHT AFTER the
+ * animation declaration so the source-order tiebreak proactively
+ * disables the animation when reduced-motion is set. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-game-status.running {
+    animation: none;
+  }
 }
 
 @keyframes runningStatusPulse {

@@ -613,8 +613,23 @@ function SidebarGameItem({
           {game.platform} · {game.playTime}
         </div>
       </div>
+      {/* Status dot (RIGHT) — last in the flex row so it sits
+       *  visually on the right edge, after the title/meta.
+       *  All rows share the same rightmost X coordinate
+       *  (gap-controlled, with `flex-shrink: 0`) so the dots
+       *  line up vertically in a single column on the right.
+       *  `aria-label` reads the install state to screen
+       *  readers so the visual-only colored dot isn't lost
+       *  in the aural rendering. */}
       <div
         className={`sidebar-game-status ${isRunning ? "running" : game.installed ? "installed" : "not-installed"}`}
+        aria-label={
+          isRunning
+            ? "Running"
+            : game.installed
+            ? "Installed"
+            : "Not installed"
+        }
       />
     </button>
   );
