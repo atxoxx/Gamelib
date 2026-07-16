@@ -226,6 +226,19 @@ struct SteamAppDetail {
     #[allow(dead_code)]
     name: Option<String>,
     short_description: Option<String>,
+    /// Rich "About this game" body the Steam store displays under
+    /// the capsule image. Rendered as HTML with embedded `<img>` tags
+    /// (pointing at Steam CDN URLs) that act as inline GIFs/images.
+    /// Used by the frontend AboutSection for true fidelity — the
+    /// plain-text `short_description` is just a teaser.
+    #[serde(default)]
+    about_the_game: Option<String>,
+    /// Steam store "movies" (trailers + gameplay clips). Both `.webm`
+    /// and `.mp4` URLs are surfaced per resolution slot; the
+    /// frontend `<video>` element picks the best one based on
+    /// browser support.
+    #[serde(default)]
+    movies: Vec<SteamMovie>,
     #[serde(default)]
     developers: Vec<String>,
     #[serde(default)]
@@ -247,10 +260,351 @@ struct SteamGenre {
     description: Option<String>,
 }
 
+/// Raw movie entry from the Steam `appdetails` endpoint. We expose
+/// the four resolution slots (`webm.max`, `webm.full`, `mp4.max`,
+/// `mp4.full`) plus `thumbnail` (a JPG poster) and `highlight`
+/// (Steam's flagged "main trailer" bit). The frontend uses the
+/// thumbnail as `<video poster>` so movies render beautifully
+/// while paused.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SteamMovie {
+    #[serde(default)]
+    id: u32,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    thumbnail: Option<String>,
+    #[serde(default)]
+    highlight: bool,
+    #[serde(default)]
+    webm: Option<SteamMovieVariant>,
+    #[serde(default)]
+    mp4: Option<SteamMovieVariant>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct SteamMovieVariant {
+    #[serde(default)]
+    max: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "480")]
+    p480: Option<String>,
+    #[serde(default)]
+    full: Option<String>,
+}
+
 // ─── Base64 Encoding ─────────────────────────────────────────────────────────
 
 /// Re-export of the base64 encoder shared with lib.rs.
 /// This avoids code duplication.
+// ─── Rich About Payload (Steam `about_the_game` + `movies[]`) ────────────────
+
+/// A single trailer/gameplay clip sourced from the Steam store. The
+/// frontend AboutSection renders a `<video>` tile per entry; `poster`
+/// powers the static thumbnail while the browser picks the best
+/// `<source>` based on the `kind` (application/vnd.apple.mpegurl /
+/// video/webm vs video/mp4 — webm is preferred because Steam encodes
+/// at a smaller size for the same perceived quality).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MovieEntry {
+    pub id: u32,
+    pub name: Option<String>,
+    pub thumbnail: Option<String>,
+    /// Best webm URL (max resolution when available, else 480p).
+    pub webm: Option<String>,
+    /// Best mp4 URL (max resolution when available, else 480p, else
+    /// full). Webm is preferred on capable browsers; mp4 is the
+    /// universal fallback (Safari, mobile, embedded WebView).
+    pub mp4: Option<String>,
+    pub highlight: bool,
+}
+
+/// The combined "About" payload returned by the `get_about_section`
+/// Tauri command. Source priority is Steam-first (`source == "steam"`)
+/// with IGDB as a graceful fallback (`source == "igdb"`) when:
+///   1. The game has no Steam AppID, OR
+///   2. Steam's `about_the_game` is empty AND no movies, OR
+///   3. Steam's appdetails call failed.
+///
+/// `about_html` is rendered with `dangerouslySetInnerHTML` after
+/// minimal client-side sanitization; it includes Steam CDN `<img>`
+/// tags as inlined images/GIFs for the visual richness the user
+/// asked for. `about_text` is the fallback for renderers that don't
+/// accept raw HTML.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RichAboutPayload {
+    /// `"steam" | "igdb" | "none"`. `none` signals "no data" — the
+    /// frontend should hide the section OR fall back to its pre-
+    /// existing `game.description` field as a last resort.
+    pub source: String,
+    /// Deep-link to the source page (Steam store / IGDB game).
+    pub source_url: Option<String>,
+    /// Human-readable source name ("Steam" / "IGDB").
+    pub source_name: Option<String>,
+    /// Raw HTML body (Steam "about_the_game"). Frontend sanitizes.
+    pub about_html: Option<String>,
+    /// Plain-text fallback (Steam short_description or IGDB summary).
+    pub about_text: Option<String>,
+    /// Trailers / gameplay videos from Steam `movies[]`. IGDB
+    /// YouTube videos are intentionally not surfaced here — the
+    /// existing `VideosSection` already handles YouTube embeds.
+    pub movies: Vec<MovieEntry>,
+    /// Unix-seconds timestamp of the last successful fetch. Drives
+    /// the frontend "Updated {fetchedAt}" label.
+    pub fetched_at: u64,
+}
+
+// Tiny per-appid TTL cache. Steam's `about_the_game` HTML changes at
+// most every few weeks (store page edits, new patch notes), so a
+// 6-hour TTL strikes a reasonable balance. We use a `OnceLock<Mutex>`
+// for cheap cloning and zero per-fetch hashing; the entry count is
+// bounded by the size of the user's Steam library, so there's no
+// memory-growth concern.
+//
+// Cooldown of negative cache: a Steam failure (HTTP error / parse
+// error) is NOT cached — we want the next click to have a fresh
+// chance to succeed. Negative caching Steam errors would turn a
+// single hiccup into a 6-hour outage.
+static ABOUT_CACHE: OnceLock<Mutex<HashMap<u32, (Instant, RichAboutPayload)>>> = OnceLock::new();
+
+const ABOUT_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Strip a Steam `about_the_game` HTML string down to a plain-text
+/// preview suitable for length hints / non-HTML renderers. The
+/// `<br>`/`<p>`/`<li>` boundaries are preserved as spaces so the
+/// resulting text reads naturally. Not used for actual display —
+/// `about_html` is the canonical render path.
+fn strip_html_for_preview(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut last_was_space = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                if !last_was_space {
+                    out.push(' ');
+                    last_was_space = true;
+                }
+            }
+            c if !in_tag => {
+                out.push(c);
+                last_was_space = c.is_whitespace();
+            }
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Fetch the rich-about payload with a small cache. Returns
+/// `None` when *both* Steam and IGDB come back empty (frontend hides
+/// the section in that case, or falls back to the legacy
+/// `game.description` field).
+pub async fn fetch_rich_about(
+    steam_app_id: Option<u32>,
+    game_name: Option<&str>,
+) -> Option<RichAboutPayload> {
+    // 1. Steam ─ the user's preferred source.
+    if let Some(app_id) = steam_app_id {
+        if let Some(payload) = fetch_steam_about_cached(app_id).await {
+            if payload.about_html.is_some() || !payload.movies.is_empty() {
+                return Some(payload);
+            }
+            // Steam responded but produced nothing useful — fall
+            // through to IGDB.
+        }
+        // No payload OR empty payload — fall through.
+    }
+
+    // 2. IGDB fallback by game name. We don't accept a slug here
+    // because the Steam-priority path already covers any title
+    // we have an appid for. Without an appid we're guessing by
+    // name anyway, and IGDB's `summary`/`storyline` + YouTube
+    // `videos[]` (handled by the existing VideosSection) is good
+    // enough.
+    if let Some(name) = game_name {
+        if let Some(payload) = fetch_igdb_about(name).await {
+            return Some(payload);
+        }
+    }
+
+    None
+}
+
+/// Steam-specific fetch + cache. The cache key is the Steam appid;
+/// the TTL is `ABOUT_CACHE_TTL`. Returns `None` on any failure
+/// (network, parse, missing appid) — the caller treats that as
+/// "Steam unavailable" and walks the IGDB fallback.
+async fn fetch_steam_about_cached(app_id: u32) -> Option<RichAboutPayload> {
+    // Positive-cache hit? Return it.
+    {
+        let cache = ABOUT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let guard = cache.lock().ok()?;
+        if let Some((fetched, payload)) = guard.get(&app_id) {
+            if fetched.elapsed() < ABOUT_CACHE_TTL {
+                return Some(payload.clone());
+            }
+        }
+    }
+
+    // 1. Hit Steam's appdetails endpoint. Mirrors the URL the
+    //    existing `fetch_steam_game_details_impl` uses; we reuse
+    //    `http_client()` for TLS session cache warmth.
+    let url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={}&cc=us&l=en",
+        app_id
+    );
+    let client = http_client();
+    let resp = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    // 2. Parse the raw response. The Steam wrapper is keyed by the
+    //    appid string, identical to `SteamAppDetailResponse` used by
+    //    `search_steam`, so we reuse the deserialization path —
+    //    except we also read `about_the_game` + `movies` which the
+    //    search path ignores. We declare a local copy of the
+    //    wrapper here so the change is self-contained (touching the
+    //    outer `SteamAppDetail` would silently let the search path
+    //    start pulling trailers, which we don't want yet).
+    #[derive(Deserialize)]
+    struct RichWrapper {
+        success: bool,
+        #[serde(default)]
+        data: Option<RichAppDetail>,
+    }
+    #[derive(Deserialize)]
+    struct RichAppDetail {
+        #[serde(default)]
+        about_the_game: Option<String>,
+        #[serde(default)]
+        short_description: Option<String>,
+        #[serde(default)]
+        movies: Vec<SteamMovie>,
+    }
+
+    let map: HashMap<String, RichWrapper> = match resp.json().await {
+        Ok(m) => m,
+        Err(_) => return None,
+    };
+    let wrapper = match map.get(&app_id.to_string()) {
+        Some(w) => w,
+        None => return None,
+    };
+    if !wrapper.success {
+        return None;
+    }
+    let data = match wrapper.data.as_ref() {
+        Some(d) => d,
+        None => return None,
+    };
+
+    // 3. Build the payload. Map movies to the frontend schema; pick
+    //    the best webm (max → 480 → None) and best mp4 (max → 480 →
+    //    full → None) slots.
+    let movies: Vec<MovieEntry> = data
+        .movies
+        .iter()
+        .map(|m| {
+            let webm = m
+                .webm
+                .as_ref()
+                .and_then(|v| v.max.clone().or_else(|| v.p480.clone()));
+            let mp4 = m
+                .mp4
+                .as_ref()
+                .and_then(|v| v.max.clone().or_else(|| v.p480.clone()).or_else(|| v.full.clone()));
+            MovieEntry {
+                id: m.id,
+                name: m.name.clone(),
+                thumbnail: m.thumbnail.clone(),
+                webm,
+                mp4,
+                highlight: m.highlight,
+            }
+        })
+        .collect();
+
+    let about_text = data
+        .about_the_game
+        .as_deref()
+        .map(strip_html_for_preview)
+        .filter(|s| !s.is_empty());
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let payload = RichAboutPayload {
+        source: "steam".to_string(),
+        source_url: Some(format!("https://store.steampowered.com/app/{}", app_id)),
+        source_name: Some("Steam".to_string()),
+        about_html: data.about_the_game.clone(),
+        about_text,
+        movies,
+        fetched_at: now,
+    };
+
+    // 4. Cache + return. Only positive results are cached so a
+    //    transient Steam hiccup doesn't poison subsequent renders.
+    if payload.about_html.is_some() || !payload.movies.is_empty() {
+        if let Some(cache) = ABOUT_CACHE.get() {
+            if let Ok(mut guard) = cache.lock() {
+                guard.insert(app_id, (Instant::now(), payload.clone()));
+            }
+        }
+    }
+
+    Some(payload)
+}
+
+/// IGDB fallback: search by name and return the first hit's
+/// storyline + summary as plain text. We don't include IGDB videos
+/// here because the existing VideosSection already surfaces them
+/// via YouTube embeds; doubling-up would create two trailers rows.
+async fn fetch_igdb_about(game_name: &str) -> Option<RichAboutPayload> {
+    let results = search_igdb(game_name).await;
+    let best = results.into_iter().next()?;
+
+    // Prefer the longer `storyline`; fall back to `summary`. Skip
+    // when both are empty (no IGDB data worth showing).
+    let about_text = best
+        .storyline
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .or(best.description.clone().filter(|s| !s.trim().is_empty()));
+
+    let about_text = match about_text {
+        Some(s) => s,
+        None => return None,
+    };
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    Some(RichAboutPayload {
+        source: "igdb".to_string(),
+        source_url: Some(best.source_url.clone()),
+        source_name: Some("IGDB".to_string()),
+        about_html: None,
+        about_text: Some(about_text),
+        movies: Vec::new(),
+        fetched_at: now,
+    })
+}
+
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -1017,7 +1371,7 @@ pub async fn search_launchbox_images(game_name: &str) -> Result<Vec<LaunchBoxIma
 
 use std::sync::OnceLock;
 use std::sync::Mutex;
-use std::time::{Instant, Duration};
+use std::time::{Instant, Duration, SystemTime};
 
 struct TokenCache {
     token: String,

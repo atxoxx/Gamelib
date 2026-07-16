@@ -301,6 +301,58 @@ export const STEAM_LANGUAGES: { code: string; label: string; flag: string }[] = 
   { code: "dutch",      label: "Nederlands",             flag: "🇳🇱" },
 ];
 
+// ─── Rich About Payload (Steam `about_the_game` + trailers) ────────────────────
+
+/**
+ * A single trailer / gameplay clip sourced from the Steam store's
+ * `data.movies[]` array. The frontend AboutSection renders one
+ * `<video>` tile per entry with `poster = thumbnail`. Webm is the
+ * preferred `<source>` (smaller, better quality at the same bitrate)
+ * with mp4 as the universal fallback for Safari / mobile / WebView
+ * contexts.
+ */
+export interface MovieEntry {
+  id: number;
+  name?: string;
+  /** Steam CDN JPG poster — set as `<video poster>`. */
+  thumbnail?: string;
+  /** Best-res webm URL (max -> 480p fallback chain). */
+  webm?: string;
+  /** Best-res mp4 URL (max -> 480p -> full fallback chain). */
+  mp4?: string;
+  /** Steam's "main trailer" flag. Highlighted in the UI when true. */
+  highlight: boolean;
+}
+
+/**
+ * The combined "About" payload returned by `get_about_section`.
+ * Sourced Steam-first (HTML body + trailers); falls back to IGDB
+ * plain text when Steam is unavailable. `source === "none"` means
+ * "no data" — the frontend should hide the section or fall back to
+ * the legacy `game.description` field.
+ */
+export interface RichAboutPayload {
+  /** `"steam" | "igdb" | "none"` */
+  source: string;
+  /** Deep-link to the source page (Steam store / IGDB game). */
+  sourceUrl?: string;
+  /** Human-readable source name ("Steam" / "IGDB"). */
+  sourceName?: string;
+  /**
+   * Raw HTML body (Steam `about_the_game`). Rendered with
+   * `dangerouslySetInnerHTML` after minimal client-side
+   * sanitization; includes Steam CDN `<img>` tags as inline
+   * images/GIFs.
+   */
+  aboutHtml?: string;
+  /** Plain-text fallback (Steam `short_description` or IGDB summary). */
+  aboutText?: string;
+  /** Steam trailers / gameplay videos. */
+  movies: MovieEntry[];
+  /** Unix-seconds timestamp of the last successful fetch. */
+  fetchedAt: number;
+}
+
 // ─── Achievements / Success Story Types ─────────────────────────────────────
 
 /** A single achievement definition + user progress (from Steam API merge). */

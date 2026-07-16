@@ -32,7 +32,7 @@ mod achievements;
 mod downloader;
 mod tray;
 mod system_screenshots;
-use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult};
+use game_scraper::{GameMetadataResult, LaunchBoxImageResult, StoreGameSummary, TimeToBeat, SimilarGame, ReleaseDateInfo, IgdbReview, LanguageSupportInfo, ReviewFetchResult, RichAboutPayload};
 use game_watcher::{GameWatcher, GameRefInput};
 use gpu_detector::GpuInfo;
 use epic::auth::{epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_is_authenticated, epic_logout};
@@ -1094,6 +1094,24 @@ async fn fetch_external_reviews(
     source: String,
 ) -> Result<Vec<IgdbReview>, String> {
     game_scraper::fetch_external_reviews(&game_name, &source).await
+}
+
+/// Fetch the rich "About" payload for a game. Prefers Steam's
+/// `about_the_game` (HTML with embedded GIFs/images) + `movies[]`
+/// (Steam CDN .webm/.mp4 trailers); falls back to IGDB's
+/// `summary` / `storyline` when Steam is unavailable (no appid,
+/// transient Steam failure, or empty Steam response).
+///
+/// Returns `None` when both sources come back empty, so the
+/// frontend can hide the section entirely. The payload is
+/// cached in-process for 6h per Steam appid — a Steam store page
+/// edit cycle is well under that window.
+#[tauri::command]
+async fn get_about_section(
+    steam_app_id: Option<u32>,
+    game_name: Option<String>,
+) -> Option<RichAboutPayload> {
+    game_scraper::fetch_rich_about(steam_app_id, game_name.as_deref()).await
 }
 
 /// Recursively scan a folder for image files (jpg, jpeg, png, gif, bmp, webp)
@@ -2264,7 +2282,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games, fetch_game_reviews, fetch_external_reviews, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,

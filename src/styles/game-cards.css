@@ -1185,3 +1185,345 @@
   color: var(--color-accent);
   filter: drop-shadow(0 0 6px var(--color-accent-glow));
 }
+
+/* ── AboutSection enhancements ────────────────────────── */
+
+/* Header row: just the title + source pill. The Show/Hide
+ * toggle moved to a centred footer below the body so it reads
+ * as the section's primary action, not a corner affordance. */
+.about-section__header {
+  margin-bottom: var(--space-md);
+}
+
+.about-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.about-section__source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--space-xs);
+  padding: 2px 10px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Steam -- accent-tinted so the brand match reads at a glance.
+ * IGDB  -- neutral so it doesn't fight with the accent stripe at
+ *         the top of the section. Manual -- muted, signals "no
+ *         source authoritative enough to brand". */
+.about-section__source-pill--steam {
+  background: color-mix(in srgb, #66c0f4 16%, var(--color-bg-tertiary));
+  border-color: color-mix(in srgb, #66c0f4 40%, var(--color-border));
+  color: #66c0f4;
+}
+
+.about-section__source-pill--igdb {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-tertiary));
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  color: var(--color-accent);
+}
+
+.about-section__source-pill--manual,
+.about-section__source-pill--none {
+  color: var(--color-text-muted);
+}
+
+/* Toggle button -- pill-shaped ghost button to the right of the
+ * title. Hover lightens the border so the user understands it's
+ * clickable without competing with the section title's accent
+ * icon. The chevron rotates 180° based on the collapsed modifier
+ * -- the rotation is the universal "open / close" affordance. */
+.about-section__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+
+.about-section__toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-tertiary));
+}
+
+.about-section__toggle:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.about-section__toggle-hint {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.about-section__toggle-chevron {
+  transition: transform var(--duration-medium) var(--ease-standard);
+  color: var(--color-text-muted);
+}
+
+.about-section__toggle-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+/* Body clip wrapper. The wrapper (not the body itself) owns
+ * the max-height / mask state so we can hide heavy children
+ * (images, headings, trailers, "View on" link) when collapsed
+ * via `display: none` — without removing the prose from
+ * screen-reader reach.
+ *
+ * Cap choices:
+ *   - collapsed: 320 px fits Steam's typical first paragraph
+ *     plus the intro image, with the mask fade announcing
+ *     "more below" without aggressive hiding.
+ *   - expanded: `max-height: none` — explicitly no cap so even
+ *     Steam's longest `about_the_game` bodies (Counter-Strike,
+ *     The Long Dark etc., which render well above 8,000 px)
+ *     are fully viewable. A numeric cap would reintroduce a
+ *     finite clipping failure mode. The downside: CSS cannot
+ *     smoothly interpolate from `max-height: 320px` to `none`,
+ *     so the expand transition is discrete (instant) by spec.
+ *     That's the right UX: the user clicked the toggle
+ *     expecting an immediate full reveal, not a slow scroll-down. */
+.about-section__body-clip {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 78%, transparent 100%);
+  transition: max-height 380ms var(--ease-standard),
+              -webkit-mask-image 200ms var(--ease-standard),
+              mask-image 200ms var(--ease-standard);
+}
+
+.about-section__body-clip--collapsed {
+  max-height: 320px;
+}
+
+.about-section__body-clip--expanded {
+  max-height: none;
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+
+/* When collapsed, hide heavy children so the prose peek is
+ * the focus and Steam's splash headings / hero images don't
+ * eat the entire 320 px. `display: none` here also removes
+ * these from the accessibility tree — so screen-reader users
+ * hear only the prose peek, matching what they see. The
+ * bottom-centre toggle button's `aria-expanded` + `aria-controls`
+ * lets SC users expand deliberately instead of sifting through
+ * dozens of `<img>` alt texts. */
+.about-section__body-clip--collapsed .about-html img,
+.about-section__body-clip--collapsed .about-html h1,
+.about-section__body-clip--collapsed .about-html h2,
+.about-section__body-clip--collapsed .about-html h3,
+.about-section__body-clip--collapsed .about-movies,
+.about-section__body-clip--collapsed .metadata-source-link {
+  display: none;
+}
+
+/* Inner body container — pure layout anchor for the clip
+ * wrapper. The previous --collapsed/--expanded modifiers
+ * lived on this element; they have moved to the outer wrapper. */
+.about-section__body {
+  /* no rules; layout anchor only */
+}
+
+/* ── AboutSection footer (Show/Hide toggle) ────────── */
+
+/* Centered footer holds the Show/Hide toggle. Sits below the
+ * body clip wrapper with a small top margin. Flex justify
+ * centres the toggle button so it reads as the section's
+ * primary action — the universal UI pattern for "Show More"
+ * used by Steam, Google Play, App Store. */
+.about-section__footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: var(--space-md);
+}
+
+/* Steam `about_the_game` HTML rendering. Steam wraps each
+ * paragraph in `<p>`, headings in `<h1>`/`<h2>`, includes embedded
+ * `<img>` tags (GIFs/photos), and uses `<br>` for soft breaks.
+ * Normalize these to the app's content rhythm:
+ *   - paragraphs get generous line-height for readability
+ *   - images cap width + center so a wide screenshot doesn't
+ *     shatter the section card
+ *   - headings inherit the title colour and a tighter size ramp
+ * Steam occasionally wraps sections in `<div>` containers; the
+ * generic block selector handles that. */
+.about-html {
+  color: var(--color-text-primary);
+  line-height: 1.7;
+  font-size: var(--font-size-md);
+}
+
+.about-html p { margin: 0 0 var(--space-md) 0; }
+
+.about-html h1,
+.about-html h2,
+.about-html h3 {
+  margin: var(--space-lg) 0 var(--space-sm) 0;
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+}
+
+.about-html h1 { font-size: var(--font-size-xl); }
+.about-html h2 { font-size: var(--font-size-lg); }
+.about-html h3 { font-size: var(--font-size-md); }
+
+.about-html img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: var(--space-md) auto;
+  border: 1px solid var(--color-border);
+}
+
+.about-html ul,
+.about-html ol {
+  margin: var(--space-sm) 0 var(--space-md) var(--space-lg);
+  padding-left: var(--space-md);
+  color: var(--color-text-primary);
+}
+
+.about-html li { margin-bottom: 4px; }
+
+.about-html a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--duration-fast) var(--ease-standard);
+}
+
+.about-html a:hover { text-decoration-color: var(--color-accent); }
+
+/* Trailers grid. Auto-fit columns collapsing down on narrow
+ * viewports. `gap` matches the screenshots carousel so the two
+ * strips feel like siblings in the page. Each tile reserves a
+ * fixed 16:9 height before the video decodes, preventing layout
+ * shift on expand. The strip's pre-existing VideosSection lives
+ * below the about-section; spacing here is a `margin-top` so the
+ * user reads the prose first, then sees the trailers below. */
+.about-movies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.about-movie-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.about-movie-tile:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+/* Highlighted (Steam's "main trailer" bit) tiles get a soft
+ * accent glow so the eye lands on the canonical trailer first. */
+.about-movie-tile--highlight {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+  box-shadow: 0 0 14px var(--color-accent-glow);
+}
+
+/* The `<video>` element inside the tile. We pin width 100% with
+ * `aspect-ratio: 16/9` so the browser reserves the right height
+ * before the first frame decodes -- prevents layout shift when
+ * the user expands the section. `object-fit: cover` keeps the
+ * poster image cropped sensibly across resolutions. */
+.about-movie-tile__video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  object-fit: cover;
+  border: none;
+}
+
+.about-movie-tile__poster-only {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: var(--color-bg-secondary);
+  background-size: cover;
+  background-position: center;
+}
+
+.about-movie-tile__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.about-movie-tile__play-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.about-movie-tile__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--font-weight-medium);
+}
+
+/* Light theme overrides -- Steam Blue stays readable on white,
+ * but needs darker text colour so the pill doesn't wash out. */
+[data-theme="light"] .about-section__source-pill--steam {
+  background: color-mix(in srgb, #1b6ea6 12%, var(--color-bg-tertiary));
+  color: #1b6ea6;
+}

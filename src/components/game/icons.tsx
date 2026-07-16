@@ -301,6 +301,23 @@ export function IconExternalLink({ size, ...p }: IconProps) {
 }
 
 /**
+ * Chevron-down glyph — used as the rotation indicator inside the
+ * AboutSection's collapse/expand toggle. The toggle button
+ * rotates it 180° via CSS (`.about-section__toggle-chevron--collapsed`)
+ * when the section is collapsed, giving the user the same
+ * "open / close door" affordance used by SidebarPopover and
+ * other collapse-y controls across the app. 1.75px stroke keeps
+ * it visually balanced with the surrounding Feather-style icons.
+ */
+export function IconChevronDown({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <polyline points="6 9 12 15 18 9" />
+    </BaseIcon>
+  );
+}
+
+/**
  * Pencil / edit glyph used as the hover-only affordance on the
  * Size KPI tile in `InfoKpiCard`. The icon stays invisible until
  * the user hovers (or keyboard-focuses) the clickable tile — the
