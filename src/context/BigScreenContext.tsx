@@ -55,13 +55,14 @@ async function setTauriFullscreen(on: boolean): Promise<void> {
     if (isCurrentlyFullscreen === on) return;
 
     if (on) {
-      // Temporarily enable window decorations so the OS registers it as a standard fullscreen window and hides the taskbar
-      await win.setDecorations(true).catch(() => {});
+      // Enter native fullscreen directly. We deliberately do NOT touch
+      // window decorations here: on Windows, flipping decorations on
+      // then off resizes the frame and leaves the OS taskbar overlapping
+      // the bottom of the window (the "bottom cut off" bug). A bordlerless
+      // window going native-fullscreen cleanly covers the taskbar.
       await win.setFullscreen(true);
     } else {
       await win.setFullscreen(false);
-      // Disable window decorations again for windowed mode
-      await win.setDecorations(false).catch(() => {});
     }
   } catch {
     // Tauri API not available (e.g. `npm run dev` in browser).

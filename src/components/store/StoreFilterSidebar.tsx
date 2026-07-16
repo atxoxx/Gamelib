@@ -1,7 +1,7 @@
 import { useSources } from "../../context/SourceContext";
 import type { SourceLink } from "../../types/source";
 
-const GENRES = [
+export const GENRES = [
   "Action",
   "Adventure",
   "RPG",

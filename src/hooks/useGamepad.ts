@@ -244,6 +244,25 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
     // on the first frame after reconnect.
     lastFrameTimeRef.current = 0;
 
+    // When the window enters/exits fullscreen (or is otherwise
+    // resized) the viewport dimensions change, so the saved cursor
+    // position may land outside the new viewport (e.g. below the
+    // Windows taskbar area that fullscreen now covers). Re-clamp it
+    // on every resize so the pointer snaps back on-screen.
+    function onResize() {
+      const vm = virtualMouseRef.current;
+      const maxX = typeof window !== "undefined" ? window.innerWidth : vm.x;
+      const maxY = typeof window !== "undefined" ? window.innerHeight : vm.y;
+      const nx = Math.max(0, Math.min(maxX, vm.x));
+      const ny = Math.max(0, Math.min(maxY, vm.y));
+      if (nx !== vm.x || ny !== vm.y) {
+        vm.x = nx;
+        vm.y = ny;
+        publishVirtualMouse();
+      }
+    }
+    window.addEventListener("resize", onResize);
+
     let rafId: number;
 
     function publishVirtualMouse(force = false): void {
@@ -365,7 +384,14 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
             focusedRef.current.removeAttribute("data-focused");
             focusedRef.current = next;
             next.setAttribute("data-focused", "true");
-            next.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            // `inline: "nearest"` keeps horizontal rails scrolling along
+            // their own axis instead of yanking the whole page. `nearest`
+            // on block avoids over-scrolling past the viewport edges.
+            next.scrollIntoView({
+              block: "nearest",
+              inline: "nearest",
+              behavior: "smooth",
+            });
             setFocusedElement(next);
             next.focus({ preventScroll: true });
           }
@@ -548,7 +574,10 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
     }
 
     rafId = requestAnimationFrame(poll);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", onResize);
+    };
   }, [enabled, connected]);
 
   // ── Cleanup ────────────────────────────────────────────────

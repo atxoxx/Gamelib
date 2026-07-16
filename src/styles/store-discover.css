@@ -1206,9 +1206,120 @@
 @media (prefers-reduced-motion: reduce) {
   .store-filter-chip-spinner {
     animation: none;
-    /* Visual fallback: a static dot in the accent color so the chip
-       still reads as "in progress" without motion. */
     border-top-color: var(--color-accent);
     opacity: 0.7;
+  }
+}
+
+/* ============================================================================
+   Discover landing — Genre quick filters + hero glow polish
+
+   - .store-genre-quickfilters : a single row of pill buttons above the
+     rails for one-tap genre jumps (see StoreGenreQuickFilters.tsx).
+   - .store-hero-glow : a soft accent bloom behind the hero content that
+     breathes slowly so the landing feels alive without competing with the
+     rotating cover.
+   ============================================================================ */
+
+.store-genre-quickfilters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: 0 var(--space-2xs);
+}
+
+.store-genre-quickfilters-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.store-genre-quickfilters-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.store-genre-quickfilter {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.store-genre-quickfilter:hover {
+  color: #fff;
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.store-genre-quickfilter:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.store-genre-quickfilter:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.store-genre-quickfilter.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+/* ── Hero glow bloom ─────────────────────────────────────────────────── */
+
+.store-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 12% 90%,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
+    transparent 55%
+  );
+  opacity: 0;
+  animation: storeHeroGlow 7s ease-in-out infinite;
+  mix-blend-mode: screen;
+}
+
+@keyframes storeHeroGlow {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .store-hero::after {
+    animation: none;
+    opacity: 0.4;
   }
 }

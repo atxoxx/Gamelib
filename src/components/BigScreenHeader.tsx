@@ -133,6 +133,15 @@ function PowerIcon() {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
 // ── Tabs Definition ──────────────────────────────────────────────
 
 interface HeaderTab {
@@ -183,7 +192,11 @@ function HeaderTabItem({
   );
 }
 
-export default function BigScreenHeader() {
+export default function BigScreenHeader({
+  onOpenSearch,
+}: {
+  onOpenSearch?: () => void;
+}) {
   const gamepad = useGamepad();
   const navigate = useNavigate();
   const location = useLocation();
@@ -232,6 +245,8 @@ export default function BigScreenHeader() {
 
   const focusableExit = useFocusable(handleExit);
 
+  const focusableSearch = useFocusable(() => onOpenSearch?.());
+
   const contentTabs = tabs.filter((t) => t.type === "content");
   const systemTabs = tabs.filter((t) => t.type === "system");
 
@@ -277,7 +292,20 @@ export default function BigScreenHeader() {
             );
           })}
 
-          {/* Exit Big Screen (Power button style) */}
+          {/* Quick search (opens the global Big Screen search overlay) */}
+        <button
+          type="button"
+          className="bigscreen-header-tab bigscreen-header-tab--system bigscreen-header-tab--search"
+          {...focusableSearch}
+          aria-label="Search the store"
+          title="Search ( / )"
+        >
+          <span className="bigscreen-header-tab-icon">
+            <SearchIcon />
+          </span>
+        </button>
+
+        {/* Exit Big Screen (Power button style) */}
           <button
             type="button"
             className="bigscreen-header-tab bigscreen-header-tab--system bigscreen-header-tab--exit"

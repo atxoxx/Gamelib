@@ -62,50 +62,78 @@ export default function VirtualCursor({ gamepad }: VirtualCursorProps) {
 
   useEffect(() => {
     let rafId: number;
+    // Track visibility so we can fully hide the element (display:none)
+    // whenever the cursor is toggled off — an opacity-only fade left
+    // the pointer visible at its last opacity after an L3 hide.
+    let lastVisible: boolean | null = null;
 
     function tick() {
       const cur = gamepad.virtualMouse;
-      if (!cur.visible || typeof document === "undefined") {
+      if (typeof document === "undefined") {
         rafId = requestAnimationFrame(tick);
         return;
       }
 
-      // ── Cursor position update via transform ────────────────
       const el = cursorRef.current;
-      if (el) {
-        if (
-          cur.x !== lastRenderRef.current.x ||
-          cur.y !== lastRenderRef.current.y
-        ) {
-          el.style.transform = `translate3d(${cur.x - 4}px, ${cur.y - 3}px, 0)`;
-          lastRenderRef.current = { x: cur.x, y: cur.y, ts: performance.now() };
+
+      // ── Hide the cursor when not visible ───────────────────
+      if (!cur.visible) {
+        if (el && lastVisible !== false) {
+          el.style.display = "none";
+          el.style.opacity = "0";
+          lastVisible = false;
         }
-        // ── Opacity (idle fade + drag indicator) ─────────────
-        const now = performance.now();
-        const idleMs = now - cur.lastInputMs;
-        const isDragging = cur.leftDown || cur.rightDown;
-
-        let target: number;
-        if (isDragging || cur.moving) {
-          target = ACTIVE_OPACITY;
-        } else if (idleMs < IDLE_FADE_MS) {
-          // Gentle breathing pulse when recently active but not moving.
-          target = IDLE_BREATH_OPACITY;
-        } else {
-          target = MIN_OPACITY;
-        }
-
-        // Smooth the opacity change over ~120 ms for a soft transition.
-        const prev = fadeRef.current;
-        const next = prev + (target - prev) * 0.18;
-        fadeRef.current = next;
-        el.style.opacity = String(next);
-
-        // Drag ring pulse — toggles a secondary class for the
-        // outer ring's animated glow during click-and-drag.
-        el.classList.toggle("virtual-cursor--dragging", isDragging);
-        if (isDragging) el.style.setProperty("--drag-opacity", String(DRAG_OPACITY));
+        rafId = requestAnimationFrame(tick);
+        return;
       }
+
+      if (!el) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (lastVisible !== true) {
+        el.style.display = "block";
+        // Reveal instantly so removing the L3 hide doesn't animate
+        // from a stale opacity.
+        el.style.opacity = String(ACTIVE_OPACITY);
+        fadeRef.current = ACTIVE_OPACITY;
+        lastVisible = true;
+      }
+
+      // ── Cursor position update via transform ────────────────
+      if (
+        cur.x !== lastRenderRef.current.x ||
+        cur.y !== lastRenderRef.current.y
+      ) {
+        el.style.transform = `translate3d(${cur.x - 4}px, ${cur.y - 3}px, 0)`;
+        lastRenderRef.current = { x: cur.x, y: cur.y, ts: performance.now() };
+      }
+      // ── Opacity (idle fade + drag indicator) ─────────────
+      const now = performance.now();
+      const idleMs = now - cur.lastInputMs;
+      const isDragging = cur.leftDown || cur.rightDown;
+
+      let target: number;
+      if (isDragging || cur.moving) {
+        target = ACTIVE_OPACITY;
+      } else if (idleMs < IDLE_FADE_MS) {
+        // Gentle breathing pulse when recently active but not moving.
+        target = IDLE_BREATH_OPACITY;
+      } else {
+        target = MIN_OPACITY;
+      }
+
+      // Smooth the opacity change over ~120 ms for a soft transition.
+      const prev = fadeRef.current;
+      const next = prev + (target - prev) * 0.18;
+      fadeRef.current = next;
+      el.style.opacity = String(next);
+
+      // Drag ring pulse — toggles a secondary class for the
+      // outer ring's animated glow during click-and-drag.
+      el.classList.toggle("virtual-cursor--dragging", isDragging);
+      if (isDragging) el.style.setProperty("--drag-opacity", String(DRAG_OPACITY));
 
       rafId = requestAnimationFrame(tick);
     }
@@ -120,7 +148,7 @@ export default function VirtualCursor({ gamepad }: VirtualCursorProps) {
     <div
       ref={cursorRef}
       className="virtual-cursor"
-      style={{ opacity: 0 }}
+      style={{ opacity: 0, display: "none" }}
       aria-hidden="true"
     >
       <div className="virtual-cursor-body" />
