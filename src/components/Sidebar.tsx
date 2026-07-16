@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -395,15 +396,36 @@ export default function Sidebar() {
   // popover manages its own dismissal (click anywhere outside the
   // popover OR the anchor, plus Escape) so the sidebars listen for
   // everything else.
+  //
+  // We bind to `click` (NOT `mousedown`) so the portaled context
+  // menu's button onClick handlers run BEFORE the dismiss fires —
+  // the menu's React `e.stopPropagation()` only stops React's
+  // synthetic bubble, not native DOM bubbling, so a `mousedown`
+  // listener would close the menu before the user could release
+  // their click on a menu item. `click` fires after mouseup so the
+  // menu button's onClick (which runs the action) executes first.
+  // The downside: a user who opens the menu then drags out without
+  // releasing on a menu item still triggers dismiss — which is the
+  // expected loop-closing behavior anyway.
   useEffect(() => {
-    function handleClick() {
+    function handleClick(e: MouseEvent) {
+      // Ignore clicks whose target is inside the portaled menu —
+      // React's stopPropagation runs but its scope is synthetic,
+      // and the menu's button onClick that runs the action is
+      // what we WANT to fire before dismiss. We tag the portal
+      // root with `data-sidebar-context-menu` (set via the menu
+      // component) so this handler can detect containment cheaply.
+      const target = e.target as Element | null;
+      if (target && target.closest("[data-sidebar-context-menu]")) {
+        return;
+      }
       setShowImportMenu(false);
       setContextMenu(null);
     }
     if (showImportMenu || contextMenu) {
-      document.addEventListener("mousedown", handleClick);
+      document.addEventListener("click", handleClick);
     }
-    return () => document.removeEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("click", handleClick);
   }, [showImportMenu, contextMenu]);
 
   async function handleImportExe() {
@@ -932,6 +954,7 @@ export default function Sidebar() {
                 isRunning={runningGameIds.includes(game.id)}
                 bulkSelected={bulkSelectedIds.has(game.id)}
                 searchQuery={filterState.search}
+                prefersCover={isIconRail}
                 onClick={handleRowClick}
                 onContextMenu={(e) => handleGameContextMenu(e, game)}
                 onPointerEnter={(g) => setHoveredGameId(g.id)}
@@ -978,6 +1001,7 @@ export default function Sidebar() {
                 isRunning={runningGameIds.includes(game.id)}
                 bulkSelected={bulkSelectedIds.has(game.id)}
                 searchQuery={filterState.search}
+                prefersCover={isIconRail}
                 onClick={handleRowClick}
                 onContextMenu={(e) => handleGameContextMenu(e, game)}
                 onPointerEnter={(g) => setHoveredGameId(g.id)}
@@ -1008,26 +1032,37 @@ export default function Sidebar() {
           </>
         )}
       </div>
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          game={contextMenu.game}
-          isRunning={runningGameIds.includes(contextMenu.game.id)}
-          isPinned={pinnedIds.has(contextMenu.game.id)}
-          onLaunch={() => handleLaunchFromContextMenu(contextMenu.game)}
-          onViewDetails={() => handleViewDetailsFromContextMenu(contextMenu.game)}
-          onRemove={() => handleRemoveFromContextMenu(contextMenu.game)}
-          onTogglePin={() => {
-            togglePin(contextMenu.game);
-            setContextMenu(null);
-          }}
-          onSetStatus={(s) => handleSetPlayStatus(contextMenu.game, s)}
-          onShowInFolder={() => handleShowInFolder(contextMenu.game)}
-          onOpenStore={() => handleOpenStore(contextMenu.game)}
-          onCopyPath={() => handleCopyPath(contextMenu.game)}
-        />
-      )}
+      {/* Context menu is portalled to `document.body` so it can
+       *  extend past the sidebar's right edge without being
+       *  clipped by `.app-sidebar { overflow: hidden }`. Without
+       *  this the menu items truncate mid-label when the user's
+       *  right-click sits inside the sidebar — the parent sidebar
+       *  clips the overflow but the menu needs to draw over the
+       *  main panel. Portal keeps the React tree (so handlers like
+       *  `onMouseDown={stopPropagation}` still fire correctly)
+       *  while letting the rendered DOM live at body level. */}
+      {contextMenu &&
+        createPortal(
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            game={contextMenu.game}
+            isRunning={runningGameIds.includes(contextMenu.game.id)}
+            isPinned={pinnedIds.has(contextMenu.game.id)}
+            onLaunch={() => handleLaunchFromContextMenu(contextMenu.game)}
+            onViewDetails={() => handleViewDetailsFromContextMenu(contextMenu.game)}
+            onRemove={() => handleRemoveFromContextMenu(contextMenu.game)}
+            onTogglePin={() => {
+              togglePin(contextMenu.game);
+              setContextMenu(null);
+            }}
+            onSetStatus={(s) => handleSetPlayStatus(contextMenu.game, s)}
+            onShowInFolder={() => handleShowInFolder(contextMenu.game)}
+            onOpenStore={() => handleOpenStore(contextMenu.game)}
+            onCopyPath={() => handleCopyPath(contextMenu.game)}
+          />,
+          document.body
+        )}
 
       {showImportModal && (
         <ImportModal
@@ -1118,24 +1153,64 @@ function ContextMenu({
   const adjustedX = window.innerWidth - x < menuWidth ? x - menuWidth : x;
   const adjustedY = window.innerHeight - y < menuHeight ? y - menuHeight : y;
 
-  // Status submenu open state. Click on the "Set Status" item to
-  // toggle; click any submenu option commits + closes both
-  // submenu and parent context menu. We deliberately use click
-  // rather than hover because hover-submenus have a latency
-  // cost that's not worth a two-deep menu.
+  // Status submenu open state + viewport position computed from
+  // the trigger row's bounding rect. We do NOT rely on CSS
+  // `position: absolute; left: 100%` because the surrounding
+  // portaled menu can introduce stacking contexts / overflow that
+  // silently shift the submenu out of view on some themes.
+  // Instead the submenu is portaled to `document.body` with
+  // explicit `position: fixed; top; left` so it always sits at
+  // the right edge of the trigger row no matter what styling is
+  // applied to ancestors. Recomputed every time `statusOpen`
+  // flips true so a scroll between the menu's mount and the
+  // first click can't leave the submenu stranded.
   const [statusOpen, setStatusOpen] = useState(false);
+  const [submenuPos, setSubmenuPos] = useState<{ top: number; left: number } | null>(null);
+  const hasSubmenuRef = useRef<HTMLDivElement>(null);
 
-  // When the menu sits flush against the right viewport edge
-  // (because the original X was close to the screen edge), we want
-  // the status submenu to fly out to the LEFT — otherwise it
-  // overflows the window. The `flip` flag is derived from the
-  // post-adjust X coordinate.
-  const submenuFlipped = adjustedX < 12;
+  function toggleStatusSubmenu() {
+    setStatusOpen((prev) => {
+      const next = !prev;
+      if (next && hasSubmenuRef.current) {
+        const rect = hasSubmenuRef.current.getBoundingClientRect();
+        // Prefer flying out to the right; flip to the LEFT only
+        // when there's not enough room past the trigger to fit
+        // a 160px-min submenu. Clamp to viewport padding (8px)
+        // so the submenu never bleeds off the screen.
+        const SUBMENU_MIN_WIDTH = 168;
+        const PAGE_MARGIN = 8;
+        let left = rect.right + 4;
+        if (left + SUBMENU_MIN_WIDTH > window.innerWidth - PAGE_MARGIN) {
+          left = Math.max(
+            PAGE_MARGIN,
+            rect.left - SUBMENU_MIN_WIDTH - 4
+          );
+        }
+        let top = rect.top;
+        // Estimated height: 5 status options × ~28px + 8px padding.
+        const ESTIMATED_SUBMENU_HEIGHT = 156;
+        if (top + ESTIMATED_SUBMENU_HEIGHT > window.innerHeight - PAGE_MARGIN) {
+          top = Math.max(PAGE_MARGIN, window.innerHeight - ESTIMATED_SUBMENU_HEIGHT - PAGE_MARGIN);
+        }
+        setSubmenuPos({ top, left });
+      }
+      return next;
+    });
+  }
 
   return (
     <div
+      // `data-sidebar-context-menu` is the contract our parent
+      // Sidebar's outside-click dismiss handler uses to detect the
+      // portaled menu's DOM tree. React's `stopPropagation` only
+      // blocks synthetic events; the dismiss handler is a NATIVE
+      // document-level `click` listener, so it would otherwise see
+      // every menu-item click and unmount the menu before the
+      // item's onClick runs. The `closest()` check in the parent
+      // useEffect early-returns for clicks tagged with this attr.
       className="context-menu"
-      style={{ left: adjustedX, top: adjustedY }}
+      data-sidebar-context-menu="true"
+      style={{ left: adjustedX, top: adjustedY, zIndex: 9200 }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="context-menu-header">
@@ -1165,18 +1240,26 @@ function ContextMenu({
         </svg>
         {isPinned ? "Unpin" : "Pin to Top"}
       </button>
-      {/* Set Status — toggles a fly-out submenu to the right (or
-       *  left, when on the right viewport edge) of this row. The
-       *  `.has-submenu` class adds a chevron via CSS. */}
+      {/* Set Status — toggles a fly-out submenu that is portaled to
+       *  document.body with position: fixed coords derived from
+       *  this trigger row's bounding rect. Without portaling
+       *  CSS containment (overflow:hidden on .context-menu ancestor,
+       *  stacking-context clipping on a parent) can silently shift
+       *  the submenu out of view. The portal guarantees it paints
+       *  at the calculated viewport coordinates regardless.
+       *  The trigger div keeps `position: relative` so the
+       *  CSS-defined chevron submenu (`.has-submenu::after`) and
+       *  any z-index layering still anchor cleanly to it. */}
       <div
+        ref={hasSubmenuRef}
         className={`context-menu-item has-submenu${statusOpen ? " submenu-open" : ""}`}
-        onClick={() => setStatusOpen((v) => !v)}
+        onClick={toggleStatusSubmenu}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setStatusOpen((v) => !v);
+            toggleStatusSubmenu();
           }
         }}
       >
@@ -1187,36 +1270,47 @@ function ContextMenu({
           <circle cx="9" cy="7" r="3" />
         </svg>
         Set Status
-        <div
-          className={`sidebar-context-submenu${statusOpen ? " open" : ""}${submenuFlipped ? " sidebar-context-submenu--flip" : ""}`}
-          role="menu"
-          aria-label="Play status options"
-        >
-          {(["backlog", "playing", "completed", "on_hold", "abandoned"] as PlayStatus[]).map(
-            (s) => {
-              const meta = PLAY_STATUS_DETAILS[s];
-              const active = (game.playStatus || "backlog") === s;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  className={`sidebar-context-submenu__item${active ? " active" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSetStatus(s);
-                  }}
-                >
-                  <span
-                    className="dot"
-                    style={{ background: meta.color }}
-                  />
-                  {meta.label}
-                </button>
-              );
-            }
-          )}
-        </div>
       </div>
+      {statusOpen && submenuPos &&
+        createPortal(
+          <div
+            className="sidebar-context-submenu open"
+            data-sidebar-context-menu="true"
+            style={{
+              position: "fixed",
+              top: submenuPos.top,
+              left: submenuPos.left,
+              zIndex: 9300,
+            }}
+            role="menu"
+            aria-label="Play status options"
+          >
+            {(["backlog", "playing", "completed", "on_hold", "abandoned"] as PlayStatus[]).map(
+              (s) => {
+                const meta = PLAY_STATUS_DETAILS[s];
+                const active = (game.playStatus || "backlog") === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`sidebar-context-submenu__item${active ? " active" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetStatus(s);
+                    }}
+                  >
+                    <span
+                      className="dot"
+                      style={{ background: meta.color }}
+                    />
+                    {meta.label}
+                  </button>
+                );
+              }
+            )}
+          </div>,
+          document.body
+        )}
       <button className="context-menu-item" onClick={onShowInFolder}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -1276,6 +1370,7 @@ function SidebarGameItem({
   isRunning,
   bulkSelected,
   searchQuery,
+  prefersCover,
   onClick,
   onContextMenu,
   onPointerEnter,
@@ -1286,6 +1381,15 @@ function SidebarGameItem({
   isRunning: boolean;
   bulkSelected: boolean;
   searchQuery: string;
+  /**
+   * When true, prefer `coverArtUrl` (the full-cover artwork, e.g.
+   * IGDB / Steam library_600x900) over `iconUrl` (the small
+   * square library icon). Set in icon-rail mode so each row is
+   * visually dominated by its game cover rather than a 32×32
+   * square thumbnail; the rail is wide enough (68px) for the
+   * larger image to read clearly while the title/meta is hidden.
+   */
+  prefersCover?: boolean;
   onClick: (game: Game, e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onPointerEnter: (game: Game) => void;
@@ -1344,7 +1448,37 @@ function SidebarGameItem({
       onMouseLeave={onPointerLeave}
     >
       <div className="sidebar-game-icon">
-        {game.iconUrl ? (
+        {/* Image priority chain:
+         *   • prefersCover + coverArtUrl → cover (icon-rail mode).
+         *     Covers are aspect-ratio (often 2:3), cropped to fit
+         *     the rail box via `object-fit: cover` in CSS.
+         *   • otherwise iconUrl (small Steam library square), falls
+         *     through to coverArtUrl, falls through to the
+         *     placeholder SVG.
+         *  The Steam-CDN onError fallback chain is shared with the
+         *  Library page's auto-fetch so a tile that 404s on the
+         *  hi-res URL still has a graceful degradation path. */}
+        {prefersCover && game.coverArtUrl ? (
+          <img
+            src={game.coverArtUrl}
+            alt={game.name}
+            onError={(e) => {
+              const img = e.currentTarget;
+              const appId = game.steamAppId;
+              if (appId) {
+                if (img.src.includes("library_600x900_2x")) {
+                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`;
+                  return;
+                }
+                if (img.src.includes("library_600x900")) {
+                  img.src = `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg`;
+                  return;
+                }
+              }
+              updateGame(game.id, { coverArtUrl: undefined });
+            }}
+          />
+        ) : game.iconUrl ? (
           <img src={game.iconUrl} alt={game.name} />
         ) : game.coverArtUrl ? (
           <img

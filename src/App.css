@@ -1161,8 +1161,15 @@
  * tiny status dot. The title/meta are hidden but remain in the
  * DOM so the row keeps its semantic structure (good for
  * screen readers via the `aria-label` on `.sidebar-game-status`).
- * The 36px-wide cover sits centered in the rail and gains a soft
- * outline on hover so it doesn't read as a flat icon button. */
+ * The cover sits centered in the rail and gains a soft glow on
+ * hover so it doesn't read as a flat icon button.
+ *
+ * NOTE: SidebarGameItem prefers the high-res `coverArtUrl` (full
+ * cover artwork, often IGDB / Steam library_600x900) over the
+ * small square `iconUrl` whenever `prefersCover={isIconRail}` is
+ * set by the parent. CSS-side we keep the box square so the
+ * aspect-ratio cover crops cleanly via `object-fit: cover` on
+ * the existing `.sidebar-game-icon img` rule. */
 .app-sidebar.sidebar-icon-rail .sidebar-game-item {
   justify-content: center;
   padding: var(--space-xs);
@@ -1175,18 +1182,62 @@
 }
 
 .app-sidebar.sidebar-icon-rail .sidebar-game-icon {
-  width: 40px;
-  height: 40px;
+  /* 56px box is the sweet spot for a 68px rail: 6px breathing
+   * room on each side, and large enough that an aspect-ratio
+   * cover (typically 2:3) reads as a recognizable game card with
+   * `object-fit: cover` cropping the top/bottom to a square. */
+  width: 56px;
+  height: 56px;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-sm);
+  /* Defensive: covers that downloaded with a transparent border
+   * can let the dark sidebar bleed through sub-pixel rounding.
+   * A 1px opaque border matching the surface color keeps the
+   * cover visually detached from the rail background. */
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  overflow: hidden;
   transition: transform var(--transition-fast),
-    border-color var(--transition-fast);
-  border: 1px solid transparent;
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Force the cover <img> to render inside the .sidebar-game-icon
+ * with explicit dimensions + display:block. Without `display:
+ * block` the inline-image baseline adds ~4px of phantom line
+ * height below the cover; without explicit `min-*` sizes a
+ * CSS race during the first paint after `content-visibility:
+ * auto` revealed the row can leave the <img> collapsed to 0×0
+ * and the user sees nothing in the rail box. The `object-fit:
+ * cover` on the base `.sidebar-game-icon img` rule (line ~1002)
+ * handles aspect-ratio cropping — we only restate the explicit
+ * dimensions for rail-mode with `!important` to win over any
+ * platform-default `<img>` width. */
+.app-sidebar.sidebar-icon-rail .sidebar-game-icon img {
+  display: block !important;
+  width: 56px !important;
+  height: 56px !important;
+  min-width: 56px;
+  min-height: 56px;
+  object-fit: cover;
+  /* Visible backdrop while the image is loading or absent so the
+   * rail is never a row of invisible rectangles. */
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-tertiary)),
+    var(--color-bg-tertiary)
+  );
 }
 
 .app-sidebar.sidebar-icon-rail .sidebar-game-item:hover .sidebar-game-icon {
-  transform: scale(1.08);
+  transform: scale(1.15);
   border-color: var(--color-accent);
+  box-shadow: var(--shadow-md), 0 0 14px var(--color-accent-glow);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item.active .sidebar-game-icon {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
 }
 
 .app-sidebar.sidebar-icon-rail .sidebar-divider {
@@ -1531,6 +1582,18 @@
   flex-shrink: 0;
 }
 
+/* Position the trigger row as a containing block for the
+ * submenu so `.sidebar-context-submenu { left: 100% }`
+ * resolves to the right edge of the trigger ROW (not the
+ * outermost positioned ancestor). Without `position: relative`
+ * here, the submenu would otherwise ride up to the next
+ * positioned ancestor — historically the body, which positioned
+ * the submenu far off-screen to the right and made "Set Status"
+ * appear visually cut off / invisible. */
+.context-menu-item.has-submenu {
+  position: relative;
+}
+
 /* Replace the row's "Search highlight" caret so the open
  * submenu parent gets an arrow pointing into the submenu. */
 .context-menu-item.has-submenu::after {
@@ -1546,7 +1609,501 @@
   flex-shrink: 0;
 }
 
-.context-menu-item.has-submenu:hover::after {
+.context-menu-item.has-submenu:hover::after,
+.context-menu-item.has-submenu.submenu-open::after {
+  border-color: var(--color-accent);
+}
+
+/* ==============================
+   Sidebar — Enhanced Features
+   ============================== */
+
+/* Restore stack-context priority for the portaled context menu.
+ * `.context-menu` is portaled to `document.body` for the right-
+ * click menu (so it can extend past the sidebar's right edge
+ * without being clipped by `.app-sidebar { overflow: hidden }`).
+ * The portal moves it OUT of the sidebar's local stacking
+ * context, so we restate the z-index here to keep it above
+ * every other sidebar overlay:
+ *   • sidebar base (200)
+ *   • sidebar-import-menu (200)
+ *   • SidebarFilterPopover (9000)
+ *   • SidebarHoverPreview (9100)
+ * Picking 9200 leaves room for a future above-the-menu overlay. */
+.context-menu {
+  z-index: 9200 !important;
+}
+
+/* Body-level toggle of the inner sidebar between full-width and
+ * icon-only-rail mode. The `.app-sidebar` wrapper reads
+ * `SidebarCollapseContext` and adds `.sidebar-icon-rail` when active.
+ * The two classes below force `width` to the icon-rail variable,
+ * hide the chrome that would crowd a 68px column (search box,
+ * filter button label, import button), and tighten the row markup
+ * so it collapses to just (cover · status-dot). The sidebar root
+ * is a flex column so inner elements with `flex: 0 0 auto` keep
+ * their layout; the icon rail keeps the header's collapse-to-full
+ * toggle visible so the user can revert with one click. */
+.app-sidebar.sidebar-icon-rail {
+  width: var(--sidebar-icon-rail-width);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-search,
+.app-sidebar.sidebar-icon-rail .sidebar-filter-btn,
+.app-sidebar.sidebar-icon-rail .sidebar-import-wrapper {
+  display: none;
+}
+
+/* In rail mode, the row shows only the cover thumbnail and the
+ * tiny status dot. The title/meta are hidden but remain in the
+ * DOM so the row keeps its semantic structure (good for
+ * screen readers via the `aria-label` on `.sidebar-game-status`).
+ * The cover sits centered in the rail and gains a soft glow on
+ * hover so it doesn't read as a flat icon button.
+ *
+ * NOTE: SidebarGameItem prefers the high-res `coverArtUrl` (full
+ * cover artwork, often IGDB / Steam library_600x900) over the
+ * small square `iconUrl` whenever `prefersCover={isIconRail}` is
+ * set by the parent. CSS-side we keep the box square so the
+ * aspect-ratio cover crops cleanly via `object-fit: cover` on
+ * the existing `.sidebar-game-icon img` rule. */
+.app-sidebar.sidebar-icon-rail .sidebar-game-item {
+  justify-content: center;
+  padding: var(--space-xs);
+  gap: 0;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item .sidebar-game-info,
+.app-sidebar.sidebar-icon-rail .sidebar-game-item .sidebar-game-status {
+  display: none;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-icon {
+  /* 56px box is the sweet spot for a 68px rail: 6px breathing
+   * room on each side, and large enough that an aspect-ratio
+   * cover (typically 2:3) reads as a recognizable game card with
+   * `object-fit: cover` cropping the top/bottom to a square. */
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  /* Defensive: covers that downloaded with a transparent border
+   * can let the dark sidebar bleed through sub-pixel rounding.
+   * A 1px opaque border matching the surface color keeps the
+   * cover visually detached from the rail background. */
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  overflow: hidden;
+  transition: transform var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Force the cover <img> to render inside the .sidebar-game-icon
+ * with explicit dimensions + display:block. Without `display:
+ * block` the inline-image baseline adds ~4px of phantom line
+ * height below the cover; without explicit `min-*` sizes a
+ * CSS race during the first paint after `content-visibility:
+ * auto` revealed the row can leave the <img> collapsed to 0×0
+ * and the user sees nothing in the rail box. The `object-fit:
+ * cover` on the base `.sidebar-game-icon img` rule (line ~1002)
+ * handles aspect-ratio cropping — we only restate the explicit
+ * dimensions for rail-mode with `!important` to win over any
+ * platform-default `<img>` width. */
+.app-sidebar.sidebar-icon-rail .sidebar-game-icon img {
+  display: block !important;
+  width: 56px !important;
+  height: 56px !important;
+  min-width: 56px;
+  min-height: 56px;
+  object-fit: cover;
+  /* Visible backdrop while the image is loading or absent so the
+   * rail is never a row of invisible rectangles. */
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-tertiary)),
+    var(--color-bg-tertiary)
+  );
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item:hover .sidebar-game-icon {
+  transform: scale(1.15);
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md), 0 0 14px var(--color-accent-glow);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item.active .sidebar-game-icon {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+/* PinnedGames section header (above the pinned rows). Renders as
+ * a tiny uppercase label with a small 📌 inline SVG so the
+ * intent reads at a glance even when the section is collapsed.
+ * The horizontal rule above the section is rendered by the parent
+ * Sidebar component via `.sidebar-pinned-section::before` (added
+ * by Sidebar.tsx inline because pure-CSS hooks are simpler than
+ * restructuring the divider HTML). */
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-sm) 4px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.sidebar-section-header svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+/* Hide the pinned section header in icon-rail mode — it would
+ * crowd the 68px column. The covers alone read clearly. */
+.app-sidebar.sidebar-icon-rail .sidebar-section-header {
+  display: none;
+}
+
+/* Search match highlight. Applied by the Sidebar's
+ * HighlightedName component (regex split, <mark> wrap). Uses
+ * accent-soft fill + accent text, with no padding tweak so the
+ * name keeps the same baseline whether highlighted or not. */
+.sidebar-game-name mark {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-radius: var(--radius-xs);
+  padding: 0 2px;
+}
+
+/* Active-filter pill row. Renders BELOW the search/filter button
+ * row and is hidden whenever no advanced filter is active. Each
+ * chip mirrors the Library page's LibraryFilterChips pattern:
+ * pill, label, removable × — a single "Clear all" affordance at
+ * the start rolls every facet back via the existing `reset()`
+ * on useLibraryFilters. Horizontal scroll on overflow via
+ * `overflow-x: auto` keeps the chips on one row. */
+.sidebar-active-filters {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-xs) 0 var(--space-xs);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sidebar-active-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-active-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sidebar-active-filter__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  transition: color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.sidebar-active-filter__remove:hover {
+  color: var(--color-danger);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-active-filter__remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-active-filters {
+  display: none;
+}
+
+/* Multi-select bulk action bar. Sits a fixed distance from the
+ * bottom of the sidebar's list area, painting above any rows
+ * obscured by scroll. Hidden when nothing is selected. Pinned
+ * to the bottom of the visible sidebar surface using
+ * `position: sticky` so the bar never floats away from the rows
+ * the user is interacting with. */
+.sidebar-bulk-action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-top: 1px solid var(--color-border-light);
+  border-bottom: none;
+  z-index: 50;
+  animation: sidebarBulkBarIn 180ms var(--ease-enter);
+}
+
+@keyframes sidebarBulkBarIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sidebar-bulk-action-bar__count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+.sidebar-bulk-action-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.sidebar-bulk-action-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  gap: 4px;
+}
+
+.sidebar-bulk-action-bar__btn svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.sidebar-bulk-action-bar__btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-bulk-action-bar__btn--danger:hover {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border));
+}
+
+.sidebar-bulk-action-bar__btn--accent {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.sidebar-bulk-action-bar__btn--accent:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar {
+  /* In rail mode the bulk action buttons would crowd the 68px
+   * column; collapse the bar to a single transparent icon
+   * cluster that fully expands on hover. The pin + remove + exit
+   * actions stay — the user only ever multi-selects from rail
+   * mode by accident, so a compact bar is safe. */
+  justify-content: center;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar__count,
+.app-sidebar.sidebar-icon-rail .sidebar-bulk-action-bar__btn span {
+  display: none;
+}
+
+/* Multi-select checkmark. Lives in the corner of every row that
+ * is part of the current bulk selection. .sidebar-game-item's
+ * `position: relative` (already present) lets us absolutely
+ * position the badge without introducing new positioning
+ * contracts. */
+.sidebar-game-item.bulk-selected {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-tertiary));
+  border-left-color: var(--color-accent);
+}
+
+.sidebar-game-item__check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 6px var(--color-accent-glow);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.sidebar-game-item.bulk-selected .sidebar-game-item__check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sidebar-game-item__check svg {
+  width: 10px;
+  height: 10px;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-game-item.bulk-selected .sidebar-game-item__check {
+  top: 8px;
+  right: 8px;
+}
+
+/* Context menu submenu container (used by the Set Status
+ * hover-flyout). Positioned absolutely relative to its parent
+ * context-menu item so it appears on the right of the trigger
+ * item. Hidden by default; `.open` flips it into view after a
+ * short hover delay. Auto-flip to the LEFT half of the screen
+ * on the right edge via .sidebar-context-submenu--flip. */
+.sidebar-context-submenu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 160px;
+  margin-left: 4px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.sidebar-context-submenu.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.sidebar-context-submenu--flip {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 4px;
+  transform: translateX(4px);
+}
+
+.sidebar-context-submenu--flip.open {
+  transform: translateX(0);
+}
+
+.sidebar-context-submenu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+  gap: var(--space-xs);
+}
+
+.sidebar-context-submenu__item:hover {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-context-submenu__item.active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.sidebar-context-submenu__item .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Position the trigger row as a containing block for the
+ * submenu so `.sidebar-context-submenu { left: 100% }`
+ * resolves to the right edge of the trigger ROW (not the
+ * outermost positioned ancestor). Without `position: relative`
+ * here, the submenu would otherwise ride up to the next
+ * positioned ancestor — historically the body, which positioned
+ * the submenu far off-screen to the right and made "Set Status"
+ * appear visually cut off / invisible. */
+.context-menu-item.has-submenu {
+  position: relative;
+}
+
+/* Replace the row's "Search highlight" caret so the open
+ * submenu parent gets an arrow pointing into the submenu. */
+.context-menu-item.has-submenu::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--color-text-secondary);
+  border-top: 1.5px solid var(--color-text-secondary);
+  transform: rotate(45deg);
+  margin-left: auto;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.context-menu-item.has-submenu:hover::after,
+.context-menu-item.has-submenu.submenu-open::after {
   border-color: var(--color-accent);
 }
 
