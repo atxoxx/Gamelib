@@ -77,7 +77,7 @@ export default function VirtualCursor({ gamepad }: VirtualCursorProps) {
           cur.x !== lastRenderRef.current.x ||
           cur.y !== lastRenderRef.current.y
         ) {
-          el.style.transform = `translate3d(${cur.x - 12}px, ${cur.y - 12}px, 0)`;
+          el.style.transform = `translate3d(${cur.x - 4}px, ${cur.y - 3}px, 0)`;
           lastRenderRef.current = { x: cur.x, y: cur.y, ts: performance.now() };
         }
         // ── Opacity (idle fade + drag indicator) ─────────────

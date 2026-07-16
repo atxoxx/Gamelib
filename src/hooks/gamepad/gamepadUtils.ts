@@ -35,8 +35,6 @@ export function isVisible(el: HTMLElement): boolean {
   return r.width > 0 && r.height > 0;
 }
 
-const ANGULAR_TOLERANCE_RAD = (Math.PI / 180) * 45;
-
 /** Squared distance helper. */
 function distSquared(a: Point, b: Point): number {
   const dx = a.x - b.x;
@@ -65,12 +63,13 @@ export interface FocusableCandidate {
  * pressed" — same heuristic the Xbox system UI uses for spatial
  * navigation.
  */
-export function nearestInDirection(
+function findCandidate(
+  cur: Point,
   current: HTMLElement,
   candidates: FocusableCandidate[],
   dirAngle: number,
+  toleranceRad: number,
 ): HTMLElement | null {
-  const cur = center(current);
   let best: HTMLElement | null = null;
   let bestDist = Infinity;
 
@@ -85,9 +84,14 @@ export function nearestInDirection(
     while (delta > Math.PI) delta -= 2 * Math.PI;
     while (delta < -Math.PI) delta += 2 * Math.PI;
 
-    if (Math.abs(delta) > ANGULAR_TOLERANCE_RAD) continue;
+    if (Math.abs(delta) > toleranceRad) continue;
 
-    const d = distSquared(cur, center(entry.element));
+    // Weighted distance: penalize angular deviation to favor elements directly in line.
+    // Weighted distance = distSquared * (1 + 2 * sin^2(delta))
+    const dRaw = distSquared(cur, center(entry.element));
+    const sinDelta = Math.sin(delta);
+    const d = dRaw * (1.0 + 2.0 * sinDelta * sinDelta);
+
     if (d < bestDist) {
       bestDist = d;
       best = entry.element;
@@ -97,12 +101,41 @@ export function nearestInDirection(
   return best;
 }
 
+/**
+ * Nearest-in-direction picker.
+ *
+ *   • Iterates all registered focusables.
+ *   • Skips the current element and any zero-area element
+ *     (collapsed menus, hidden modals).
+ *   • Performs a two-pass scan (first tight ±45° tolerance, then falling
+ *     back to a wider ±85° tolerance if no candidates match) to avoid
+ *     navigation getting stuck in complex grids.
+ *   • Computes a weighted distance that penalizes angular deviation.
+ *
+ * Returned element is the closest "in the direction the user
+ * pressed".
+ */
+export function nearestInDirection(
+  current: HTMLElement,
+  candidates: FocusableCandidate[],
+  dirAngle: number,
+): HTMLElement | null {
+  const cur = center(current);
+
+  // First pass: tight tolerance
+  const tightMatch = findCandidate(cur, current, candidates, dirAngle, (Math.PI / 180) * 45);
+  if (tightMatch) return tightMatch;
+
+  // Second pass fallback: wide tolerance
+  return findCandidate(cur, current, candidates, dirAngle, (Math.PI / 180) * 85);
+}
+
 // ── Virtual-mouse physics ───────────────────────────────────────
 
 /** Past this fraction of stick deflection, the cursor starts moving. */
 export const RIGHT_STICK_DEADZONE = 0.18;
 /** Stick deflection below this is treated as zero for left stick too. */
-export const STICK_DEADZONE = 0.5;
+export const STICK_DEADZONE = 0.2;
 
 /** Cursor speed at the deadzone threshold (px/s). Slow & precise. */
 export const VIRTUAL_MOUSE_MIN_SPEED = 250;
@@ -146,13 +179,22 @@ export function dispatchMouse(
   x: number,
   y: number,
   button: number,
+  leftDown = false,
+  rightDown = false,
 ): void {
   if (typeof document === "undefined") return;
   const target = document.elementFromPoint(x, y);
   if (!target) return;
 
-  const buttons =
-    type === "mousedown" ? 1 << button : type === "mouseup" ? 0 : 0;
+  let buttons = 0;
+  if (leftDown) buttons |= 1;
+  if (rightDown) buttons |= 2;
+
+  if (type === "mousedown") {
+    buttons |= (button === 0 ? 1 : button === 2 ? 2 : 0);
+  } else if (type === "mouseup") {
+    buttons &= ~(button === 0 ? 1 : button === 2 ? 2 : 0);
+  }
 
   const init: MouseEventInit = {
     bubbles: true,
@@ -162,6 +204,8 @@ export function dispatchMouse(
     buttons,
     clientX: x,
     clientY: y,
+    screenX: x,
+    screenY: y,
   };
   target.dispatchEvent(new MouseEvent(type, init));
 }

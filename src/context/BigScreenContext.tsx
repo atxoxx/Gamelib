@@ -53,10 +53,34 @@ async function setTauriFullscreen(on: boolean): Promise<void> {
     // redundant IPC call that would re-enter fullscreen by accident.
     const isCurrentlyFullscreen = await win.isFullscreen().catch(() => false);
     if (isCurrentlyFullscreen === on) return;
-    await win.setFullscreen(on);
+
+    if (on) {
+      // Temporarily enable window decorations so the OS registers it as a standard fullscreen window and hides the taskbar
+      await win.setDecorations(true).catch(() => {});
+      await win.setFullscreen(true);
+    } else {
+      await win.setFullscreen(false);
+      // Disable window decorations again for windowed mode
+      await win.setDecorations(false).catch(() => {});
+    }
   } catch {
     // Tauri API not available (e.g. `npm run dev` in browser).
-    // Silently no-op — Big Screen still works in windowed mode.
+    // Fallback: use HTML5 Fullscreen API for standard browsers
+    if (typeof document !== "undefined") {
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+      if (isCurrentlyFullscreen === on) return;
+      if (on) {
+        document.documentElement.requestFullscreen().catch((err) => {
+          console.warn("Failed to enter browser fullscreen:", err);
+        });
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch((err) => {
+            console.warn("Failed to exit browser fullscreen:", err);
+          });
+        }
+      }
+    }
   }
 }
 
@@ -161,6 +185,24 @@ export function BigScreenProvider({ children }: { children: ReactNode }) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isBigScreen, setBigScreen, toggleBigScreen]);
+
+  // Sync state if browser fullscreen is exited (e.g. Esc button pressed in browser)
+  useEffect(() => {
+    function handleFullscreenChange() {
+      if (typeof document !== "undefined") {
+        const isFullscreen = !!document.fullscreenElement;
+        if (!isFullscreen && isBigScreen) {
+          setIsBigScreenState(false);
+          lsSet(LS_BIG_SCREEN, "false");
+        }
+      }
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [isBigScreen]);
 
   const value = useMemo<BigScreenContextValue>(
     () => ({ isBigScreen, setBigScreen, ready }),

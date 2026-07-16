@@ -88,7 +88,6 @@ export interface GamepadState {
 
 // ── Constants ───────────────────────────────────────────────────
 // Loop-level constants stay here (per-frame, not math-tuning):
-const DIR_COOLDOWN = 150;
 
 // ── Hook ────────────────────────────────────────────────────────
 
@@ -115,9 +114,9 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
     moving: false,
     lastInputMs: 0,
   });
-  const lastPublishedVMRef = useRef<VirtualMouseState>(virtualMouseRef.current);
+  const lastPublishedVMRef = useRef<VirtualMouseState>({ ...virtualMouseRef.current });
   const [virtualMouse, setVirtualMouse] = useState<VirtualMouseState>(
-    () => virtualMouseRef.current,
+    () => ({ ...virtualMouseRef.current }),
   );
 
   // Tab cycler subscription (BigScreenNav uses this for LB/RB).
@@ -126,8 +125,9 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
   >(null);
 
   // ── Polling-loop state refs ────────────────────────────────
-  const lastDirTimeRef = useRef(0);
-  const prevLeftAxesRef = useRef<{ h: number; v: number }>({ h: 0, v: 0 });
+  const holdDirectionRef = useRef<{ h: number; v: number } | null>(null);
+  const holdStartRef = useRef<number>(0);
+  const lastRepeatRef = useRef<number>(0);
   const prevRightAxesRef = useRef<{ h: number; v: number }>({ h: 0, v: 0 });
   const prevButtonsRef = useRef<{
     a: boolean;
@@ -160,6 +160,21 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       const entry: FocusableEntry = { element, onActivate };
       entriesRef.current.push(entry);
 
+      const setFocusedInRegistry = () => {
+        if (focusedRef.current === element) return;
+        if (focusedRef.current) {
+          focusedRef.current.removeAttribute("data-focused");
+        }
+        focusedRef.current = element;
+        element.setAttribute("data-focused", "true");
+        setFocusedElement(element);
+      };
+
+      // Add listeners to sync focus state when focused or hovered
+      element.addEventListener("focus", setFocusedInRegistry);
+      element.addEventListener("mousedown", setFocusedInRegistry);
+      element.addEventListener("mouseenter", setFocusedInRegistry);
+
       if (!focusedRef.current) {
         focusedRef.current = element;
         element.setAttribute("data-focused", "true");
@@ -167,6 +182,10 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       }
 
       return () => {
+        element.removeEventListener("focus", setFocusedInRegistry);
+        element.removeEventListener("mousedown", setFocusedInRegistry);
+        element.removeEventListener("mouseenter", setFocusedInRegistry);
+
         entriesRef.current = entriesRef.current.filter(
           (e) => e.element !== element,
         );
@@ -239,7 +258,7 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
         prev.rightDown !== cur.rightDown ||
         prev.moving !== cur.moving
       ) {
-        lastPublishedVMRef.current = cur;
+        lastPublishedVMRef.current = { ...cur };
         setVirtualMouse({ ...cur });
       }
     }
@@ -254,10 +273,10 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
           setConnected(false);
           const cur = virtualMouseRef.current;
           if (cur.leftDown) {
-            dispatchMouse("mouseup", cur.x, cur.y, 0);
+            dispatchMouse("mouseup", cur.x, cur.y, 0, false, cur.rightDown);
           }
           if (cur.rightDown) {
-            dispatchMouse("mouseup", cur.x, cur.y, 2);
+            dispatchMouse("mouseup", cur.x, cur.y, 2, cur.leftDown, false);
           }
           cur.visible = false;
           cur.leftDown = false;
@@ -292,55 +311,66 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       if (Math.abs(gp.axes[0]) > STICK_DEADZONE) leftH = gp.axes[0];
       if (Math.abs(gp.axes[1]) > STICK_DEADZONE) leftV = gp.axes[1];
 
-      const prevLeftH = prevLeftAxesRef.current.h;
-      const prevLeftV = prevLeftAxesRef.current.v;
-      const hRising =
-        Math.abs(leftH) > STICK_DEADZONE &&
-        Math.abs(prevLeftH) <= STICK_DEADZONE;
-      const vRising =
-        Math.abs(leftV) > STICK_DEADZONE &&
-        Math.abs(prevLeftV) <= STICK_DEADZONE;
-      const dPadUsed =
-        gp.buttons[12]?.pressed ||
-        gp.buttons[13]?.pressed ||
-        gp.buttons[14]?.pressed ||
-        gp.buttons[15]?.pressed;
+      // Discrete direction based on thresholds
+      let dirH = 0;
+      let dirV = 0;
+      if (gp.buttons[14]?.pressed || leftH < -STICK_DEADZONE) dirH = -1;
+      else if (gp.buttons[15]?.pressed || leftH > STICK_DEADZONE) dirH = 1;
 
-      const canNavigate = now - lastDirTimeRef.current > DIR_COOLDOWN;
+      if (gp.buttons[12]?.pressed || leftV < -STICK_DEADZONE) dirV = -1;
+      else if (gp.buttons[13]?.pressed || leftV > STICK_DEADZONE) dirV = 1;
 
-      if (canNavigate && focusedRef.current) {
-        const entries = entriesRef.current;
-        if (entries.length > 1) {
-          let dirH = 0;
-          let dirV = 0;
-          if (dPadUsed) {
-            if (gp.buttons[12]?.pressed) dirV = -1;
-            if (gp.buttons[13]?.pressed) dirV = 1;
-            if (gp.buttons[14]?.pressed) dirH = -1;
-            if (gp.buttons[15]?.pressed) dirH = 1;
-          } else if (hRising || vRising) {
-            dirH = Math.sign(leftH);
-            dirV = Math.sign(leftV);
-          }
-          if (dirH !== 0 || dirV !== 0) {
-            const dirAngle = Math.atan2(dirV, dirH);
-            const next = nearestInDirection(
-              focusedRef.current,
-              entries,
-              dirAngle,
-            );
-            if (next && next !== focusedRef.current) {
-              focusedRef.current.removeAttribute("data-focused");
-              focusedRef.current = next;
-              next.setAttribute("data-focused", "true");
-              next.scrollIntoView({ block: "nearest", behavior: "smooth" });
-              setFocusedElement(next);
-              lastDirTimeRef.current = now;
+      const hasInput = dirH !== 0 || dirV !== 0;
+      let shouldNavigate = false;
+
+      if (!hasInput) {
+        // Neutral state: reset hold tracking
+        holdDirectionRef.current = null;
+        holdStartRef.current = 0;
+        lastRepeatRef.current = 0;
+      } else {
+        const prevHold = holdDirectionRef.current;
+        const isNewDirection = !prevHold || prevHold.h !== dirH || prevHold.v !== dirV;
+
+        if (isNewDirection) {
+          shouldNavigate = true;
+          holdDirectionRef.current = { h: dirH, v: dirV };
+          holdStartRef.current = now;
+          lastRepeatRef.current = now;
+        } else {
+          // Standard keyboard-like repeat: 400ms delay, then repeat every 150ms
+          const REPEAT_DELAY_MS = 400;
+          const REPEAT_INTERVAL_MS = 150;
+          const holdTime = now - holdStartRef.current;
+          if (holdTime >= REPEAT_DELAY_MS) {
+            const timeSinceLastRepeat = now - lastRepeatRef.current;
+            if (timeSinceLastRepeat >= REPEAT_INTERVAL_MS) {
+              shouldNavigate = true;
+              lastRepeatRef.current = now;
             }
           }
         }
       }
-      prevLeftAxesRef.current = { h: leftH, v: leftV };
+
+      if (shouldNavigate && focusedRef.current) {
+        const entries = entriesRef.current;
+        if (entries.length > 1) {
+          const dirAngle = Math.atan2(dirV, dirH);
+          const next = nearestInDirection(
+            focusedRef.current,
+            entries,
+            dirAngle,
+          );
+          if (next && next !== focusedRef.current) {
+            focusedRef.current.removeAttribute("data-focused");
+            focusedRef.current = next;
+            next.setAttribute("data-focused", "true");
+            next.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            setFocusedElement(next);
+            next.focus({ preventScroll: true });
+          }
+        }
+      }
 
       const vm = virtualMouseRef.current;
 
@@ -350,18 +380,15 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       // movement than a straight push.
       const rightH = gp.axes[2] ?? 0;
       const rightV = gp.axes[3] ?? 0;
-      const magH = Math.abs(rightH) - RIGHT_STICK_DEADZONE;
-      const magV = Math.abs(rightV) - RIGHT_STICK_DEADZONE;
+      const len = Math.sqrt(rightH * rightH + rightV * rightV);
       let vx = 0;
       let vy = 0;
 
-      if (magH > 0 || magV > 0) {
-        const normH = magH / (1 - RIGHT_STICK_DEADZONE);
-        const normV = magV / (1 - RIGHT_STICK_DEADZONE);
-        const m = Math.min(1, Math.sqrt(normH * normH + normV * normV));
+      if (len > RIGHT_STICK_DEADZONE) {
+        const m = Math.min(1, (len - RIGHT_STICK_DEADZONE) / (1 - RIGHT_STICK_DEADZONE));
         const speed = virtualMouseSpeed(m);
-        vx = Math.sign(rightH) * speed;
-        vy = Math.sign(rightV) * speed;
+        vx = (rightH / len) * speed;
+        vy = (rightV / len) * speed;
       }
 
       if (vx !== 0 || vy !== 0) {
@@ -374,6 +401,7 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
           0,
           Math.min(window.innerHeight, vm.y + vy * dtSec),
         );
+        dispatchMouse("mousemove", vm.x, vm.y, 0, vm.leftDown, vm.rightDown);
       } else {
         vm.moving = false;
       }
@@ -384,11 +412,25 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       const aPressed = gp.buttons[0]?.pressed ?? false;
       if (aPressed && !prevButtonsRef.current.a) {
         if (vm.visible) {
-          const el = document.elementFromPoint(vm.x, vm.y);
-          if (el) {
-            dispatchMouse("mousedown", vm.x, vm.y, 0);
-            dispatchMouse("mouseup", vm.x, vm.y, 0);
-            dispatchMouse("click", vm.x, vm.y, 0);
+          const target = document.elementFromPoint(vm.x, vm.y);
+          if (target) {
+            dispatchMouse("mousedown", vm.x, vm.y, 0, true, vm.rightDown);
+            dispatchMouse("mouseup", vm.x, vm.y, 0, false, vm.rightDown);
+            dispatchMouse("click", vm.x, vm.y, 0, false, vm.rightDown);
+
+            // Sync gamepad focus state to the clicked element if it is registered
+            const registeredEntry = entriesRef.current.find(
+              (entry) => entry.element === target || entry.element.contains(target)
+            );
+            if (registeredEntry) {
+              if (focusedRef.current && focusedRef.current !== registeredEntry.element) {
+                focusedRef.current.removeAttribute("data-focused");
+              }
+              focusedRef.current = registeredEntry.element;
+              registeredEntry.element.setAttribute("data-focused", "true");
+              setFocusedElement(registeredEntry.element);
+              registeredEntry.element.focus({ preventScroll: true });
+            }
           }
           vm.lastInputMs = now;
         } else if (focusedRef.current) {
@@ -447,14 +489,14 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       const ltPressed = ltRaw > TRIGGER_THRESHOLD;
       if (ltPressed && !prevButtonsRef.current.lt) {
         if (vm.visible) {
-          dispatchMouse("mousedown", vm.x, vm.y, 2);
-          dispatchMouse("contextmenu", vm.x, vm.y, 2);
+          dispatchMouse("mousedown", vm.x, vm.y, 2, vm.leftDown, true);
+          dispatchMouse("contextmenu", vm.x, vm.y, 2, vm.leftDown, true);
           vm.rightDown = true;
           vm.lastInputMs = now;
         }
       } else if (!ltPressed && prevButtonsRef.current.lt) {
         if (vm.visible && vm.rightDown) {
-          dispatchMouse("mouseup", vm.x, vm.y, 2);
+          dispatchMouse("mouseup", vm.x, vm.y, 2, vm.leftDown, false);
           vm.rightDown = false;
         }
       }
@@ -465,13 +507,13 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       const rtPressed = rtRaw > TRIGGER_THRESHOLD;
       if (rtPressed && !prevButtonsRef.current.rt) {
         if (vm.visible) {
-          dispatchMouse("mousedown", vm.x, vm.y, 0);
+          dispatchMouse("mousedown", vm.x, vm.y, 0, true, vm.rightDown);
           vm.leftDown = true;
           vm.lastInputMs = now;
         }
       } else if (!rtPressed && prevButtonsRef.current.rt) {
         if (vm.visible && vm.leftDown) {
-          dispatchMouse("mouseup", vm.x, vm.y, 0);
+          dispatchMouse("mouseup", vm.x, vm.y, 0, false, vm.rightDown);
           vm.leftDown = false;
         }
       }
@@ -493,8 +535,8 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       // get stuck if the user hides the cursor mid-drag.
       const l3Pressed = gp.buttons[9]?.pressed ?? false;
       if (l3Pressed && !prevButtonsRef.current.l3) {
-        if (vm.leftDown) dispatchMouse("mouseup", vm.x, vm.y, 0);
-        if (vm.rightDown) dispatchMouse("mouseup", vm.x, vm.y, 2);
+        if (vm.leftDown) dispatchMouse("mouseup", vm.x, vm.y, 0, false, vm.rightDown);
+        if (vm.rightDown) dispatchMouse("mouseup", vm.x, vm.y, 2, vm.leftDown, false);
         vm.leftDown = false;
         vm.rightDown = false;
         vm.visible = false;
