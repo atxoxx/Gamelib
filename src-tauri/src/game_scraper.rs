@@ -144,7 +144,114 @@ pub struct LanguageSupportInfo {
     pub support_type: String,
 }
 
+// ─── System Requirements (Steam `pc_requirements`) ──────────────────────────
+
+/// Structured system requirements, parsed from Steam's variable
+/// HTML `pc_requirements.minimum` / `pc_requirements.recommended`
+/// payload. Steam's markup is wildly inconsistent across titles
+/// (some use `<ul><li><strong>OS:</strong> Windows…</li>`, others
+/// use plain text with `<br>` separators), so we extract a
+/// canonical field set instead of round-tripping the raw HTML.
+///
+/// Every field is `Option<String>` — Steam frequently omits one
+/// or more sections (e.g. Mac-only games have no Windows spec,
+/// older indie titles skip VR Support, etc.). The frontend
+/// silently drops empty rows so the card never has meaningless
+/// `—` entries.
+///
+/// The known label set covers the entire Steam taxonomy:
+///   - os                Windows / macOS / SteamOS + Linux
+///   - processor         CPU requirement
+///   - memory            RAM requirement
+///   - graphics          GPU requirement
+///   - directX           DirectX version
+///   - network           online play requirement
+///   - storage           disk footprint requirement
+///   - soundCard         sound card / audio requirement
+///   - vrSupport         VR headset + controller requirement
+///   - additionalNotes   "Requires X controller", "64-bit only",
+///                       "SSD recommended", etc.
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RequirementsSpec {
+    pub os: Option<String>,
+    pub processor: Option<String>,
+    pub memory: Option<String>,
+    pub graphics: Option<String>,
+    pub direct_x: Option<String>,
+    pub network: Option<String>,
+    pub storage: Option<String>,
+    pub sound_card: Option<String>,
+    pub vr_support: Option<String>,
+    pub additional_notes: Option<String>,
+}
+
+impl RequirementsSpec {
+    /// True when *no* field carries a value. The frontend uses
+    /// this to decide whether to render the section at all (vs.
+    /// hiding silently when Steam returned garbage).
+    pub fn is_empty(&self) -> bool {
+        self.os.is_none()
+            && self.processor.is_none()
+            && self.memory.is_none()
+            && self.graphics.is_none()
+            && self.direct_x.is_none()
+            && self.network.is_none()
+            && self.storage.is_none()
+            && self.sound_card.is_none()
+            && self.vr_support.is_none()
+            && self.additional_notes.is_none()
+    }
+}
+
+/// Combined system-requirements payload returned by the
+/// `get_recommended_config` Tauri command. Mirrors the
+/// `RichAboutPayload` shape so the frontend has a single
+/// familiar contract to consume (source attribution + raw HTML
+/// fallback + structured fields).
+///
+/// `minimum` and `recommended` are both `Option<…>` because Steam
+/// occasionally omits the `recommended` block entirely (e.g.
+/// older indie titles); when missing, the frontend falls back to
+/// showing only the `minimum` column rather than rendering an
+/// empty right-hand side.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PcRequirementsPayload {
+    /// `"steam" | "none"`. We don't ship an IGDB fallback for
+    /// system requirements — IGDB doesn't expose them at all,
+    /// and Steam's coverage is essentially universal (every PC
+    /// title on the store has `pc_requirements`). `none` means
+    /// the section should hide entirely.
+    pub source: String,
+    /// Deep-link to the Steam app page so the "View on Steam"
+    /// footer link in the card has a stable target.
+    pub source_url: Option<String>,
+    /// Human-readable source name ("Steam").
+    pub source_name: Option<String>,
+    /// Parsed minimum spec (the lower bar to launch the game).
+    pub minimum: Option<RequirementsSpec>,
+    /// Parsed recommended spec (the bar for a smooth experience).
+    /// `None` when Steam didn't ship one — see the type-level
+    /// doc comment for the fallback strategy.
+    pub recommended: Option<RequirementsSpec>,
+    /// Raw Steam `pc_requirements.minimum` HTML, preserved as a
+    /// last-resort fallback for any spec the parser missed
+    /// (unrecognised label → freeform paragraph). Frontend
+    /// renders this through the same HTML sanitiser the
+    /// AboutSection uses when `additional_notes` is empty after
+    /// parsing.
+    pub minimum_html: Option<String>,
+    /// Raw Steam `pc_requirements.recommended` HTML fallback.
+    pub recommended_html: Option<String>,
+    /// Unix-seconds timestamp of the last successful fetch.
+    /// Mirrors `RichAboutPayload.fetchedAt` for consistency.
+    pub fetched_at: u64,
+}
+
 // ─── Store Types (IGDB catalog browsing) ─────────────────────────────────────
+
+/// Lightweight game summary for store listings (cards, grids).
 
 /// Lightweight game summary for store listings (cards, grids).
 /// Contains only what's needed for display — no full metadata.
@@ -370,35 +477,426 @@ pub struct RichAboutPayload {
 // single hiccup into a 6-hour outage.
 static ABOUT_CACHE: OnceLock<Mutex<HashMap<u32, (Instant, RichAboutPayload)>>> = OnceLock::new();
 
-const ABOUT_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+/// Per-appid TTL cache for the system-requirements payload. Steam's
+/// `pc_requirements` block is *extremely* stable (it's set once at
+/// launch and only rarely bumped when a game ships a "we now need
+/// 16 GB RAM" patch), so we cache for a longer 24h window than
+/// `ABOUT_CACHE`. Same `OnceLock<Mutex>` pattern so concurrent
+/// fetches across the library share the same in-memory store.
+static REQUIREMENTS_CACHE: OnceLock<Mutex<HashMap<u32, (Instant, PcRequirementsPayload)>>> =
+    OnceLock::new();
 
-/// Strip a Steam `about_the_game` HTML string down to a plain-text
-/// preview suitable for length hints / non-HTML renderers. The
-/// `<br>`/`<p>`/`<li>` boundaries are preserved as spaces so the
-/// resulting text reads naturally. Not used for actual display —
-/// `about_html` is the canonical render path.
+/// 24-hour TTL for cached system-requirements payloads. Steam
+/// specs rarely change once a game is published; even when they
+/// do (e.g. a "we now recommend 32 GB" update), the next visit
+/// after 24h picks it up.
+const REQUIREMENTS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+const ABOUT_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+// ─── System Requirements Parser ────────────────────────────────────────────
+
+/// Convert a Steam `pc_requirements.minimum` / `.recommended`
+/// HTML blob into a line-oriented plain-text form suitable for
+/// label extraction. Steam's pc_requirements block is shallow
+/// markup — one of two common shapes:
+///
+///   1. `<ul class="bb_ul"><li><strong>OS:</strong> Windows…</li>
+///        <li><strong>Processor:</strong> …</li>…</ul>`
+///   2. `<strong>OS:</strong> Windows…<br><strong>Processor:</strong>
+///        …<br>…`
+///
+/// Both shapes flatten to the same one-pair-per-line plain-text
+/// representation under the rules below. We don't ship a full
+/// HTML parser for this — it would add a multi-MB dependency for
+/// a handful of HTML tags that Steam actually uses, and the
+/// hand-written transform is easy to audit.
+///
+/// Transform rules (applied in order):
+///   1. `<br>`, `<br/>`, `<br />`  → `\n`
+///   2. `</li>`, `</p>`, `</div>` → `\n`
+///   3. `</ul>`, `</ol>`          → `\n`
+///   4. `<li …>`                  → `\n`
+///   5. `</strong>`, `</b>`       → ` `   (label/value join space)
+///   6. Any remaining `<…>` tag   → ` `   (insert a space so
+///       `</strong>foo` doesn't fuse with the label word)
+///   7. Decode the common HTML entities (`&amp;`, `&nbsp;`, `&lt;`,
+///      `&gt;`, `&quot;`, `&#39;`) so the parsed values read cleanly.
+fn requirements_html_to_text(html: &str) -> String {
+    if html.is_empty() {
+        return String::new();
+    }
+    let mut out = html.to_string();
+
+    // 1. Block-level / line-break tags → newline. We iterate
+    //    case-insensitively because some games ship `<BR>` in
+    //    uppercase.
+    for needle in ["<br>", "<br/>", "<br />", "<BR>", "<BR/>", "<BR />"] {
+        out = out.replace(needle, "\n");
+    }
+    for needle in ["</li>", "</p>", "</div>", "</LI>", "</P>"] {
+        out = out.replace(needle, "\n");
+    }
+    for needle in ["</ul>", "</ol>"] {
+        out = out.replace(needle, "\n");
+    }
+    // 2. Drop the remaining inline tag pairs, leaving a space at
+    //    the join so "label value" doesn't become "labelvalue".
+    //    `replacen(n, 1)` is fine — we only ever have one pair
+    //    per line in practice and the next pass strips the rest.
+    for needle in ["</strong>", "</b>", "</em>", "</span>", "</font>"] {
+        out = out.replace(needle, " ");
+    }
+    // Strip ALL remaining `<…>` tag fragments. We use a string-based
+    // scanner rather than a regex to keep the dependency graph
+    // tight — the spec block is small and we never hit this path
+    // more than once per appdetails fetch. Iterating over `&str`
+    // rather than `bytes` lets us handle multi-byte UTF-8
+    // characters (Steam ships ™ and — in spec values) safely.
+    let mut cleaned = String::with_capacity(out.len());
+    let mut rest: &str = out.as_str();
+    while !rest.is_empty() {
+        match rest.find('<') {
+            Some(start) => {
+                // Copy everything before the `<` verbatim.
+                cleaned.push_str(&rest[..start]);
+                cleaned.push(' ');
+                // Find the matching `>`.
+                match rest[start..].find('>') {
+                    Some(end) => rest = &rest[start + end + 1..],
+                    None => {
+                        // Unterminated tag — copy the rest verbatim so
+                        // we don't silently truncate user data.
+                        cleaned.push_str(&rest[start..]);
+                        break;
+                    }
+                }
+            }
+            None => {
+                cleaned.push_str(rest);
+                break;
+            }
+        }
+    }
+    out = cleaned;
+
+    // 3. Common HTML entities. We keep this short — pc_requirements
+    //    in practice uses `&amp;` heavily (Radeon™ RX 580 & Co.).
+    out = out
+        .replace("&amp;", "&")
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'");
+
+    // 4. Collapse runs of whitespace within each line, trim edges,
+    //    and drop empty lines.
+    let mut cleaned = String::with_capacity(out.len());
+    for line in out.split('\n') {
+        let mut last_space = true;
+        let mut current = String::new();
+        for ch in line.chars() {
+            if ch.is_whitespace() {
+                if !last_space {
+                    current.push(' ');
+                    last_space = true;
+                }
+            } else {
+                current.push(ch);
+                last_space = false;
+            }
+        }
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            cleaned.push_str(trimmed);
+            cleaned.push('\n');
+        }
+    }
+    cleaned
+}
+
+/// Canonical label table for `parse_requirements_text`. Each
+/// entry is `(target_field, lowercase_label)`. The longest
+/// labels must come first so the prefix matcher doesn't snap
+/// "VR Support" to "VR" + leftover.
+const REQUIREMENT_LABELS: &[(&str, &str)] = &[
+    ("os", "os"),
+    ("processor", "processor"),
+    ("memory", "memory"),
+    ("graphics", "graphics"),
+    ("directX", "directx"),
+    ("network", "network"),
+    ("storage", "storage"),
+    ("soundCard", "sound card"),
+    ("vrSupport", "vr support"),
+    ("vrSupport", "vr headset"),
+    ("additionalNotes", "additional notes"),
+    ("additionalNotes", "notes"),
+];
+
+/// Resolve a single canonical field name to the slot on a
+/// `RequirementsSpec`. Keeping this in one place makes it
+/// trivial to audit that every `REQUIREMENT_LABELS` entry has
+/// a corresponding destination slot.
+fn spec_slot<'a>(spec: &'a mut RequirementsSpec, field: &str) -> Option<&'a mut Option<String>> {
+    match field {
+        "os" => Some(&mut spec.os),
+        "processor" => Some(&mut spec.processor),
+        "memory" => Some(&mut spec.memory),
+        "graphics" => Some(&mut spec.graphics),
+        "directX" => Some(&mut spec.direct_x),
+        "network" => Some(&mut spec.network),
+        "storage" => Some(&mut spec.storage),
+        "soundCard" => Some(&mut spec.sound_card),
+        "vrSupport" => Some(&mut spec.vr_support),
+        "additionalNotes" => Some(&mut spec.additional_notes),
+        _ => None,
+    }
+}
+
+/// True when the first character of `line` past `label_len`
+/// matches our "label boundary" rule (whitespace, colon, or
+/// end-of-line). This prevents "osm" from accidentally matching
+/// the "OS" label and the equivalent for every other label.
+fn is_label_boundary(rest: &str) -> bool {
+    match rest.chars().next() {
+        None => true,
+        Some(c) => c.is_whitespace() || c == ':' || c == '\t',
+    }
+}
+
+/// Parse the line-oriented text produced by
+/// `requirements_html_to_text` into a `RequirementsSpec`.
+///
+/// We scan the text once, looking for the known label set
+/// (see `REQUIREMENT_LABELS`). For each match we capture the
+/// rest of the line as the value, then continue with the next
+/// line. The parser is tolerant to:
+///
+///   - Trailing colons (`OS: Windows`) or no colon (`OS Windows`)
+///   - Case-insensitive label matching (we lowercase the input)
+///   - Whitespace between the label and the colon
+///   - Multi-word labels (`Sound Card`, `VR Support`)
+///
+/// Unknown labels are silently dropped so a publisher writing
+/// "Controller: Gamepad required" doesn't leak into the wrong
+/// field. If a label appears multiple times, the *longest* value
+/// wins (Steam sometimes appends a redundant footnote to the
+/// minimum spec).
+fn parse_requirements_text(text: &str) -> RequirementsSpec {
+    let mut spec = RequirementsSpec::default();
+    let lower = text.to_lowercase();
+
+    for raw_line in lower.lines() {
+        let line = raw_line.trim_start();
+        for (field, label) in REQUIREMENT_LABELS {
+            // Longest labels must come first so we don't snap
+            // "sound card" to "sound" + leftover. We still guard
+            // with `is_label_boundary` so a partial prefix like
+            // "memoryx" doesn't match "memory".
+            // `label` is `&&str` from the slice iteration; deref to
+            // `&str` directly rather than calling `.as_str()` (which
+            // is the unstable `str_as_str` feature) so we stay on
+            // stable Rust.
+            if line.len() <= label.len() || !line.starts_with(*label) {
+                continue;
+            }
+            if !is_label_boundary(&line[label.len()..]) {
+                continue;
+            }
+            let value = line[label.len()..]
+                .trim_start_matches(|c: char| c == ':' || c.is_whitespace())
+                .to_string();
+            if value.is_empty() {
+                break;
+            }
+            if let Some(slot) = spec_slot(&mut spec, field) {
+                let dominated = slot.as_ref().is_some_and(|existing| existing.len() >= value.len());
+                if !dominated {
+                    *slot = Some(value);
+                }
+            }
+            break;
+        }
+    }
+
+    spec
+}
+
+/// Public convenience wrapper: takes the raw Steam HTML for a
+/// spec block and returns a parsed `RequirementsSpec`. Returns
+/// `None` when both the input is empty and the parsed output is
+/// empty (frontend hides the section in that case).
+fn parse_requirements_html(html: Option<&str>) -> Option<RequirementsSpec> {
+    let text = html.map(requirements_html_to_text).unwrap_or_default();
+    let spec = parse_requirements_text(&text);
+    if spec.is_empty() {
+        None
+    } else {
+        Some(spec)
+    }
+}
+
+// ─── System Requirements Fetch + Cache ──────────────────────────────────────
+
+/// Strip every HTML tag from `html` and return the resulting
+/// plain text. Used by the About-section path to derive a
+/// `short_description`-friendly text preview from Steam's rich
+/// `about_the_game` HTML (which contains inline `<img>` tags the
+/// text preview shouldn't show). The transformation is more
+/// aggressive than `requirements_html_to_text` — it doesn't
+/// preserve line structure because the text preview feeds into
+/// a single-line display field, not a multi-line list.
 fn strip_html_for_preview(html: &str) -> String {
+    if html.is_empty() {
+        return String::new();
+    }
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
-    let mut last_was_space = false;
     for ch in html.chars() {
         match ch {
             '<' => in_tag = true,
             '>' => {
                 in_tag = false;
-                if !last_was_space {
+                if !out.ends_with(' ') {
                     out.push(' ');
-                    last_was_space = true;
                 }
             }
-            c if !in_tag => {
-                out.push(c);
-                last_was_space = c.is_whitespace();
-            }
+            c if !in_tag => out.push(c),
             _ => {}
         }
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Fetch system requirements with a per-appid TTL cache. Returns
+/// `None` only when Steam is unreachable AND the IGDB fallback
+/// (currently a no-op since IGDB doesn't expose specs) produced
+/// nothing. On a successful Steam response with *both* blocks
+/// empty, we return `Some(PcRequirementsPayload { source: "steam",
+/// …, minimum: None, recommended: None })` so the frontend can
+/// still render the "Steam returned no requirements for this
+/// title" empty state with a stable shape.
+pub async fn fetch_system_requirements(
+    steam_app_id: Option<u32>,
+) -> Option<PcRequirementsPayload> {
+    let app_id = steam_app_id?;
+    fetch_steam_requirements_cached(app_id).await
+}
+
+async fn fetch_steam_requirements_cached(app_id: u32) -> Option<PcRequirementsPayload> {
+    // Positive-cache hit? Return it.
+    {
+        let cache = REQUIREMENTS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let guard = cache.lock().ok()?;
+        if let Some((fetched, payload)) = guard.get(&app_id) {
+            if fetched.elapsed() < REQUIREMENTS_CACHE_TTL {
+                return Some(payload.clone());
+            }
+        }
+    }
+
+    // Hit Steam's appdetails endpoint. We reuse `http_client()` for
+    // TLS session cache warmth — the about-payload fetcher on the
+    // same appid warms the connection a few seconds before us.
+    let url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={}&cc=us&l=en",
+        app_id
+    );
+    let client = http_client();
+    let resp = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    #[derive(Deserialize)]
+    struct ReqWrapper {
+        success: bool,
+        #[serde(default)]
+        data: Option<ReqAppDetail>,
+    }
+    #[derive(Deserialize)]
+    struct ReqAppDetail {
+        #[serde(default)]
+        pc_requirements: Option<PcRequirementsRaw>,
+        #[serde(default)]
+        mac_requirements: Option<PcRequirementsRaw>,
+        #[serde(default)]
+        linux_requirements: Option<PcRequirementsRaw>,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct PcRequirementsRaw {
+        minimum: Option<String>,
+        recommended: Option<String>,
+    }
+
+    let map: HashMap<String, ReqWrapper> = match resp.json().await {
+        Ok(m) => m,
+        Err(_) => return None,
+    };
+    let wrapper = map.get(&app_id.to_string())?;
+    if !wrapper.success {
+        return None;
+    }
+    let data = wrapper.data.as_ref()?;
+
+    // Prefer Windows (pc) requirements. Mac / Linux blocks are
+    // present on cross-platform titles but the overwhelming
+    // majority of the library is Windows-first; we'll consider
+    // them in a future iteration if the demand is there.
+    let block = data
+        .pc_requirements
+        .as_ref()
+        .or(data.mac_requirements.as_ref())
+        .or(data.linux_requirements.as_ref());
+
+    let (minimum_html, recommended_html) = match block {
+        Some(b) => (b.minimum.clone(), b.recommended.clone()),
+        None => (None, None),
+    };
+
+    let minimum = parse_requirements_html(minimum_html.as_deref());
+    let recommended = parse_requirements_html(recommended_html.as_deref());
+
+    // When Steam returned empty strings for BOTH blocks, surface
+    // an empty payload so the frontend can decide whether to
+    // render the "no requirements published" empty state. We
+    // never cache an empty payload — that would suppress a future
+    // edit-cycle from being picked up for 24h.
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let payload = PcRequirementsPayload {
+        source: "steam".to_string(),
+        source_url: Some(format!("https://store.steampowered.com/app/{}", app_id)),
+        source_name: Some("Steam".to_string()),
+        minimum,
+        recommended,
+        minimum_html,
+        recommended_html,
+        fetched_at: now,
+    };
+
+    // Only cache payloads that actually carry some data. A title
+    // that hasn't published requirements yet today may publish
+    // them tomorrow, and we'd rather re-fetch than 24h-cache a
+    // negative.
+    if payload.minimum.is_some() || payload.recommended.is_some() {
+        if let Some(cache) = REQUIREMENTS_CACHE.get() {
+            if let Ok(mut guard) = cache.lock() {
+                guard.insert(app_id, (Instant::now(), payload.clone()));
+            }
+        }
+    }
+
+    Some(payload)
 }
 
 /// Fetch the rich-about payload with a small cache. Returns

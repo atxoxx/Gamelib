@@ -1527,3 +1527,288 @@
   background: color-mix(in srgb, #1b6ea6 12%, var(--color-bg-tertiary));
   color: #1b6ea6;
 }
+
+/* ── SystemRequirementsCard ──────────────────────────────────────
+   Steam pc_requirements renderer. Lives in the main column of
+   the Game page and Store game-detail page, between the
+   AboutSection and the Storyline/Screenshots stack.
+
+   Layout: header row (title + source pill + segmented tier
+   toggle) followed by a vertical list of spec rows. Each spec
+   row has a small icon, label, and value; the row's left rail
+   subtly tints to match the active tier (info for "minimum",
+   accent for "recommended") so the user can read the active
+   selection at a glance even when the card is scrolled past. */
+
+.system-requirements-card {
+  padding: var(--space-xl);
+}
+
+.system-requirements-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin: calc(-1 * var(--space-xl)) calc(-1 * var(--space-xl)) var(--space-lg);
+  padding: var(--space-lg) var(--space-xl) var(--space-md);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary)),
+    color-mix(in srgb, var(--color-accent) 0%, var(--color-surface)) 80%
+  );
+}
+
+.system-requirements-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  /* Override the .game-section-title negative-margin so the
+   * stacked header layout (title + tier toggle) doesn't pull
+   * the toggle off the card's left edge. */
+  margin: 0;
+  padding: 0;
+  background: none;
+}
+
+.system-requirements-card__source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--space-xs);
+  padding: 2px 10px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.system-requirements-card__source-pill--steam {
+  background: color-mix(in srgb, #66c0f4 16%, var(--color-bg-tertiary));
+  border-color: color-mix(in srgb, #66c0f4 40%, var(--color-border));
+  color: #66c0f4;
+}
+
+/* Light-theme override: the Steam brand teal stays but the bg
+   lightens slightly so it doesn't read as a stamp on white
+   surfaces. Mirrors the source-pill override AboutSection uses. */
+[data-theme="light"] .system-requirements-card__source-pill--steam {
+  background: color-mix(in srgb, #1b6e9c 8%, var(--color-bg-tertiary));
+  border-color: color-mix(in srgb, #1b6e9c 30%, var(--color-border));
+  color: #1b6e9c;
+}
+
+.system-requirements-card__source-pill--none,
+.system-requirements-card__source-pill--manual {
+  color: var(--color-text-muted);
+}
+
+/* Segmented tier toggle (Minimum / Recommended). Two pill-shaped
+ * buttons sharing one rounded container; the active button gets an
+ * accent-tinted fill so the selection reads at a glance. Each
+ * button is a real <button role="tab"> for keyboard a11y — focus
+ * ring mirrors the App's standard focusable token. */
+.system-requirements-card__toggle {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  gap: 2px;
+}
+
+.system-requirements-card__toggle-option {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+
+.system-requirements-card__toggle-option:hover {
+  color: var(--color-text-primary);
+}
+
+.system-requirements-card__toggle-option--active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 1px 6px var(--color-accent-glow);
+}
+
+.system-requirements-card__toggle-option--active:hover {
+  color: #fff;
+}
+
+.system-requirements-card__toggle-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+/* The spec row list. Vertical stack of icon-prefixed label/value
+ * rows; subtle bottom border separates each row, matching the
+ * definition-list rhythm of InfoKpiCard. */
+.system-requirements-card__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+}
+
+.system-requirements-card__row {
+  display: grid;
+  grid-template-columns: 28px 140px 1fr;
+  align-items: start;
+  gap: var(--space-md);
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.system-requirements-card__row:last-child {
+  border-bottom: none;
+}
+
+.system-requirements-card__row--identical {
+  /* When the active tier matches the other tier, we soften the
+   * row slightly so the user's eye is drawn to the rows where
+   * Steam actually differentiates between minimum and recommended. */
+  opacity: 0.78;
+}
+
+.system-requirements-card__row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, var(--color-border));
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.system-requirements-card__row-label {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1.4;
+  padding-top: 4px;
+}
+
+.system-requirements-card__row-value {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  color: var(--color-text-primary);
+  line-height: 1.55;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.system-requirements-card__row-empty {
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.system-requirements-card__row-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-info, var(--color-accent)) 12%, var(--color-bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--color-info, var(--color-accent)) 30%, var(--color-border));
+  color: var(--color-info, var(--color-accent));
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  align-self: center;
+}
+
+/* Raw-HTML fallback renderer (used when the structured parser
+ * came back empty but Steam did publish HTML). Steam's pc_requirements
+ * markup is shallow (one level of <ul>/<li> or <strong>label:
+ * value<br>), so we just rely on basic block-level styling. The
+ * dangerouslySetInnerHTML payload has already been sanitized in
+ * the component. */
+.system-requirements-card__raw {
+  color: var(--color-text-primary);
+  line-height: 1.7;
+  font-size: var(--font-size-md);
+}
+
+.system-requirements-card__raw ul,
+.system-requirements-card__raw ol {
+  margin: 0 0 var(--space-md) var(--space-lg);
+  padding-left: var(--space-md);
+}
+
+.system-requirements-card__raw li {
+  margin-bottom: 6px;
+}
+
+.system-requirements-card__raw strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* "View system requirements on Steam" footer link. Reuses the
+ * metadata-source-link shared style from the AboutSection so the
+ * two cards' footer links read as siblings, with a tiny
+ * additional indent so it doesn't bump against the section's
+ * bottom corner. */
+.system-requirements-card__source-link {
+  margin-top: var(--space-md);
+}
+
+/* Responsive: on narrow viewports, collapse the grid columns so
+ * the label and value don't fight for width. The icon stays in
+ * its own column at the leftmost edge so the eye anchor for
+ * "this row belongs to the same spec" doesn't shift. */
+@media (max-width: 540px) {
+  .system-requirements-card__row {
+    grid-template-columns: 28px 1fr;
+    grid-template-areas:
+      "icon label"
+      "icon value";
+    row-gap: 4px;
+  }
+  .system-requirements-card__row-icon { grid-area: icon; }
+  .system-requirements-card__row-label { grid-area: label; padding-top: 0; }
+  .system-requirements-card__row-value { grid-area: value; padding-top: 0; }
+}
+
+/* Big-screen layout: stretch the card to fill the wider hero and
+ * re-flow the header so the segmented toggle sits below the
+ * title on a single line (no cramped two-column header). */
+[data-bigscreen="true"] .system-requirements-card__header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}

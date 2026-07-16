@@ -30,6 +30,7 @@ import {
   StorylineSection,
   ScreenshotsSection,
   VideosSection,
+  SystemRequirementsCard,
 } from "../components/game";
 import { Button, ConfirmModal } from "../components/ui";
 /** Inline reusable image slot for the edit form. */
@@ -916,6 +917,7 @@ function GameDetail({ game }: { game: Game }) {
         <div className="game-content-grid">
           <div className="game-main-col">
             <AboutSection game={game} />
+            <SystemRequirementsCard steamAppId={game.steamAppId ?? null} />
             <StorylineSection game={game} />
             <ScreenshotsSection
               game={game}

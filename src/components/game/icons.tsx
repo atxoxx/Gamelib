@@ -346,3 +346,147 @@ export function IconPencil({ size, ...p }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * Cpu glyph for the System Requirements card's "Processor" row.
+ * Mirrors the IconHardDrive visual weight so both rows feel
+ * balanced when rendered next to each other.
+ */
+export function IconCpu({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <line x1="9" y1="1" x2="9" y2="4" />
+      <line x1="15" y1="1" x2="15" y2="4" />
+      <line x1="9" y1="20" x2="9" y2="23" />
+      <line x1="15" y1="20" x2="15" y2="23" />
+      <line x1="20" y1="9" x2="23" y2="9" />
+      <line x1="20" y1="14" x2="23" y2="14" />
+      <line x1="1" y1="9" x2="4" y2="9" />
+      <line x1="1" y1="14" x2="4" y2="14" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Memory-stick glyph (RAM) for the System Requirements card's
+ * "Memory" row. Two slim rectangles evoke a DIMM module.
+ */
+export function IconMemory({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <rect x="2" y="6" width="20" height="12" rx="1" />
+      <line x1="6" y1="10" x2="6" y2="14" />
+      <line x1="10" y1="10" x2="10" y2="14" />
+      <line x1="14" y1="10" x2="14" y2="14" />
+      <line x1="18" y1="10" x2="18" y2="14" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * GPU glyph for the System Requirements card's "Graphics" row.
+ * Stylised card with a fan-blade circle — reads at 14-16px
+ * while keeping the same Feather-style stroke weight as the
+ * rest of the icon set.
+ */
+export function IconGpu({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="8" cy="12" r="2" />
+      <path d="M8 10 L8 7" />
+      <path d="M8 14 L8 17" />
+      <line x1="14" y1="9" x2="20" y2="9" />
+      <line x1="14" y1="15" x2="20" y2="15" />
+      <line x1="14" y1="12" x2="18" y2="12" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Operating-system glyph (a rounded rectangle framing three
+ * overlapping horizontal bars) for the System Requirements card's
+ * "OS" row. Abstract on purpose — works for Windows / macOS /
+ * Linux without platform bias.
+ */
+export function IconOs({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <rect x="3" y="4" width="18" height="14" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="16" x2="13" y2="16" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Game-controller glyph for the System Requirements card's
+ * "Additional Notes" row (Steam often notes controller support
+ * here). Also doubles as a sensible fallback icon for the VR
+ * Support row when the controller is what's required.
+ */
+export function IconGamepad({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <line x1="6" y1="11" x2="10" y2="11" />
+      <line x1="8" y1="9" x2="8" y2="13" />
+      <line x1="15" y1="12" x2="15.01" y2="12" />
+      <line x1="18" y1="10" x2="18.01" y2="10" />
+      <path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258A4 4 0 0 0 17.32 5z" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Headset glyph for the System Requirements card's "VR Support"
+ * row. Reads as a VR headset specifically (front-facing band
+ * with two lenses) rather than headphones so the user
+ * immediately knows the spec relates to immersive hardware.
+ */
+export function IconVrHeadset({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <path d="M3 12a9 9 0 0 1 18 0v3a3 3 0 0 1-3 3h-1a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h2" />
+      <path d="M21 12v3a3 3 0 0 1-3 3" />
+      <path d="M3 12v3a3 3 0 0 0 3 3h1a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H5" />
+      <circle cx="8" cy="12" r="1" />
+      <circle cx="16" cy="12" r="1" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Network-globe glyph for the System Requirements card's
+ * "Network" row. Same primitive as `IconGlobe` but rendered with
+ * the System Requirements card's smaller `size` slot in mind
+ * (the existing `IconGlobe` reads as "worldwide content" — this
+ * variant reads more as "online connectivity required").
+ */
+export function IconNetwork({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18" />
+      <path d="M12 3a14 14 0 0 0 0 18" />
+    </BaseIcon>
+  );
+}
+
+/**
+ * Speaker-glyph for the System Requirements card's "Sound Card"
+ * row. A simple left-facing speaker with two emitted sound
+ * waves — universally readable at 12-14px.
+ */
+export function IconSoundCard({ size, ...p }: IconProps) {
+  return (
+    <BaseIcon size={size} {...p}>
+      <path d="M11 5 6 9H2v6h4l5 4z" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </BaseIcon>
+  );
+}

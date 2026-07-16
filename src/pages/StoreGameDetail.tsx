@@ -23,6 +23,7 @@ import {
   StorylineSection,
   ScreenshotsSection,
   VideosSection,
+  SystemRequirementsCard,
 } from "../components/game";
 
 
@@ -365,6 +366,7 @@ export default function StoreGameDetail() {
         <div className="game-content-grid">
           <div className="game-main-col">
             <AboutSection game={mockGame} />
+            <SystemRequirementsCard steamAppId={steamAppId ?? null} />
             <StorylineSection game={mockGame} />
             <ScreenshotsSection
               game={mockGame}

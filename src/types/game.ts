@@ -353,6 +353,80 @@ export interface RichAboutPayload {
   fetchedAt: number;
 }
 
+// ─── System Requirements (Steam `pc_requirements`) ────────────────────────────
+
+/**
+ * Structured system requirements, parsed from Steam's variable
+ * HTML `pc_requirements.minimum` / `pc_requirements.recommended`
+ * payload on the Rust side. Every field is optional because
+ * Steam frequently omits one or more sections (Mac-only games
+ * have no Windows spec, older indie titles skip VR Support,
+ * etc.) — the frontend silently drops empty rows so the card
+ * never has meaningless `—` entries.
+ *
+ * Field coverage mirrors the entire Steam taxonomy:
+ *   - os                Windows / macOS / SteamOS + Linux
+ *   - processor         CPU requirement
+ *   - memory            RAM requirement
+ *   - graphics          GPU requirement
+ *   - directX           DirectX version
+ *   - network           online play requirement
+ *   - storage           disk footprint requirement
+ *   - soundCard         sound card / audio requirement
+ *   - vrSupport         VR headset + controller requirement
+ *   - additionalNotes   free-form footnote ("Requires X controller",
+ *                       "64-bit only", "SSD recommended", etc.)
+ */
+export interface RequirementsSpec {
+  os?: string;
+  processor?: string;
+  memory?: string;
+  graphics?: string;
+  directX?: string;
+  network?: string;
+  storage?: string;
+  soundCard?: string;
+  vrSupport?: string;
+  additionalNotes?: string;
+}
+
+/**
+ * Combined system-requirements payload returned by the
+ * `get_recommended_config` Tauri command. Source priority is
+ * Steam-only (IGDB doesn't expose specs); `source === "none"`
+ * means the game has no Steam appid and the section should hide
+ * entirely.
+ *
+ * When `minimum` AND `recommended` are both `None` BUT
+ * `minimumHtml` / `recommendedHtml` carry values, the parser
+ * simply didn't recognise any labels in the raw HTML — the
+ * frontend should fall back to rendering the raw HTML through
+ * its existing sanitizer rather than dropping the section
+ * silently.
+ */
+export interface PcRequirementsPayload {
+  /** `"steam" | "none"` */
+  source: string;
+  /** Deep-link to the Steam app page (for the "View on Steam" footer). */
+  sourceUrl?: string;
+  /** Human-readable source name ("Steam"). */
+  sourceName?: string;
+  /** Parsed minimum spec (lower bar to launch the game). */
+  minimum?: RequirementsSpec;
+  /** Parsed recommended spec (bar for a smooth experience). */
+  recommended?: RequirementsSpec;
+  /**
+   * Raw Steam `pc_requirements.minimum` HTML, preserved as a
+   * last-resort fallback when the label parser missed any spec
+   * (unrecognised label → freeform paragraph).
+   */
+  minimumHtml?: string;
+  /** Raw Steam `pc_requirements.recommended` HTML fallback. */
+  recommendedHtml?: string;
+  /** Unix-seconds timestamp of the last successful fetch. */
+  fetchedAt: number;
+}
+
 // ─── Achievements / Success Story Types ─────────────────────────────────────
 
 /** A single achievement definition + user progress (from Steam API merge). */

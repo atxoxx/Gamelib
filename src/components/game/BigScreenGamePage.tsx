@@ -52,6 +52,7 @@ import LanguagesSection from "./LanguagesSection";
 import ScreenshotsSection from "./ScreenshotsSection";
 import StorylineSection from "./StorylineSection";
 import AboutSection from "./AboutSection";
+import SystemRequirementsCard from "./SystemRequirementsCard";
 
 interface BigScreenGamePageProps {
   /** The currently-viewed game. Page is mounted only when this is defined. */
@@ -340,6 +341,19 @@ export default function BigScreenGamePage({
       {/* ── Storyline / About (existing components) ────────── */}
       <StorylineSection game={game} />
       <AboutSection game={game} />
+
+      {/* ── System Requirements (Steam pc_requirements) ───────
+       *  Placed between About and Screenshots so the user can
+       *  scan the prose summary, then see whether their rig
+       *  can run the game, before browsing the screenshots.
+       *  The component auto-hides when Steam has no appid for
+       *  the title (mirrors the existing AboutSection's
+       *  empty-state discipline). */}
+      <SystemRequirementsCard
+        steamAppId={
+          typeof game.steamAppId === "number" ? game.steamAppId : null
+        }
+      />
 
       {/* ── Screenshots rail ───────────────────────────────── */}
       <ScreenshotsSection game={game} onOpen={setLightbox} />
