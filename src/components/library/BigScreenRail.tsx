@@ -15,7 +15,7 @@
 // shared "spotlight" panel without us having to duplicate state.
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { useGamepadCtx } from "../../hooks/GamepadProvider";
+import { useGamepad } from "../../hooks/GamepadProvider";
 import BigScreenGameCard from "./BigScreenGameCard";
 import type { Game } from "../../types/game";
 
@@ -52,7 +52,7 @@ export default function BigScreenRail({
   onCardClick,
   onFocusedGameChange,
 }: BigScreenRailProps) {
-  const gamepad = useGamepadCtx();
+  const gamepad = useGamepad();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Last-published focused game id so we can dedupe and only emit on
   // rising-edge changes (prevents the parent Spotlight from
@@ -148,9 +148,6 @@ export default function BigScreenRail({
                   <BigScreenGameCard
                     game={game}
                     onClick={() => onCardClick(game)}
-                    // data-game-id is the bridge the focus-watcher above
-                    // uses to map the focused element back to its game.
-                    data-game-id={game.id}
                   />
                 </div>
               ))}

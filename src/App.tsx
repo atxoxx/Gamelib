@@ -29,6 +29,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { AchievementProvider } from "./context/AchievementContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import { BigScreenProvider, useBigScreen } from "./context/BigScreenContext";
+import { GamepadProvider } from "./hooks/GamepadProvider";
 import { LandingRedirect } from "./components/LandingRedirect";
 import Splashscreen from "./components/Splashscreen";
 import "./App.css";
@@ -59,6 +60,49 @@ function AppLayout() {
   );
 }
 
+/**
+ * Inner shell mounted inside <BigScreenProvider> so it can read
+ * `isBigScreen` via `useBigScreen()`. The <GamepadProvider> lives
+ * here (not inside <BigScreenLayout>) so that `useGamepad()` is
+ * safe to call from any page in the app — desktop pages, the
+ * TopNav, the Sidebar — without a try/catch fallback. The
+ * `enabled` flag keeps the rAF loop asleep on desktop and wakes
+ * it on the next animation frame when Big Screen flips on.
+ */
+function AppShell() {
+  const { isBigScreen } = useBigScreen();
+  return (
+    <GamepadProvider enabled={isBigScreen}>
+      <Routes>
+        <Route element={<AppLayout />}>
+          {/* L6: default landing page — read from
+              SettingsContext so changes the user makes
+              in Settings apply on the *next* mount
+              (without a full reload). See
+              ./components/LandingRedirect.tsx for the
+              resolved-target computation; <Navigate>
+              itself only sees the resolved path. */}
+          <Route index element={<LandingRedirect />} />
+          <Route path="library" element={<LibraryPage />} />
+          <Route path="library/:gameId" element={<GamePage />} />
+          <Route path="wishlist" element={<WishlistPage />} />
+          <Route path="news" element={<NewsPage />} />
+          <Route path="deals" element={<DealsPage />} />
+          <Route path="activity" element={<ActivityPage />} />
+          <Route path="achievements" element={<AchievementsPage />} />
+          <Route path="downloads" element={<DownloadsPage />} />
+          <Route path="storage" element={<StoragePage />} />
+          <Route path="store" element={<StorePage />} />
+          <Route path="store/:gameSlug" element={<StoreGameDetail />} />
+          <Route path="community" element={<CommunityPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="plugins" element={<PluginsPage />} />
+        </Route>
+      </Routes>
+    </GamepadProvider>
+  );
+}
+
 function App() {
   return (
     <HashRouter>
@@ -74,32 +118,7 @@ function App() {
                     <DownloadProvider>
                       <SettingsProvider>
                       <BigScreenProvider>
-                      <Routes>
-                        <Route element={<AppLayout />}>
-                          {/* L6: default landing page — read from
-                              SettingsContext so changes the user makes
-                              in Settings apply on the *next* mount
-                              (without a full reload). See
-                              ./components/LandingRedirect.tsx for the
-                              resolved-target computation; <Navigate>
-                              itself only sees the resolved path. */}
-                          <Route index element={<LandingRedirect />} />
-                          <Route path="library" element={<LibraryPage />} />
-                          <Route path="library/:gameId" element={<GamePage />} />
-                          <Route path="wishlist" element={<WishlistPage />} />
-                          <Route path="news" element={<NewsPage />} />
-                          <Route path="deals" element={<DealsPage />} />
-                          <Route path="activity" element={<ActivityPage />} />
-                          <Route path="achievements" element={<AchievementsPage />} />
-                          <Route path="downloads" element={<DownloadsPage />} />
-                          <Route path="storage" element={<StoragePage />} />
-                          <Route path="store" element={<StorePage />} />
-                          <Route path="store/:gameSlug" element={<StoreGameDetail />} />
-                          <Route path="community" element={<CommunityPage />} />
-                          <Route path="settings" element={<SettingsPage />} />
-                          <Route path="plugins" element={<PluginsPage />} />
-                        </Route>
-                      </Routes>
+                      <AppShell />
                       </BigScreenProvider>
                       </SettingsProvider>
                     </DownloadProvider>
@@ -122,4 +141,4 @@ function App() {
   );
 }
 
-export default App;
+export default App;

@@ -7,6 +7,12 @@
 // the context is mounted. The TopNav toggle button (🖥️) calls
 // setBigScreen() directly.
 //
+// PR 1 cleanup: a single keydown listener handles F11, Ctrl+B, AND
+// Escape (the latter exits Big Screen without toggling fullscreen
+// when the OS already did — Tauri intercepts Escape at OS level in
+// native fullscreen). Previously these were two separate useEffects
+// with duplicated state+persist+fullscreen logic.
+//
 // Architecture mirrors SettingsContext: localStorage hydration on
 // mount, React state for fast renders, Tauri API calls wrapped in
 // try/catch so `npm run dev` in the browser doesn't crash.
@@ -54,6 +60,23 @@ async function setTauriFullscreen(on: boolean): Promise<void> {
   }
 }
 
+/**
+ * Skip the global keyboard shortcuts when the user is typing in a
+ * form field. F11 and Ctrl+B inside an input should be handled by
+ * the browser (F11 toggles browser fullscreen anyway); Escape
+ * inside a textarea should let the field swallow it (e.g. clear
+ * IME composition).
+ */
+function isTypingInField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable ||
+    !!target.closest("[contenteditable]")
+  );
+}
+
 // ── Public shape ────────────────────────────────────────────────
 
 export interface BigScreenContextValue {
@@ -86,92 +109,58 @@ export function BigScreenProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Escape inside fullscreen → exit Big Screen Mode ─────────
-  // Tauri intercepts Escape at the OS level when the window is in
-  // native fullscreen (Windows + macOS), so the OS already pops us
-  // out of fullscreen. When that happens we also want to drop out of
-  // Big Screen Mode so the user lands back in the regular desktop
-  // layout (TopNav + Sidebar + MainContent), not the Big Screen
-  // layout rendered in a maximized window. We listen for the WindowEvent
-  // 'resize' (fullscreen exit fires it) plus a keydown-Escape path
-  // for the in-app case where fullscreen is bypassed (browser dev).
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      // Only react to bare Escape — F11 / Ctrl+B are still handled by
-      // the listener further below which toggles Big Screen Mode.
-      if (e.key !== "Escape") return;
-      if (!isBigScreen) return;
-      // Skip when the user is typing — let the field swallow Escape.
-      const target = e.target;
-      if (target instanceof HTMLElement) {
-        if (
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable ||
-          target.closest("[contenteditable]")
-        ) {
-          return;
-        }
-      }
-      e.preventDefault();
-      setIsBigScreenState(false);
-      lsSet(LS_BIG_SCREEN, "false");
-      setTauriFullscreen(false);
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isBigScreen]);
-
+  // ── Public toggle (used by TopNav button + Gamepad hint's exit) ─
+  // Programmatic toggle. Both keyboard handlers and direct callers
+  // funnel through one of {setBigScreen, toggleBigScreen} so the
+  // "state + localStorage + Tauri fullscreen" triplet lives in one
+  // place.
   const setBigScreen = useCallback(async (on: boolean) => {
     setIsBigScreenState(on);
     lsSet(LS_BIG_SCREEN, String(on));
     await setTauriFullscreen(on);
   }, []);
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────
-  // F11 is the standard fullscreen toggle in every browser / media
-  // player. Ctrl+B is the secondary shortcut — easier to reach on
-  // a controller-free keyboard without stretching for F11.
-  //
-  // We use `keydown` (not `keyup`) so the toggle fires on press
-  // and doesn't conflict with any page-level `keyup` handlers that
-  // might eat the event. The listener is registered once per mount
-  // and cleaned up on unmount so multiple providers (e.g.
-  // StrictMode double-mount in dev) don't stack handlers.
+  const toggleBigScreen = useCallback(() => {
+    setIsBigScreenState((prev) => {
+      const next = !prev;
+      lsSet(LS_BIG_SCREEN, String(next));
+      setTauriFullscreen(next);
+      return next;
+    });
+  }, []);
+
+  // ── Single keydown listener ─────────────────────────────────
+  // Handles F11 / Ctrl+B (toggle) and Escape (exit Big Screen
+  // without re-firing fullscreen when the OS already did). The OS
+  // intercepts Escape at the native-fullscreen level on Windows /
+  // macOS; this listener also handles the in-app case where
+  // fullscreen is bypassed (browser dev).
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Don't toggle when the user is typing in an input / textarea /
-      // contenteditable — F11 and Ctrl+B inside a form field should
-      // be handled by the browser / text editor, not us.
-      const target = e.target;
-      if (target instanceof HTMLElement) {
-        if (
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable ||
-          target.closest("[contenteditable]")
-        ) {
-          return;
-        }
+      if (isTypingInField(e.target)) return;
+
+      // Escape: exit Big Screen when active; otherwise let other
+      // handlers (modal close, etc.) consume it.
+      if (e.key === "Escape") {
+        if (!isBigScreen) return;
+        e.preventDefault();
+        setBigScreen(false);
+        return;
       }
 
+      // F11 (universal fullscreen toggle) or Ctrl+B (easier on
+      // controller-free keyboards) — toggle Big Screen Mode.
       const isF11 = e.key === "F11";
       const isCtrlB = (e.ctrlKey || e.metaKey) && e.key === "b";
-
       if (isF11 || isCtrlB) {
         e.preventDefault();
-        setIsBigScreenState((prev) => {
-          const next = !prev;
-          lsSet(LS_BIG_SCREEN, String(next));
-          setTauriFullscreen(next);
-          return next;
-        });
+        toggleBigScreen();
       }
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isBigScreen, setBigScreen, toggleBigScreen]);
 
   const value = useMemo<BigScreenContextValue>(
     () => ({ isBigScreen, setBigScreen, ready }),

@@ -1763,7 +1763,8 @@ function GameDetail({ game }: { game: Game }) {
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const { getGame, setSelectedGameId } = useGames();
-  const { isBigScreen } = useBigScreen();
+  const { isBigScreen, setBigScreen } = useBigScreen();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (gameId) {
@@ -1772,6 +1773,27 @@ export default function GamePage() {
   }, [gameId, setSelectedGameId]);
 
   const game = gameId ? getGame(gameId) : undefined;
+
+  // Big Screen Mode: back/edit/remove all drop the user out of Big
+  // Screen back to the desktop GameDetail. The PS5 single-page Hub
+  // can't open its own edit/confirm modals while mounted (the
+  // overlay owns the viewport), so exiting Big Screen is the
+  // simplest correct behavior — the desktop GameDetail then
+  // renders and the user clicks Edit/Remove there. A future
+  // tabbed Big Screen Game page can keep the user in Big Screen
+  // by surfacing those flows inline. (Replaces the deleted
+  // BigScreenGamePageRouter that previously dispatched a
+  // `gamelib:drill-in` event to bridge Explore cards to the
+  // desktop tab UI.)
+  const handleBack = useCallback(() => {
+    navigate("/library");
+  }, [navigate]);
+  const handleEdit = useCallback(() => {
+    setBigScreen(false);
+  }, [setBigScreen]);
+  const handleRemove = useCallback(() => {
+    setBigScreen(false);
+  }, [setBigScreen]);
 
   if (!game) {
     return <GameNotFound />;
@@ -1782,56 +1804,17 @@ export default function GamePage() {
   // its own hero, metadata strip, and inline sections so we don't
   // have to rebuild the tabs.
   if (isBigScreen) {
-    return <BigScreenGamePageRouter game={game} />;
+    return (
+      <BigScreenGamePage
+        game={game}
+        onBack={handleBack}
+        onEdit={handleEdit}
+        onRemove={handleRemove}
+      />
+    );
   }
 
   return <GameDetail key={game.id} game={game} />;
-}
-
-/**
- * Thin router-aware wrapper around BigScreenGamePage that wires
- * "Back / Edit / Remove" to actual navigation / modal flows.
- * Extracted so the default export stays simple and so the
- * bigscreen variant's wiring is contained in one place.
- */
-function BigScreenGamePageRouter({ game }: { game: Game }) {
-  const navigate = useNavigate();
-  const { setBigScreen } = useBigScreen();
-  // Drill-in listener: the BigScreenGamePage's "Explore" cards fire
-  // a `gamelib:drill-in` event when the user wants to open a full-fat
-  // tab (Reviews / Achievements / Web Links) that doesn't fit on the
-  // single-page Game Hub. We handle it by exiting Big Screen Mode so
-  // the regular desktop GamePage tab UI takes over without us having
-  // to fork those tabs for both modes.
-  useEffect(() => {
-    function onDrillIn() {
-      setBigScreen(false);
-    }
-    window.addEventListener("gamelib:drill-in", onDrillIn);
-    return () => window.removeEventListener("gamelib:drill-in", onDrillIn);
-  }, [setBigScreen]);
-  const handleBack = useCallback(() => {
-    navigate("/library");
-  }, [navigate]);
-  const handleEdit = useCallback(() => {
-    // Flip out of Big Screen so the parent GamePage re-renders the
-    // desktop GameDetail (which owns the existing edit modal).
-    setBigScreen(false);
-  }, [setBigScreen]);
-  const handleRemove = useCallback(() => {
-    // Same drill-in pattern as Edit — the actual confirm/remove
-    // lives in the desktop GameDetail.
-    window.dispatchEvent(new CustomEvent("gamelib:drill-in"));
-  }, []);
-
-  return (
-    <BigScreenGamePage
-      game={game}
-      onBack={handleBack}
-      onEdit={handleEdit}
-      onRemove={handleRemove}
-    />
-  );
 }
 
 // ─── Game Activity Tab Component (Redesigned) ──────────────────────────────────

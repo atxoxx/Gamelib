@@ -6,53 +6,34 @@
 // Focus state: card lifts with translateY(-8px), gets a glowing
 // accent border. The A button triggers `onClick` (which should
 // navigate to the game detail page).
+//
+// As of PR 1, focus registration is delegated to `useFocusable` —
+// the ref callback is stable across renders, so the focus registry
+// doesn't thrash on every parent render the way the previous
+// `useCallback` + cleanupRef pattern did.
 
-import { useCallback, useRef } from "react";
 import { type Game } from "../../types/game";
-import { useGamepadCtx } from "../../hooks/GamepadProvider";
 import { useGames } from "../../context/GameContext";
+import { useFocusable } from "../../hooks/useFocusable";
 
 interface BigScreenGameCardProps {
   game: Game;
   onClick: () => void;
-  /**
-   * Optional stable id burned onto the root element as a
-   * `data-game-id="…"` attribute. Used by sibling components
-   * (BigScreenRail's focus watcher in particular) to map the global
-   * `gamepad.focusedElement` back to its owning game without having
-   * to register a separate listener per card. Defaults to
-   * `game.id` so existing callers keep working without changes.
-   */
-  "data-game-id"?: string;
 }
 
-export default function BigScreenGameCard({ game, onClick }: BigScreenGameCardProps) {
-  const gamepad = useGamepadCtx();
+export default function BigScreenGameCard({
+  game,
+  onClick,
+}: BigScreenGameCardProps) {
   const { runningGameIds } = useGames();
   const isRunning = runningGameIds.includes(game.id);
-  const cleanupRef = useRef<(() => void) | null>(null);
-
-  const focusableRef = useCallback(
-    (el: HTMLElement | null) => {
-      // Clean up previous registration
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
-      }
-      if (el) {
-        cleanupRef.current = gamepad.registerAction(el, onClick);
-      }
-    },
-    [gamepad, onClick],
-  );
+  // Stable focusable props; ref + cleanup are owned by useFocusable.
+  const focusable = useFocusable(onClick);
 
   return (
     <div
       className={`bigscreen-game-card${isRunning ? " running" : ""}`}
-      ref={focusableRef}
-      tabIndex={0}
-      role="option"
-      onClick={onClick}
+      {...focusable}
       data-game-id={game.id}
     >
       <div className="bigscreen-game-card-cover">
@@ -90,4 +71,4 @@ export default function BigScreenGameCard({ game, onClick }: BigScreenGameCardPr
       </div>
     </div>
   );
-}
+}

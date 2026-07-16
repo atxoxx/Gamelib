@@ -83,24 +83,6 @@ const GridIcon = (
   </svg>
 );
 
-/**
- * Stable sentinel Game object passed to `useSteamAppId` while no
- * real game is focused. Empty `name` + empty `id` keep the hook
- * from making any Steam round-trip (its in-flight guard rejects
- * games with no name). The sentinel lives at module scope so its
- * identity is stable across renders, satisfying the hook's deep
- * dependency comparison.
- */
-const EMPTY_GAME = {
-  id: "",
-  name: "",
-  path: "",
-  platform: "",
-  installed: false,
-  playTime: "",
-  addedAt: 0,
-} as unknown as Game;
-
 export default function BigScreenLibrary({
   filteredGames,
   totalGames,
@@ -149,12 +131,13 @@ export default function BigScreenLibrary({
   }, []);
 
   // ── Steam resolution for the featured game ──────────────────
-  // useSteamAppId falls back to a one-shot Steam store-search for
-  // titles that didn't ship with `steamAppId`, persisting the
-  // resolved id back onto the game via updateGame. We pass the
-  // EMPTY_GAME sentinel when nothing is focused so the hook's
-  // in-flight guards short-circuit (empty name = empty payload).
-  const { appId: featuredSteamAppId } = useSteamAppId(featuredGame ?? EMPTY_GAME);
+  // useSteamAppId already short-circuits on `null` / `undefined`
+  // (its `if (!game) return;` guard at the top of the resolve
+  // effect skips the Steam round-trip when no game is focused).
+  // Passing `featuredGame` directly removes the need for the
+  // EMPTY_GAME sentinel that PR 1 used to satisfy the hook's
+  // `Game` (not `Game | null`) signature.
+  const { appId: featuredSteamAppId } = useSteamAppId(featuredGame);
   const resolvedSteamAppId =
     typeof featuredSteamAppId === "number"
       ? featuredSteamAppId

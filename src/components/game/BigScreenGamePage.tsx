@@ -1,46 +1,49 @@
-// BigScreenGamePage — PS5 single-page Game Hub for Big Screen mode.
+// BigScreenGamePage — PS5 tabbed Game Hub for Big Screen mode.
 //
-// One tall scrolling page. No tabs. PS5 visual:
+// Phase 3 PR 3a replaces the previous single-page scroll with a
+// 4-tab layout (Overview | Media | Specs | More) and bumper-cycled
+// navigation. The hero stays fixed at the top across all tabs;
+// each tab owns its own scroll region.
+//
 //   ┌──────────────────────────────────────────────────┐
-//   │   Banner background (full-bleed)                 │
-//   │   Game logo                          ▶ PLAY       │
-//   │   Subtitle line                     Details  ⋯   │
+//   │   Banner background (full-bleed, paused on Overview)
+//   │   Game logo / title              ▶ PLAY
+//   │   Subtitle line                  Trailer · Edit · Remove
 //   └──────────────────────────────────────────────────┘
-//   ┌── Metadata strip ─────────────────────────────────┐
-//   │ [Platform] [Status] [Playtime] [Players] [Rating]│
+//   ┌── Metadata strip (pills) ─────────────────────────┐
+//   │ [Platform] [Status] [Playtime] [Players] [Rating]
 //   └──────────────────────────────────────────────────┘
-//   ┌── Storyline (one big block quote) ─────────────────┐
+//   ┌── Tab bar (LB / [Overview][Media][Specs][More] / RB) ─┐
 //   └──────────────────────────────────────────────────┘
-//   ┌── About / Description ────────────────────────────┐
-//   └──────────────────────────────────────────────────┘
-//   ┌── Screenshots ────────────────────────────────────┐
-//   │   [shot][shot][shot][shot][shot]──▶               │
-//   └──────────────────────────────────────────────────┘
-//   ┌── Specs ─────────┐  ┌── Releases ──────────────────┐
-//   │ Modes, Themes…  │  │ Platform · date · region…    │
-//   └─────────────────┘  └─────────────────────────────┘
-//   ┌── Languages ──────────────────────────────────────┐
-//   │ Language | Interface | Audio | Subtitles          │
-//   └──────────────────────────────────────────────────┘
-//   ┌── More (Explore) ─────────────────────────────────┐
-//   │ Reviews · Activity · Achievements · Web Links     │
+//   ┌── Tab panel (scrolls; only one is active at a time) ──┐
+//   │  Overview: Storyline · About · SystemReqs · ...
+//   │  Media:    empty placeholder (PR 3b)
+//   │  Specs:    empty placeholder (PR 3b)
+//   │  More:     empty placeholder (PR 3c)
 //   └──────────────────────────────────────────────────┘
 //
-// Composition: reuses existing components (ScreenshotsSection,
-// SpecsCard, ReleasesCard, LanguagesSection, StorylineSection)
-// where they already handle the data shape. New code lives in
-// the hero + metadata strip + "More" grid.
+// Bumper wiring: `useGamepad().registerTabCycler(...)` overrides
+// BigScreenNav's tab cycler while this page is mounted. The
+// unregister fn runs on unmount so the nav cycler reclaims LB/RB
+// when the user leaves the Game Hub.
 //
-// Accessibility: the Play button uses the BigScreenProvider's
-// focusableProps helper so D-pad spatial nav lands on it from the
-// rail of any sibling (e.g. the BigScreenLibrary). Other
-// interactive elements (Details, More cards) register via the
-// same helper.
+// Per-tab scroll regions: the TabPanel component owns the
+// absolute/relative CSS that keeps inactive panels in the DOM
+// (preserves scroll) while not participating in layout. Only the
+// active panel owns the layout box.
+//
+// Paused hero: `paused={activeTab === "overview"}` keeps the
+// Ken-Burns / cross-fade cycle frozen on the landing tab so the
+// user has time to read the cover, title, and meta strip. The
+// cycle resumes on Media/Specs/More where the user is focused on
+// tab content.
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
-import { useBigScreenHook } from "../../hooks/useBigScreen";
+import { useFocusable } from "../../hooks/useFocusable";
+import { useGamepad } from "../../hooks/GamepadProvider";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
@@ -50,9 +53,26 @@ import SpecsCard from "./SpecsCard";
 import ReleasesCard from "./ReleasesCard";
 import LanguagesSection from "./LanguagesSection";
 import ScreenshotsSection from "./ScreenshotsSection";
+import VideosSection from "./VideosSection";
 import StorylineSection from "./StorylineSection";
 import AboutSection from "./AboutSection";
 import SystemRequirementsCard from "./SystemRequirementsCard";
+import RatingsKpiCard from "./RatingsKpiCard";
+import TimeToBeatCard from "./TimeToBeatCard";
+import CrackWatchCard from "../CrackWatchCard";
+import GameRelationsCard from "../GameRelationsCard";
+import ReviewsTab from "../ReviewsTab";
+import AchievementsTab from "../AchievementsTab";
+import WebLinksTab from "../WebLinksTab";
+import { GameActivityTab } from "../../pages/GamePage";
+import BigScreenPill from "../bigscreen/BigScreenPill";
+import BigScreenMetaStrip from "../bigscreen/BigScreenMetaStrip";
+import BigScreenLightbox from "../bigscreen/BigScreenLightbox";
+import BigScreenTabBar, {
+  type TabDef,
+} from "../bigscreen/BigScreenTabBar";
+import BigScreenTabPanel from "../bigscreen/BigScreenTabPanel";
+import { extractYear } from "../bigscreen/bigscreenFormat";
 
 interface BigScreenGamePageProps {
   /** The currently-viewed game. Page is mounted only when this is defined. */
@@ -65,6 +85,15 @@ interface BigScreenGamePageProps {
   onRemove: () => void;
 }
 
+type GamePageTab = "overview" | "media" | "specs" | "more";
+
+const GAME_PAGE_TABS: TabDef<GamePageTab>[] = [
+  { id: "overview", label: "Overview", icon: <OverviewIcon /> },
+  { id: "media", label: "Media", icon: <MediaIcon /> },
+  { id: "specs", label: "Specs", icon: <SpecsIcon /> },
+  { id: "more", label: "More", icon: <MoreIcon /> },
+];
+
 export default function BigScreenGamePage({
   game,
   onBack,
@@ -72,7 +101,7 @@ export default function BigScreenGamePage({
   onRemove,
 }: BigScreenGamePageProps) {
   const { runningGameIds, launchGame } = useGames();
-  const { focusableProps } = useBigScreenHook();
+  const gamepad = useGamepad();
   // Steam appid resolution for the player-count badge. Identical
   // pattern to the desktop hero: falls back to a one-shot Steam
   // name lookup for non-Steam titles and persists the resolved
@@ -83,42 +112,53 @@ export default function BigScreenGamePage({
   const isRunning = runningGameIds.includes(game.id);
   const status = PLAY_STATUS_DETAILS[game.playStatus || "backlog"];
 
-  // Screenshot lightbox state. We use the same fullscreen overlay
-  // pattern as desktop GamePage so a screenshot tap opens an
-  // in-place modal without bouncing out of Big Screen Mode.
+  // Tab state + lightbox state.
+  const [activeTab, setActiveTab] = useState<GamePageTab>("overview");
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  const focusableBack = focusableProps(onBack);
-  const focusableEdit = focusableProps(onEdit);
-  const focusableRemove = focusableProps(onRemove);
-  const focusableTrailer = focusableProps(() => {
+  // Bumper-cycled tab navigation (LB / RB). `registerTabCycler`
+  // returns an unregister function that runs on unmount, restoring
+  // BigScreenNav's LB/RB behavior when the user leaves the Game
+  // Hub. While the lightbox is open we ignore bumper presses so
+  // the user can't cycle tabs while a fullscreen preview is up.
+  useEffect(() => {
+    return gamepad.registerTabCycler((direction) => {
+      if (lightbox) return;
+      setActiveTab((prev) => {
+        const idx = GAME_PAGE_TABS.findIndex((t) => t.id === prev);
+        const nextIdx =
+          direction === "forward"
+            ? (idx + 1) % GAME_PAGE_TABS.length
+            : (idx - 1 + GAME_PAGE_TABS.length) % GAME_PAGE_TABS.length;
+        return GAME_PAGE_TABS[nextIdx].id;
+      });
+    });
+  }, [gamepad.registerTabCycler, lightbox]);
+
+  const focusableBack = useFocusable(onBack);
+  const focusableEdit = useFocusable(onEdit);
+  const focusableRemove = useFocusable(onRemove);
+  const focusableTrailer = useFocusable(() => {
     if (!game.videos || game.videos.length === 0) return;
     setLightbox(game.videos[0]);
   });
 
-  const releaseYear = useMemo(() => {
-    if (!game.releaseDate) return null;
-    const m = game.releaseDate.match(/(19|20)\d{2}/);
-    return m ? Number.parseInt(m[0], 10) : null;
-  }, [game.releaseDate]);
-
+  const releaseYear = extractYear(game.releaseDate);
   const rating = game.igdbRating ?? game.criticRating;
 
   return (
     <div className="bigscreen-gamepage">
-      {/* ── Hero ───────────────────────────────────────────── */}
+      {/* ── Hero (always visible, pauses on Overview) ────────── */}
       <section
         className="bigscreen-gamepage-hero"
         aria-label={`${game.name} banner`}
       >
-        {/* Auto-cycling parallax background. Picks video > cycle >
-            * static > empty based on what the game has. See
-            * ./BigScreenHeroBackground.tsx for the ladder. */}
         <BigScreenHeroBackground
           bannerUrl={game.bannerUrl}
           coverArtUrl={game.coverArtUrl}
           screenshots={game.screenshots}
           videos={game.videos}
+          paused={activeTab === "overview"}
         />
         <div className="bigscreen-gamepage-hero-mask" aria-hidden />
         <div className="bigscreen-gamepage-hero-glow" aria-hidden />
@@ -249,64 +289,26 @@ export default function BigScreenGamePage({
         </div>
       </section>
 
-      {/* ── Metadata strip ────────────────────────────────── */}
-      <section className="bigscreen-gamepage-meta-strip" aria-label="Game metadata">
-        <span className="bigscreen-gamepage-meta-pill bigscreen-gamepage-meta-pill--platform">
+      {/* ── Metadata strip (pills) ───────────────────────────── */}
+      <BigScreenMetaStrip
+        aria-label="Game metadata"
+        className="bigscreen-gamepage-meta-strip"
+      >
+        <BigScreenPill tone="accent" size="md">
           {game.platform}
-        </span>
-        <span
-          className="bigscreen-gamepage-meta-pill"
-          style={{
-            background: `color-mix(in srgb, ${status.color} 18%, transparent)`,
-            color: status.color,
-            borderColor: `color-mix(in srgb, ${status.color} 35%, transparent)`,
-          }}
+        </BigScreenPill>
+        <BigScreenPill
+          tone="muted"
+          size="md"
+          dot
+          customColor={status.color}
         >
-          <span
-            className="bigscreen-gamepage-meta-dot"
-            style={{ background: status.color }}
-          />
           {status.label}
-        </span>
-        <span className="bigscreen-gamepage-meta-pill">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-            width="14"
-            height="14"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          {game.playTime || "0h"}
-        </span>
-        {resolvedSteamAppId != null && (
-          <span className="bigscreen-gamepage-meta-pill">
-            <SteamPlayerCount appId={resolvedSteamAppId} /> playing now
-          </span>
-        )}
-        {rating != null && rating > 0 && (
-          <span className="bigscreen-gamepage-meta-pill">
-            <svg
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden
-              width="14"
-              height="14"
-            >
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-            </svg>
-            {Math.round(rating)}%{" "}
-            {game.igdbRating != null ? "IGDB" : "Critic"}
-          </span>
-        )}
-        {game.installed ? (
-          <span className="bigscreen-gamepage-meta-pill bigscreen-gamepage-meta-pill--ready">
+        </BigScreenPill>
+        <BigScreenPill
+          tone="muted"
+          size="md"
+          icon={
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -318,180 +320,249 @@ export default function BigScreenGamePage({
               width="14"
               height="14"
             >
-              <polyline points="20 6 9 17 4 12" />
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
             </svg>
+          }
+        >
+          {game.playTime || "0h"}
+        </BigScreenPill>
+        {resolvedSteamAppId != null && (
+          <BigScreenPill tone="muted" size="md">
+            <SteamPlayerCount appId={resolvedSteamAppId} /> on Steam
+          </BigScreenPill>
+        )}
+        {rating != null && rating > 0 && (
+          <BigScreenPill
+            tone="muted"
+            size="md"
+            icon={
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden
+                width="14"
+                height="14"
+              >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            }
+          >
+            {Math.round(rating)}%{" "}
+            {game.igdbRating != null ? "IGDB" : "Critic"}
+          </BigScreenPill>
+        )}
+        {game.installed ? (
+          <BigScreenPill
+            tone="success"
+            size="md"
+            icon={
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+                width="14"
+                height="14"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            }
+          >
             Ready to play
-          </span>
+          </BigScreenPill>
         ) : (
-          <span className="bigscreen-gamepage-meta-pill bigscreen-gamepage-meta-pill--absent">
+          <BigScreenPill tone="muted" size="md">
             Not installed
-          </span>
+          </BigScreenPill>
         )}
         {isRunning && (
-          <span className="bigscreen-gamepage-meta-pill bigscreen-gamepage-meta-pill--running">
-            <span
-              className="bigscreen-gamepage-meta-dot"
-              style={{ background: "var(--color-success)" }}
-            />
+          <BigScreenPill tone="success" size="md" dot>
             Running
-          </span>
+          </BigScreenPill>
         )}
-      </section>
+      </BigScreenMetaStrip>
 
-      {/* ── Storyline / About (existing components) ────────── */}
+      {/* ── Tab bar (LB / [tabs] / RB) ───────────────────────── */}
+      <BigScreenTabBar
+        tabs={GAME_PAGE_TABS}
+        activeTab={activeTab}
+        onActivate={setActiveTab}
+        ariaLabel="Game page sections"
+      />
+
+      {/* ── Per-tab scroll region ───────────────────────────── */}
+      <div className="bigscreen-gamepage-tab-scroll-region">
+        <BigScreenTabPanel tabId="overview" activeTab={activeTab}>
+        <BigScreenGamePageOverview game={game} />
+        </BigScreenTabPanel>
+        <BigScreenTabPanel tabId="media" activeTab={activeTab}>
+          <BigScreenGamePageMedia
+            game={game}
+            onOpenLightbox={setLightbox}
+          />
+        </BigScreenTabPanel>
+        <BigScreenTabPanel tabId="specs" activeTab={activeTab}>
+          <BigScreenGamePageSpecs game={game} />
+        </BigScreenTabPanel>
+        <BigScreenTabPanel tabId="more" activeTab={activeTab}>
+          <BigScreenGamePageMore game={game} />
+        </BigScreenTabPanel>
+      </div>
+
+      {/* ── Lightbox (portal-rendered) ──────────────────────── */}
+      <BigScreenLightbox src={lightbox} onClose={() => setLightbox(null)} />
+    </div>
+  );
+}
+
+// ─── Overview tab content ────────────────────────────────────────
+//
+// PR 3a keeps the existing Overview sections (Storyline, About,
+// SystemRequirements, Screenshots, the 2-col Specs + Releases row,
+// Languages, plus the GameRelationsCard that's now wired in) as
+// the canonical Overview landing content. PR 3b will rearrange
+// some of these into Media (screenshots) and Specs (cards).
+
+function BigScreenGamePageOverview({
+  game,
+}: {
+  game: Game;
+}) {
+  return (
+    <div className="bigscreen-gamepage-overview">
+      {/* Prose-only landing: the narrative story + the description.
+       *  Screenshots and data cards moved to Media / Specs tabs in
+       *  PR 3b; SystemRequirementsCard moved to Specs (where power
+       *  users look first). */}
       <StorylineSection game={game} />
       <AboutSection game={game} />
+    </div>
+  );
+}
 
-      {/* ── System Requirements (Steam pc_requirements) ───────
-       *  Placed between About and Screenshots so the user can
-       *  scan the prose summary, then see whether their rig
-       *  can run the game, before browsing the screenshots.
-       *  The component auto-hides when Steam has no appid for
-       *  the title (mirrors the existing AboutSection's
-       *  empty-state discipline). */}
+// ─── Media tab content ────────────────────────────────────────────
+//
+// PR 3b fills in the Media tab. Screenshots (with lightbox) +
+// Videos (IGDB / YouTube embeds). ScreenshotsSection.onOpen bubbles
+// the clicked screenshot URL up to the parent BigScreenGamePage
+// where the lightbox state lives, so the click handler survives
+// tab switches.
+
+function BigScreenGamePageMedia({
+  game,
+  onOpenLightbox,
+}: {
+  game: Game;
+  onOpenLightbox: (src: string) => void;
+}) {
+  return (
+    <div className="bigscreen-gamepage-media">
+      <ScreenshotsSection game={game} onOpen={onOpenLightbox} />
+      <VideosSection game={game} />
+    </div>
+  );
+}
+
+// ─── Specs tab content ─────────────────────────────────────────────
+//
+// PR 3b fills in the Specs tab. Power-user "data dump": spec cards,
+// releases, languages, system requirements, plus the crackwatch
+// status, time-to-beat, and ratings KPI cards. Layout is a mix of
+// 2-col grids for compact cards and full-width rows for tables /
+// language lists.
+
+function BigScreenGamePageSpecs({ game }: { game: Game }) {
+  return (
+    <div className="bigscreen-gamepage-specs">
+      {/* Two-column: SpecsCard + ReleasesCard. */}
+      <div className="bigscreen-gamepage-2col" data-cols="2">
+        <SpecsCard game={game} />
+        <ReleasesCard game={game} />
+      </div>
+
+      {/* Two-column: TimeToBeatCard + RatingsKpiCard. */}
+      <div className="bigscreen-gamepage-2col" data-cols="2">
+        <TimeToBeatCard game={game} />
+        <RatingsKpiCard game={game} />
+      </div>
+
+      {/* Languages (full-width table). */}
+      <LanguagesSection game={game} />
+
+      {/* System Requirements (Steam pc_requirements). Auto-hides
+       *  when Steam has no appid for the title. */}
       <SystemRequirementsCard
         steamAppId={
           typeof game.steamAppId === "number" ? game.steamAppId : null
         }
       />
 
-      {/* ── Screenshots rail ───────────────────────────────── */}
-      <ScreenshotsSection game={game} onOpen={setLightbox} />
-
-      {/* ── Two-column grid: Specs + Releases ──────────────── */}
-      <div className="bigscreen-gamepage-2col" data-cols="2">
-        <SpecsCard game={game} />
-        <ReleasesCard game={game} />
-      </div>
-
-      {/* ── Languages ─────────────────────────────────────── */}
-      <LanguagesSection game={game} />
-
-      {/* ── More (Explore) ─────────────────────────────────── */}
-      {(game.igdbReviews?.length ||
-        game.steamAchievements?.length ||
-        game.websites?.length) && (
-        <MoreSection game={game} />
-      )}
-
-      {/* ── Lightbox ───────────────────────────────────────── */}
-      {/* ── Lightbox ───────────────────────────────────────── */}
-      {lightbox && (
-        <div
-          className="bigscreen-gamepage-lightbox-mask"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Preview"
-          onClick={() => setLightbox(null)}
-        >
-          {/* Inner frame stops click-propagation so clicking the
-           *  image/video itself doesn't dismiss the preview — only
-           *  the surrounding dim backdrop does. ──────────────── */}
-          <div
-            className="bigscreen-gamepage-lightbox-frame"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {isVideoUrl(lightbox) ? (
-              <video src={lightbox} controls autoPlay />
-            ) : (
-              <img
-                src={lightbox}
-                alt="Fullscreen preview"
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: "85vh",
-                  objectFit: "contain",
-                  display: "block",
-                }}
-              />
-            )}
-          </div>
-        </div>
-      )}
+      {/* CrackWatch status (cracked / uncracked / denuvo). */}
+      <CrackWatchCard gameName={game.name} />
     </div>
   );
 }
 
-// ─── Subcomponents ─────────────────────────────────────────────
+// ─── More tab content ────────────────────────────────────────────
+//
+// PR 3c fills in the More tab by directly reusing the four desktop
+// tab components (ReviewsTab, AchievementsTab, GameActivityTab,
+// WebLinksTab) plus the GameRelationsCard that moved out of
+// Overview. The components are mounted inside `.bigscreen-gamepage-more`
+// (see bigscreen.css) which sets the TV-scale padding/spacing
+// without forking the desktop implementations.
+//
+// `WebLinksTab` accepts a `visible?: boolean` prop the desktop uses
+// to suppress the embedded webview when modals are open. Big Screen
+// has no modals on this tab so we pass `visible={true}`.
+//
+// `GameActivityTab` is exported from `src/pages/GamePage.tsx` rather
+// than its own module. Importing across the components→pages
+// boundary is a known wart — a future cleanup PR can extract it
+// to `src/components/activity/GameActivityTab.tsx`.
 
-function MoreSection({ game }: { game: Game }) {
-  const { focusableProps } = useBigScreenHook();
-  const reviewsCount = game.igdbReviews?.length ?? 0;
-  const achievementsCount = game.steamAchievements?.length ?? 0;
-  const websitesCount = game.websites?.length ?? 0;
-
-  const cards: Array<{ title: string; subtitle: string; icon: React.ReactNode }> =
-    [];
-  if (reviewsCount > 0) {
-    cards.push({
-      title: "Reviews",
-      subtitle: `${reviewsCount} review${reviewsCount === 1 ? "" : "s"}`,
-      icon: <ReviewsIcon />,
-    });
-  }
-  if (achievementsCount > 0) {
-    cards.push({
-      title: "Achievements",
-      subtitle: `${achievementsCount} unlock${
-        achievementsCount === 1 ? "" : "s"
-      }`,
-      icon: <TrophyIcon />,
-    });
-  }
-  if (websitesCount > 0) {
-    cards.push({
-      title: "Web Links",
-      subtitle: `${websitesCount} site${websitesCount === 1 ? "" : "s"}`,
-      icon: <LinkIcon />,
-    });
-  }
-
-  if (cards.length === 0) return null;
-
-  // Single shared drill-in handler. Each card knows its "label" so
-  // the desktop GamePage can decide which tab to land on. The
-  // current implementation re-uses the regular GamePage and lets
-  // the user pick a tab from its strip — the label is informational
-  // only and broadcast on the drill-in event so future leap-into
-  // logic (e.g. focus the Reviews tab directly) has the context.
-  const handleDrillIn = useMemo(() => {
-    return (_label: string) => () => {
-      window.dispatchEvent(new CustomEvent("gamelib:drill-in"));
-    };
-  }, []);
-
+function BigScreenGamePageMore({ game }: { game: Game }) {
   return (
-    <section className="bigscreen-gamepage-more" aria-label="Explore more">
-      <h2 className="bigscreen-gamepage-section-title">Explore</h2>
-      <div className="bigscreen-gamepage-more-grid">
-        {cards.map((c) => (
-          <button
-            key={c.title}
-            type="button"
-            className="bigscreen-gamepage-more-card"
-            {...focusableProps(handleDrillIn(c.title))}
-          >
-            <span className="bigscreen-gamepage-more-card-icon" aria-hidden>
-              {c.icon}
-            </span>
-            <span className="bigscreen-gamepage-more-card-title">
-              {c.title}
-            </span>
-            <span className="bigscreen-gamepage-more-card-subtitle">
-              {c.subtitle}
-            </span>
-          </button>
-        ))}
-      </div>
-    </section>
+    <div className="bigscreen-gamepage-more">
+      {/* Top: relations card (collection / developer / publisher /
+       *  franchise / similar). Acts as the "explore further" entry
+       *  point above the data-heavy tab content. */}
+      <GameRelationsCard
+        mode="library"
+        currentGame={game}
+        currentGameId={game.id}
+        similarGames={game.similarGames}
+        collectionId={game.collectionId}
+        collectionName={game.collection}
+      />
+
+      {/* Reviews aggregator (Steam / Metacritic / OpenCritic / RAWG). */}
+      <ReviewsTab game={game} />
+
+      {/* Steam achievements with rarity distribution. */}
+      <AchievementsTab game={game} />
+
+      {/* Activity dashboard (sessions, playtime charts). */}
+      <GameActivityTab game={game} />
+
+      {/* External links (store, ProtonDB, PCGamingWiki, etc.).
+       *  visible={true} — no Big Screen modal masking. */}
+      <WebLinksTab game={game} visible={true} />
+    </div>
   );
 }
 
-function isVideoUrl(url: string): boolean {
-  return /\.(mp4|webm|mov)(\?|$)/.test(url);
-}
+// (EmptyTabPlaceholder was removed in PR 3b — all four tabs now
+// render real content. If a future "no data" inner state needs
+// to be shared across tabs, reintroduce it here.)
 
-function ReviewsIcon() {
+// ─── Tab icons (inline SVGs, no icon library dependency) ─────────
+
+function OverviewIcon(): ReactNode {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -500,19 +571,17 @@ function ReviewsIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      width="22"
-      height="22"
       aria-hidden
+      width="18"
+      height="18"
     >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="9" y1="13" x2="15" y2="13" />
-      <line x1="9" y1="17" x2="13" y2="17" />
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   );
 }
 
-function TrophyIcon() {
+function MediaIcon(): ReactNode {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -521,17 +590,18 @@ function TrophyIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      width="22"
-      height="22"
       aria-hidden
+      width="18"
+      height="18"
     >
-      <circle cx="12" cy="8" r="6" />
-      <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
     </svg>
   );
 }
 
-function LinkIcon() {
+function SpecsIcon(): ReactNode {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -540,12 +610,36 @@ function LinkIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      width="22"
-      height="22"
       aria-hidden
+      width="18"
+      height="18"
     >
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function MoreIcon(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      width="18"
+      height="18"
+    >
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+      <circle cx="5" cy="12" r="1" />
     </svg>
   );
 }

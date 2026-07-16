@@ -1,91 +1,18 @@
-// useBigScreen — convenience hook that combines BigScreenContext's
-// layout toggle with the Gamepad API controller navigation state
-// from the shared GamepadProvider context.
+// useBigScreen — thin re-export of the BigScreenContext hook.
 //
-// BigScreenLayout provides GamepadProvider, so all children
-// (BigScreenNav, BigScreenGameCard, FocusRing, pages) share the
-// same focus registry and focused element via useGamepadCtx().
+// As of PR 1, this module is a one-liner. The old `useBigScreenHook`
+// mega-hook (which mixed the layout toggle, the gamepad context, and
+// a `focusableProps` factory behind a try/catch stub) has been
+// broken up:
 //
-// Consumer components call `useBigScreenHook()` to get:
-// - `isBigScreen`: whether the mode is active
-// - `gamepad`: the shared GamepadState from context
-// - `setBigScreen`: toggle the layout mode
-// - `focusableProps`: helper returning spread props for
-//   controller-focusable elements
+//   • `useBigScreen()`        — just the layout toggle (this file).
+//   • `useGamepad()`          — gamepad state, throws if not in
+//                               provider. Imported from
+//                               `./GamepadProvider`.
+//   • `useFocusable(onActivate)` — register a focusable element.
+//                                  Imported from `./useFocusable`.
+//
+// Consumers should pick the focused hook they need rather than
+// re-aggregating here.
 
-import { useCallback } from "react";
-import { useBigScreen as useBigScreenCtx } from "../context/BigScreenContext";
-import { useGamepadCtx } from "./GamepadProvider";
-import type { GamepadState } from "./useGamepad";
-
-export interface BigScreenHook {
-  isBigScreen: boolean;
-  setBigScreen: (on: boolean) => void;
-  gamepad: GamepadState;
-  focusableProps: (
-    onActivate: () => void,
-  ) => {
-    ref: (el: HTMLElement | null) => void;
-    tabIndex: number;
-    role: string;
-    onClick: () => void;
-  };
-}
-
-export function useBigScreenHook(): BigScreenHook {
-  const { isBigScreen, setBigScreen } = useBigScreenCtx();
-
-  // Read from the shared GamepadProvider context. Consumers no
-  // longer create their own useGamepad() instance — BigScreenLayout
-  // owns the single source of truth.
-  let gamepad: GamepadState;
-  try {
-    gamepad = useGamepadCtx();
-  } catch {
-    // GamepadProvider not mounted yet (e.g. desktop mode). Return a
-    // stub so components don't crash. Includes the virtual-mouse
-    // fields so callers can read `gamepad.virtualMouse` without
-    // needing a separate type guard.
-    gamepad = {
-      connected: false,
-      focusedElement: null,
-      registerAction: () => () => {},
-      virtualMouse: {
-        visible: false,
-        x: 0,
-        y: 0,
-        leftDown: false,
-        rightDown: false,
-        moving: false,
-        lastInputMs: 0,
-      },
-      toggleVirtualMouse: () => {},
-      recenterVirtualMouse: () => {},
-      registerTabCycler: () => () => {},
-    };
-  }
-
-  const focusableProps = useCallback(
-    (onActivate: () => void) => {
-      let cleanup: (() => void) | null = null;
-
-      return {
-        ref: (el: HTMLElement | null) => {
-          if (cleanup) {
-            cleanup();
-            cleanup = null;
-          }
-          if (el) {
-            cleanup = gamepad.registerAction(el, onActivate);
-          }
-        },
-        tabIndex: 0,
-        role: "option",
-        onClick: onActivate,
-      };
-    },
-    [gamepad],
-  );
-
-  return { isBigScreen, setBigScreen, gamepad, focusableProps };
-}
+export { useBigScreen } from "../context/BigScreenContext";

@@ -4,6 +4,12 @@
 // Big Picture behavior where the spotlight updates to reflect
 // whichever game card the user has highlighted.
 //
+// As of PR 2, the status / metadata pill row uses the shared
+// `BigScreenPill` component (was inline JSX). The cover, running
+// indicator, and placeholder fall back through `BigScreenCover`.
+// Format helpers (`truncate`, `extractYear`) live in
+// `../bigscreen/bigscreenFormat.ts`.
+//
 // Visibility
 // ──────────
 // The spotlight is rendered when at least one game exists in the
@@ -14,17 +20,24 @@
 // Focus registration
 // ──────────────────
 // The Play and Details buttons register with the GamepadProvider via
-// the `focusableProps` helper from `useBigScreenHook` so spatial nav
-// can land on them. Their action handlers are passed in from the
-// parent so the Spotlight owns no game state — same pattern as the
-// desktop GameHero's GameLaunchActions.
+// `useFocusable` so spatial nav can land on them. Their action
+// handlers are passed in from the parent so the Spotlight owns no
+// game state — same pattern as the desktop GameHero's
+// GameLaunchActions.
 
 import { useCallback } from "react";
 import type { Game } from "../../types/game";
-import { useBigScreenHook } from "../../hooks/useBigScreen";
 import { useGames } from "../../context/GameContext";
+import { useFocusable } from "../../hooks/useFocusable";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
+import BigScreenPill from "../bigscreen/BigScreenPill";
+import BigScreenCover from "../bigscreen/BigScreenCover";
+import {
+  truncate,
+  extractYear,
+  formatLastPlayed,
+} from "../bigscreen/bigscreenFormat";
 
 interface BigScreenSpotlightProps {
   /**
@@ -55,7 +68,20 @@ interface BigScreenSpotlightProps {
   onDetails: (game: Game) => void;
 }
 
-const PLACEHOLDER_COVER_CLASS = "bigscreen-spotlight-cover--placeholder";
+/** Monitor icon for the empty-library placeholder cover. */
+const EmptyStatePlaceholderIcon = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.2"
+    aria-hidden
+  >
+    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+    <line x1="8" y1="21" x2="16" y2="21" />
+    <line x1="12" y1="17" x2="12" y2="21" />
+  </svg>
+);
 
 export default function BigScreenSpotlight({
   game,
@@ -64,7 +90,6 @@ export default function BigScreenSpotlight({
   onDetails,
 }: BigScreenSpotlightProps) {
   const { runningGameIds } = useGames();
-  const { focusableProps } = useBigScreenHook();
   // Steam look-up lives in BigScreenLibrary so the spotlight stays
   // purely presentational and we don't burn a Steam round-trip when
   // no game is focused. The resolved appid is passed down via the
@@ -83,12 +108,11 @@ export default function BigScreenSpotlight({
     onDetails(game);
   }, [game, onDetails]);
 
-  // Register focusable buttons. The `useCallback` keys on `game?.id`
-  // so the focus listener reattaches when the spotlight target
-  // changes — without this, navigating from one game to another
-  // would keep Play pointing at the previous game's `handlePlay`.
-  const playProps = focusableProps(handlePlay);
-  const detailsProps = focusableProps(handleDetails);
+  // Register focusable buttons. `useFocusable` reads the latest
+  // callback via a ref, so the focus listener auto-updates when the
+  // spotlight target swaps — no `game?.id` dep tracking needed.
+  const playProps = useFocusable(handlePlay);
+  const detailsProps = useFocusable(handleDetails);
 
   // ── Empty placeholder ────────────────────────────────────────
   if (!game) {
@@ -99,21 +123,12 @@ export default function BigScreenSpotlight({
         data-empty="true"
       >
         <div className="bigscreen-spotlight-glow" aria-hidden />
-        <div className={`bigscreen-spotlight-cover ${PLACEHOLDER_COVER_CLASS}`}>
-          <div className="bigscreen-spotlight-cover-placeholder">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              aria-hidden
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          </div>
-        </div>
+        <BigScreenCover
+          alt=""
+          aspectRatio="16 / 9"
+          placeholderIcon={EmptyStatePlaceholderIcon}
+          className="bigscreen-spotlight-cover bigscreen-spotlight-cover--placeholder"
+        />
         <div className="bigscreen-spotlight-meta">
           <h2 className="bigscreen-spotlight-title">Welcome to your library</h2>
           <p className="bigscreen-spotlight-subtitle">
@@ -137,57 +152,36 @@ export default function BigScreenSpotlight({
     >
       <div className="bigscreen-spotlight-glow" aria-hidden />
 
-      <div className="bigscreen-spotlight-cover">
-        {coverUrl ? (
-          <img src={coverUrl} alt={game.name} loading="lazy" />
-        ) : (
-          <div className={`bigscreen-spotlight-cover-placeholder`}>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              aria-hidden
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-          </div>
-        )}
-        {isRunning && (
-          <span
-            className="bigscreen-spotlight-running-dot"
-            title="Running"
-            aria-label="This game is currently running"
-          />
-        )}
-      </div>
+      <BigScreenCover
+        url={coverUrl}
+        alt={game.name}
+        isRunning={isRunning}
+        aspectRatio="16 / 9"
+        className="bigscreen-spotlight-cover"
+      />
 
       <div className="bigscreen-spotlight-meta">
         <div className="bigscreen-spotlight-pills">
-          <span className="bigscreen-spotlight-pill bigscreen-spotlight-pill--platform">
+          <BigScreenPill tone="accent" size="sm">
             {game.platform}
-          </span>
-          <span
-            className="bigscreen-spotlight-pill"
-            style={{
-              background: `color-mix(in srgb, ${status.color} 18%, transparent)`,
-              color: status.color,
-              borderColor: `color-mix(in srgb, ${status.color} 35%, transparent)`,
-            }}
+          </BigScreenPill>
+          <BigScreenPill
+            tone="muted"
+            size="sm"
+            dot
+            customColor={status.color}
           >
-            <span
-              className="bigscreen-spotlight-pill-dot"
-              style={{ background: status.color }}
-            />
             {status.label}
-          </span>
+          </BigScreenPill>
           {resolvedSteamAppId != null && (
-            <span className="bigscreen-spotlight-pill bigscreen-spotlight-pill--players">
+            <BigScreenPill tone="info" size="sm">
               <SteamPlayerCount appId={resolvedSteamAppId} />
-            </span>
+            </BigScreenPill>
           )}
           {releaseYear != null && (
-            <span className="bigscreen-spotlight-pill">{releaseYear}</span>
+            <BigScreenPill tone="muted" size="sm">
+              {releaseYear}
+            </BigScreenPill>
           )}
         </div>
 
@@ -286,45 +280,4 @@ function SpotlightStat({
       <span className="bigscreen-spotlight-stat-value">{value}</span>
     </div>
   );
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1).trimEnd() + "…";
-}
-
-function extractYear(date: string | undefined): number | null {
-  if (!date) return null;
-  // ISO `YYYY-MM-DD` is the most common shape; fall back to the
-  // first 4-digit run for free-form strings like "Q4 2025".
-  const m = date.match(/(19|20)\d{2}/);
-  return m ? Number.parseInt(m[0], 10) : null;
-}
-
-function formatLastPlayed(ts: number): string {
-  const diffMs = Date.now() - ts;
-  if (diffMs < 0) return "Just now";
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  const years = Math.floor(days / 365);
-  return `${years}y ago`;
-}
-
-/**
- * Sentinel Game object passed to `useSteamAppId` when the
- * spotlight's game slot is empty. The hook only reads `.id` /
- * `.name` / `.steamAppId`, so a minimal shape avoids an early
- * `undefined` branch on every render. We never persist this object
- * — the hook should treat it as a "no current target" signal and
- * skip the Steam round-trip.
- */
-// (Moved to BigScreenLibrary — single-owner of the hook call.)
+}

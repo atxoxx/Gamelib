@@ -8,10 +8,15 @@
 // (LB / RB) cycle through tabs directly via the GamepadProvider's
 // tab-cycler registration so users can hop tabs without having to
 // spatially navigate the full bar.
+//
+// As of PR 1, this file uses the leaner `useGamepad()` hook (was
+// `useGamepadCtx`) and the new `useFocusable` hook (was the inline
+// `makeFocusable` factory that recreated closures per render).
 
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useGamepadCtx } from "../hooks/GamepadProvider";
-import { useCallback, useEffect } from "react";
+import { useGamepad } from "../hooks/GamepadProvider";
+import { useFocusable } from "../hooks/useFocusable";
+import { useEffect } from "react";
 
 // ── Tab icons ──────────────────────────────────────────────────
 
@@ -153,31 +158,39 @@ const tabs: BigScreenTab[] = [
   { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 
+/**
+ * Single tab renderer. Kept as a small component so each tab can
+ * call `useFocusable()` with its own stable ref callback — the
+ * alternative (mapping over tabs in the parent and spreading the
+ * same factory result) would force a per-render ref churn.
+ */
+function BigScreenNavTab({
+  tab,
+  active,
+  onActivate,
+}: {
+  tab: BigScreenTab;
+  active: boolean;
+  onActivate: () => void;
+}) {
+  const focusable = useFocusable(onActivate);
+  return (
+    <NavLink
+      to={tab.path}
+      className={`bigscreen-nav-tab${active ? " active" : ""}`}
+      {...focusable}
+      aria-label={tab.label}
+    >
+      <span className="bigscreen-nav-tab-icon">{tab.icon}</span>
+      <span className="bigscreen-nav-tab-label">{tab.label}</span>
+    </NavLink>
+  );
+}
+
 export default function BigScreenNav() {
-  const gamepad = useGamepadCtx();
+  const gamepad = useGamepad();
   const navigate = useNavigate();
   const location = useLocation();
-
-  const makeFocusable = useCallback(
-    (path: string) => {
-      let cleanup: (() => void) | null = null;
-      return {
-        ref: (el: HTMLElement | null) => {
-          if (cleanup) {
-            cleanup();
-            cleanup = null;
-          }
-          if (el) {
-            cleanup = gamepad.registerAction(el, () => navigate(path));
-          }
-        },
-        tabIndex: 0,
-        role: "option" as const,
-        onClick: () => navigate(path),
-      };
-    },
-    [gamepad, navigate],
-  );
 
   // ── LB / RB: cycle tabs directly ─────────────────────────────
   // Bumpers skip the spatial-nav scan and jump straight to the next
@@ -207,16 +220,12 @@ export default function BigScreenNav() {
         {tabs.map((tab) => {
           const isActive = location.pathname.startsWith(tab.path);
           return (
-            <NavLink
+            <BigScreenNavTab
               key={tab.path}
-              to={tab.path}
-              className={`bigscreen-nav-tab${isActive ? " active" : ""}`}
-              {...makeFocusable(tab.path)}
-              aria-label={tab.label}
-            >
-              <span className="bigscreen-nav-tab-icon">{tab.icon}</span>
-              <span className="bigscreen-nav-tab-label">{tab.label}</span>
-            </NavLink>
+              tab={tab}
+              active={isActive}
+              onActivate={() => navigate(tab.path)}
+            />
           );
         })}
       </div>

@@ -18,12 +18,23 @@
 // provider that wraps this hook lives in `./GamepadProvider.tsx`.
 //
 // Consumers:
-//   • `useGamepadCtx()` from `./GamepadProvider` returns the shared
+//   • `useGamepad()` from `./GamepadProvider` returns the shared
 //     singleton state: `{ connected, focusedElement, registerAction,
 //     virtualMouse, toggleVirtualMouse, recenterVirtualMouse,
 //     registerTabCycler }`.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  nearestInDirection,
+  dispatchMouse,
+  dispatchKey,
+  virtualMouseSpeed,
+  RIGHT_STICK_DEADZONE,
+  STICK_DEADZONE,
+  TRIGGER_THRESHOLD,
+  MAX_FRAME_DT_SEC,
+  FIRST_FRAME_DT_MS,
+} from "./gamepad/gamepadUtils";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -75,136 +86,15 @@ export interface GamepadState {
   ) => () => void;
 }
 
-// ── Internal helpers (geometry, dispatch) ──────────────────────
-
-function center(el: HTMLElement): { x: number; y: number } {
-  const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-}
-
-function angle(from: { x: number; y: number }, to: { x: number; y: number }): number {
-  return Math.atan2(to.y - from.y, to.x - from.x);
-}
-
-function isVisible(el: HTMLElement): boolean {
-  const r = el.getBoundingClientRect();
-  return r.width > 0 && r.height > 0;
-}
-
-function nearestInDirection(
-  current: HTMLElement,
-  candidates: FocusableEntry[],
-  dirAngle: number,
-): HTMLElement | null {
-  const cur = center(current);
-  const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
-    return dx * dx + dy * dy;
-  };
-  const tol = (Math.PI / 180) * 45;
-
-  let best: HTMLElement | null = null;
-  let bestDist = Infinity;
-
-  for (const entry of candidates) {
-    if (entry.element === current) continue;
-    if (!isVisible(entry.element)) continue;
-
-    const a = angle(cur, center(entry.element));
-
-    let delta = a - dirAngle;
-    while (delta > Math.PI) delta -= 2 * Math.PI;
-    while (delta < -Math.PI) delta += 2 * Math.PI;
-
-    if (Math.abs(delta) > tol) continue;
-
-    const d = dist2(cur, center(entry.element));
-    if (d < bestDist) {
-      bestDist = d;
-      best = entry.element;
-    }
-  }
-
-  return best;
-}
-
 // ── Constants ───────────────────────────────────────────────────
-const STICK_DEADZONE = 0.5;
-const RIGHT_STICK_DEADZONE = 0.18;
+// Loop-level constants stay here (per-frame, not math-tuning):
 const DIR_COOLDOWN = 150;
-const TRIGGER_THRESHOLD = 0.4;
-const VIRTUAL_MOUSE_MIN_SPEED = 250; // px/s at the deadzone threshold
-const VIRTUAL_MOUSE_MAX_SPEED = 1800; // px/s at full tilt
-
-// ── Virtual mouse helpers ───────────────────────────────────────
-
-/**
- * Non-linear acceleration: m in [0, 1] past the deadzone,
- * speed = minSpeed + (maxSpeed - minSpeed) * m^1.4. The 1.4
- * exponent gives a comfortable ramp so small stick deflection = slow
- * precise movement (~250 px/s) and full tilt = fast cross-screen
- * traversal (~1800 px/s) without feeling twitchy in either regime.
- */
-function virtualMouseSpeed(m: number): number {
-  return (
-    VIRTUAL_MOUSE_MIN_SPEED +
-    (VIRTUAL_MOUSE_MAX_SPEED - VIRTUAL_MOUSE_MIN_SPEED) *
-      Math.pow(Math.max(0, Math.min(1, m)), 1.4)
-  );
-}
-
-/** Dispath synthetic MouseEvent on the topmost element at (x, y). */
-function dispatchMouse(
-  type: "mousedown" | "mouseup" | "click" | "contextmenu" | "mousemove",
-  x: number,
-  y: number,
-  button: number,
-): void {
-  if (typeof document === "undefined") return;
-  const target = document.elementFromPoint(x, y);
-  if (!target) return;
-
-  const buttons =
-    type === "mousedown" ? 1 << button : type === "mouseup" ? 0 : 0;
-
-  const init: MouseEventInit = {
-    bubbles: true,
-    cancelable: true,
-    view: window,
-    button,
-    buttons,
-    clientX: x,
-    clientY: y,
-  };
-  target.dispatchEvent(new MouseEvent(type, init));
-}
-
-/** Dispatch a synthetic keyboard event to BOTH window and document. */
-function dispatchKey(key: string): void {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return;
-  }
-  const init: KeyboardEventInit = {
-    key,
-    bubbles: true,
-    cancelable: true,
-  };
-  // Dispatch on both targets: react-hotkeys, react-modal, dialog
-  // primitives, and Tauri-injected keymaps split between window
-  // and document listeners, so firing on both is the only way to
-  // reliably reach every Escape handler.
-  for (const target of [window, document]) {
-    target.dispatchEvent(new KeyboardEvent("keydown", init));
-    target.dispatchEvent(new KeyboardEvent("keyup", init));
-  }
-}
 
 // ── Hook ────────────────────────────────────────────────────────
 
 /**
  * Internal hook used by GamepadProvider. Exported so GamepadProvider
- * can consume it, but external consumers should use `useGamepadCtx()`
+ * can consume it, but external consumers should use `useGamepad()`
  * from `./GamepadProvider` to get the shared singleton state.
  */
 export function useGamepadInternal(enabled: boolean): GamepadState {
@@ -331,8 +221,8 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
     // reconnect (or initial mount) computes a sensible Δt. Without
     // this, `lastFrameTimeRef.current` retains a stale timestamp
     // and `dtMs` becomes a large value that a single frame would
-    // then cap at 0.1 s — teleporting the cursor ~180 px on the
-    // first frame after reconnect.
+    // then cap at MAX_FRAME_DT_SEC — teleporting the cursor ~180px
+    // on the first frame after reconnect.
     lastFrameTimeRef.current = 0;
 
     let rafId: number;
@@ -382,14 +272,14 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
 
       if (!connected) setConnected(true);
 
-      // Δt for frame-rate-independent stick motion. Capped at 100ms
-      // so a stall (debugger / tab switch) doesn't fly the cursor
+      // Δt for frame-rate-independent stick motion. Capped so a
+      // stall (debugger / tab switch) doesn't fly the cursor
       // across the screen.
       const dtMs = lastFrameTimeRef.current
         ? timestamp - lastFrameTimeRef.current
-        : 16;
+        : FIRST_FRAME_DT_MS;
       lastFrameTimeRef.current = timestamp;
-      const dtSec = Math.min(dtMs / 1000, 0.1);
+      const dtSec = Math.min(dtMs / 1000, MAX_FRAME_DT_SEC);
       const now = performance.now();
 
       // ── LEFT STICK / D-PAD → spatial navigation ────────────
@@ -638,3 +528,7 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
     registerTabCycler,
   };
 }
+
+// Tuning constants and types live in `./gamepad/gamepadUtils` and
+// are imported by name from there when a consumer needs them — no
+// re-exports here to avoid a second import surface.

@@ -57,6 +57,14 @@ interface BigScreenHeroBackgroundProps {
   cycleMs?: number;
   /** Cross-fade duration in ms. Defaults to 1500. */
   fadeMs?: number;
+  /**
+   * Pause the auto-cycle (and freeze the Ken-Burns keyframe via
+   * `data-paused`). The "video" mode is unaffected — a paused
+   * video would just stop playing, which is rarely what the user
+   * wants when reading the hero. Phase 5 polish will wire this to
+   * hero-actions focus so the cycle freezes while the user reads.
+   */
+  paused?: boolean;
 }
 
 const DEFAULT_CYCLE_MS = 14000;
@@ -85,6 +93,7 @@ export default function BigScreenHeroBackground({
   videos,
   cycleMs = DEFAULT_CYCLE_MS,
   fadeMs = DEFAULT_FADE_MS,
+  paused = false,
 }: BigScreenHeroBackgroundProps) {
   // Reduce-motion gate. We compute once on mount and never update —
   // if the user changes the OS setting mid-session we'd need a
@@ -139,6 +148,7 @@ export default function BigScreenHeroBackground({
         shots={screenshots!}
         cycleMs={cycleMs}
         fadeMs={fadeMs}
+        paused={paused}
       />
     );
   }
@@ -189,6 +199,9 @@ interface CycleBackgroundProps {
    *  with a no-op cross-fade. The CSS keyframes are still applied
    *  but the JS doesn't advance the index. */
   reducedMotion?: boolean;
+  /** Pause the cycle tick + freeze the Ken-Burns keyframe via a
+   *  `data-paused` attribute the CSS reads. */
+  paused?: boolean;
 }
 
 function CycleBackground({
@@ -196,6 +209,7 @@ function CycleBackground({
   cycleMs,
   fadeMs,
   reducedMotion = false,
+  paused = false,
 }: CycleBackgroundProps) {
   // `current` = the slide currently at full opacity.
   // `next`    = the slide we're about to fade in over `current`.
@@ -206,6 +220,7 @@ function CycleBackground({
 
   useEffect(() => {
     if (reducedMotion || shots.length < 2) return;
+    if (paused) return;
     // Tick is `cycleMs` (per-slide budget). The first `fadeMs` are
     // the cross-fade — once that's done, we advance `current` by
     // 1 so the now-visible slide becomes the new "current".
@@ -219,7 +234,7 @@ function CycleBackground({
     return () => {
       window.clearInterval(id);
     };
-  }, [shots.length, cycleMs, fadeMs]);
+  }, [shots.length, cycleMs, fadeMs, paused, reducedMotion]);
   // `reducedMotion` is intentionally omitted from the deps array:
   // the value is the stable result of `useMemo(() => matchMedia(…), [])`
   // captured at mount (see top of this component), so including it
@@ -242,7 +257,11 @@ function CycleBackground({
   }
 
   return (
-    <div className="bigscreen-gamepage-hero-bg-cycle" aria-hidden>
+    <div
+      className="bigscreen-gamepage-hero-bg-cycle"
+      data-paused={paused ? "true" : undefined}
+      aria-hidden
+    >
       <div
         className={
           "bigscreen-gamepage-hero-bg-slide " +
