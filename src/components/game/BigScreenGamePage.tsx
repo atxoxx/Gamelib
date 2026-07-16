@@ -47,7 +47,8 @@ import { useGamepad } from "../../hooks/GamepadProvider";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
-import GameLaunchActions from "./GameLaunchActions";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import DownloadModal from "../DownloadModal";
 import BigScreenHeroBackground from "./BigScreenHeroBackground";
 import SpecsCard from "./SpecsCard";
 import ReleasesCard from "./ReleasesCard";
@@ -100,7 +101,7 @@ export default function BigScreenGamePage({
   onEdit,
   onRemove,
 }: BigScreenGamePageProps) {
-  const { runningGameIds, launchGame } = useGames();
+  const { runningGameIds, launchGame, forceCloseGame } = useGames();
   const gamepad = useGamepad();
   // Steam appid resolution for the player-count badge. Identical
   // pattern to the desktop hero: falls back to a one-shot Steam
@@ -115,6 +116,15 @@ export default function BigScreenGamePage({
   // Tab state + lightbox state.
   const [activeTab, setActiveTab] = useState<GamePageTab>("overview");
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+
+  // Reset isClosing when game stops running
+  useEffect(() => {
+    if (!isRunning) {
+      setIsClosing(false);
+    }
+  }, [isRunning]);
 
   // Bumper-cycled tab navigation (LB / RB). `registerTabCycler`
   // returns an unregister function that runs on unmount, restoring
@@ -135,6 +145,31 @@ export default function BigScreenGamePage({
     });
   }, [gamepad.registerTabCycler, lightbox]);
 
+  const handlePlay = () => {
+    launchGame(game);
+  };
+
+  const handleForceClose = () => {
+    if (isRunning) {
+      setIsClosing(true);
+      forceCloseGame(game);
+    }
+  };
+
+  const showInstall =
+    !game.installed && game.platform === "Steam" && game.steamAppId;
+
+  const handleInstall = () => {
+    if (!game.steamAppId) return;
+    openUrl(`steam://install/${game.steamAppId}`).catch((err) =>
+      console.warn("Failed to open Steam install:", err)
+    );
+  };
+
+  const focusablePlay = useFocusable(handlePlay);
+  const focusableForceClose = useFocusable(handleForceClose);
+  const focusableInstall = useFocusable(handleInstall);
+  const focusableDownload = useFocusable(() => setDownloadOpen(true));
   const focusableBack = useFocusable(onBack);
   const focusableEdit = useFocusable(onEdit);
   const focusableRemove = useFocusable(onRemove);
@@ -216,75 +251,120 @@ export default function BigScreenGamePage({
           </div>
 
           <div className="bigscreen-gamepage-hero-actions">
-            <GameLaunchActions
-              game={game}
-              onLaunch={() => launchGame(game)}
-              size="md"
-            />
+            {showInstall && (
+              <button
+                type="button"
+                className="bigscreen-details-btn bigscreen-details-btn--primary"
+                {...focusableInstall}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20" aria-hidden>
+                  <polyline points="8 17 12 21 16 17" />
+                  <line x1="12" y1="12" x2="12" y2="21" />
+                  <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
+                </svg>
+                <span>Install via Steam</span>
+              </button>
+            )}
+
+            {!showInstall && (
+              isRunning ? (
+                <>
+                  <button
+                    type="button"
+                    className="bigscreen-details-btn bigscreen-details-btn--primary"
+                    disabled
+                  >
+                    <span className="bigscreen-game-card-running-dot" style={{ position: "relative", top: 0, right: 0, marginRight: 8 }} />
+                    <span>Running</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="bigscreen-details-btn bigscreen-details-btn--danger"
+                    {...focusableForceClose}
+                    disabled={isClosing}
+                  >
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                    </svg>
+                    <span>{isClosing ? "Closing…" : "Force Close"}</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="bigscreen-details-btn bigscreen-details-btn--primary"
+                  {...focusablePlay}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden>
+                    <polygon points="6 4 20 12 6 20 6 4" />
+                  </svg>
+                  <span>Play</span>
+                </button>
+              )
+            )}
+
+            <button
+              type="button"
+              className="bigscreen-details-btn bigscreen-details-btn--secondary"
+              {...focusableDownload}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20" aria-hidden>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Find Download</span>
+            </button>
+
             {game.videos && game.videos.length > 0 && (
               <button
                 type="button"
-                className="bigscreen-gamepage-hero-btn"
+                className="bigscreen-details-btn bigscreen-details-btn--secondary"
                 {...focusableTrailer}
                 aria-label="Watch trailer"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden
-                  width="20"
-                  height="20"
-                >
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden width="20" height="20">
                   <polygon points="6 4 20 12 6 20 6 4" />
                 </svg>
                 <span>Trailer</span>
               </button>
             )}
+
             <button
               type="button"
-              className="bigscreen-gamepage-hero-btn"
+              className="bigscreen-details-btn bigscreen-details-btn--secondary"
               {...focusableEdit}
               aria-label="Edit game details"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                width="18"
-                height="18"
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden width="18" height="18">
                 <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
               </svg>
               <span>Edit</span>
             </button>
+
             <button
               type="button"
-              className="bigscreen-gamepage-hero-btn bigscreen-gamepage-hero-btn--danger"
+              className="bigscreen-details-btn bigscreen-details-btn--secondary bigscreen-gamepage-hero-btn--danger"
               {...focusableRemove}
               aria-label="Remove from library"
               disabled={isRunning}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                width="18"
-                height="18"
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden width="18" height="18">
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
               </svg>
               <span>Remove</span>
             </button>
+
+            {downloadOpen && (
+              <DownloadModal
+                gameName={game.name}
+                gameId={game.id}
+                steamAppId={game.steamAppId}
+                onClose={() => setDownloadOpen(false)}
+              />
+            )}
           </div>
         </div>
       </section>

@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenStoreGamePage from "../components/store/BigScreenStoreGamePage";
 import type { GameMetadataResult, IgdbReview, Game } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { Button } from "../components/ui";
@@ -91,6 +93,7 @@ export default function StoreGameDetail() {
   const { games, addStoreGame } = useGames();
   const { showToast } = useToast();
   const { unit: sizeUnit } = useSizeUnit();
+  const { isBigScreen } = useBigScreen();
 
   const [data, setData] = useState<GameMetadataResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,6 +240,19 @@ export default function StoreGameDetail() {
   const releaseYear = data.releaseDate
     ? new Date(data.releaseDate).getFullYear()
     : null;
+
+  if (isBigScreen && mockGame) {
+    return (
+      <BigScreenStoreGamePage
+        game={mockGame}
+        onBack={() => navigate("/store")}
+        onAddToLibrary={handleAddToLibrary}
+        adding={adding}
+        isInLibrary={isInLibrary}
+        libraryGameId={libraryGameId}
+      />
+    );
+  }
 
   return (
     <div className="game-page">

@@ -14,6 +14,8 @@ import HeroFeature from "../components/store/HeroFeature";
 import SnapRail from "../components/store/SnapRail";
 import DensityToggle from "../components/DensityToggle";
 import type { StoreGameSummary, StoreCategory } from "../types/game";
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenStore from "../components/store/BigScreenStore";
 
 /**
  * Max number of consecutive empty-page auto-loads performed while the
@@ -27,11 +29,13 @@ const MAX_AUTO_EMPTY_FETCHES = 3;
 
 export default function StorePage() {
   const navigate = useNavigate();
+  const { isBigScreen } = useBigScreen();
   // Wishlist + density live in app-level providers (`App.tsx`). Read
   // density here so the toolbar can mutate it; the lifted provider's
   // state is shared with the new `/wishlist` page automatically.
   const { density, setDensity } = useDensityContext();
   const { sources } = useSources();
+
   const {
     games,
     loading,
@@ -46,6 +50,19 @@ export default function StorePage() {
     applyFilters,
     resetFilters,
   } = useStoreGames();
+
+  // Handlers
+  const handleCardClick = useCallback(
+    (game: StoreGameSummary) => {
+      navigate(`/store/${game.slug}`);
+    },
+    [navigate]
+  );
+
+  if (isBigScreen) {
+    return <BigScreenStore onCardClick={handleCardClick} />;
+  }
+
 
   // ── Library-mode filter state (presentational, wired to backend on Apply) ──
   const [searchActive, setSearchActive] = useState(false);
@@ -164,12 +181,6 @@ export default function StorePage() {
     [setCategory]
   );
 
-  const handleCardClick = useCallback(
-    (game: StoreGameSummary) => {
-      navigate(`/store/${game.slug}`);
-    },
-    [navigate]
-  );
 
   const handleSearchChange = useCallback(
     (value: string) => {
