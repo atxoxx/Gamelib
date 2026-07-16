@@ -24,21 +24,37 @@ function generateConsistentSeries(avgVal: number, minVal: number, maxVal: number
   series[0] = minVal;
   series[Math.floor(N / 2)] = maxVal;
 
-  let r = 123456789;
-  for (let i = 0; i < seedStr.length; i++) {
-    r = (r + seedStr.charCodeAt(i)) * 31;
-  }
-  const nextRand = () => {
-    r = (r * 1103515245 + 12345) & 0x7fffffff;
-    return r / 0x7fffffff;
+  let seed = seedStr.split("").reduce((sum, c) => sum + c.charCodeAt(0), 0);
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
   };
 
+  const spread = (maxVal - minVal) / 4;
   for (let i = 1; i < N - 1; i++) {
     if (i === Math.floor(N / 2)) continue;
-    const f = i / (N - 1);
-    const noise = (nextRand() - 0.5) * (maxVal - minVal) * 0.15;
-    const interp = minVal + (maxVal - minVal) * f;
-    series[i] = Math.max(minVal, Math.min(maxVal, interp + noise));
+    const noise = rnd() * 2 - 1;
+    series[i] = Math.max(minVal, Math.min(maxVal, Math.round(avgVal + noise * spread)));
+  }
+
+  // Adjust values so the average matches exactly
+  const targetSum = avgVal * N;
+  let currentSum = series.reduce((sum, val) => sum + val, 0);
+  let attempts = 0;
+  
+  while (currentSum !== targetSum && attempts < 100) {
+    attempts++;
+    const diff = targetSum - currentSum;
+    const step = diff > 0 ? 1 : -1;
+    
+    for (let i = 0; i < N; i++) {
+      const newVal = series[i] + step;
+      if (newVal >= minVal && newVal <= maxVal) {
+        series[i] = newVal;
+        currentSum += step;
+        if (currentSum === targetSum) break;
+      }
+    }
   }
 
   return series;
@@ -46,6 +62,9 @@ function generateConsistentSeries(avgVal: number, minVal: number, maxVal: number
 
 export function GameActivityTab({ game }: { game: Game }) {
   const { getGameSessions, deleteSession } = useActivity();
+  // Toast feedback for screenshot success / error — GameActivityTab is
+  // a sibling component to GameDetail, so its own useToast() (rather
+  // than the one inside GameDetail) is in scope here.
   const { showToast } = useToast();
   const sessions = useMemo(() => getGameSessions(game.id), [game.id, getGameSessions]);
 
@@ -60,6 +79,12 @@ export function GameActivityTab({ game }: { game: Game }) {
       const container = document.querySelector(".game-activity-tab");
       if (!container) return;
 
+      // Capture the *entire* activity view in height, not just the
+      // currently-visible portion. scrollHeight reflects the full
+      // rendered tab including content below the fold; passing it as
+      // both `height` and `windowHeight` lets html2canvas paint the
+      // complete layout in one pass instead of just viewport-clipped
+      // pixels.
       const fullHeight = (container as HTMLElement).scrollHeight;
       const fullWidth = (container as HTMLElement).scrollWidth;
 
@@ -72,6 +97,12 @@ export function GameActivityTab({ game }: { game: Game }) {
         height: fullHeight,
         windowWidth: fullWidth,
         windowHeight: fullHeight,
+        // html2canvas 1.4.1 doesn't understand CSS Color Module L4
+        // `color-mix(in srgb, …)` and throws "Attempting to parse an
+        // unsupported color function 'color'". The project uses
+        // color-mix in 170+ rules, so we rewrite every `color-mix()`
+        // in the clone to a literal rgb() / rgba() before html2canvas
+        // reads computed styles (see src/utils/color.ts).
         onclone: prepareClonedDocumentForCanvasCapture,
       });
 
@@ -93,6 +124,7 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
   };
 
+  // Timeframe-filtered sessions (for stats computation and sessions list)
   const filteredSessions = useMemo(() => {
     if (timeframe === "all") return sessions;
     const days = timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : timeframe === "90d" ? 90 : 365;
@@ -101,11 +133,13 @@ export function GameActivityTab({ game }: { game: Game }) {
     return sessions.filter((s) => new Date(s.date) >= cutoff);
   }, [sessions, timeframe]);
 
+  // Compute stats on the fly based on filtered sessions
   const stats = useMemo(() => {
     const totalPlayTimeMin = filteredSessions.reduce((s, sess) => s + sess.durationMin, 0);
     const totalSessions = filteredSessions.length;
     const avgSessionMin = totalSessions > 0 ? Math.round(totalPlayTimeMin / totalSessions) : 0;
     
+    // Streaks
     const uniqueDays = new Set<string>();
     filteredSessions.forEach((s) => {
       if (s.date) uniqueDays.add(s.date.slice(0, 10));
@@ -150,6 +184,7 @@ export function GameActivityTab({ game }: { game: Game }) {
       bestStreak = Math.max(bestStreak, currentRun);
     }
 
+    // Most active day
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayTotals = [0, 0, 0, 0, 0, 0, 0];
     filteredSessions.forEach((s) => {
@@ -166,6 +201,7 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
     const mostActiveDay = maxDayVal > 0 ? dayNames[maxDayIdx] : "—";
 
+    // Playtime trend (compare first half to second half of timeframe days)
     let trendDirection: "up" | "down" | "flat" = "flat";
     const timeframeDays = timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : timeframe === "90d" ? 90 : 365;
     const entries: { date: string; mins: number }[] = [];
@@ -193,6 +229,7 @@ export function GameActivityTab({ game }: { game: Game }) {
       }
     }
 
+    // First and last play dates
     const sortedChronological = [...filteredSessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const firstPlayed = sortedChronological.length > 0
       ? new Date(sortedChronological[0].date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
@@ -216,6 +253,7 @@ export function GameActivityTab({ game }: { game: Game }) {
     };
   }, [filteredSessions, timeframe]);
 
+  // Grouped playtime data for aggregation tabs (AGG_DAY, AGG_WEEK, AGG_MONTH)
   const playtimeChartData = useMemo(() => {
     const timeframeDays = timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : timeframe === "90d" ? 90 : 365;
     const cutoffDate = new Date();
@@ -310,14 +348,21 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
   }, [filteredSessions, timeframe, playtimeAgg]);
 
+  // Filter hardware sessions (those containing non-zero telemetry).
+  // Note: FPS-sanitized sessions whose avgFps collapsed to 0 are kept here
+  // because their CPU/GPU/RAM/temp data is still valid for the other perf
+  // charts. The empty-FPS sample is filtered at series-build time below
+  // so only the FPS chart sees the gap, not CPU/GPU/RAM.
   const sessionsWithHw = useMemo(() => {
     return filteredSessions.filter((s) => s.metrics && s.metrics.avgCpuUsage > 0);
   }, [filteredSessions]);
 
+  // Check if we have real temperature data (WMI returns 0 if unsupported/disabled)
   const hasTemps = useMemo(() => {
     return sessionsWithHw.some((s) => s.metrics && (s.metrics.avgCpuTemp > 0 || s.metrics.avgGpuTemp > 0));
   }, [sessionsWithHw]);
 
+  // Aggregate averages and max values for mini hardware cards.
   const hwAverages = useMemo(() => {
     if (sessionsWithHw.length === 0) return null;
     const len = sessionsWithHw.length;
@@ -348,10 +393,12 @@ export function GameActivityTab({ game }: { game: Game }) {
     };
   }, [sessionsWithHw]);
 
+  // Generate curves for selected performance session
   const perfTimelineData = useMemo(() => {
     if (sessionsWithHw.length === 0) return null;
     const selectedSess = isolatedSessionIndex !== null ? sessionsWithHw[isolatedSessionIndex] : null;
     
+    // Average duration of sessions with hardware
     const avgDuration = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.durationMin, 0) / sessionsWithHw.length);
     const durationMin = selectedSess?.durationMin ?? avgDuration;
     
@@ -381,6 +428,7 @@ export function GameActivityTab({ game }: { game: Game }) {
 
     const seedStr = selectedSess ? selectedSess.id : "all-average";
 
+    // Generate mathematically consistent curves that strictly match the session's actual metrics
     const cpu = generateConsistentSeries(targetMetrics.avgCpuUsage, Math.max(0, targetMetrics.avgCpuUsage - 15), Math.min(100, targetMetrics.avgCpuUsage + 20), N, seedStr + "-cpu");
     const gpu = generateConsistentSeries(targetMetrics.avgGpuUsage, Math.max(0, targetMetrics.avgGpuUsage - 10), Math.min(100, targetMetrics.avgGpuUsage + 15), N, seedStr + "-gpu");
     const ram = generateConsistentSeries(targetMetrics.avgRamUsage, Math.max(0, targetMetrics.avgRamUsage - 5), Math.min(100, targetMetrics.avgRamUsage + 5), N, seedStr + "-ram");
@@ -412,6 +460,7 @@ export function GameActivityTab({ game }: { game: Game }) {
 
   return (
     <div className="game-activity-tab">
+      {/* Top Header Panel */}
       <div className="game-activity-header">
         <div className="game-activity-title-group">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -422,6 +471,7 @@ export function GameActivityTab({ game }: { game: Game }) {
         </div>
 
         <div className="game-activity-controls">
+          {/* Tabs: Playtime / Performance */}
           <div className="game-activity-toggle-group">
             <button
               className={`game-activity-toggle-btn ${viewMode === "playtime" ? "active" : ""}`}
@@ -443,6 +493,7 @@ export function GameActivityTab({ game }: { game: Game }) {
             </button>
           </div>
 
+          {/* Timeframe selector */}
           <div className="game-activity-timeframe-group">
             {(["7d", "30d", "90d", "all"] as const).map((t) => (
               <button
@@ -458,6 +509,7 @@ export function GameActivityTab({ game }: { game: Game }) {
             ))}
           </div>
 
+          {/* Camera screenshot button */}
           <button className="game-activity-action-btn" title="Save Screenshot" onClick={handleCaptureScreenshot}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" />
@@ -466,7 +518,9 @@ export function GameActivityTab({ game }: { game: Game }) {
         </div>
       </div>
 
+      {/* Main Two-column layout grid */}
       <div className="game-activity-layout">
+        {/* Left Column: 11 cards + sessions list */}
         <div className="game-activity-left-col">
           <div className="game-activity-stats-grid">
             <StatCard
@@ -535,6 +589,7 @@ export function GameActivityTab({ game }: { game: Game }) {
             />
           </div>
 
+          {/* RECENT SESSIONS */}
           <div className="game-activity-recent-sessions">
             <h3 className="game-activity-sessions-title">
               Recent Sessions
@@ -615,9 +670,11 @@ export function GameActivityTab({ game }: { game: Game }) {
           </div>
         </div>
 
+        {/* Right Column */}
         <div className="game-activity-right-col">
           {viewMode === "playtime" ? (
             <>
+              {/* Playtime Panel */}
               <div className="game-activity-panel">
                 <div className="game-activity-panel-header">
                   <h3 className="game-activity-panel-title">
@@ -670,7 +727,9 @@ export function GameActivityTab({ game }: { game: Game }) {
                     />
                   ) : (
                     <LineChart
-                      series={[{ data: playtimeChartData.data, color: "var(--color-accent)", label: "Playtime" }]}
+                      series={[
+                        { data: playtimeChartData.data, color: "var(--color-accent)", label: "Playtime" }
+                      ]}
                       labels={playtimeChartData.labels}
                       formatValue={formatPlayTime}
                       height={220}
@@ -683,14 +742,17 @@ export function GameActivityTab({ game }: { game: Game }) {
                 )}
               </div>
 
+              {/* Heatmap Panel */}
               <div className="game-activity-panel">
                 <WeeklyHeatmap sessions={filteredSessions} />
               </div>
             </>
           ) : (
             <>
+              {/* Performance View */}
               {sessionsWithHw.length > 0 && hwAverages ? (
                 <>
+                  {/* Hardware mini cards */}
                   <div className="game-activity-perf-cards">
                     <PerfMiniCard label="Avg FPS" avg={`${hwAverages.avgFps}`} max={`MAX: ${hwAverages.maxFps}`} />
                     <PerfMiniCard label="CPU Usage" avg={`${hwAverages.avgCpu}%`} max={`MAX: ${hwAverages.maxCpu}%`} />
@@ -704,6 +766,7 @@ export function GameActivityTab({ game }: { game: Game }) {
                     )}
                   </div>
 
+                  {/* Isolated session selector */}
                   {sessionsWithHw.length > 1 && (
                     <div className="game-activity-panel" style={{ padding: "10px 16px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-md)", flexWrap: "wrap" }}>
@@ -737,6 +800,7 @@ export function GameActivityTab({ game }: { game: Game }) {
                     </div>
                   )}
 
+                  {/* Stacked Charts */}
                   {perfTimelineData && (
                     <div className="game-activity-stacked-charts">
                       <ChartSection title="CPU & GPU Load">
@@ -769,7 +833,9 @@ export function GameActivityTab({ game }: { game: Game }) {
 
                       <ChartSection title="RAM Usage">
                         <LineChart
-                          series={[{ data: perfTimelineData.ram, color: "#2ecc71", label: "RAM" }]}
+                          series={[
+                            { data: perfTimelineData.ram, color: "#2ecc71", label: "RAM" }
+                          ]}
                           labels={perfTimelineData.labels}
                           height={180}
                           minY={0}
@@ -780,7 +846,9 @@ export function GameActivityTab({ game }: { game: Game }) {
 
                       <ChartSection title="FPS">
                         <LineChart
-                          series={[{ data: perfTimelineData.fps, color: "#16b195", label: "FPS" }]}
+                          series={[
+                            { data: perfTimelineData.fps, color: "#16b195", label: "FPS" }
+                          ]}
                           labels={perfTimelineData.labels}
                           height={180}
                           minY={0}
@@ -807,6 +875,7 @@ export function GameActivityTab({ game }: { game: Game }) {
   );
 }
 
+// ─── Stats Card Helper ────────────────────────────────────────────────────────
 function StatCard({
   label,
   value,
@@ -829,6 +898,7 @@ function StatCard({
   );
 }
 
+// ─── Performance Mini Card Helper ─────────────────────────────────────────────
 function PerfMiniCard({ label, avg, max }: { label: string; avg: string; max: string }) {
   return (
     <div className="game-activity-perf-card">
@@ -841,6 +911,7 @@ function PerfMiniCard({ label, avg, max }: { label: string; avg: string; max: st
   );
 }
 
+// ─── Chart Section Helper ─────────────────────────────────────────────────────
 function ChartSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="game-activity-chart-section">
@@ -855,6 +926,7 @@ function ChartSection({ title, children }: { title: string; children: React.Reac
   );
 }
 
+// ─── Heatmap Subcomponent ─────────────────────────────────────────────────────
 function WeeklyHeatmap({ sessions }: { sessions: GameSession[] }) {
   const timeframeDays = 365;
   

@@ -203,12 +203,12 @@ export default function BigScreenHeader({
   const { setBigScreen } = useBigScreen();
 
   const isDashboardRoute = tabs.some((t) => location.pathname === t.path);
-  if (!isDashboardRoute) return null;
 
   const [timeString, setTimeString] = useState("");
 
   // Live ticking clock
   useEffect(() => {
+    if (!isDashboardRoute) return;
     const updateTime = () => {
       const d = new Date();
       setTimeString(
@@ -222,10 +222,11 @@ export default function BigScreenHeader({
     updateTime();
     const interval = setInterval(updateTime, 1000 * 30); // update every 30 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [isDashboardRoute]);
 
   // LB / RB: Cycle all content tabs in order
   useEffect(() => {
+    if (!isDashboardRoute) return;
     return gamepad.registerTabCycler((direction) => {
       const currentIndex = tabs.findIndex((t) =>
         location.pathname.startsWith(t.path)
@@ -237,7 +238,7 @@ export default function BigScreenHeader({
           : (baseIndex - 1 + tabs.length) % tabs.length;
       navigate(tabs[nextIndex].path);
     });
-  }, [gamepad, location.pathname, navigate]);
+  }, [gamepad, location.pathname, navigate, isDashboardRoute]);
 
   const handleExit = () => {
     setBigScreen(false);
@@ -246,6 +247,8 @@ export default function BigScreenHeader({
   const focusableExit = useFocusable(handleExit);
 
   const focusableSearch = useFocusable(() => onOpenSearch?.());
+
+  if (!isDashboardRoute) return null;
 
   const contentTabs = tabs.filter((t) => t.type === "content");
   const systemTabs = tabs.filter((t) => t.type === "system");

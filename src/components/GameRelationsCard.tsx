@@ -185,10 +185,11 @@ function buildLibraryGroups(
   similarGames: RelatedGame[],
   collectionMembers: StoreGameSummary[]
 ): RelationGroup[] {
+  const name = ("name" in current ? current.name : (current as any).title) || "";
   const seen = new Set<string>();
   // Reserve the current game's own name so it never re-appears
   // in any group (it's the "anchor" the user is already on).
-  seen.add(normalizeName(current.name));
+  seen.add(normalizeName(name));
 
   const groups: RelationGroup[] = [];
 
@@ -364,7 +365,7 @@ function buildLibraryGroups(
       // Self-exclusion by name (the seen seed already handles the
       // exact-match case, but `namesMatch` tolerates punctuation/
       // case variations between the IGDB title and the local name).
-      if (namesMatch(s.name, current.name)) continue;
+      if (namesMatch(s.name, name)) continue;
       const key = normalizeName(s.name);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -430,9 +431,10 @@ function buildStoreGroups(
   similarGames: RelatedGame[],
   collectionMembers: StoreGameSummary[]
 ): RelationGroup[] {
+  const title = ("title" in current ? current.title : (current as any).name) || "";
   const seen = new Set<string>();
   // Reserve the current title.
-  seen.add(normalizeName(current.title));
+  seen.add(normalizeName(title));
 
   const groups: RelationGroup[] = [];
 
@@ -448,7 +450,7 @@ function buildStoreGroups(
   // title under any punctuation/case variation.
   const inLibrary: RelatedGame[] = [];
   for (const g of library) {
-    if (!namesMatch(g.name, current.title)) continue;
+    if (!namesMatch(g.name, title)) continue;
     const key = normalizeName(g.name);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -473,7 +475,7 @@ function buildStoreGroups(
   if (collectionMembers.length > 0) {
     const matches: RelatedGame[] = [];
     for (const s of collectionMembers) {
-      if (namesMatch(s.name, current.title)) continue;
+      if (namesMatch(s.name, title)) continue;
       const key = normalizeName(s.name);
       if (seen.has(key)) continue;
       seen.add(key);

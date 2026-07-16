@@ -65,7 +65,7 @@ import GameRelationsCard from "../GameRelationsCard";
 import ReviewsTab from "../ReviewsTab";
 import AchievementsTab from "../AchievementsTab";
 import WebLinksTab from "../WebLinksTab";
-import { GameActivityTab } from "../../pages/GamePage";
+import { GameActivityTab } from "./GameActivityTab";
 import BigScreenPill from "../bigscreen/BigScreenPill";
 import BigScreenMetaStrip from "../bigscreen/BigScreenMetaStrip";
 import BigScreenLightbox from "../bigscreen/BigScreenLightbox";
