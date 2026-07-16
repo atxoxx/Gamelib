@@ -27,11 +27,16 @@ export default function BigScreenStoreRail({
   // Monitor gamepad focus changes to update the parent backdrop/spotlight
   useEffect(() => {
     const el = gamepad.focusedElement;
-    const id = el?.getAttribute("data-game-id") ?? null;
-    if (id === lastFocusedIdRef.current) return;
-    lastFocusedIdRef.current = id;
+    if (!el || !scrollRef.current || !scrollRef.current.contains(el)) return;
+    const id = el.getAttribute("data-game-id");
     const game = id ? games.find((g) => String(g.id) === id) ?? null : null;
-    onFocusedGameChange(game);
+    if (id !== lastFocusedIdRef.current) {
+      lastFocusedIdRef.current = id;
+      onFocusedGameChange(game);
+    } else {
+      // Publish the fresh game reference on sibling list updates
+      onFocusedGameChange(game);
+    }
   }, [gamepad.focusedElement, games, onFocusedGameChange]);
 
   // Center active element in the viewport rail

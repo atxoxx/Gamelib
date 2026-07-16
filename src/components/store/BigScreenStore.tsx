@@ -89,6 +89,16 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
 
   const detailsFocusable = useFocusable(handleDetails);
 
+  // Sync featuredGame with lists when rails update
+  useEffect(() => {
+    if (!featuredGame) return;
+    const allStoreGames = [...trending, ...popular, ...top, ...comingSoon, ...newReleases];
+    const updated = allStoreGames.find((g) => g.id === featuredGame.id);
+    if (updated && updated !== featuredGame) {
+      setFeaturedGame(updated);
+    }
+  }, [trending, popular, top, comingSoon, newReleases, featuredGame]);
+
   if (loading) {
     return (
       <div className="bigscreen-store-dashboard bigscreen-store-dashboard--loading">

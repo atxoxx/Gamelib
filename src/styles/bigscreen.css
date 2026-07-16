@@ -292,6 +292,8 @@
 }
 
 .bigscreen-dashboard-scrollable-content {
+  position: relative;
+  z-index: 2;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -725,6 +727,28 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+}
+
+.steam-player-count.bigscreen-steam-players {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  box-shadow: none !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  color: inherit !important;
+  text-transform: inherit !important;
+  backdrop-filter: none !important;
+}
+
+.steam-player-count.bigscreen-steam-players .steam-player-count-dot {
+  width: 6px !important;
+  height: 6px !important;
 }
 
 .bigscreen-gamepage-meta-strip {

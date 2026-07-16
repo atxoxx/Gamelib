@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
@@ -72,6 +72,11 @@ export default function BigScreenLibrary({
     return continuePlaying[0] ?? recentlyAdded[0] ?? filteredGames[0] ?? null;
   });
 
+  const [logoError, setLogoError] = useState(false);
+  useEffect(() => {
+    setLogoError(false);
+  }, [featuredGame?.id]);
+
   const handleFocusedGameChange = useCallback((g: Game | null) => {
     if (g) setFeaturedGame(g);
   }, []);
@@ -104,6 +109,15 @@ export default function BigScreenLibrary({
 
   const playFocusable = useFocusable(handlePlay);
   const detailsFocusable = useFocusable(handleDetails);
+
+  // Keep featuredGame synced with context updates (e.g. Steam appid writes, metadata changes)
+  useEffect(() => {
+    if (!featuredGame) return;
+    const updated = filteredGames.find((g) => g.id === featuredGame.id);
+    if (updated && updated !== featuredGame) {
+      setFeaturedGame(updated);
+    }
+  }, [filteredGames, featuredGame]);
 
 
   return (
@@ -140,11 +154,12 @@ export default function BigScreenLibrary({
             <div className="bigscreen-details-pane-content">
               {/* Game logo or large text title */}
               <div className="bigscreen-details-logo-area">
-                {featuredGame.logoUrl ? (
+                {featuredGame.logoUrl && !logoError ? (
                   <img
                     src={featuredGame.logoUrl}
                     alt={featuredGame.name}
                     className="bigscreen-details-logo"
+                    onError={() => setLogoError(true)}
                   />
                 ) : (
                   <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
@@ -168,7 +183,7 @@ export default function BigScreenLibrary({
                 )}
                 {resolvedSteamAppId != null && (
                   <BigScreenPill tone="muted" size="sm">
-                    <SteamPlayerCount appId={resolvedSteamAppId} /> on Steam
+                    <SteamPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Steam
                   </BigScreenPill>
                 )}
               </div>

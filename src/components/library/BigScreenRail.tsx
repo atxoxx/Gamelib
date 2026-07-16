@@ -67,11 +67,16 @@ export default function BigScreenRail({
   // `data-game-id` attribute we set on each card below.
   useEffect(() => {
     const el = gamepad.focusedElement;
-    const id = el?.getAttribute("data-game-id") ?? null;
-    if (id === lastFocusedIdRef.current) return;
-    lastFocusedIdRef.current = id;
+    if (!el || !scrollRef.current || !scrollRef.current.contains(el)) return;
+    const id = el.getAttribute("data-game-id");
     const game = id ? games.find((g) => g.id === id) ?? null : null;
-    onFocusedGameChange(game);
+    if (id !== lastFocusedIdRef.current) {
+      lastFocusedIdRef.current = id;
+      onFocusedGameChange(game);
+    } else {
+      // Publish the fresh game reference on sibling list updates
+      onFocusedGameChange(game);
+    }
   }, [gamepad.focusedElement, games, onFocusedGameChange]);
 
   // Auto-scroll the rail when the focus ring's owner scrolls into
