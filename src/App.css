@@ -375,6 +375,338 @@
   --shadow-glow: 0 0 24px var(--color-accent-glow);
 }
 
+/* Solarized Theme Override */
+[data-theme="solarized"] {
+  --color-bg-primary: #002b36;
+  --color-bg-secondary: #073642;
+  --color-bg-tertiary: #0a4654;
+  --color-bg-hover: #114e5c;
+  --color-bg-active: #1a6072;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(38, 139, 210, 0.06) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(7, 54, 66, 0.85);
+  --color-surface-raised: rgba(10, 70, 84, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(7, 54, 66, 0.6);
+
+  --color-border: #0a4654;
+  --color-border-light: #114e5c;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #fdf6e3;
+  --color-text-secondary: #eee8d5;
+  --color-text-muted: #93a1a1;
+  --color-text-inverse: #002b36;
+
+  --color-accent: #268bd2;
+  --color-accent-hover: #4aa3e0;
+  --color-accent-active: #1f6fa8;
+  --color-accent-glow: rgba(38, 139, 210, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Tokyo Night Theme Override */
+[data-theme="tokyonight"] {
+  --color-bg-primary: #1a1b26;
+  --color-bg-secondary: #24283b;
+  --color-bg-tertiary: #2f3449;
+  --color-bg-hover: #3a3f58;
+  --color-bg-active: #414868;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(122, 162, 247, 0.06) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(36, 40, 59, 0.85);
+  --color-surface-raised: rgba(47, 52, 73, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(36, 40, 59, 0.6);
+
+  --color-border: #2f3449;
+  --color-border-light: #414868;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #c0caf5;
+  --color-text-secondary: #a9b1d6;
+  --color-text-muted: #565f89;
+  --color-text-inverse: #1a1b26;
+
+  --color-accent: #7aa2f7;
+  --color-accent-hover: #94b4f9;
+  --color-accent-active: #5e87e8;
+  --color-accent-glow: rgba(122, 162, 247, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Gruvbox Theme Override */
+[data-theme="gruvbox"] {
+  --color-bg-primary: #282828;
+  --color-bg-secondary: #3c3836;
+  --color-bg-tertiary: #504945;
+  --color-bg-hover: #665c54;
+  --color-bg-active: #7c6f64;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(250, 189, 47, 0.05) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(60, 56, 54, 0.85);
+  --color-surface-raised: rgba(80, 73, 69, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(60, 56, 54, 0.6);
+
+  --color-border: #504945;
+  --color-border-light: #665c54;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #ebdbb2;
+  --color-text-secondary: #d5c4a1;
+  --color-text-muted: #a89984;
+  --color-text-inverse: #282828;
+
+  --color-accent: #fe8019;
+  --color-accent-hover: #febd5a;
+  --color-accent-active: #d4660a;
+  --color-accent-glow: rgba(254, 128, 25, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Catppuccin Theme Override */
+[data-theme="catppuccin"] {
+  --color-bg-primary: #1e1e2e;
+  --color-bg-secondary: #24273a;
+  --color-bg-tertiary: #2a2e42;
+  --color-bg-hover: #363a4f;
+  --color-bg-active: #494d64;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(203, 166, 247, 0.06) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(36, 39, 58, 0.85);
+  --color-surface-raised: rgba(42, 46, 66, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(36, 39, 58, 0.6);
+
+  --color-border: #2a2e42;
+  --color-border-light: #494d64;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #cad3f5;
+  --color-text-secondary: #b8c0e0;
+  --color-text-muted: #6e738d;
+  --color-text-inverse: #1e1e2e;
+
+  --color-accent: #cba6f7;
+  --color-accent-hover: #d8bdf9;
+  --color-accent-active: #b48ef0;
+  --color-accent-glow: rgba(203, 166, 247, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Sunset Theme Override */
+[data-theme="sunset"] {
+  --color-bg-primary: #1f0f1a;
+  --color-bg-secondary: #2a1626;
+  --color-bg-tertiary: #3a1f33;
+  --color-bg-hover: #4d2942;
+  --color-bg-active: #612f54;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(255, 122, 89, 0.06) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(255, 94, 158, 0.05) 0%, transparent 40%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(42, 22, 38, 0.85);
+  --color-surface-raised: rgba(58, 31, 51, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.75);
+  --color-surface-glass: rgba(42, 22, 38, 0.6);
+
+  --color-border: #3a1f33;
+  --color-border-light: #4d2942;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #fdeef2;
+  --color-text-secondary: #f3c5d4;
+  --color-text-muted: #b07d92;
+  --color-text-inverse: #1f0f1a;
+
+  --color-accent: #ff7a59;
+  --color-accent-hover: #ff9b80;
+  --color-accent-active: #e85f3a;
+  --color-accent-glow: rgba(255, 122, 89, 0.32);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Oceanic Theme Override */
+[data-theme="oceanic"] {
+  --color-bg-primary: #071a2b;
+  --color-bg-secondary: #0c2740;
+  --color-bg-tertiary: #12344f;
+  --color-bg-hover: #184162;
+  --color-bg-active: #1f5278;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(34, 211, 238, 0.06) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(12, 39, 64, 0.85);
+  --color-surface-raised: rgba(18, 52, 79, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(12, 39, 64, 0.6);
+
+  --color-border: #12344f;
+  --color-border-light: #184162;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #e6f6fb;
+  --color-text-secondary: #b3dcec;
+  --color-text-muted: #6f9cb3;
+  --color-text-inverse: #071a2b;
+
+  --color-accent: #22d3ee;
+  --color-accent-hover: #4fddf2;
+  --color-accent-active: #15b3cc;
+  --color-accent-glow: rgba(34, 211, 238, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Rose Pine Theme Override */
+[data-theme="rosepine"] {
+  --color-bg-primary: #191724;
+  --color-bg-secondary: #1f1d2e;
+  --color-bg-tertiary: #26233a;
+  --color-bg-hover: #2f2b43;
+  --color-bg-active: #40394f;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(235, 188, 186, 0.05) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(31, 29, 46, 0.85);
+  --color-surface-raised: rgba(38, 35, 58, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(31, 29, 46, 0.6);
+
+  --color-border: #26233a;
+  --color-border-light: #40394f;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #e0def4;
+  --color-text-secondary: #c5c3e0;
+  --color-text-muted: #6e6a86;
+  --color-text-inverse: #191724;
+
+  --color-accent: #eb6f92;
+  --color-accent-hover: #f08ba6;
+  --color-accent-active: #d6557f;
+  --color-accent-glow: rgba(235, 111, 146, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Synthwave Theme Override */
+[data-theme="synthwave"] {
+  --color-bg-primary: #170d2b;
+  --color-bg-secondary: #241544;
+  --color-bg-tertiary: #311c5b;
+  --color-bg-hover: #3f2576;
+  --color-bg-active: #502e93;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(255, 113, 206, 0.06) 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, rgba(5, 217, 232, 0.05) 0%, transparent 40%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(36, 21, 68, 0.85);
+  --color-surface-raised: rgba(49, 28, 91, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.78);
+  --color-surface-glass: rgba(36, 21, 68, 0.6);
+
+  --color-border: #311c5b;
+  --color-border-light: #502e93;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 35%, transparent);
+
+  --color-text-primary: #f9f2ff;
+  --color-text-secondary: #05d9e8;
+  --color-text-muted: #b08bd7;
+  --color-text-inverse: #170d2b;
+
+  --color-accent: #ff71ce;
+  --color-accent-hover: #ff8fda;
+  --color-accent-active: #e84eb6;
+  --color-accent-glow: rgba(255, 113, 206, 0.35);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow), 0 0 48px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+/* Forest Theme Override */
+[data-theme="forest"] {
+  --color-bg-primary: #0c1510;
+  --color-bg-secondary: #13241a;
+  --color-bg-tertiary: #1c3325;
+  --color-bg-hover: #274433;
+  --color-bg-active: #315540;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(132, 204, 22, 0.05) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(19, 36, 26, 0.85);
+  --color-surface-raised: rgba(28, 51, 37, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(19, 36, 26, 0.6);
+
+  --color-border: #1c3325;
+  --color-border-light: #274433;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #eef5ea;
+  --color-text-secondary: #b9d4ab;
+  --color-text-muted: #6f9270;
+  --color-text-inverse: #0c1510;
+
+  --color-accent: #84cc16;
+  --color-accent-hover: #9ee02f;
+  --color-accent-active: #6ca60f;
+  --color-accent-glow: rgba(132, 204, 22, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
+/* Desert Mirage Theme Override */
+[data-theme="desert"] {
+  --color-bg-primary: #1c160f;
+  --color-bg-secondary: #2a2118;
+  --color-bg-tertiary: #3a2f20;
+  --color-bg-hover: #4a3c28;
+  --color-bg-active: #5c4a30;
+  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(224, 171, 85, 0.05) 0%, transparent 45%),
+                        var(--color-bg-primary);
+
+  --color-surface: rgba(42, 33, 24, 0.85);
+  --color-surface-raised: rgba(58, 47, 32, 0.92);
+  --color-surface-overlay: rgba(0, 0, 0, 0.7);
+  --color-surface-glass: rgba(42, 33, 24, 0.6);
+
+  --color-border: #3a2f20;
+  --color-border-light: #4a3c28;
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  --color-text-primary: #f5ead7;
+  --color-text-secondary: #e0c9a3;
+  --color-text-muted: #a78a5e;
+  --color-text-inverse: #1c160f;
+
+  --color-accent: #e0ab55;
+  --color-accent-hover: #e8bc77;
+  --color-accent-active: #c9923c;
+  --color-accent-glow: rgba(224, 171, 85, 0.3);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+
+  --shadow-glow: 0 0 24px var(--color-accent-glow);
+}
+
 /* ==============================
    App Layout
    ============================== */

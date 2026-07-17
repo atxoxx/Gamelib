@@ -53,6 +53,46 @@ const BUILTIN_THEMES: ThemeConfig[] = [
     id: "dracula",
     meta: { name: "Dracula", descriptor: "vibrant" },
   },
+  {
+    id: "solarized",
+    meta: { name: "Solarized", descriptor: "calm" },
+  },
+  {
+    id: "tokyonight",
+    meta: { name: "Tokyo Night", descriptor: "calm" },
+  },
+  {
+    id: "gruvbox",
+    meta: { name: "Gruvbox", descriptor: "minimal" },
+  },
+  {
+    id: "catppuccin",
+    meta: { name: "Catppuccin", descriptor: "vibrant" },
+  },
+  {
+    id: "sunset",
+    meta: { name: "Sunset", descriptor: "vibrant" },
+  },
+  {
+    id: "oceanic",
+    meta: { name: "Oceanic", descriptor: "calm" },
+  },
+  {
+    id: "rosepine",
+    meta: { name: "Rose Pine", descriptor: "minimal" },
+  },
+  {
+    id: "synthwave",
+    meta: { name: "Synthwave", descriptor: "vibrant" },
+  },
+  {
+    id: "forest",
+    meta: { name: "Forest", descriptor: "calm" },
+  },
+  {
+    id: "desert",
+    meta: { name: "Desert Mirage", descriptor: "minimal" },
+  },
 ];
 
 const STORAGE_KEY = "gamelib-theme";
