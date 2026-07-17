@@ -19,7 +19,14 @@ type FixedSourceKey =
   | "nexusmods"
   | "moddb";
 
-type SteamSectionKey = "store" | "discussions" | "news" | "workshop";
+type SteamSectionKey =
+  | "store"
+  | "discussions"
+  | "news"
+  | "workshop"
+  | "screenshots"
+  | "videos"
+  | "guides";
 
 interface SourceDef {
   /** Either a FixedSourceKey or a full user-added URL (for custom sources). */
@@ -139,6 +146,12 @@ function buildUrl(
         return `https://store.steampowered.com/news/app/${appId}`;
       case "workshop":
         return `https://steamcommunity.com/app/${appId}/workshop/`;
+      case "screenshots":
+        return `https://steamcommunity.com/app/${appId}/screenshots/`;
+      case "videos":
+        return `https://steamcommunity.com/app/${appId}/videos/`;
+      case "guides":
+        return `https://steamcommunity.com/app/${appId}/guides/`;
     }
   }
   if (source === "protondb") {
@@ -269,6 +282,28 @@ const SteamWorkshopIcon = (
   </svg>
 );
 
+const SteamScreenshotsIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="5" width="18" height="14" rx="2" ry="2" />
+    <circle cx="8.5" cy="10" r="1.5" />
+    <path d="M21 17l-5-5L5 21" />
+  </svg>
+);
+
+const SteamVideosIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="5" width="14" height="14" rx="2" ry="2" />
+    <path d="M16 9l6-3v12l-6-3z" />
+  </svg>
+);
+
+const SteamGuidesIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+);
+
 const FixedSources: SourceDef[] = [
   { key: "steam", label: "Steam", accent: "#66c0f4", iconBg: "#1b2838", icon: SteamIcon },
   { key: "protondb", label: "ProtonDB", accent: "#7c5cff", iconBg: "#3a2d8a", icon: ProtonDBIcon },
@@ -283,6 +318,9 @@ const SteamSections: SteamSectionDef[] = [
   { key: "discussions", label: "Discussions", icon: SteamChatIcon },
   { key: "news", label: "News", icon: SteamNewsIcon },
   { key: "workshop", label: "Workshop", icon: SteamWorkshopIcon },
+  { key: "screenshots", label: "Screenshots", icon: SteamScreenshotsIcon },
+  { key: "videos", label: "Videos", icon: SteamVideosIcon },
+  { key: "guides", label: "Guides", icon: SteamGuidesIcon },
 ];
 
 /** Derive a display label + host for a user-added URL. */
