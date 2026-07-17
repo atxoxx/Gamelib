@@ -828,7 +828,10 @@ export default function Sidebar() {
             variant="secondary"
             className="sidebar-import-btn"
             title="Import games"
-            onClick={() => setShowImportMenu((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowImportMenu((v) => !v);
+            }}
             leftIcon={
               <svg
                 viewBox="0 0 24 24"
@@ -847,12 +850,31 @@ export default function Sidebar() {
             Import Games
           </Button>
 
-          {showImportMenu && (
-            <div ref={importMenuRef} className="sidebar-import-menu" onMouseDown={(e) => e.stopPropagation()}>
-              <button
-                className="sidebar-import-option"
-                onClick={handleImportExe}
-              >
+          {showImportMenu &&
+            createPortal(
+              (() => {
+                const rect = importBtnRef.current?.getBoundingClientRect();
+                const menuStyle: React.CSSProperties = rect
+                  ? {
+                      position: "fixed",
+                      top: rect.bottom + 6,
+                      left: rect.left,
+                      width: 240,
+                      zIndex: 10000,
+                    }
+                  : { position: "fixed", zIndex: 10000 };
+                return (
+                  <div
+                    ref={importMenuRef}
+                    className="sidebar-import-menu"
+                    data-sidebar-context-menu
+                    style={menuStyle}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      className="sidebar-import-option"
+                      onClick={handleImportExe}
+                    >
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
@@ -900,8 +922,11 @@ export default function Sidebar() {
                   </span>
                 </div>
               </button>
-            </div>
-          )}
+              </div>
+            );
+              })(),
+              document.body
+            )}
         </div>
       </div>
 

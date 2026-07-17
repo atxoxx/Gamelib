@@ -2393,15 +2393,14 @@
 }
 
 .sidebar-import-menu {
-  position: absolute;
-  top: calc(100% + var(--space-xs));
-  left: 0;
-  right: 0;
+  /* Portalled to document.body (see Sidebar.tsx) so it is not clipped
+   * by `.app-sidebar { overflow: hidden }`. Position/size are set
+   * inline relative to the trigger button's bounding rect. */
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  z-index: 200;
+  z-index: 10000;
   overflow: hidden;
   animation: importMenuIn 150ms ease;
 }
