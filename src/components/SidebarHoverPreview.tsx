@@ -88,14 +88,28 @@ interface SidebarHoverPreviewProps {
 }
 
 export function SidebarHoverPreview({
-  game,
+  game: gameProp,
   anchorSelector,
   active,
   delay = 350,
 }: SidebarHoverPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const showTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const navigate = useNavigate();
+
+  // Tracks whether the pointer is currently over the preview card
+  // itself. When the user moves the mouse from the row toward the
+  // card it crosses a gap; we keep the preview alive while the
+  // pointer is on either the row or the card so it doesn't vanish
+  // mid-flight.
+  const pointerOnPreviewRef = useRef(false);
+  // Last known game, retained during the hide-grace window so the
+  // card can stay mounted (and the pointer can reach it) even after
+  // the hovered row reports leave and `game` goes null.
+  const lastGameRef = useRef<Game | null>(gameProp);
+  if (gameProp) lastGameRef.current = gameProp;
+  const renderGame = gameProp ?? lastGameRef.current;
 
   // Position state: live screen coords + side flag.
   const [pos, setPos] = useState<{
@@ -113,10 +127,18 @@ export function SidebarHoverPreview({
   useEffect(() => {
     if (active) {
       clearTimeout(showTimerRef.current);
+      clearTimeout(hideTimerRef.current);
       showTimerRef.current = setTimeout(() => setVisible(true), delay);
     } else {
       clearTimeout(showTimerRef.current);
-      setVisible(false);
+      // Don't dismiss instantly: give the pointer a grace window to
+      // reach the preview card before tearing it down. If the pointer
+      // enters the card, `pointerOnPreviewRef` is set and we cancel
+      // the pending hide. If the row is re-entered, `active` flips
+      // back to true and also cancels it.
+      hideTimerRef.current = setTimeout(() => {
+        if (!pointerOnPreviewRef.current) setVisible(false);
+      }, 120);
     }
     return () => clearTimeout(showTimerRef.current);
   }, [active, delay]);
@@ -192,7 +214,7 @@ export function SidebarHoverPreview({
       list?.removeEventListener("scroll", scheduleRecompute);
       if (rafHandle != null) cancelAnimationFrame(rafHandle);
     };
-  }, [visible, anchorSelector, game?.id]);
+  }, [visible, anchorSelector, renderGame?.id]);
 
   // Escape dismisses.
   useEffect(() => {
@@ -204,8 +226,9 @@ export function SidebarHoverPreview({
     return () => window.removeEventListener("keydown", onKey);
   }, [visible]);
 
-  if (!visible || !pos || !game) return null;
+  if (!visible || !pos || !renderGame) return null;
 
+  const game = renderGame;
   const rating =
     typeof game.igdbRating === "number"
       ? Math.round(game.igdbRating)
@@ -231,6 +254,15 @@ export function SidebarHoverPreview({
       role="tooltip"
       aria-hidden="true"
       data-preview-anchor-id={anchorKey}
+      onPointerEnter={() => {
+        pointerOnPreviewRef.current = true;
+        clearTimeout(hideTimerRef.current);
+      }}
+      onPointerLeave={() => {
+        pointerOnPreviewRef.current = false;
+        clearTimeout(showTimerRef.current);
+        setVisible(false);
+      }}
     >
       <div className="sidebar-hover-preview__cover">
         {game.coverArtUrl ? (
