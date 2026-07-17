@@ -11,6 +11,7 @@ import { useSizeUnit } from "../hooks/useSizeUnit";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import CrackWatchCard from "../components/CrackWatchCard";
+import ProtonDBCard from "../components/ProtonDBCard";
 import AchievementsTab from "../components/AchievementsTab";
 import GameRelationsCard from "../components/GameRelationsCard";
 import {
@@ -948,6 +949,7 @@ function GameDetail({ game }: { game: Game }) {
             <TimeToBeatCard game={game} />
             <ReleasesCard game={game} />
             <CrackWatchCard gameName={game.name} />
+            <ProtonDBCard steamAppId={game.steamAppId} />
             <LanguagesSection game={game} />
           </div>
         </div>

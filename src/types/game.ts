@@ -824,6 +824,44 @@ export const STORE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Number of store games per page (infinite scroll batch size). */
 export const STORE_PAGE_SIZE = 20;
 
+// ─── ProtonDB Compatibility ─────────────────────────────────────────────────
+
+/** ProtonDB community-reported Linux / Steam Deck compatibility summary.
+ *  Fetched on-demand from the public endpoint
+ *  `https://www.protondb.com/api/v1/reports/summaries/{appid}.json`.
+ *  The endpoint returns a 404 (no JSON) when a game has zero reports, so
+ *  `found` is used to distinguish "no reports yet" from a fetch error. */
+export interface ProtonDBStatus {
+  /** Whether a summary was found (the endpoint returns 404 with no body
+   *  when a game has no reports at all). */
+  found: boolean;
+  /** Official rating tier. One of: "platinum" | "gold" | "silver" |
+   *  "bronze" | "borked" | "pending". "pending" means confidence is too
+   *  low for a verdict. */
+  tier: ProtonDBTier;
+  /** Tier estimate used while `tier` is "pending". */
+  provisionalTier?: ProtonDBTier;
+  /** Highest tier anyone reported (optimistic). */
+  bestReportedTier?: ProtonDBTier;
+  /** Recent reports' tier — differs from `tier` when the game is
+   *  regressing or improving. */
+  trendingTier?: ProtonDBTier;
+  /** Confidence in the tier verdict. */
+  confidence?: "inadequate" | "low" | "moderate" | "high" | "strong";
+  /** Compatibility score in the range 0..1. */
+  score?: number;
+  /** Total number of community reports. */
+  total?: number;
+}
+
+export type ProtonDBTier =
+  | "pending"
+  | "borked"
+  | "bronze"
+  | "silver"
+  | "gold"
+  | "platinum";
+
 // ─── CrackWatch Status ──────────────────────────────────────────────────────
 
 /** CrackWatch status parsed from crackrelease.com.

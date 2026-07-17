@@ -12,6 +12,7 @@ import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
+import ProtonDBCard from "../components/ProtonDBCard";
 import SteamPlayerCount from "../components/SteamPlayerCount";
 import GameRelationsCard from "../components/GameRelationsCard";
 import {
@@ -407,6 +408,7 @@ export default function StoreGameDetail() {
             <TimeToBeatCard game={mockGame} />
             <ReleasesCard game={mockGame} />
             <CrackWatchCard gameName={data.title} />
+            <ProtonDBCard steamAppId={steamAppId} />
             <LanguagesSection game={mockGame} />
           </div>
         </div>

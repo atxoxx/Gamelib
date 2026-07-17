@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 
 mod config;
 mod crackwatch;
+mod protondb;
 mod db;
 mod game_scraper;
 mod game_watcher;
@@ -2328,6 +2329,7 @@ pub fn run() {
             torrent_engine::torrent_set_speed_limits,
             torrent_engine::torrent_open_folder,
             crackwatch::fetch_crackwatch_status,
+            protondb::fetch_protondb_status,
             fetch_url,
             rebuild_watcher_index,
             achievements::fetch_achievements,

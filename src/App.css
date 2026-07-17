@@ -9856,6 +9856,143 @@
   height: 13px;
 }
 
+/* ── ProtonDB Card ───────────────────────────────────────────────────── */
+
+.pdb-card {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #4a9eff 4%, var(--color-surface)),
+    var(--color-surface)
+  );
+  border-color: color-mix(in srgb, #4a9eff 16%, var(--color-border));
+}
+
+.pdb-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.pdb-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid;
+  box-shadow: 0 2px 12px color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.pdb-tier-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.pdb-tier-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.pdb-meta-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: calc(var(--space-xs) * -1);
+}
+
+.pdb-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pdb-meta-row:last-child {
+  border-bottom: none;
+}
+
+.pdb-meta-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.pdb-meta-val {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  text-align: right;
+}
+
+.pdb-trend-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.pdb-trend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-accent);
+  animation: pdb-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pdb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pdb-links {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.pdb-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-fast);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.pdb-source-link:hover {
+  color: var(--color-accent-hover);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-tertiary));
+}
+
+.pdb-source-link svg {
+  width: 13px;
+  height: 13px;
+}
+
 /* ── Store Game Card CrackWatch badge ───────────────────────────────── */
 
 .store-card-cw-badge {
