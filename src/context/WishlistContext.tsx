@@ -22,6 +22,10 @@ interface WishlistContextValue {
   toggle: (game: StoreGameSummary) => void;
   /** Explicit remove — used by WishlistRail heart button. */
   remove: (slug: string) => void;
+  /** Update or clear the free-text note on a wishlisted game. */
+  setNote: (slug: string, note: string) => void;
+  /** Bulk-remove every entry (used by the "Clear wishlist" action). */
+  clear: () => void;
   /** Convenience: number of wishlisted games. */
   count: number;
 }

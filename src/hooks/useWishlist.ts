@@ -130,6 +130,29 @@ export function useWishlist() {
     });
   }, []);
 
+  /** Update or clear the free-text note attached to a wishlisted game.
+   *  Persists through the same debounced save path as `toggle`/`remove`. */
+  const setNote = useCallback((slug: string, note: string) => {
+    setEntriesBySlug((prev) => {
+      const existing = prev[slug];
+      if (!existing) return prev;
+      const next = { ...prev };
+      if (note.trim().length === 0) {
+        // Drop the field entirely when emptied to keep the payload clean.
+        const { note: _omit, ...rest } = existing;
+        next[slug] = rest;
+      } else {
+        next[slug] = { ...existing, note: note.trim() };
+      }
+      return next;
+    });
+  }, []);
+
+  /** Bulk-remove every entry. Used by the "Clear wishlist" action. */
+  const clear = useCallback(() => {
+    setEntriesBySlug({});
+  }, []);
+
   const isWishlisted = useCallback(
     (slug: string) => Boolean(entriesBySlug[slug]),
     [entriesBySlug]
@@ -146,6 +169,8 @@ export function useWishlist() {
     isWishlisted,
     toggle,
     remove,
+    setNote,
+    clear,
     count: wishlist.length,
   };
 }

@@ -789,6 +789,10 @@ export const SIZE_UNITS: readonly SizeUnit[] = ["gb", "gib"] as const;
 export interface WishlistEntry extends StoreGameSummary {
   /** Unix timestamp (ms) when the game was added to the wishlist. */
   addedAt: number;
+  /** Free-text note the user can attach to a wishlisted game
+   *  (e.g. "buy during winter sale", "play after beating X").
+   *  Optional and absent for entries added before notes existed. */
+  note?: string;
 }
 
 /** Shape of `<app_data>/wishlist_cache.json` on disk. */
