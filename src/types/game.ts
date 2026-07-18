@@ -63,6 +63,15 @@ export interface Game {
   /** Rockstar `TitleId` (e.g. `"gta5"`, `"rdr2"`). Drives the
     *  `rockstar-<titleId>` game id and launcher launch/uninstall. */
   rockstarTitleId?: string;
+  /** ── Ubisoft Connect (Uplay) integration fields ──────────────
+   *  Mirrors the GOG/Steam/Epic/Rockstar shape so the Library filter
+   *  sidebar can tag Ubisoft-synced titles uniformly. */
+  /** Ubisoft `uplay_id` — drives the `uplay-<id>` game id and the
+   *  `uplay://launch/<id>` launch protocol. */
+  uplayGameId?: string;
+  /** True when this entry was imported from Ubisoft Connect
+   *  (drives `uplay://launch/<id>` behaviour). */
+  uplayIsConnect?: boolean;
   /** Achievement completion data synced from Steam */
   steamAchievements?: SteamAchievement[];
   /**
@@ -523,7 +532,7 @@ export const STORE_SOURCES: readonly StoreSource[] = [
  * Library source filter for distinguishing between different game
  * origins (Steam sync, local imports, GOG, etc.).
  */
-export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic" | "humble" | "rockstar";
+export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic" | "humble" | "rockstar" | "ubisoft";
 
 export type PlayStatus = "backlog" | "playing" | "completed" | "abandoned" | "on_hold";
 

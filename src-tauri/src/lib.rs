@@ -25,6 +25,7 @@ mod gog;
 mod humble;
 mod steam_game_watcher;
 mod rockstar;
+mod uplay;
 mod size;
 // New modules for the download feature. See each module's
 // top-of-file doc comment for the design rationale.
@@ -49,6 +50,10 @@ use humble::{
 use rockstar::sync::{
     rockstar_launch_game, rockstar_open_client, rockstar_sync_library,
     rockstar_uninstall_game,
+};
+use uplay::{
+    uplay_get_settings, uplay_install_game, uplay_launch_game, uplay_open_client,
+    uplay_save_settings, uplay_sync_library, uplay_uninstall_game,
 };
 use steam::auth::{
     steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
@@ -178,6 +183,13 @@ struct GameData {
     /// True when this entry is a non-game extra (soundtrack/artbook/…).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     humble_is_extra: Option<bool>,
+    // Ubisoft Connect integration fields
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    uplay_game_id: Option<String>,
+    /// `true` when the game was installed/launched via Ubisoft Connect
+    /// (drives `uplay://launch/<id>` behaviour).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    uplay_is_connect: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     launch_arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -640,6 +652,19 @@ fn launch_game(
             .map_err(|e| format!("Failed to open Steam URL: {}", e))?;
 
         // No PID â€” the watcher will detect the process when it appears
+        initial_pid = 0;
+        exe_path = None;
+    } else if platform == "Ubisoft" && game_path.is_empty() {
+        // Ubisoft Connect game without a local exe path -- launch via
+        // the `uplay://launch/<id>` protocol. Mirrors Playnite's
+        // `UplayPlayController.Play`. The watcher detects the child
+        // process when UbisoftConnect.exe hands off to the game.
+        let sid = game_id
+            .strip_prefix("uplay-")
+            .ok_or("Ubisoft games require a uplay-<id> game id")?;
+        let url = format!("uplay://launch/{}", sid);
+        tauri_plugin_opener::open_url(url, None::<&str>)
+            .map_err(|e| format!("Failed to open Ubisoft URL: {}", e))?;
         initial_pid = 0;
         exe_path = None;
     } else {
@@ -2328,6 +2353,11 @@ pub fn run() {
             // + launcher client actions (no cloud auth).
             rockstar_sync_library, rockstar_launch_game, rockstar_open_client,
             rockstar_uninstall_game,
+            // Ubisoft Connect (Uplay) integration — installed + library
+            // scan + client actions (uplay:// protocol).
+            uplay_sync_library, uplay_launch_game, uplay_install_game,
+            uplay_uninstall_game, uplay_open_client, uplay_get_settings,
+            uplay_save_settings,
             // Download-feature commands. The torrent engine manages
             // its own global session; the source manager and store
             // checker are passed through `tauri::State`.

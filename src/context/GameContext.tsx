@@ -583,6 +583,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // ── Ubisoft Connect: launch through the Ubisoft client ──
+      // Playnite routes play via the `uplay://launch/<id>` protocol so
+      // Ubisoft's DRM bootstrap runs. We do the same when the game
+      // carries a `uplayGameId`.
+      if (game.uplayGameId) {
+        await invoke<string>("uplay_launch_game", {
+          uplayId: game.uplayGameId,
+        });
+        if (splashOn) splash.updateStatus("started");
+        showToast(`Launched ${game.name}`, "success");
+        return;
+      }
+
       // ── Unified launch: single Tauri command for all game types ─────
       // The Rust backend handles:
       //   * Direct exe spawn (Local games, Steam with known path)

@@ -19,6 +19,7 @@ const SOURCE_OPTIONS: readonly { value: LibrarySource; label: string }[] = [
   { value: "epic", label: "Epic" },
   { value: "humble", label: "Humble" },
   { value: "rockstar", label: "Rockstar" },
+  { value: "ubisoft", label: "Ubisoft" },
 ];
 
 const PLAY_STATUS_OPTIONS: readonly { value: PlayStatus | "all"; label: string }[] = [

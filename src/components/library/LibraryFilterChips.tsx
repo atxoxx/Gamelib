@@ -52,6 +52,7 @@ export default function LibraryFilterChips({
     epic: "Epic",
     humble: "Humble",
     rockstar: "Rockstar",
+    ubisoft: "Ubisoft",
   };
 
   const hasAny =

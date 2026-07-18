@@ -107,6 +107,7 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
     if (filters.source === "epic" && game.platform !== "Epic") return false;
     if (filters.source === "humble" && game.platform !== "Humble") return false;
     if (filters.source === "rockstar" && game.platform !== "Rockstar") return false;
+    if (filters.source === "ubisoft" && game.platform !== "Ubisoft") return false;
   }
 
   // Genres (OR — game must have at least one selected genre)

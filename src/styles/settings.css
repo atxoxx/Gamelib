@@ -943,6 +943,15 @@
   background: linear-gradient(90deg, #1d2b32, #1fb6a6);
 }
 
+.integration-tile.uplay .integration-tile-icon {
+  color: #00aae4;
+  box-shadow: 0 0 14px rgba(0, 170, 228, 0.35);
+}
+
+.integration-tile.uplay::before {
+  background: linear-gradient(90deg, #04263a, #00aae4);
+}
+
 .integration-tile-icon svg {
   width: 24px;
   height: 24px;

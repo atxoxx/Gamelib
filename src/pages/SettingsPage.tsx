@@ -12,6 +12,7 @@ import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import type { GogAuthState, GogSyncResult } from "../types/gog";
 import type { HumbleAuthState, HumbleSettings, HumbleSyncResult } from "../types/humble";
 import type { RockstarSyncResult } from "../types/rockstar";
+import type { UplaySyncResult, UplaySettings } from "../types/uplay";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { useAchievements } from "../context/AchievementContext";
@@ -293,6 +294,17 @@ export default function SettingsPage() {
   const [rockstarSyncResult, setRockstarSyncResult] = useState<RockstarSyncResult | null>(null);
   const [isRockstarSyncing, setIsRockstarSyncing] = useState(false);
 
+  // Ubisoft Connect (Uplay) integration state. No account/auth — it's a
+  // pure installed-games + owned-library scan + launcher client, so the
+  // only state is the last sync result, the in-flight flag, and the
+  // user-toggleable settings blob.
+  const [uplaySyncResult, setUplaySyncResult] = useState<UplaySyncResult | null>(null);
+  const [isUplaySyncing, setIsUplaySyncing] = useState(false);
+  const [uplaySettings, setUplaySettings] = useState<UplaySettings>({
+    importInstalledGames: true,
+    importUninstalledGames: false,
+  });
+
   // Humble Bundle integration state. Cookie-based auth (no OAuth) — a
   // WebView drives humblebundle.com/login and we snapshot the session
   // cookies. The mount probe checks `humble_is_authenticated` (cookie
@@ -318,6 +330,28 @@ export default function SettingsPage() {
       if (s) setHumbleSettings(s);
     } catch (e) {
       console.error("Failed to load Humble settings:", e);
+    }
+  }
+
+  async function loadUplaySettings() {
+    try {
+      const s = await invoke<UplaySettings>("uplay_get_settings");
+      if (s) setUplaySettings(s);
+    } catch (e) {
+      console.error("Failed to load Uplay settings:", e);
+    }
+  }
+
+  async function updateUplaySetting<K extends keyof UplaySettings>(
+    key: K,
+    value: UplaySettings[K],
+  ) {
+    const next = { ...uplaySettings, [key]: value };
+    setUplaySettings(next);
+    try {
+      await invoke("uplay_save_settings", { settings: next });
+    } catch (err) {
+      showToast(`Failed to save Uplay setting: ${err}`, "error");
     }
   }
 
@@ -438,6 +472,7 @@ export default function SettingsPage() {
         }
       } catch { /* not authenticated */ }
       await loadHumbleSettings();
+      await loadUplaySettings();
     })();
 
     try {
@@ -1084,6 +1119,86 @@ export default function SettingsPage() {
       showToast(`Rockstar scan failed: ${err}`, "error");
     } finally {
       setIsRockstarSyncing(false);
+    }
+  }
+
+  // ── Ubisoft Connect (Uplay) handlers ─────────────────────────────
+  // No account/auth — scan of installed + owned library titles plus
+  // launcher-client status. Mirrors the Rockstar flow.
+
+  async function handleUplaySync() {
+    setIsUplaySyncing(true);
+    setUplaySyncResult(null);
+    try {
+      const result: UplaySyncResult = await invoke("uplay_sync_library");
+      setUplaySyncResult(result);
+      if (result.success) {
+        const existingUplayIds = new Set(
+          games.filter((gm) => gm.uplayGameId).map((gm) => gm.id)
+        );
+        const newGames: Game[] = [];
+        for (const entry of result.syncedGames ?? []) {
+          if (existingUplayIds.has(entry.id)) continue;
+          newGames.push({
+            id: entry.id,
+            name: entry.title,
+            path: entry.installDir ?? "",
+            platform: "Ubisoft",
+            installed: entry.isInstalled,
+            playTime: "0h 0m",
+            addedAt: Date.now(),
+            uplayGameId: entry.uplayId,
+            uplayIsConnect: true,
+            coverArtUrl: entry.coverImage,
+            iconUrl: entry.iconImage,
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt:
+              entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+          });
+        }
+        if (newGames.length > 0) {
+          addGames(newGames);
+          showToast(
+            `Scanned ${result.gamesImported} Ubisoft games · ${newGames.length} new`,
+            "success"
+          );
+        } else {
+          showToast(
+            `Scanned ${result.gamesImported} Ubisoft games (all already in library)`,
+            "success"
+          );
+        }
+
+        // Update `installed` / size for existing Ubisoft entries when
+        // the scan reports a different install state.
+        for (const entry of result.syncedGames ?? []) {
+          const game = games.find((g) => g.id === entry.id);
+          if (!game) continue;
+          const patch: Partial<Game> = {};
+          if (game.installed !== entry.isInstalled) patch.installed = entry.isInstalled;
+          if (entry.sizeBytes !== undefined) {
+            patch.sizeBytes = entry.sizeBytes;
+            patch.sizeRootPath = entry.sizeRootPath;
+            patch.sizeDetectedAt = new Date().toISOString();
+          }
+          if (Object.keys(patch).length > 0) updateGame(game.id, patch);
+        }
+      }
+    } catch (err) {
+      setUplaySyncResult({
+        success: false,
+        gamesImported: 0,
+        gamesSkipped: 0,
+        errors: [String(err)],
+        lastSync: 0,
+        clientInstalled: false,
+        clientPath: "",
+        syncedGames: [],
+      });
+      showToast(`Ubisoft scan failed: ${err}`, "error");
+    } finally {
+      setIsUplaySyncing(false);
     }
   }
 
@@ -2208,9 +2323,94 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* ── Ubisoft Connect (Uplay) ── */}
+          <div className="integration-tile uplay">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><UplayIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">Ubisoft Connect</h3>
+                    {uplaySyncResult?.clientInstalled && (
+                      <span className="integration-badge active">Detected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Import your Ubisoft Connect library — installed games and
+                    your full owned catalog — plus launch titles through the
+                    Ubisoft Connect client. No account required.
+                  </p>
+                </div>
+              </div>
+
+              <div className="integration-tile-body">
+                {uplaySyncResult?.clientInstalled ? (
+                  <div className="auth-status">
+                    Ubisoft Connect detected
+                    {uplaySyncResult.clientPath
+                      ? ` at ${uplaySyncResult.clientPath}`
+                      : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    Ubisoft Connect isn't installed — only games already on disk
+                    can be detected via the registry.
+                  </p>
+                )}
+
+                <p className="auth-note">
+                  Detection is fully local: Gamelib reads the Windows
+                  uninstall registry for installed titles and the Ubisoft
+                  Connect cache for your owned library.
+                </p>
+
+                <div className="integration-tile-actions">
+                  <Button
+                    variant="primary"
+                    onClick={handleUplaySync}
+                    isLoading={isUplaySyncing}
+                  >
+                    Sync Library
+                  </Button>
+                </div>
+
+                {uplaySyncResult && (
+                  <div className={`sync-result ${uplaySyncResult.success ? "success" : "error"}`}>
+                    {uplaySyncResult.success
+                      ? `✓ Scanned ${uplaySyncResult.gamesImported} game(s)${uplaySyncResult.errors.length ? ` · ${uplaySyncResult.errors.length} warning(s)` : ""}`
+                      : `✗ ${uplaySyncResult.errors?.[0] || "Sync failed"}`}
+                  </div>
+                )}
+
+                {uplaySyncResult?.lastSync ? (
+                  <p className="sync-result-time">
+                    Last sync: {new Date(uplaySyncResult.lastSync * 1000).toLocaleString()}
+                  </p>
+                ) : null}
+
+                {/* Uplay settings toggles (Playnite parity) */}
+                <div className="humble-settings-grid">
+                  <UplayToggle
+                    label="Import installed games"
+                    hint="Import games detected as installed via the Windows registry."
+                    checked={uplaySettings.importInstalledGames}
+                    onChange={(v) => updateUplaySetting("importInstalledGames", v)}
+                  />
+                  <UplayToggle
+                    label="Import uninstalled games"
+                    hint="Import your full owned library (incl. uninstalled) from the Ubisoft Connect cache."
+                    checked={uplaySettings.importUninstalledGames}
+                    onChange={(v) => updateUplaySetting("importUninstalledGames", v)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <p className="integration-footer">
             More integrations coming soon — itch.io and more.
           </p>
+
 
           {/* ── Data & sync preferences (across vendors) ── */}
           <header className="settings-section-header" style={{ marginTop: "var(--space-xl)" }}>
@@ -2898,6 +3098,45 @@ function RockstarIcon() {
         d="M8.6 6.4h6.8c.95 0 1.72.77 1.72 1.72v8.42c0 .95-.77 1.72-1.72 1.72H8.6c-.95 0-1.72-.77-1.72-1.72v-8.42C6.88 7.17 7.65 6.4 8.6 6.4zm.86 1.5v9h1.5v-3.16h2.46v-1.47H10.96V8.9h3.18v-1.0H9.46zm9.0-.3l1.04-.78.94 1.24-1.04.78-.94-1.24z"
       />
     </svg>
+  );
+}
+
+function UplayIcon() {
+  // Stylized Ubisoft Connect "U" mark in Ubisoft blue (#00aae4).
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+      <rect x="0.5" y="0.5" width="23" height="23" rx="5" fill="#04263a" />
+      <path
+        fill="#00aae4"
+        d="M12 6.2c-2.8 0-5.1 1.2-6.5 3.1l1.5 1.3c1-1.4 2.8-2.3 4.9-2.3 2.1 0 3.9.9 4.9 2.3l1.5-1.3C17.1 7.4 14.8 6.2 12 6.2zm0 4.4c-1.5 0-2.7.6-3.4 1.6l1.6 1.4c.4-.6 1-.9 1.8-.9.8 0 1.4.3 1.8.9l1.6-1.4c-.7-1-1.9-1.6-3.4-1.6zm0 4.3c-.7 0-1.2.2-1.5.6l1.5 1.3 1.5-1.3c-.3-.4-.8-.6-1.5-.6z"
+      />
+    </svg>
+  );
+}
+
+function UplayToggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="humble-toggle">
+      <span className="humble-toggle-text">
+        <span className="humble-toggle-label">{label}</span>
+        {hint && <span className="humble-toggle-hint">{hint}</span>}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
   );
 }
 
