@@ -14,16 +14,32 @@
 
 .store-tab-bar {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-xs);
   margin-bottom: var(--space-lg);
+  padding: var(--space-xs);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex-shrink: 0;
+}
+
+.store-tab-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .store-tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-lg);
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
@@ -31,10 +47,13 @@
   font-weight: var(--font-weight-medium);
   cursor: pointer;
   position: relative;
-  transition: all var(--transition-fast);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  white-space: nowrap;
+  transition: color var(--transition-fast),
+              background var(--transition-fast),
+              box-shadow var(--transition-fast),
+              transform var(--transition-fast);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
 }
 
 .store-tab:hover {
@@ -43,14 +62,34 @@
 }
 
 .store-tab.active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+  color: #fff;
+  background: var(--color-accent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.store-tab.active:hover {
+  background: var(--color-accent-hover);
 }
 
 .store-tab-icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.store-tab-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.store-tab-label {
+  line-height: 1;
+}
+
+.store-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* ── Store Search Bar ──────────────────────────────────────────────────── */
@@ -132,6 +171,114 @@
   color: var(--color-text-primary);
 }
 
+/* ── Store Detail toolbar (sticky results header) ──────────────────────── */
+
+.store-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.store-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-bg-primary) 78%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-xs);
+}
+
+.store-toolbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.store-toolbar-title h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.store-toolbar-count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.store-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.store-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.store-filter-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.store-filter-trigger:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.store-filter-trigger.has-active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.store-filter-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+}
+
 /* ── Store Layout (sidebar + main) ─────────────────────────────────────── */
 
 .store-layout {
@@ -141,6 +288,12 @@
   min-height: 0;
 }
 
+/* Inline sidebar is shown only on wide viewports; compact widths use the
+   slide-over drawer instead (see `.store-filter-drawer` below). */
+.store-layout-inline-sidebar {
+  display: none;
+}
+
 .store-main {
   flex: 1;
   min-width: 0;
@@ -148,15 +301,34 @@
   flex-direction: column;
 }
 
+/* ── Density toolbar (compact, lives in the sticky toolbar) ─────────────── */
+
+.store-density-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.store-density-toolbar-label {
+  letter-spacing: 0.4px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  font-size: var(--font-size-xs);
+  opacity: 0.85;
+}
+
 /* ── Store Filter Sidebar ──────────────────────────────────────────────── */
 
 .store-filter-sidebar {
-  width: 220px;
+  width: 240px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  padding: var(--space-md);
+  padding: var(--space-lg);
   background: var(--color-surface-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -164,7 +336,19 @@
   border-radius: var(--radius-lg);
   height: fit-content;
   position: sticky;
-  top: 0;
+  top: 64px;
+  align-self: flex-start;
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.store-filter-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+.store-filter-sidebar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
 }
 
 .store-filter-section {
@@ -364,8 +548,26 @@
    which pushes the card past its column boundary and bleeds into the
    next card. Setting `min-width: 0` lets the body overlay's
    `overflow-wrap: break-word` actually wrap. */
-.store-game-grid > .store-game-card {
+.store-game-grid > .store-game-cell {
   min-width: 0;
+}
+
+/* Staggered entrance: each card cell fades + lifts in. The per-index
+   delay is set inline (capped) so the grid populates with a calm
+   cascade rather than a single dump. */
+.store-game-cell {
+  animation: storeCellIn 420ms var(--ease-enter, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+@keyframes storeCellIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── Store Game Card ───────────────────────────────────────────────────── */
@@ -708,17 +910,131 @@
   height: 18px;
 }
 
+/* ── Slide-over filter drawer (compact widths) ────────────────────────────
+   Replaces the permanently-mounted sidebar on narrow viewports. The grid
+   keeps its full width; filters are summoned on demand via the toolbar
+   "Filters" button. On wide screens the drawer is hidden and the inline
+   sidebar (`.store-layout-inline-sidebar`) is shown instead. */
+
+.store-filter-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+}
+
+.store-filter-drawer-scrim.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.store-filter-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 91;
+  width: min(360px, 88vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -24px 0 60px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%);
+  transition: transform var(--duration-medium) var(--ease-standard);
+}
+
+.store-filter-drawer.open {
+  transform: translateX(0);
+}
+
+.store-filter-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.store-filter-drawer-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.store-filter-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.store-filter-drawer-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.store-filter-drawer-close:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.store-filter-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+/* Inside the drawer the sidebar loses its own card chrome + sticky
+   positioning so it fills the drawer naturally. */
+.store-filter-drawer .store-filter-sidebar {
+  width: 100%;
+  position: static;
+  top: auto;
+  max-height: none;
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 0;
+  gap: var(--space-lg);
+}
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
+
+/* Wide screens: show the inline sidebar, hide the drawer trigger/drawer. */
+@media (min-width: 1024px) {
+  .store-layout-inline-sidebar {
+    display: block;
+  }
+
+  .store-filter-trigger {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .store-filter-trigger {
+    display: inline-flex;
+  }
+}
 
 @media (max-width: 768px) {
   .store-layout {
     flex-direction: column;
-  }
-
-  .store-filter-sidebar {
-    width: 100%;
-    position: static;
-    max-height: none;
   }
 
   .store-game-grid {
@@ -730,6 +1046,30 @@
 
   .store-page {
     padding: var(--space-md);
+  }
+
+  .store-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .store-tab-label {
+    display: none;
+  }
+
+  .store-tab {
+    padding: 8px 12px;
+  }
+}
+
+/* Calm, still loading/entrance for reduced-motion users. */
+@media (prefers-reduced-motion: reduce) {
+  .store-game-cell {
+    animation: none;
+  }
+
+  .store-filter-drawer,
+  .store-filter-drawer-scrim {
+    transition: none;
   }
 }
 

@@ -81,6 +81,22 @@ export default function StorePage() {
   // the existing per-facet behavior).
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
 
+  // Slide-over filter panel (mobile/compact efficiency upgrade): the
+  // permanent sidebar is replaced by an on-demand drawer so the grid
+  // keeps its full width until the user actually wants to filter.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const activeFilterCount = useMemo(
+    () =>
+      selectedGenres.length +
+      selectedPlatforms.length +
+      (yearMin != null ? 1 : 0) +
+      (yearMax != null ? 1 : 0) +
+      (ratingMin != null ? 1 : 0) +
+      selectedSourceIds.length,
+    [selectedGenres, selectedPlatforms, yearMin, yearMax, ratingMin, selectedSourceIds]
+  );
+
   // ── Prune dangling source IDs on Settings-side deletions ───────────
   // If the user deletes a source from Settings while a filter is
   // active, the deleted ID stays in `selectedSourceIds` until the
@@ -239,6 +255,49 @@ export default function StorePage() {
     ? visibleGames.length
     : undefined;
 
+  // Centralizes the sidebar so it can be mounted in both the inline
+  // layout (wide screens) and the slide-over drawer (compact widths)
+  // without duplicating the prop list.
+  const renderFilterSidebar = () => (
+    <StoreFilterSidebar
+      selectedGenres={selectedGenres}
+      selectedPlatforms={selectedPlatforms}
+      yearMin={yearMin}
+      yearMax={yearMax}
+      ratingMin={ratingMin}
+      selectedSourceIds={selectedSourceIds}
+      onGenresChange={setSelectedGenres}
+      onPlatformsChange={setSelectedPlatforms}
+      onYearRangeChange={(min, max) => {
+        setYearMin(min);
+        setYearMax(max);
+      }}
+      onRatingMinChange={setRatingMin}
+      onSourcesChange={setSelectedSourceIds}
+      onApply={() => {
+        handleApplyFilters();
+        setFiltersOpen(false);
+      }}
+      onReset={handleResetFilters}
+    />
+  );
+
+  // Human-readable title for the active category / search context, used
+  // by the results header strip so the user always knows what they're
+  // browsing without re-reading the tab bar.
+  const resultsTitle = useMemo(() => {
+    if (isSearching) return "Search";
+    const label = {
+      trending: "Trending",
+      popular: "Popular",
+      top: "Top Rated",
+      coming_soon: "Coming Soon",
+      new_releases: "New Releases",
+      all: "All Games",
+    }[category];
+    return label ?? "Games";
+  }, [isSearching, category]);
+
   return (
     <div className="store-page">
       <StoreTabBar activeTab={activeTab} onTabChange={handleTabChange} />
@@ -248,16 +307,6 @@ export default function StorePage() {
         onChange={handleSearchChange}
         visible={searchActive || isSearching}
       />
-
-      {/* Density toolbar — shows whenever the user can browse cards
-          (skipped on the dedicated search screen where input focus
-          matters more than layout toggles). */}
-      {!isSearching && (
-        <div className="store-density-toolbar" aria-label="Layout controls">
-          <span className="store-density-toolbar-label">Density</span>
-          <DensityToggle density={density} onChange={setDensity} />
-        </div>
-      )}
 
       {isDiscover ? (
         /* ── Discover landing: hero + 5 IGDB rails. The wishlist rail
@@ -309,7 +358,57 @@ export default function StorePage() {
         </div>
       ) : (
         /* ── Category / search detail view ───────────────────────── */
-        <>
+        <div className="store-detail">
+          {/* Sticky toolbar: results title + live count on the left,
+              filter trigger + density toggle on the right. Stays pinned
+              while the grid scrolls so layout controls are always a
+              single tap away. */}
+          <div className="store-toolbar">
+            <div className="store-toolbar-title">
+              <h2>{resultsTitle}</h2>
+              <span className="store-toolbar-count">
+                {sourceFilterChipCount !== undefined
+                  ? sourceFilterChipCount
+                  : games.length}{" "}
+                game{games.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="store-toolbar-actions">
+              <button
+                type="button"
+                className={`store-filter-trigger${activeFilterCount > 0 ? " has-active" : ""}`}
+                onClick={() => setFiltersOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={filtersOpen}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="4" y1="6" x2="20" y2="6" />
+                  <line x1="7" y1="12" x2="17" y2="12" />
+                  <line x1="10" y1="18" x2="14" y2="18" />
+                </svg>
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="store-filter-trigger-badge">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+
+              <div className="store-density-toolbar" aria-label="Layout controls">
+                <DensityToggle density={density} onChange={setDensity} />
+              </div>
+            </div>
+          </div>
+
           {showFilters && (
             <StoreFilterChips
               selectedGenres={selectedGenres}
@@ -342,27 +441,11 @@ export default function StorePage() {
             />
           )}
 
+          {/* Inline sidebar on wide viewports. The slide-over drawer
+              (below) handles compact widths so the grid keeps its full
+              width until filters are explicitly requested. */}
           <div className="store-layout">
-            {showFilters && (
-              <StoreFilterSidebar
-                selectedGenres={selectedGenres}
-                selectedPlatforms={selectedPlatforms}
-                yearMin={yearMin}
-                yearMax={yearMax}
-                ratingMin={ratingMin}
-                selectedSourceIds={selectedSourceIds}
-                onGenresChange={setSelectedGenres}
-                onPlatformsChange={setSelectedPlatforms}
-                onYearRangeChange={(min, max) => {
-                  setYearMin(min);
-                  setYearMax(max);
-                }}
-                onRatingMinChange={setRatingMin}
-                onSourcesChange={setSelectedSourceIds}
-                onApply={handleApplyFilters}
-                onReset={handleResetFilters}
-              />
-            )}
+            <div className="store-layout-inline-sidebar">{renderFilterSidebar()}</div>
 
             <div className="store-main">
               {isSearching && searchQuery && !loading && (
@@ -384,8 +467,48 @@ export default function StorePage() {
               />
             </div>
           </div>
-        </>
+        </div>
       )}
+
+      {/* Slide-over filter drawer (compact widths). Animated, with a
+          scrim that closes on click. On wide screens it is hidden and
+          the inline sidebar above takes over. */}
+      <div
+        className={`store-filter-drawer-scrim${filtersOpen ? " open" : ""}`}
+        onClick={() => setFiltersOpen(false)}
+        aria-hidden={!filtersOpen}
+      />
+      <aside
+        className={`store-filter-drawer${filtersOpen ? " open" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Filters"
+        aria-hidden={!filtersOpen}
+      >
+        <div className="store-filter-drawer-header">
+          <h3>Filters</h3>
+          <button
+            type="button"
+            className="store-filter-drawer-close"
+            onClick={() => setFiltersOpen(false)}
+            aria-label="Close filters"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="store-filter-drawer-body">{renderFilterSidebar()}</div>
+      </aside>
     </div>
   );
 }

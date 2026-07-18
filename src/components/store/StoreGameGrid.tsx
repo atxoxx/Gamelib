@@ -161,8 +161,14 @@ export default function StoreGameGrid({
   // ── Game grid ──────────────────────────────────────────────────────────
   return (
     <div className={`store-game-grid${isList ? " density-list" : ""}`}>
-      {games.map((game) => (
-        <StoreGameCard key={game.id} game={game} onClick={onCardClick} />
+      {games.map((game, i) => (
+        <div
+          key={game.id}
+          className="store-game-cell"
+          style={{ animationDelay: `${Math.min(i, 24) * 28}ms` }}
+        >
+          <StoreGameCard game={game} onClick={onCardClick} />
+        </div>
       ))}
 
       {/* Sentinel div for infinite scroll */}
