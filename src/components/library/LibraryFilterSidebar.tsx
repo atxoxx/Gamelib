@@ -2,9 +2,6 @@ import type { LibraryStatus, LibrarySort } from "../../hooks/useLibraryFilters";
 import { SORT_LABELS, SORT_OPTIONS } from "../../hooks/useLibraryFilters";
 import type { LibrarySource, PlayStatus } from "../../types/game";
 
-/** Status radio options. Declared at module scope so TypeScript infers
- *  the literal `LibraryStatus` type for each `value` (instead of widening
- *  to `string` and requiring a cast at the call site). */
 const STATUS_OPTIONS: readonly { value: LibraryStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "installed", label: "Installed" },
@@ -40,13 +37,9 @@ interface LibraryFilterSidebarProps {
   ratingMin: number | null;
   status: LibraryStatus;
   playStatus: PlayStatus | "all";
-  /** Unique genre names present in the library, sorted alphabetically. */
   availableGenres: string[];
-  /** Unique platform names present in the library, sorted alphabetically. */
   availablePlatforms: string[];
-  /** Current source filter value. */
   source: LibrarySource;
-  /** Current sort order. */
   sort: LibrarySort;
   onSearchChange: (q: string) => void;
   onGenresChange: (g: string[]) => void;
@@ -61,13 +54,9 @@ interface LibraryFilterSidebarProps {
 }
 
 /**
- * LibraryFilterSidebar: left-rail filter panel for the Library page.
- *
- * Mirrors `StoreFilterSidebar` (same overall structure: Search → Status
- * (library-specific) → Genres → Platforms → Release Year → Rating →
- * Reset). Live-applies each change to the hook state (no Apply button)
- * because library filtering is local and instant; the Store needs an
- * Apply button because its filter changes trigger a remote IGDB fetch.
+ * LibraryFilterSidebar: the left-rail filter panel. Status / Play Status /
+ * Source are compact segmented controls; Genres / Platforms are pill
+ * toggles. Every change applies live (library filtering is local + instant).
  */
 export default function LibraryFilterSidebar({
   search,
@@ -93,93 +82,85 @@ export default function LibraryFilterSidebar({
   onSortChange,
   onReset,
 }: LibraryFilterSidebarProps) {
-  const handleGenreToggle = (genre: string) => {
-    if (selectedGenres.includes(genre)) {
-      onGenresChange(selectedGenres.filter((g) => g !== genre));
-    } else {
-      onGenresChange([...selectedGenres, genre]);
-    }
-  };
+  const toggleGenre = (genre: string) =>
+    onGenresChange(
+      selectedGenres.includes(genre)
+        ? selectedGenres.filter((g) => g !== genre)
+        : [...selectedGenres, genre]
+    );
 
-  const handlePlatformToggle = (platform: string) => {
-    if (selectedPlatforms.includes(platform)) {
-      onPlatformsChange(selectedPlatforms.filter((p) => p !== platform));
-    } else {
-      onPlatformsChange([...selectedPlatforms, platform]);
-    }
-  };
+  const togglePlatform = (platform: string) =>
+    onPlatformsChange(
+      selectedPlatforms.includes(platform)
+        ? selectedPlatforms.filter((p) => p !== platform)
+        : [...selectedPlatforms, platform]
+    );
 
   return (
-    <aside className="library-filter-sidebar">
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Search</h4>
+    <aside className="lib-filter" aria-label="Library filters">
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Search</h4>
         <input
           type="text"
-          className="library-filter-search"
+          className="lib-filter-search"
           placeholder="Filter games by name..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </div>
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Status</h4>
-        <div className="library-filter-radio-group">
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Status</h4>
+        <div className="lib-segment">
           {STATUS_OPTIONS.map((opt) => (
-            <label key={opt.value} className="library-filter-radio">
-              <input
-                type="radio"
-                name="library-status"
-                value={opt.value}
-                checked={status === opt.value}
-                onChange={() => onStatusChange(opt.value)}
-              />
-              <span>{opt.label}</span>
-            </label>
+            <button
+              key={opt.value}
+              type="button"
+              className={`lib-segment-option${status === opt.value ? " active" : ""}`}
+              onClick={() => onStatusChange(opt.value)}
+            >
+              {opt.label}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Play Status</h4>
-        <div className="library-filter-radio-group">
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Play Status</h4>
+        <div className="lib-segment">
           {PLAY_STATUS_OPTIONS.map((opt) => (
-            <label key={opt.value} className="library-filter-radio">
-              <input
-                type="radio"
-                name="library-play-status"
-                value={opt.value}
-                checked={playStatus === opt.value}
-                onChange={() => onPlayStatusChange(opt.value)}
-              />
-              <span>{opt.label}</span>
-            </label>
+            <button
+              key={opt.value}
+              type="button"
+              className={`lib-segment-option${playStatus === opt.value ? " active" : ""}`}
+              onClick={() => onPlayStatusChange(opt.value)}
+            >
+              {opt.label}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Source</h4>
-        <div className="library-filter-radio-group">
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Source</h4>
+        <div className="lib-segment">
           {SOURCE_OPTIONS.map((opt) => (
-            <label key={opt.value} className="library-filter-radio">
-              <input
-                type="radio"
-                name="library-source"
-                value={opt.value}
-                checked={source === opt.value}
-                onChange={() => onSourceChange(opt.value)}
-              />
-              <span>{opt.label}</span>
-            </label>
+            <button
+              key={opt.value}
+              type="button"
+              className={`lib-segment-option${source === opt.value ? " active" : ""}`}
+              onClick={() => onSourceChange(opt.value)}
+            >
+              {opt.label}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Sort</h4>
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Sort</h4>
         <select
-          className="library-filter-select"
+          className="lib-filter-search"
           value={sort}
           onChange={(e) => onSortChange(e.target.value as LibrarySort)}
         >
@@ -190,62 +171,70 @@ export default function LibraryFilterSidebar({
       </div>
 
       {availableGenres.length > 0 && (
-        <div className="library-filter-section">
-          <h4 className="library-filter-heading">Genres</h4>
-          <div className="library-filter-list">
+        <div className="lib-filter-section">
+          <h4 className="lib-filter-heading">
+            Genres
+            {selectedGenres.length > 0 && (
+              <span className="lib-filter-count-badge">{selectedGenres.length}</span>
+            )}
+          </h4>
+          <div className="lib-pills">
             {availableGenres.map((genre) => (
-              <label key={genre} className="library-filter-checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedGenres.includes(genre)}
-                  onChange={() => handleGenreToggle(genre)}
-                />
-                <span>{genre}</span>
-              </label>
+              <button
+                key={genre}
+                type="button"
+                className={`lib-pill${selectedGenres.includes(genre) ? " active" : ""}`}
+                onClick={() => toggleGenre(genre)}
+              >
+                {genre}
+              </button>
             ))}
           </div>
         </div>
       )}
 
       {availablePlatforms.length > 0 && (
-        <div className="library-filter-section">
-          <h4 className="library-filter-heading">Platforms</h4>
-          <div className="library-filter-list">
+        <div className="lib-filter-section">
+          <h4 className="lib-filter-heading">
+            Platforms
+            {selectedPlatforms.length > 0 && (
+              <span className="lib-filter-count-badge">{selectedPlatforms.length}</span>
+            )}
+          </h4>
+          <div className="lib-pills">
             {availablePlatforms.map((platform) => (
-              <label key={platform} className="library-filter-checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedPlatforms.includes(platform)}
-                  onChange={() => handlePlatformToggle(platform)}
-                />
-                <span>{platform}</span>
-              </label>
+              <button
+                key={platform}
+                type="button"
+                className={`lib-pill${selectedPlatforms.includes(platform) ? " active" : ""}`}
+                onClick={() => togglePlatform(platform)}
+              >
+                {platform}
+              </button>
             ))}
           </div>
         </div>
       )}
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">Release Year</h4>
-        <div className="library-filter-year-row">
+      <div className="lib-filter-section">
+        <h4 className="lib-filter-heading">Release Year</h4>
+        <div className="lib-year-row">
           <input
             type="number"
-            className="library-filter-year-input"
+            className="lib-year-input"
             placeholder="From"
             value={yearMin ?? ""}
             onChange={(e) => {
-              // Trim guards against whitespace-only input (which would
-              // coerce to 0 and bypass the placeholder state).
               const raw = e.target.value.trim();
               onYearRangeChange(raw ? Number(raw) : null, yearMax);
             }}
             min={1970}
             max={2030}
           />
-          <span className="library-filter-year-sep">–</span>
+          <span className="lib-year-sep">–</span>
           <input
             type="number"
-            className="library-filter-year-input"
+            className="lib-year-input"
             placeholder="To"
             value={yearMax ?? ""}
             onChange={(e) => {
@@ -258,30 +247,27 @@ export default function LibraryFilterSidebar({
         </div>
       </div>
 
-      <div className="library-filter-section">
-        <h4 className="library-filter-heading">
-          Minimum Rating: {ratingMin ?? 0}
-        </h4>
+      <div className="lib-filter-section">
+        <div className="lib-rating-head">
+          <h4 className="lib-filter-heading">Minimum Rating</h4>
+          <span className="lib-rating-value">{ratingMin ?? 0}+</span>
+        </div>
         <input
           type="range"
-          className="library-filter-slider"
+          className="lib-rating-slider"
           min={0}
           max={100}
           step={5}
           value={ratingMin ?? 0}
           onChange={(e) =>
-            onRatingMinChange(
-              Number(e.target.value) > 0 ? Number(e.target.value) : null
-            )
+            onRatingMinChange(Number(e.target.value) > 0 ? Number(e.target.value) : null)
           }
         />
       </div>
 
-      <div className="library-filter-actions">
-        <button className="library-filter-btn reset" onClick={onReset}>
-          Reset Filters
-        </button>
-      </div>
+      <button className="lib-filter-reset" onClick={onReset}>
+        Reset Filters
+      </button>
     </aside>
   );
 }

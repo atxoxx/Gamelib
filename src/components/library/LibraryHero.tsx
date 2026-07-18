@@ -5,7 +5,6 @@ import type { Game } from "../../types/game";
 import { parsePlayTime, formatPlayTime } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useToast } from "../../context/ToastContext";
-import StatCard from "./StatCard";
 import { gameNameFromPath } from "../../types/game";
 
 interface LibraryHeroProps {
@@ -13,31 +12,19 @@ interface LibraryHeroProps {
 }
 
 /**
- * Library hero: time-of-day greeting, four aggregate stat cards, and
- * a pair of quick-action CTAs. Sits at the top of the Library page
- * above the filter chips, giving the page a recognizable "home" feel
- * instead of dropping straight into the grid.
+ * Library hero: time-of-day greeting, four aggregate KPI tiles, and a pair
+ * of quick-action CTAs. Sits at the top of the Library page above the
+ * filter chips, giving the page a recognizable "home" feel.
  *
- * The hero also exports the four computed stat numbers as a `useMemo`
- * so callers that want to reuse the same numbers (e.g. an info bar
- * elsewhere) don't recompute them. We don't actually use that here,
- * but it documents the derivation is intentional rather than a free
- * side effect of the render.
- *
- * The "Import Games" button is wired to a single-file exe picker that
- * calls `importLocalGames` directly with `metadata: null` so the user
- * gets an instant one-click import without going through the multi-
- * file matching modal. The full Folder Scan flow is still available
- * in the sidebar's import menu for power users.
+ * The hero also paints a blurred cover-collage wallpaper from the user's
+ * own library art, so the panel reads as *their* collection rather than a
+ * generic surface. Decorative only (aria-hidden).
  */
 export default function LibraryHero({ games }: LibraryHeroProps) {
   const navigate = useNavigate();
   const { importLocalGames } = useGames();
   const { showToast } = useToast();
 
-  // Time-of-day greeting: morning < 12, afternoon < 18, evening otherwise.
-  // Computed once on mount — flipping the greeting mid-session feels
-  // gimmicky and would force a re-render every minute.
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
     if (hour < 5) return "Up late";
@@ -46,35 +33,21 @@ export default function LibraryHero({ games }: LibraryHeroProps) {
     return "Good evening";
   }, []);
 
-  // ── Aggregate stats ────────────────────────────────────────────────
-  // Four numbers, four cards. Computed off the raw `games` array so
-  // they're always in sync with the grid below — no separate source
-  // of truth to keep aligned.
   const stats = useMemo(() => {
     const total = games.length;
     const installed = games.filter((g) => g.installed).length;
-    const installedPct =
-      total > 0 ? Math.round((installed / total) * 100) : 0;
-    const totalMinutes = games.reduce(
-      (sum, g) => sum + parsePlayTime(g.playTime),
-      0
-    );
-    // "Recently added" = games whose `addedAt` falls in the last 7 days.
-    // Using a 7-day window (vs 30) keeps the count meaningful even for
-    // a moderate library — a 30-day window would saturate the label
-    // with a single big Steam import and stop being a useful signal.
+    const installedPct = total > 0 ? Math.round((installed / total) * 100) : 0;
+    const totalMinutes = games.reduce((sum, g) => sum + parsePlayTime(g.playTime), 0);
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const recentlyAdded = games.filter(
-      (g) => (g.addedAt ?? 0) >= sevenDaysAgo
-    ).length;
-    return {
-      total,
-      installed,
-      installedPct,
-      totalPlayTime: formatPlayTime(totalMinutes),
-      recentlyAdded,
-    };
+    const recentlyAdded = games.filter((g) => (g.addedAt ?? 0) >= sevenDaysAgo).length;
+    return { total, installed, installedPct, totalPlayTime: formatPlayTime(totalMinutes), recentlyAdded };
   }, [games]);
+
+  // Pick a handful of covers for the blurred backdrop collage.
+  const collage = useMemo(
+    () => games.filter((g) => g.coverArtUrl).slice(0, 6).map((g) => g.coverArtUrl as string),
+    [games]
+  );
 
   async function handleQuickImport() {
     try {
@@ -85,8 +58,6 @@ export default function LibraryHero({ games }: LibraryHeroProps) {
         filters: [{ name: "Executable", extensions: ["exe"] }],
       });
       if (filePath && typeof filePath === "string") {
-        // Single-file quick import — no matching modal, no IGDB scrape.
-        // The user can open the game page later to fetch metadata.
         await importLocalGames([{ path: filePath, metadata: null }]);
         showToast(`Imported ${gameNameFromPath(filePath)}`, "success");
       }
@@ -101,18 +72,25 @@ export default function LibraryHero({ games }: LibraryHeroProps) {
   }
 
   return (
-    <section className="library-hero" aria-label="Library overview">
-      <div className="library-hero-glow" aria-hidden />
+    <section className="lib-hero" aria-label="Library overview">
+      {collage.length > 0 && (
+        <div className="lib-hero-collage" aria-hidden>
+          {collage.map((src, i) => (
+            <img key={i} src={src} alt="" loading="lazy" />
+          ))}
+        </div>
+      )}
+      <div className="lib-hero-veil" aria-hidden />
 
-      <div className="library-hero-content">
-        <div className="library-hero-text">
-          <h1 className="library-hero-greeting">
+      <div className="lib-hero-content">
+        <div className="lib-hero-text">
+          <h1 className="lib-hero-greeting">
             {greeting}
-            <span className="library-hero-greeting-dot" aria-hidden>
+            <span className="lib-hero-greeting-dot" aria-hidden>
               .
             </span>
           </h1>
-          <p className="library-hero-subtitle">
+          <p className="lib-hero-subtitle">
             {stats.total === 0
               ? "Your library is looking a little empty — let's fix that."
               : stats.recentlyAdded > 0
@@ -125,40 +103,16 @@ export default function LibraryHero({ games }: LibraryHeroProps) {
           </p>
         </div>
 
-        <div className="library-hero-actions">
-          <button
-            type="button"
-            className="library-hero-btn library-hero-btn--primary"
-            onClick={handleQuickImport}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+        <div className="lib-hero-actions">
+          <button type="button" className="lib-hero-btn lib-hero-btn--primary" onClick={handleQuickImport}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             Import Games
           </button>
-          <button
-            type="button"
-            className="library-hero-btn library-hero-btn--secondary"
-            onClick={handleBrowseStore}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+          <button type="button" className="lib-hero-btn lib-hero-btn--ghost" onClick={handleBrowseStore}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
               <polyline points="17 6 23 6 23 12" />
             </svg>
@@ -167,92 +121,84 @@ export default function LibraryHero({ games }: LibraryHeroProps) {
         </div>
       </div>
 
-      <div className="library-hero-stats">
-        <StatCard
+      <div className="lib-hero-stats">
+        <StatTile
           value={stats.total}
           label="Total Games"
+          accent="var(--color-accent)"
+          delayMs={0}
           icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
               <line x1="8" y1="21" x2="16" y2="21" />
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
           }
-          delayMs={0}
         />
-        <StatCard
+        <StatTile
           value={stats.installed}
           label="Installed"
-          subtext={
-            stats.total > 0
-              ? `${stats.installedPct}% of library`
-              : "No games yet"
-          }
-          tone="success"
+          subtext={stats.total > 0 ? `${stats.installedPct}% of library` : "No games yet"}
+          accent="var(--color-success)"
+          delayMs={70}
           icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <polyline points="20 6 9 17 4 12" />
             </svg>
           }
-          delayMs={60}
         />
-        <StatCard
+        <StatTile
           value={stats.totalPlayTime}
           label="Total Playtime"
-          tone="info"
+          accent="var(--color-info)"
+          delayMs={140}
           icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="12" cy="12" r="10" />
               <polyline points="12 6 12 12 16 14" />
             </svg>
           }
-          delayMs={120}
         />
-        <StatCard
+        <StatTile
           value={stats.recentlyAdded}
           label="Added This Week"
           subtext={stats.recentlyAdded === 1 ? "new arrival" : undefined}
-          tone="warning"
+          accent="var(--color-warning)"
+          delayMs={210}
           icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
           }
-          delayMs={180}
         />
       </div>
     </section>
+  );
+}
+
+interface StatTileProps {
+  value: string | number;
+  label: string;
+  subtext?: string;
+  accent: string;
+  delayMs: number;
+  icon: React.ReactNode;
+}
+
+function StatTile({ value, label, subtext, accent, delayMs, icon }: StatTileProps) {
+  return (
+    <div
+      className="lib-stat"
+      style={{ animationDelay: `${delayMs}ms`, ["--stat-accent" as string]: accent }}
+    >
+      <div className="lib-stat-icon" aria-hidden>
+        {icon}
+      </div>
+      <div className="lib-stat-body">
+        <div className="lib-stat-value" title={String(value)}>{value}</div>
+        <div className="lib-stat-label">{label}</div>
+        {subtext && <div className="lib-stat-subtext">{subtext}</div>}
+      </div>
+    </div>
   );
 }

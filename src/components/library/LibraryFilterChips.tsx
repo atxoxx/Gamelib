@@ -16,14 +16,34 @@ interface LibraryFilterChipsProps {
   onResetAll: () => void;
 }
 
+const statusLabel: Record<LibraryStatus, string> = {
+  all: "All",
+  installed: "Installed",
+  not_installed: "Not Installed",
+};
+
+const sourceLabel: Record<LibrarySource, string> = {
+  all: "All",
+  steam: "Steam",
+  local: "Local",
+  gog: "GOG",
+  epic: "Epic",
+  humble: "Humble",
+  rockstar: "Rockstar",
+  ubisoft: "Ubisoft",
+};
+
+const CloseIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
 /**
  * LibraryFilterChips: horizontal row of dismissable chips summarizing the
- * active filter set. Renders nothing when no filters are applied. The
- * `resultCount` shows the narrowed result count so users can see at a
- * glance how aggressive their filters are.
- *
- * Mirrors `StoreFilterChips` but adds two library-specific facets:
- * a free-text search chip and an installation status chip.
+ * active filter set, with a live result count. Renders nothing when no
+ * filters are applied.
  */
 export default function LibraryFilterChips({
   filters,
@@ -38,23 +58,6 @@ export default function LibraryFilterChips({
   onRemoveSource,
   onResetAll,
 }: LibraryFilterChipsProps) {
-  const statusLabel: Record<LibraryStatus, string> = {
-    all: "All",
-    installed: "Installed",
-    not_installed: "Not Installed",
-  };
-
-  const sourceLabel: Record<LibrarySource, string> = {
-    all: "All",
-    steam: "Steam",
-    local: "Local",
-    gog: "GOG",
-    epic: "Epic",
-    humble: "Humble",
-    rockstar: "Rockstar",
-    ubisoft: "Ubisoft",
-  };
-
   const hasAny =
     filters.search.length > 0 ||
     filters.genres.length > 0 ||
@@ -69,112 +72,68 @@ export default function LibraryFilterChips({
   if (!hasAny) return null;
 
   return (
-    <div className="library-filter-chips">
-      <span className="library-filter-count">
+    <div className="lib-chips">
+      <span className="lib-chip-count">
         {resultCount} game{resultCount !== 1 ? "s" : ""}
       </span>
 
       {filters.search && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           &ldquo;{filters.search}&rdquo;
-          <button type="button" onClick={onRemoveSearch} aria-label="Clear search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemoveSearch} aria-label="Clear search">{CloseIcon}</button>
         </span>
       )}
 
       {filters.status !== "all" && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           {statusLabel[filters.status]}
-          <button type="button" onClick={onRemoveStatus} aria-label="Clear status filter">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemoveStatus} aria-label="Clear status filter">{CloseIcon}</button>
         </span>
       )}
 
       {filters.playStatus !== "all" && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           {PLAY_STATUS_DETAILS[filters.playStatus].label}
-          <button type="button" onClick={onRemovePlayStatus} aria-label="Clear play status filter">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemovePlayStatus} aria-label="Clear play status filter">{CloseIcon}</button>
         </span>
       )}
 
       {filters.source !== "all" && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           {sourceLabel[filters.source]}
-          <button type="button" onClick={onRemoveSource} aria-label="Clear source filter">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemoveSource} aria-label="Clear source filter">{CloseIcon}</button>
         </span>
       )}
 
       {filters.genres.map((genre) => (
-        <span key={`g-${genre}`} className="library-filter-chip">
+        <span key={`g-${genre}`} className="lib-chip">
           {genre}
-          <button type="button" onClick={() => onRemoveGenre(genre)} aria-label={`Remove ${genre}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={() => onRemoveGenre(genre)} aria-label={`Remove ${genre}`}>{CloseIcon}</button>
         </span>
       ))}
 
       {filters.platforms.map((platform) => (
-        <span key={`p-${platform}`} className="library-filter-chip">
+        <span key={`p-${platform}`} className="lib-chip">
           {platform}
-          <button
-            type="button"
-            onClick={() => onRemovePlatform(platform)}
-            aria-label={`Remove ${platform}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={() => onRemovePlatform(platform)} aria-label={`Remove ${platform}`}>{CloseIcon}</button>
         </span>
       ))}
 
       {(filters.yearMin != null || filters.yearMax != null) && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           {filters.yearMin ?? "..."} – {filters.yearMax ?? "..."}
-          <button type="button" onClick={onRemoveYear} aria-label="Clear year filter">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemoveYear} aria-label="Clear year filter">{CloseIcon}</button>
         </span>
       )}
 
       {filters.ratingMin != null && (
-        <span className="library-filter-chip">
+        <span className="lib-chip">
           ⭐ {filters.ratingMin}+
-          <button type="button" onClick={onRemoveRating} aria-label="Clear rating filter">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <button type="button" onClick={onRemoveRating} aria-label="Clear rating filter">{CloseIcon}</button>
         </span>
       )}
 
-      <button type="button" className="library-filter-reset-all" onClick={onResetAll}>
+      <button type="button" className="lib-chip-reset" onClick={onResetAll}>
         Clear all
       </button>
     </div>

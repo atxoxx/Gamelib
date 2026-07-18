@@ -1,59 +1,1028 @@
-/* ─── Library Page: Filters, Chips, Density ─────────────────────────────
- *
- * Mirrors `store.css` so the Library and Store pages have a consistent
- * filter UX. All classes are namespaced with `library-` to avoid
- * colliding with `.store-*` selectors that share the same look.
- *
- * Density variants are applied to both the grid container (to widen /
- * tighten the column minmax) and the individual card (to switch between
- * cover-only / cover+body / cover+overlay-body layouts).
- */
+/* ════════════════════════════════════════════════════════════════════
+   Library Tab — Modern Refactor
+   ────────────────────────────────────────────────────────────────────
+   A ground-up restyle of the Library page. Built entirely on the app's
+   shared design tokens (--color-*, --space-*, --radius-*, --shadow-*,
+   --transition-*) so every theme (dark / light / nord / cyberpunk …)
+   stays in lockstep. The goals of this pass:
 
-/* ── Library Filter Sidebar ──────────────────────────────────────── */
+     1. A unified, sticky top toolbar that owns search + sort + density,
+        so the most-used controls are always one glance away.
+     2. A slimmer, collapsible filter rail with segmented status
+        controls and pill toggles instead of checkbox lists.
+     3. Refined game cards: glass cover, gradient body overlay in
+        cinematic, calmer hover, and a modern "quick action" play FAB.
+     4. A hero that doubles as a cover-collage wallpaper, with animated
+        KPI tiles.
+     5. Polished rails, empty states, and virtualized grid.
 
-.library-filter-sidebar {
+   All class names are namespaced `lib-` to avoid colliding with the
+   Store page's `store-*` selectors.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Page shell ─────────────────────────────────────────────────────── */
+
+.lib-page {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+  padding: var(--space-lg) var(--space-2xl) var(--space-4xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  animation: libPageIn 360ms var(--ease-enter);
+}
+
+.lib-page--bigscreen {
+  padding: 0;
+  gap: 0;
+  animation: none;
+}
+
+@keyframes libPageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   HERO
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-hero {
+  position: relative;
+  border-radius: var(--radius-2xl);
+  padding: var(--space-xl) var(--space-2xl);
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  isolation: isolate;
+  animation: libHeroIn 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes libHeroIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Cover-collage wallpaper: the hero loads a few cover thumbnails as a
+   blurred, dimmed backdrop so the page feels like *your* library
+   rather than a generic panel. Pure decoration. */
+.lib-hero-collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 1fr;
+  opacity: 0.5;
+  z-index: -2;
+  filter: blur(26px) saturate(1.4);
+  transform: scale(1.25);
+  mask-image: linear-gradient(110deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.35) 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(110deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.35) 55%, transparent 100%);
+  pointer-events: none;
+}
+
+.lib-hero-collage img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lib-hero-veil {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--color-bg-secondary) 92%, transparent) 0%, color-mix(in srgb, var(--color-bg-secondary) 55%, transparent) 60%, transparent 100%),
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-accent) 22%, transparent) 0%, transparent 55%),
+    radial-gradient(120% 140% at 100% 100%, color-mix(in srgb, var(--color-info) 14%, transparent) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.lib-hero-content {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+.lib-hero-text {
+  min-width: 260px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.lib-hero-greeting {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+  letter-spacing: -0.6px;
+  line-height: 1.05;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+}
+
+.lib-hero-greeting-dot {
+  color: var(--color-accent);
+  text-shadow: 0 0 18px var(--color-accent-glow);
+}
+
+.lib-hero-subtitle {
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.45;
+  max-width: 560px;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
+}
+
+.lib-hero-actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.lib-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px var(--space-lg);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
+  white-space: nowrap;
+}
+
+.lib-hero-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.lib-hero-btn--primary {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 8px 24px var(--color-accent-glow);
+}
+
+.lib-hero-btn--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px var(--color-accent-glow);
+}
+
+.lib-hero-btn--ghost {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.lib-hero-btn--ghost:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: translateY(-2px);
+}
+
+.lib-hero-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── KPI tiles ─────────────────────────────────────────────────────── */
+
+.lib-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+}
+
+.lib-stat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  opacity: 0;
+  animation: libStatIn 460ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform var(--transition-normal), border-color var(--transition-normal),
+    box-shadow var(--transition-normal);
+}
+
+.lib-stat::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--stat-accent, var(--color-accent));
+  opacity: 0.85;
+}
+
+.lib-stat:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--stat-accent, var(--color-accent)) 45%, var(--color-border));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes libStatIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lib-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  color: var(--stat-accent, var(--color-accent));
+  background: color-mix(in srgb, var(--stat-accent, var(--color-accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--stat-accent, var(--color-accent)) 30%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--stat-accent, var(--color-accent)) 22%, transparent);
+}
+
+.lib-stat-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.lib-stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.lib-stat-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-stat-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.lib-stat-subtext {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   RAILS (Continue Playing / Recently Added)
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-rail {
+  animation: libRailIn 520ms cubic-bezier(0.16, 1, 0.3, 1) 120ms backwards;
+}
+
+@keyframes libRailIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lib-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.lib-rail-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.lib-rail-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.lib-rail-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.lib-rail-icon--continue {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 32%, transparent);
+}
+
+.lib-rail-icon--recent {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, transparent);
+}
+
+.lib-rail-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+  letter-spacing: -0.2px;
+}
+
+.lib-rail-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 2px 0 0 0;
+}
+
+.lib-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.lib-rail-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+.lib-rail-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lib-rail-toggle:active {
+  transform: scale(0.92);
+}
+
+.lib-rail-toggle svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(180deg);
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lib-rail--collapsed .lib-rail-toggle svg {
+  transform: rotate(0deg);
+}
+
+/* Collapse animation via grid-template-rows trick. */
+.lib-rail-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+}
+
+.lib-rail-body--collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.lib-rail-body--collapsed .lib-rail-viewport {
+  visibility: hidden;
+  transition: visibility 0ms linear 300ms;
+}
+
+.lib-rail-viewport {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  visibility: visible;
+  transition: visibility 0ms linear 300ms;
+}
+
+.lib-rail-track {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px var(--space-xs) var(--space-lg);
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.lib-rail-track::-webkit-scrollbar {
+  height: 6px;
+}
+
+.lib-rail-track::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.lib-rail-track::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-light);
+}
+
+.lib-rail-item {
+  flex: 0 0 150px;
+  scroll-snap-align: start;
+}
+
+@media (min-width: 600px) {
+  .lib-rail-item {
+    flex: 0 0 172px;
+  }
+}
+
+.lib-rail-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 50%, transparent);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.lib-rail-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.lib-rail-empty-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.lib-rail-fade {
+  position: absolute;
+  top: 0;
+  bottom: var(--space-lg);
+  width: 40px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.lib-rail-fade--left {
+  left: 0;
+  background: linear-gradient(90deg, var(--color-bg-primary), transparent);
+}
+
+.lib-rail-fade--right {
+  right: 0;
+  background: linear-gradient(270deg, var(--color-bg-primary), transparent);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   STICKY TOOLBAR
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-toolbar {
+  position: sticky;
+  top: var(--space-md);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-bg-primary) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  flex-wrap: wrap;
+}
+
+.lib-toolbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.lib-toolbar-title h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lib-toolbar-count {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lib-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* Prominent pill search */
+.lib-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 var(--space-md);
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.lib-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.lib-search svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.lib-search:focus-within svg {
+  color: var(--color-accent);
+}
+
+.lib-search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  width: 100%;
+  padding: 0;
+}
+
+.lib-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Sort + density get a unified glass group */
+.lib-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.lib-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.lib-icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lib-icon-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.lib-icon-btn.active {
+  color: #fff;
+  background: var(--color-accent);
+  box-shadow: 0 2px 10px var(--color-accent-glow);
+}
+
+.lib-icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Sort dropdown */
+.lib-sort {
+  position: relative;
+}
+
+.lib-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 var(--space-md);
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.lib-sort-trigger:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.lib-sort-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lib-sort-trigger.open {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.lib-sort-trigger-icon {
+  display: inline-flex;
+  color: var(--color-text-secondary);
+}
+
+.lib-sort-trigger-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lib-sort-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.lib-sort-trigger.open .lib-sort-chevron {
+  transform: rotate(180deg);
+}
+
+.lib-sort-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  margin: 0;
+  padding: var(--space-2xs) 0;
+  list-style: none;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-accent-glow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 60;
+  animation: libSortIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes libSortIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.lib-sort-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.lib-sort-option:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.lib-sort-option-icon {
+  display: inline-flex;
+  color: var(--color-text-muted);
+}
+
+.lib-sort-option-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lib-sort-option.active {
+  color: var(--color-accent);
+}
+
+.lib-sort-option.active .lib-sort-option-icon {
+  color: var(--color-accent);
+}
+
+.lib-sort-check {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  color: var(--color-accent);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   FILTER CHIPS ROW
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.lib-chip-count {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  margin-right: var(--space-2xs);
+}
+
+.lib-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px 4px var(--space-sm);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
+  color: var(--color-accent);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  line-height: 1.2;
+  font-weight: var(--font-weight-medium);
+}
+
+.lib-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 50%;
+  opacity: 0.65;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.lib-chip button:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.lib-chip button svg {
+  width: 11px;
+  height: 11px;
+}
+
+.lib-chip-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.lib-chip-reset:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   LAYOUT: filter rail + main grid
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-layout {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: flex-start;
+}
+
+.lib-rail-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  transition: width var(--transition-normal);
+}
+
+.lib-rail-wrap.collapsed {
+  width: 44px;
+}
+
+/* Collapse toggle sits flush-left as a vertical rail. */
+.lib-rail-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.lib-rail-toggle-btn svg {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--transition-normal);
+}
+
+.lib-rail-wrap.collapsed .lib-rail-toggle-btn svg {
+  transform: rotate(180deg);
+}
+
+.lib-rail-toggle-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+.lib-rail-toggle-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lib-rail-toggle-btn.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.lib-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   FILTER SIDEBAR
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-filter {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  padding: var(--space-md);
+  width: 248px;
+  flex-shrink: 0;
+  padding: var(--space-lg);
   background: var(--color-surface-glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  width: 250px;
-  flex-shrink: 0;
-  align-self: flex-start;
   position: sticky;
-  top: var(--space-lg);
-  max-height: calc(100vh - 2 * var(--space-lg));
+  top: calc(var(--space-md) + 64px);
+  max-height: calc(100vh - 96px);
   overflow-y: auto;
-  box-shadow: var(--shadow-md);
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
+  box-shadow: var(--shadow-md);
 }
 
-.library-filter-sidebar::-webkit-scrollbar {
+.lib-filter::-webkit-scrollbar {
   width: 8px;
 }
 
-.library-filter-sidebar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.library-filter-sidebar::-webkit-scrollbar-thumb {
+.lib-filter::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-.library-filter-sidebar::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-light);
-  background-clip: padding-box;
-}
-
-.library-filter-section {
+.lib-filter-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
@@ -61,1033 +1030,711 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.library-filter-section:last-of-type {
+.lib-filter-section:last-of-type {
   padding-bottom: 0;
   border-bottom: none;
 }
 
-.library-filter-heading {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 0 0 var(--space-xs) 0;
-}
-
-.library-filter-search {
-  width: 100%;
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  outline: none;
-  transition: border-color 0.15s ease;
-  font-family: inherit;
-}
-
-.library-filter-search:focus {
-  border-color: var(--color-accent);
-}
-
-.library-filter-search::placeholder {
-  color: var(--color-text-muted);
-}
-
-.library-filter-select {
-  width: 100%;
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  outline: none;
-  transition: border-color 0.15s ease;
-  font-family: inherit;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa0b0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-}
-
-.library-filter-select:focus {
-  border-color: var(--color-accent);
-}
-
-.library-filter-select:hover {
-  border-color: var(--color-text-secondary);
-}
-
-.library-filter-radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.library-filter-radio {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  padding: var(--space-xs) var(--space-xs);
-  border-radius: var(--radius-sm);
-  transition: background 0.1s ease;
-}
-
-.library-filter-radio:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.library-filter-radio input[type="radio"] {
-  accent-color: var(--color-accent);
-  margin: 0;
-  cursor: pointer;
-}
-
-.library-filter-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.library-filter-checkbox {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  padding: var(--space-xs) var(--space-xs);
-  border-radius: var(--radius-sm);
-  transition: background 0.1s ease;
-}
-
-.library-filter-checkbox:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.library-filter-checkbox input[type="checkbox"] {
-  accent-color: var(--color-accent);
-  margin: 0;
-  cursor: pointer;
-}
-
-.library-filter-year-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.library-filter-year-input {
-  width: 70px;
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  outline: none;
-  font-family: inherit;
-}
-
-.library-filter-year-input:focus {
-  border-color: var(--color-accent);
-}
-
-.library-filter-year-sep {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.library-filter-slider {
-  width: 100%;
-  accent-color: var(--color-accent);
-  margin: var(--space-xs) 0 0 0;
-}
-
-.library-filter-actions {
-  display: flex;
-  gap: var(--space-sm);
-  margin-top: var(--space-xs);
-}
-
-.library-filter-btn {
-  flex: 1;
-  padding: var(--space-xs) var(--space-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  transition: all 0.15s ease;
-  font-family: inherit;
-}
-
-.library-filter-btn:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
-}
-
-/* ── Library Filter Chips ────────────────────────────────────────── */
-
-.library-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-  align-items: center;
-  margin-bottom: var(--space-md);
-}
-
-.library-filter-count {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin-right: var(--space-xs);
-  font-weight: var(--font-weight-semibold);
-  font-variant-numeric: tabular-nums;
-}
-
-.library-filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px var(--space-sm);
-  background: var(--color-surface-glass);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  line-height: 1.2;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-.library-filter-chip button {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-left: var(--space-xs);
-  transition: color 0.1s ease;
-}
-
-.library-filter-chip button:hover {
-  color: var(--color-text-primary);
-}
-
-.library-filter-chip button svg {
-  width: 12px;
-  height: 12px;
-}
-
-.library-filter-reset-all {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-family: inherit;
-  margin-left: var(--space-xs);
-}
-
-.library-filter-reset-all:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-text-secondary);
-}
-
-/* ── Library Page Layout: container, sidebar + grid ─────────────── */
-
-/* The page container. Fills the full width of the main content area
- * (the app already constrains it to the sidebar/main grid column) so
- * the hero, rails and grid use all available horizontal space instead
- * of being capped at a narrow centered column. */
-.library-grid {
-  width: 100%;
-  padding: var(--space-xl) var(--space-2xl) var(--space-3xl);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-}
-
-.library-grid--bigscreen {
-  display: block;
-  max-width: none;
-  padding: 0;
-  gap: 0;
-}
-
-.library-heading {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-  letter-spacing: -0.2px;
-}
-
-.library-layout {
-  display: flex;
-  gap: var(--space-lg);
-  align-items: flex-start;
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Library Hero — greeting + stats + quick actions
-   ════════════════════════════════════════════════════════════════════ */
-
-/* Compact hero — the original spec called for a tall, magazine-style
-   greeting + 4 stat tiles taking up nearly half the viewport. We've
-   tightened every dimension (~35% shorter vertical footprint) while
-   keeping the same hierarchy: greeting -> subtitle -> CTAs -> stats.
-   The slice-by-slice rationale lives inline on each rule so future
-   tweaks are local and obvious. */
-.library-hero {
-  position: relative;
-  margin: 0 0 var(--space-md) 0;
-  padding: var(--space-lg) var(--space-xl);
-  border-radius: var(--radius-2xl);
-  background:
-    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-accent) 16%, transparent) 0%, transparent 55%),
-    radial-gradient(120% 140% at 100% 100%, color-mix(in srgb, var(--color-info) 10%, transparent) 0%, transparent 50%),
-    var(--color-surface-glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  isolation: isolate;
-  animation: libraryHeroIn 420ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes libraryHeroIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Subtle ambient glow at the top of the hero — height dropped from
-   220px to 130px so the gradient doesn't drown the slimmer hero. */
-.library-hero-glow {
-  position: absolute;
-  inset: -50% -10% auto -10%;
-  height: 130px;
-  background: radial-gradient(
-    ellipse at 50% 0%,
-    color-mix(in srgb, var(--color-accent) 30%, transparent) 0%,
-    transparent 75%
-  );
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.85;
-}
-
-.library-hero-content {
+.lib-filter-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-lg);
-  margin-bottom: var(--space-lg);
-  flex-wrap: wrap;
-}
-
-.library-hero-text {
-  flex: 1;
-  min-width: 260px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.library-hero-greeting {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  font-size: clamp(22px, 2.8vw, 28px);
+  font-size: 10px;
   font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   margin: 0;
-  letter-spacing: -0.3px;
-  line-height: 1.15;
 }
 
-.library-hero-greeting-dot {
-  color: var(--color-accent);
-  text-shadow: 0 0 14px var(--color-accent-glow);
-}
-
-.library-hero-subtitle {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
-  line-height: 1.4;
-  max-width: 520px;
-}
-
-.library-hero-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-
-.library-hero-btn {
+.lib-filter-count-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px var(--space-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  font-family: inherit;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-  border: 1px solid transparent;
-}
-
-.library-hero-btn svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-
-.library-hero-btn--primary {
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
   background: var(--color-accent);
   color: #fff;
-  border-color: var(--color-accent);
-  box-shadow: 0 4px 14px var(--color-accent-glow);
-}
-
-.library-hero-btn--primary:hover {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px var(--color-accent-glow);
-}
-
-.library-hero-btn--secondary {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border-color: var(--color-border);
-}
-
-.library-hero-btn--secondary:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  transform: translateY(-1px);
-}
-
-.library-hero-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.library-hero-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--space-sm);
-}
-
-/* ── Stat Card ─────────────────────────────────────────────────── */
-
-.library-stat-card {
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  background: color-mix(in srgb, var(--color-bg-secondary) 70%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  transition: all var(--transition-normal);
-  opacity: 0;
-  animation: statCardIn 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  overflow: hidden;
-}
-
-.library-stat-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    120% 120% at 0% 0%,
-    color-mix(in srgb, var(--color-accent) 10%, transparent),
-    transparent 60%
-  );
-  pointer-events: none;
-}
-
-.library-stat-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent);
-}
-
-@keyframes statCardIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.library-stat-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-  color: var(--color-accent);
-  box-shadow: 0 0 10px var(--color-accent-glow);
-}
-
-.library-stat-card-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-/* Right-aligned column for the label/subtext below the value. Lives
-   directly under the icon in the horizontal card grid; sits to the
-   right of the value because the value gets `flex: 1` and pushes the
-   label group to the trailing edge — gives the row a clear
-   "metric → supporting copy" silhouette. */
-.library-stat-card-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex-shrink: 0;
-  text-align: right;
-}
-
-.library-stat-card-label {
-  font-size: 10px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-
-.library-stat-card-subtext {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-/* Value size for the compact horizontal layout. Smaller than the
-   prior 2xl (24px) so it fits inside the now-thinner card without
-   line-wrapping on common playtime values like "1234h". Tailored to
-   align visually with the 30px icon — `var(--font-size-xl)` (20px)
-   reads as the right "next to" weight rather than competing with
-   the icon. `flex: 1` so the value takes the remaining horizontal
-   space inside the card and pushes the right-aligned label/subtext
-   column to the trailing edge; `min-width: 0` keeps a long numeric
-   value from stretching the parent flex item past its column. */
-.library-stat-card-value {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  line-height: 1.05;
-  letter-spacing: -0.2px;
-  font-variant-numeric: tabular-nums;
-  flex: 1;
-  min-width: 0;
-  /* `overflow: hidden` + `text-overflow: ellipsis` keeps a runaway value
-     (e.g. "1234567h") from blowing out the card width; the wrapped
-     `word-break: break-word` rule is gone now that the card has a
-     fixed single-line silhouette. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Tone variants — swap the icon badge hue without changing layout */
-.library-stat-card--success .library-stat-card-icon {
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 25%, transparent);
-}
-
-.library-stat-card--success:hover {
-  border-color: color-mix(in srgb, var(--color-success) 40%, var(--color-border));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
-    0 0 0 1px color-mix(in srgb, var(--color-success) 25%, transparent);
-}
-
-.library-stat-card--info .library-stat-card-icon {
-  color: var(--color-info);
-  background: color-mix(in srgb, var(--color-info) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--color-info) 25%, transparent);
-}
-
-.library-stat-card--info:hover {
-  border-color: color-mix(in srgb, var(--color-info) 40%, var(--color-border));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
-    0 0 0 1px color-mix(in srgb, var(--color-info) 25%, transparent);
-}
-
-.library-stat-card--warning .library-stat-card-icon {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--color-warning) 25%, transparent);
-}
-
-.library-stat-card--warning:hover {
-  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3),
-    0 0 0 1px color-mix(in srgb, var(--color-warning) 25%, transparent);
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Recently Added Rail — horizontal scrolling row of recent games
-   ════════════════════════════════════════════════════════════════════ */
-
-.library-rail {
-  margin: 0 0 var(--space-xl) 0;
-  animation: libraryRailIn 500ms cubic-bezier(0.16, 1, 0.3, 1) 200ms backwards;
-  /* Sole source of truth for the rail icon's square dimension.
-   * `.library-rail-icon` reads it for width/height; `.library-rail-subtitle`
-   * reads it (+ `--space-sm`) for its padding-left so the two stay aligned. */
-  --library-rail-icon-size: 24px;
-}
-
-@keyframes libraryRailIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}/* Rail header stacks the title row (icon + title + toggle) above the
- * subtitle. The old "Scroll" hint badge + header-actions wrapper are
- * gone — the rail's scrollbar + edge fades already advertise
- * scrollability. */
-.library-rail-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: var(--space-md);
-  padding: 0 var(--space-xs);
-}
-
-/* Title row: [icon] [title ...] [toggle]. `flex: 1` on the title
- * pushes the toggle flush-right; `min-width: 0` lets a long title
- * shrink-wrap instead of pushing the toggle off-screen. */
-.library-rail-title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-/* Section icon badge (24×24 tinted pill). Smaller than the hero
- * stat-card icons (30px) because the rail icon sits next to a small
- * title + toggle and shouldn't compete with them. NOTE: no default
- * tint on the base rule — every variant supplies its own color via
- * a modifier (--continue / --recent) so adding a new rail forces an
- * explicit hue choice instead of inheriting the accent default. */
-.library-rail-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--library-rail-icon-size);
-  height: var(--library-rail-icon-size);
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-}
-
-.library-rail-icon svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Continue Playing = success (active session). */
-.library-rail-icon--continue {
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
-}
-
-/* Recently Added = warning (freshly imported). */
-.library-rail-icon--recent {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
-}
-
-.library-rail-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-  letter-spacing: -0.1px;
-  flex: 1;
-  min-width: 0;
-}
-
-.library-rail-subtitle {
-  /* `padding-left` matches `--library-rail-icon-size` + gap so the
-   * subtitle text sits under the title text, not under the icon. */
-  padding-left: calc(var(--library-rail-icon-size) + var(--space-sm));
-  margin: 2px 0 0 0;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
-/* ── Rail collapse toggle button ──────────────────────────── */
-
-/* Compact icon button that flips the section between collapsed and
- * expanded. Mirrors the visual weight of the `.library-rail-hint`
- * badge next to it so they sit nicely as a pair in the header row.
- * The `aria-expanded` attribute drives the chevron rotation through
- * the descendant selector `.library-rail--collapsed .library-rail-toggle svg`
- * so the toggled state doesn't need its own JS class. */
-.library-rail-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.library-rail-toggle:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-  border-color: var(--color-accent);
-  box-shadow: 0 0 8px var(--color-accent-glow);
-}
-
-.library-rail-toggle:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.library-rail-toggle:active {
-  transform: scale(0.94);
-}
-
-.library-rail-toggle svg {
-  width: 14px;
-  height: 14px;
-  /* The icon is a chevron-down SVG. We rotate it 180° in the
-   * base (expanded) state so it appears as a chevron-UP — the
-   * conventional affordance for "section is currently open, click
-   * to collapse it back up into the header".
-   * In the collapsed variant we drop the rotation so the icon
-   * shows as a chevron-DOWN instead — "section is closed, click to
-   * expand it downward". The rotation animates so the transition
-   * between states reads cleanly. */
-  transform: rotate(180deg);
-  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.library-rail--collapsed .library-rail-toggle svg {
-  transform: rotate(0deg);
-}
-
-/* ── Rail collapse animation (grid-template-rows trick) ───── */
-
-/* The CSS grid `0fr ↔ 1fr` track trick is the cleanest way to
- * animate to an intrinsic (auto) height — a plain `max-height` would
- * need a hard-coded ceiling that introduces a "dead time" at the
- * end of the animation (animating to e.g. 600px when the real
- * content is ~280px tall wastes ~half the duration traversing empty
- * space). Browsers compute the resolved fr→px value mid-transition
- * based on actual content height, so the animation feels linear.
- *
- * Requires the inner `.library-rail-viewport` child to:
- *   - `overflow: hidden` so content past the collapsing row tracks
- *     gets clipped cleanly,
- *   - `min-height: 0` so the grid track can shrink all the way to zero
- *     (the default `min-height: auto` on grid items would otherwise
- *     preserve the intrinsic content height forever). */
-.library-rail-viewport-wrapper {
-  display: grid;
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 220ms ease;
-}
-
-.library-rail-viewport-wrapper--collapsed {
-  grid-template-rows: 0fr;
-  opacity: 0;
-}
-
-.library-rail-viewport-wrapper--collapsed .library-rail-viewport {
-  /* Remove keyboard focus from hidden cards during and after the
-   * collapse so screen-reader / tab navigation can't reach elements
-   * the user can't visually see. The focus ring on the toggle button
-   * already covers the only keyboard-visible control in this state. */
-  visibility: hidden;
-  transition: visibility 0ms linear 280ms;
-}
-
-/* ── Rail empty state ─────────────────────────────────────────── */
-
-/* Friendly placeholder shown when a rail has no items to display.
- * Stays inline with the rail's vertical rhythm so the user sees the
- * section exists (and where new items will land) instead of the
- * whole rail silently disappearing. The dashed border + tertiary
- * background differentiates it from a regular card — a solid border
- * would make it look like a broken card and confuse the user. */
-/* Empty state — column layout with a centered icon + caption so the
- * surface reads as an intentional "nothing here yet" placeholder
- * instead of a truncated row that looks like a broken card. */
-.library-rail-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-xl) var(--space-md);
-  text-align: center;
-  background: color-mix(in srgb, var(--color-bg-tertiary) 50%, transparent);
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-}
-
-/* Circular icon badge above the caption. Visual rhyme with the
- * populated-rail's `.library-rail-icon` so empty vs. populated
- * reads as one UI surface in different states. */
-.library-rail-empty-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.library-rail-empty-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.library-rail-empty p {
-  margin: 0;
-  max-width: 400px;
-}
-
-.library-rail-viewport {
-  position: relative;
-  /* `min-height: 0` + `overflow: hidden` are required for the parent
-   * `.library-rail-viewport-wrapper` grid track `0fr ↔ 1fr` collapse
-   * animation to work:
-   *   - `overflow: hidden` clips children (including the absolutely
-   *     positioned edge fades and the track's overflow-x content)
-   *     cleanly while the row track collapses vertically,
-   *   - `min-height: 0` overrides the grid item default of
-   *     `min-height: auto` (which preserves the child's intrinsic
-   *     content height and would prevent `0fr` from actually
-   *     shrinking it to zero). Without this, the animation snaps
-   *     back to full height at the end.
-   *
-   * The baseline `visibility: visible` transition with a 0ms delay
-   * is a no-op on the way OUT (visibly visible by default), but the
-   * collapsed variant below overrides it with a 280ms DELAYED
-   * visibility transition so cards become non-tabbable only AFTER
-   * the collapse animation completes — symmetric timing in both
-   * directions keeps keyboard / screen-reader focus from landing on
-   * invisible cards. */
-  overflow: hidden;
-  min-height: 0;
-  visibility: visible;
-  transition: visibility 0ms linear 280ms;
-}
-
-.library-rail-track {
-  display: flex;
-  gap: var(--space-md);
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 2px var(--space-xs) var(--space-md);
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
-  /* Remove the default scrollbar look in WebKit but keep functionality */
-}
-
-.library-rail-track::-webkit-scrollbar {
-  height: 6px;
-}
-
-.library-rail-track::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.library-rail-track::-webkit-scrollbar-thumb {
-  background: var(--color-border);
   border-radius: var(--radius-full);
 }
 
-.library-rail-track::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-light);
+.lib-filter-search {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  font-family: inherit;
 }
 
-.library-rail-item {
-  flex: 0 0 140px;
-  scroll-snap-align: start;
-}
-
-@media (min-width: 600px) {
-  .library-rail-item {
-    flex: 0 0 160px;
-  }
-}
-
-/* Rail card — compact, cover-forward */
-.library-rail-card {
-  cursor: pointer;
-  padding: 0;
-  overflow: hidden;
-  transition: all var(--transition-normal);
-  /* The Card primitive renders its children inside a `.ui-card__body`
-   * wrapper that ships with a default padding. Without this override
-   * the rail cards would inherit that padding and the cover would no
-   * longer be flush against the card's top edge. Mirrors the same
-   * rule already applied to `.library-card` further down in this
-   * file. */
-}
-
-/* Same `.ui-card__body` padding override as `.library-card` — see the
- * note in `src/App.css` for the rationale. Without this, the rail
- * card's cover starts ~16px below the card's top edge and the body
- * gets an extra ~16px gutter, which throws off the cover/body
- * proportions and makes cards feel inconsistent across the row. */
-.library-rail-card .ui-card__body {
-  padding: 0;
-}
-
-.library-rail-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md), 0 0 20px var(--color-accent-glow);
+.lib-filter-search:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.library-rail-card-cover {
+.lib-filter-search::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Segmented control for status / play-status / source */
+.lib-segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.lib-segment-option {
+  flex: 1;
+  min-width: max-content;
+  background: transparent;
+  border: none;
+  padding: 6px var(--space-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.lib-segment-option:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.lib-segment-option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.lib-segment-option.active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 2px 8px var(--color-accent-glow);
+}
+
+/* Pill checkboxes for genres / platforms */
+.lib-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 1px;
+}
+
+.lib-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.lib-pill:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.lib-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.lib-pill.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-accent-glow);
+}
+
+/* Year range */
+.lib-year-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.lib-year-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  outline: none;
+  font-family: inherit;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  transition: border-color var(--transition-fast);
+}
+
+.lib-year-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.lib-year-sep {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Rating slider */
+.lib-rating-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lib-rating-value {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-rating-slider {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  outline: none;
+  margin: var(--space-xs) 0 0 0;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.lib-rating-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  transition: transform var(--transition-fast);
+}
+
+.lib-rating-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.lib-rating-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+.lib-filter-reset {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.lib-filter-reset:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   GRID + VIRTUALIZATION
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-lg);
+}
+
+.lib-cards.density-compact {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--space-md);
+}
+
+.lib-cards.density-cinematic {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-xl);
+  justify-items: center;
+}
+
+.lib-cards.density-list {
+  grid-template-columns: 1fr;
+}
+
+.lib-cards > .lib-card {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.lib-card.density-compact {
+  max-width: 150px;
+}
+
+.lib-card.density-cinematic {
+  max-width: 300px;
+}
+
+.lib-grid-scroll {
   position: relative;
-  /* Fixed height (not aspect-ratio) so every card in the rail is
-   * guaranteed the same cover size regardless of the source image's
-   * intrinsic dimensions. `aspect-ratio: 3 / 4` looked correct in
-   * isolation but the underlying `<img>` could still stretch the
-   * wrapper when the image's natural aspect was tall (2:3 cover art
-   * vs 16:9 Steam library_hero), producing the inconsistent card
-   * heights you saw in the screenshot. `flex-shrink: 0` keeps the
-   * cover from collapsing if the body content ever gets long enough
-   * to compete for vertical space inside the Card flex container. */
-  height: 200px;
-  flex-shrink: 0;
-  /* Light "loading" fallback (NOT `--color-bg-tertiary`). The dark
-   * tertiary showed through every half-loaded Steam CDN cover and
-   * the Continue Playing / Recently Added rails ended up reading as
-   * nearly black. The Card primitive's `.ui-card--surface` rule
-   * gives the card root a surface bg; the cover mustn't be darker
-   * than that or the image looks inset-into-a-hole. */
+  width: 100%;
+}
+
+.lib-grid-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.lib-cards--virtual {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   GAME CARD
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-card {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard);
+}
+
+.lib-card:hover {
+  transform: translateY(-6px);
+  border-color: var(--color-accent);
+  box-shadow: 0 16px 34px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent),
+    0 0 30px var(--color-accent-glow);
+}
+
+.lib-card:active {
+  transform: translateY(-2px) scale(0.985);
+}
+
+.lib-card.running {
+  border-color: var(--color-success) !important;
+  box-shadow: 0 0 26px color-mix(in srgb, var(--color-success) 45%, transparent) !important;
+}
+
+/* Cover */
+.lib-card-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
   background: var(--color-surface);
   overflow: hidden;
 }
 
-.library-rail-card-cover img {
+.lib-card-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform var(--transition-slow);
-  /* Defensive guard against future rule changes that might dim
-   * cover art (the symptom reported on 2026-07-16 was that the
-   * Continue Playing + Recently Added cards read as nearly black
-   * even with a working `<img>`). Pin `opacity` + `filter` so any
-   * upstream rule setting `opacity < 1` / `filter: brightness(<1)`
-   * loses. The general `.library-rail-card` rule still has the
-   * `:hover` lift transition untouched. */
+  display: block;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   opacity: 1;
   filter: none;
 }
 
-.library-rail-card:hover .library-rail-card-cover img {
+.lib-card:hover .lib-card-cover img {
+  transform: scale(1.07);
+}
+
+.lib-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  background: linear-gradient(135deg, var(--color-bg-tertiary), var(--color-bg-secondary));
+}
+
+.lib-card-placeholder svg {
+  width: 44px;
+  height: 44px;
+  opacity: 0.3;
+}
+
+/* Top-row badges on cover */
+.lib-card-badges {
+  position: absolute;
+  top: var(--space-xs);
+  left: var(--space-xs);
+  right: var(--space-xs);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.lib-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.lib-card-badge--running {
+  background: color-mix(in srgb, var(--color-success) 90%, transparent);
+  color: #04221a;
+}
+
+.lib-card-badge--playtime {
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.lib-card-badge--status {
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.lib-card-badge--status.installed {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+}
+
+/* Quick play FAB — appears on hover */
+.lib-card-fab {
+  position: absolute;
+  bottom: var(--space-sm);
+  right: var(--space-sm);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 18px var(--color-accent-glow);
+  opacity: 0;
+  transform: translateY(8px) scale(0.9);
+  transition: opacity var(--transition-fast), transform var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.lib-card-fab svg {
+  width: 17px;
+  height: 17px;
+}
+
+.lib-card:hover .lib-card-fab {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.lib-card-fab:hover {
+  background: var(--color-accent-hover);
+  transform: translateY(0) scale(1.06);
+}
+
+.lib-card-fab:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.lib-card.running .lib-card-fab {
+  background: var(--color-success);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-success) 45%, transparent);
+}
+
+/* Body */
+.lib-card-body {
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.lib-card-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.lib-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.lib-card-platform {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  text-transform: capitalize;
+}
+
+.lib-card-developer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lib-card-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lib-card-genre {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+
+.lib-card-notes {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lib-card-notes.is-empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Compact density: cover only */
+.lib-card.density-compact .lib-card-body {
+  display: none;
+}
+
+.lib-card.density-compact .lib-card-cover {
+  aspect-ratio: 2 / 3;
+}
+
+/* Cinematic density: body overlays cover */
+.lib-card.density-cinematic .lib-card-cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+}
+
+.lib-card.density-cinematic .lib-card-body {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: var(--space-lg);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.72) 60%, rgba(0, 0, 0, 0) 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.lib-card.density-cinematic .lib-card-name {
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  font-size: var(--font-size-sm);
+  -webkit-line-clamp: 2;
+}
+
+.lib-card.density-cinematic .lib-card-platform {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.lib-card.density-cinematic .lib-card-developer,
+.lib-card.density-cinematic .lib-card-notes {
+  display: none;
+}
+
+.lib-card.density-cinematic .lib-card-fab {
+  pointer-events: auto;
+}
+
+/* List density: horizontal row */
+.lib-card.density-list {
+  min-height: 88px;
+}
+
+.lib-card.density-list > .ui-card__body {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.lib-card.density-list .lib-card-cover {
+  width: 150px;
+  flex-shrink: 0;
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.lib-card.density-list .lib-card-body {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-lg);
+  justify-content: center;
+  gap: 2px;
+}
+
+.lib-card.density-list .lib-card-name {
+  font-size: var(--font-size-md);
+  -webkit-line-clamp: 1;
+}
+
+.lib-card.density-list .lib-card-developer {
+  margin: 0;
+  -webkit-line-clamp: 1;
+}
+
+.lib-card.density-list .lib-card-notes {
+  margin: 2px 0 0 0;
+  -webkit-line-clamp: 1;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   RAIL CARD (compact cover-forward)
+   ──────────────────────────────────────────────────────────────────── */
+
+.lib-rail-card {
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal),
+    border-color var(--transition-normal);
+}
+
+.lib-rail-card .ui-card__body {
+  padding: 0;
+}
+
+.lib-rail-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md), 0 0 20px var(--color-accent-glow);
+  border-color: var(--color-accent);
+}
+
+.lib-rail-cover {
+  position: relative;
+  height: 210px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.lib-rail-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+  opacity: 1;
+  filter: none;
+}
+
+.lib-rail-card:hover .lib-rail-cover img {
   transform: scale(1.06);
 }
 
-.library-rail-card-cover-placeholder {
+.lib-rail-cover-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   height: 100%;
   color: var(--color-text-muted);
+  background: linear-gradient(135deg, var(--color-bg-tertiary), var(--color-bg-secondary));
 }
 
-.library-rail-card-cover-placeholder svg {
-  width: 32px;
-  height: 32px;
+.lib-rail-cover-placeholder svg {
+  width: 34px;
+  height: 34px;
   opacity: 0.4;
 }
 
-.library-rail-card-platform {
+.lib-rail-platform {
   position: absolute;
   top: var(--space-xs);
   left: var(--space-xs);
@@ -1105,14 +1752,21 @@
   pointer-events: none;
 }
 
-.library-rail-card-body {
+.lib-rail-player-chip {
+  position: absolute;
+  bottom: var(--space-xs);
+  left: var(--space-xs);
+  z-index: 2;
+}
+
+.lib-rail-body {
   padding: var(--space-sm) var(--space-md);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.library-rail-card-name {
+.lib-rail-name {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
@@ -1122,19 +1776,13 @@
   line-height: 1.3;
 }
 
-.library-rail-card-meta {
+.lib-rail-meta {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* Continue Playing rail — recolors the "Xh ago" meta line so the
- * user can tell the two rails apart at a glance. (The old bar-accent
- * override for this variant is gone — that whole CSS path was
- * removed when the title bar itself was replaced by `.library-rail-icon
- * .library-rail-icon--continue`.) */
-
-.library-rail--continue .library-rail-card-meta--continue {
+.lib-rail-meta--continue {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1142,13 +1790,8 @@
   font-weight: var(--font-weight-semibold);
 }
 
-/* Tiny dot prefix on the "Xh ago" / "Xd ago" text so it reads as a
- * status pill rather than a generic metadata line. The dot uses the
- * success colour at low opacity so it doesn't compete with the card's
- * hover glow. */
-.library-rail--continue .library-rail-card-meta--continue::before {
+.lib-rail-meta--continue::before {
   content: "";
-  display: inline-block;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -1157,61 +1800,29 @@
   flex-shrink: 0;
 }
 
-/* Edge fade masks — pure visual hint, never block input */
-.library-rail-fade {
-  position: absolute;
-  top: 0;
-  bottom: var(--space-md);
-  width: 36px;
-  pointer-events: none;
-  z-index: 1;
-}
+/* ────────────────────────────────────────────────────────────────────
+   EMPTY STATES
+   ──────────────────────────────────────────────────────────────────── */
 
-.library-rail-fade--left {
-  left: 0;
-  background: linear-gradient(
-    90deg,
-    var(--color-bg-primary),
-    transparent
-  );
-}
-
-.library-rail-fade--right {
-  right: 0;
-  background: linear-gradient(
-    270deg,
-    var(--color-bg-primary),
-    transparent
-  );
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Library Empty State — 3-card quick-action grid
-   ════════════════════════════════════════════════════════════════════ */
-
-.library-empty-hero {
+/* Library-level empty (no games at all) */
+.lib-empty {
   position: relative;
-  max-width: 720px;
-  margin: var(--space-xl) auto;
+  max-width: 760px;
+  margin: var(--space-2xl) auto;
   padding: var(--space-2xl) var(--space-xl);
   text-align: center;
-  background: linear-gradient(
-    180deg,
-    var(--color-surface),
-    var(--color-bg-secondary)
-  );
+  background: linear-gradient(180deg, var(--color-surface), var(--color-bg-secondary));
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-2xl);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  isolation: isolate;
-  animation: libraryEmptyIn 460ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-lg);
+  animation: libEmptyIn 480ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes libraryEmptyIn {
+@keyframes libEmptyIn {
   from {
     opacity: 0;
-    transform: scale(0.98) translateY(8px);
+    transform: scale(0.98) translateY(10px);
   }
   to {
     opacity: 1;
@@ -1219,69 +1830,61 @@
   }
 }
 
-/* Decorative gradient orb behind the content */
-.library-empty-hero-orb {
+.lib-empty-orb {
   position: absolute;
-  top: -120px;
+  top: -140px;
   left: 50%;
   transform: translateX(-50%);
-  width: 360px;
-  height: 360px;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--color-accent) 22%, transparent) 0%,
-    transparent 70%
-  );
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 24%, transparent) 0%, transparent 70%);
   pointer-events: none;
   z-index: -1;
-  opacity: 0.9;
 }
 
-.library-empty-hero-icon {
+.lib-empty-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
+  width: 68px;
+  height: 68px;
   margin-bottom: var(--space-lg);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   color: var(--color-accent);
-  box-shadow: 0 0 24px var(--color-accent-glow);
+  box-shadow: 0 0 26px var(--color-accent-glow);
 }
 
-.library-empty-hero-icon svg {
-  width: 32px;
-  height: 32px;
+.lib-empty-icon svg {
+  width: 34px;
+  height: 34px;
 }
 
-.library-empty-hero-title {
-  font-size: var(--font-size-xl);
+.lib-empty-title {
+  font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
   margin: 0 0 var(--space-sm) 0;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.4px;
 }
 
-.library-empty-hero-subtitle {
+.lib-empty-subtitle {
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
-  margin: 0 0 var(--space-xl) 0;
-  line-height: 1.5;
+  margin: 0 auto var(--space-xl);
+  line-height: 1.55;
   max-width: 480px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
-.library-empty-hero-actions {
+.lib-empty-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: var(--space-md);
   text-align: left;
 }
 
-.library-empty-hero-card {
+.lib-empty-card {
   position: relative;
   display: flex;
   align-items: center;
@@ -1289,65 +1892,71 @@
   padding: var(--space-md) var(--space-lg);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   cursor: pointer;
   font-family: inherit;
   text-align: left;
-  transition: all var(--transition-normal);
   color: var(--color-text-primary);
+  transition: all var(--transition-normal);
 }
 
-.library-empty-hero-card:hover {
+.lib-empty-card:hover {
   transform: translateY(-3px);
   border-color: var(--color-accent);
   background: var(--color-bg-hover);
   box-shadow: var(--shadow-md), 0 0 20px var(--color-accent-glow);
 }
 
-.library-empty-hero-card:focus-visible {
+.lib-empty-card:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-.library-empty-hero-card-icon {
+.lib-empty-card-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   color: var(--color-accent);
   flex-shrink: 0;
-  box-shadow: 0 0 10px var(--color-accent-glow);
+  box-shadow: 0 0 12px var(--color-accent-glow);
   transition: transform var(--transition-fast);
 }
 
-.library-empty-hero-card:hover .library-empty-hero-card-icon {
+.lib-empty-card:hover .lib-empty-card-icon {
   transform: scale(1.08);
 }
 
-.library-empty-hero-card-icon svg {
-  width: 20px;
-  height: 20px;
+.lib-empty-card-icon svg {
+  width: 21px;
+  height: 21px;
 }
 
-/* Phase 2.9 PR 2 ("Motion & Tactile Feedback"): the empty-state's
- * primary action card icon ("Import an EXE") gets a gentle infinite
- * scale-pulse so a first-time user's eye lands on the fastest
- * time-to-value path. The pulse is intentionally slow (2.4s) and
- * small (1.08x) so it stays in the "ambient invitation" register
- * rather than competing with the hero's one-shot entrance animation
- * (`.libraryEmptyIn`, 460ms cubic-bezier). The `.library-hero-btn-
- * -primary` on the same page already pulses via focus-only motion;
- * this rule specializes the empty-state's accent icon into a
- * continuous attention pull.
- *
- * Honours `prefers-reduced-motion: reduce` — falls back to a static
- * icon for users who've opted out of motion (the icon still has
- * its hover scale from the base rule). */
-@keyframes libraryEmptyIconPulse {
+.lib-empty-card-icon--info {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 25%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-info) 25%, transparent);
+}
+
+.lib-empty-card-icon--success {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.lib-empty-card-icon--accent {
+  transform-origin: center;
+  animation: libEmptyPulse 2.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+@keyframes libEmptyPulse {
   0%, 100% {
     transform: scale(1);
   }
@@ -1356,39 +1965,7 @@
   }
 }
 
-.library-empty-hero-card-icon--accent {
-  /* `transform-origin: center` is the default but stating it
-   * explicitly so future tweaks that introduce left/right motion
-   * (e.g. shimmer) don't accidentally drift the pulse origin. */
-  transform-origin: center;
-  animation: libraryEmptyIconPulse 2.4s ease-in-out infinite;
-  /* Will-change nudges the browser into promoting the icon to its
-   * own compositor layer so the 60fps scale animation doesn't
-   * periodically trigger a paint of the surrounding card. */
-  will-change: transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .library-empty-hero-card-icon--accent {
-    animation: none;
-  }
-}
-
-.library-empty-hero-card-icon--info {
-  color: var(--color-info);
-  background: color-mix(in srgb, var(--color-info) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-info) 25%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-info) 25%, transparent);
-}
-
-.library-empty-hero-card-icon--success {
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 14%, transparent);
-  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-success) 25%, transparent);
-}
-
-.library-empty-hero-card-text {
+.lib-empty-card-text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1396,7 +1973,7 @@
   gap: 2px;
 }
 
-.library-empty-hero-card-title {
+.lib-empty-card-title {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
@@ -1404,14 +1981,14 @@
   line-height: 1.3;
 }
 
-.library-empty-hero-card-desc {
+.lib-empty-card-desc {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   margin: 0;
   line-height: 1.4;
 }
 
-.library-empty-hero-card-cta {
+.lib-empty-card-cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1425,263 +2002,20 @@
   transition: all var(--transition-fast);
 }
 
-.library-empty-hero-card-cta svg {
+.lib-empty-card-cta svg {
   width: 14px;
   height: 14px;
 }
 
-.library-empty-hero-card:hover .library-empty-hero-card-cta {
+.lib-empty-card:hover .lib-empty-card-cta {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: #fff;
   transform: translateX(2px);
 }
 
-/* ════════════════════════════════════════════════════════════════════
-   Library Cards — base card, cover, body, density variants
-   ════════════════════════════════════════════════════════════════════ */
-
-/* The Card primitive renders its children inside a `.ui-card__body`
- * wrapper that ships with a default padding. Override it so the cover
- * sits flush against the card's top edge. */
-.library-card .ui-card__body {
-  padding: 0;
-}
-
-.library-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  transition: transform var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    border-color var(--duration-normal) var(--ease-standard);
-}
-
-.library-card:hover {
-  transform: translateY(-6px);
-  border-color: var(--color-accent);
-  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.6),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent),
-    0 0 30px var(--color-accent-glow);
-}
-
-.library-card:active {
-  transform: translateY(-2px) scale(0.985);
-}
-
-.library-card.running {
-  border-color: var(--color-success) !important;
-  box-shadow: 0 0 25px color-mix(in srgb, var(--color-success) 45%, transparent) !important;
-}
-
-.library-card-cover {
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  background: var(--color-surface);
-  overflow: hidden;
-  position: relative;
-}
-
-.library-card-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1),
-    filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-  opacity: 1;
-  filter: none;
-}
-
-.library-card:hover .library-card-cover img {
-  transform: scale(1.08);
-}
-
-.library-card-cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-}
-
-.library-card-cover-placeholder svg {
-  width: 40px;
-  height: 40px;
-  opacity: 0.3;
-}
-
-.library-card-body {
-  padding: var(--space-md) var(--space-lg) var(--space-lg);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.library-card-name {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin: 0;
-  line-height: 1.3;
-}
-
-.library-card-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.library-card-platform {
-  display: inline-block;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-}
-
-.library-card-developer {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.library-card-genres {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.library-card-genre-tag {
-  font-size: 10px;
-}
-
-.library-card-notes {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.library-card-notes-empty {
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-.library-main {
-  flex: 1;
-  min-width: 0;
-}
-
-/* ── Library Toolbar (heading + density + result context) ─────────── */
-
-/* Sticky toolbar that keeps the section title and density control in
- * view while the grid scrolls. A hairline bottom border + subtle
- * surface tint separates it from the content without a heavy block. */
-.library-header {
-  position: static;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  padding: 0;
-  flex-wrap: wrap;
-}
-
-.library-header h2 {
-  margin: 0;
-}
-
-/* Density segmented control — compact pill group with an active glow. */
-.library-density-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 3px var(--space-sm) 3px var(--space-md);
-  background: var(--color-surface-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  width: fit-content;
-}
-
-.library-density-toolbar-label {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  font-weight: var(--font-weight-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.library-density-toggle {
-  display: inline-flex;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  padding: 2px;
-  gap: 2px;
-}
-
-.library-density-btn {
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
-  padding: var(--space-xs);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  transition: all var(--transition-fast);
-}
-
-.library-density-btn svg {
-  width: 16px;
-  height: 16px;
-}
-
-.library-density-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.library-density-btn.active {
-  background: var(--color-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px var(--color-accent-glow);
-}
-
-.library-density-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* ── Library Empty State (filtered but no results) ───────────────── */
-
-.library-empty-filtered {
+/* Filtered-empty (has games, but no matches for filters) */
+.lib-filtered-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1693,31 +2027,31 @@
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-secondary);
-  animation: libraryEmptyIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: libEmptyIn 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.library-empty-filtered-icon {
-  width: 48px;
-  height: 48px;
+.lib-filtered-empty-icon {
+  width: 50px;
+  height: 50px;
   opacity: 0.4;
   color: var(--color-accent);
 }
 
-.library-empty-filtered-title {
+.lib-filtered-empty-title {
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
   font-weight: var(--font-weight-semibold);
   margin: 0;
 }
 
-.library-empty-filtered-subtitle {
+.lib-filtered-empty-subtitle {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin: 0;
   max-width: 360px;
 }
 
-.library-empty-filtered-reset {
+.lib-filtered-empty-reset {
   margin-top: var(--space-sm);
   padding: var(--space-xs) var(--space-md);
   background: transparent;
@@ -1731,1202 +2065,349 @@
   transition: all var(--transition-fast);
 }
 
-.library-empty-filtered-reset:hover {
+.lib-filtered-empty-reset:hover {
   background: var(--color-accent);
   color: #fff;
   box-shadow: 0 4px 14px var(--color-accent-glow);
 }
 
-/* ── Library Card Density Variants ───────────────────────────────── */
-
-/*
- * The grid column minmax changes per density:
- *   - compact   : cover-only cards, tighter columns
- *   - cozy      : default — comfortable card size
- *   - cinematic : larger columns, more whitespace, overlay body
- */
-.library-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--space-lg);
-}
-
-.library-cards.density-compact {
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: var(--space-md);
-}
-
-.library-cards.density-cinematic {
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-xl);
-  justify-items: center;
-}
-
-.library-cards.density-list {
-  grid-template-columns: 1fr;
-}
-
-/*
- * Card-level width guards. Without these, hardcoded cover widths or
- * unbreakable body text (long platform strings, long genre chains) push
- * the grid item past its column boundary.
- */
-.library-cards > .library-card {
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-}
-
-.library-card.density-compact {
-  max-width: 140px;
-}
-
-.library-card.density-cinematic {
-  max-width: 300px;
-}
-
-/* Compact: cover only, hide everything below */
-.library-card.density-compact .library-card-body {
-  display: none;
-}
-
-.library-card.density-compact .library-card-cover {
-  aspect-ratio: 2 / 3;
-}
-
-/* Cinematic: enlarge cover, overlay the body on the cover with a
-   gradient. Hide the long-form body text (developer, notes) so the
-   overlay stays compact. */
-.library-card.density-cinematic .library-card-cover {
-  position: relative;
-  aspect-ratio: 3 / 4;
-}
-
-.library-card.density-cinematic .library-card-body {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: var(--space-lg);
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.95) 0%,
-    rgba(0, 0, 0, 0.75) 60%,
-    rgba(0, 0, 0, 0) 100%
-  );
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.library-card.density-cinematic .library-card-name {
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  -webkit-line-clamp: 2;
-}
-
-.library-card.density-cinematic .library-card-meta-row {
-  font-size: var(--font-size-xs);
-}
-
-.library-card.density-cinematic .library-card-platform,
-.library-card.density-cinematic .library-card-rating {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-.library-card.density-cinematic .library-card-genres {
-  font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.library-card.density-cinematic .library-card-genre-tag {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-}
-
-/* Hide long-form fields in cinematic — they don't fit an overlay */
-.library-card.density-cinematic .library-card-developer,
-.library-card.density-cinematic .library-card-notes {
-  display: none;
-}
-
-/* Make sure badges stay visible above the gradient overlay */
-.library-card.density-cinematic .library-card-running-badge,
-.library-card.density-cinematic .library-card-playtime-badge,
-.library-card.density-cinematic .library-card-status-badge {
-  z-index: 2;
-}
-
-/* ── List density: horizontal rows with small cover preview ─────────────
- * NOTE: `.library-card` is a `ui-card` primitive whose children are wrapped
- * in `.ui-card__body`. So the flex row must be applied to THAT wrapper, not
- * directly to `.library-card`, otherwise the cover + body stay stacked. */
-
-.library-card.density-list {
-  min-height: 86px;
-}
-
-.library-card.density-list > .ui-card__body {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-}
-
-.library-card.density-list .library-card-cover {
-  width: 150px;
-  flex-shrink: 0;
-  aspect-ratio: auto;
-  height: 100%;
-  min-height: 0;
-}
-
-.library-card.density-list .library-card-body {
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-sm) var(--space-lg);
-  justify-content: center;
-  gap: 2px;
-}
-
-/* Name on its own line, slightly larger, single line */
-.library-card.density-list .library-card-name {
-  font-size: var(--font-size-md);
-  -webkit-line-clamp: 1;
-}
-
-/* Meta badges sit on the same row as the name */
-.library-card.density-list .library-card-meta-row {
-  margin-top: 2px;
-}
-
-/* Developer + genres share a single compact line under the name */
-.library-card.density-list .library-card-developer {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  -webkit-line-clamp: 1;
-}
-
-.library-card.density-list .library-card-genres {
-  margin-top: 2px;
-}
-
-.library-card.density-list .library-card-notes {
-  margin: 2px 0 0 0;
-  font-size: var(--font-size-xs);
-  -webkit-line-clamp: 1;
-}
-
-@media (max-width: 600px) {
-  .library-card.density-list {
-    min-height: 76px;
-  }
-
-  .library-card.density-list .library-card-cover {
-    width: 110px;
-  }
-}
-
-/* ── Responsive ──────────────────────────────────────────────────── */
-
-/* Tablet: slightly narrower rail/sidebar gutter */
-@media (max-width: 1100px) {
-  .library-grid {
-    padding: var(--space-lg) var(--space-xl) var(--space-2xl);
-  }
-}
-
-/* Mobile: stack the sidebar above the grid */
-@media (max-width: 800px) {
-  .library-grid {
-    padding: var(--space-md) var(--space-lg) var(--space-xl);
-  }
-
-  .library-layout {
-    flex-direction: column;
-  }
-
-  .library-filter-sidebar {
-    width: 100%;
-    position: static;
-    max-height: none;
-  }
-
-  .library-cards.density-cinematic {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  }
-
-  .library-header {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: transparent;
-  }
-}
-
-/* ─── Sidebar Filter Icon Button + Modal ────────────────────────────
- *
- * Styles for the filter icon button that lives in the sidebar header
- * next to the search input, plus the modal it opens. The modal reuses
- * the `.library-filter-*` classes above for its inner sections so the
- * filter UX looks identical between the Library page and the sidebar.
- */
-
-.sidebar-search-row {
-  display: flex;
-  gap: var(--space-xs);
-  align-items: stretch;
-}
-
-.sidebar-search-row .sidebar-search {
-  flex: 1;
-  min-width: 0;
-}
-
-.sidebar-filter-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  flex-shrink: 0;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  box-shadow: var(--shadow-sm);
-}
-
-.sidebar-filter-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.sidebar-filter-btn:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-accent);
-  background: var(--color-bg-hover);
-  box-shadow: 0 4px 12px var(--color-accent-glow);
-}
-
-.sidebar-filter-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.sidebar-filter-btn.active {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: 0 0 10px var(--color-accent-glow);
-}
-
-.sidebar-filter-btn.active:hover {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-}
-
-.sidebar-filter-count {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: var(--font-weight-bold);
-  border-radius: var(--radius-full);
-  border: 1.5px solid var(--color-bg-secondary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  font-variant-numeric: tabular-nums;
-  /* A single, brief pulse on mount draws the eye to the badge the moment
-   * it appears, then settles. We avoid an infinite animation because a
-   * constantly-pulsing element next to the user's gaze is distracting
-   * and doesn't add information — the badge is already high-contrast. */
-  animation: sidebarFilterBadgePop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 1;
-}
-
-@keyframes sidebarFilterBadgePop {
-  0% {
-    transform: scale(0.4);
-    opacity: 0;
-  }
-  60% {
-    transform: scale(1.15);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-/* ─── Sidebar Filter Popover ─────────────────────────────
- *
- * Compact, beautiful popover anchored to the filter icon button in the
- * sidebar header. Renders into `document.body` via a portal (the
- * popover component sets `position: fixed` and computes its own
- * coordinates), so this stylesheet only needs to define how the card
- * looks — not where it sits.
- *
- * Design goals:
- *   1. **Smaller** than the prior full-screen modal — fixed
- *      `width: 300px`, max-height clamped to the viewport.
- *   2. **More beautiful** — subtle accent border, soft layered shadows
- *      with a colored glow, gentle fade+scale entrance, polished pill
- *      toggles, live numeric rating badge, and a quiet footer counter.
- *   3. **Next to the icon** — positioned by the component via
- *      `getBoundingClientRect`. SIDEBAR_CONTAINER_STYLES are applied
- *      inline (top/left), so this stylesheet only paints the surface.
- *
- * Motion (`from-left` / `from-right`) picks the entrance direction so
- * the card feels like it's emerging from the icon it was launched
- * from, instead of materializing in the middle of the page.
- */
-
-/* `[data-theme=".../..."]` is also handled — the popover uses:
- *   --color-surface-raised, --color-border, --color-text-*,
- *   --color-accent / --color-accent-glow, --shadow-lg, --radius-*,
- *   --space-*, --font-size-*, --font-weight-*,
- *   --transition-fast / --transition-normal.
- * No hardcoded colors — fully themable.
- */
-
-/* ── Wrapper ─────────────────────────────────────────── */
-
-.sidebar-filter-popover {
-  /* Single source of truth for the popover's width. The position
-   * manager in `SidebarFilterPopover.tsx` reads the rendered width
-   * via `getBoundingClientRect().width`, so changing this value
-   * automatically resizes both the card and its horizontal-flip
-   * logic. The link is documented at the TS end too. */
-  --sidebar-filter-popover-width: 300px;
-
-  position: fixed;
-  z-index: 9000; /* Above sidebar (200), page content, and the
-                    topnav (100) so it always sits on top of the
-                    app surfaces but below modals (9998/9999). */
-  width: var(--sidebar-filter-popover-width);
-  max-height: min(540px, calc(100vh - 24px));
-  display: flex;
-  flex-direction: column;
-  background: var(--color-surface-raised);
-  border: 1px solid color-mix(
-    in srgb,
-    var(--color-accent) 35%,
-    var(--color-border-light)
-  );
-  border-radius: var(--radius-lg);
-  box-shadow:
-    var(--shadow-lg),
-    0 0 0 1px color-mix(in srgb, var(--color-accent) 8%, transparent),
-    0 8px 32px color-mix(in srgb, var(--color-accent) 18%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  overflow: hidden;
-  transform-origin: top left;
-  animation: sidebarFilterPopoverIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  font-family: inherit;
-}
-
-/* When the popover flips onto the left of the anchor, flip the
- * scale origin so the entrance still feels like it's growing outward
- * from the icon. */
-.sidebar-filter-popover.from-right {
-  transform-origin: top right;
-}
-
-@keyframes sidebarFilterPopoverIn {
-  from {
-    opacity: 0;
-    transform: scale(0.94) translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.sidebar-filter-popover:focus {
-  outline: none;
-}
-
-/* ── Header ───────────────────────────────────────────────── */
-
-.sidebar-filter-popover-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--color-accent) 8%, transparent),
-    transparent
-  );
-  flex-shrink: 0;
-}
-
-.sidebar-filter-popover-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  letter-spacing: 0.2px;
-}
-
-.sidebar-filter-popover-title svg {
-  width: 16px;
-  height: 16px;
-  color: var(--color-accent);
-  filter: drop-shadow(0 0 6px var(--color-accent-glow));
-}
-
-.sidebar-filter-popover-header-actions {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.sidebar-filter-popover-icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.sidebar-filter-popover-icon-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.sidebar-filter-popover-icon-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-  border-color: var(--color-border);
-}
-
-.sidebar-filter-popover-icon-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.sidebar-filter-popover-icon-btn[aria-label="Reset filters"]:hover {
-  color: var(--color-warning);
-  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border));
-}
-
-.sidebar-filter-popover-icon-btn[aria-label="Close filters"]:hover {
-  color: var(--color-danger);
-  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border));
-}
-
-/* ── Body ─────────────────────────────────────────────────── */
-
-.sidebar-filter-popover-body {
+/* ────────────────────────────────────────────────────────────────────
+   CONTEXT MENU (reuses existing .context-menu styles if present; the
+   Library page renders it but the base styling lives elsewhere). We
+   keep the class name identical so no behavior change is needed.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ────────────────────────────────────────────────────────────────────
+   BIG SCREEN LIBRARY (controller-first surface)
+   ──────────────────────────────────────────────────────────────────── */
+
+.bigscreen-library-dashboard {
+  padding: var(--space-lg) var(--space-xl) var(--space-3xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  padding: var(--space-md) var(--space-lg) var(--space-lg);
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
-.sidebar-filter-popover-section {
+.bigscreen-library-header-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.sidebar-filter-popover-heading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: 10px;
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 0;
-}
-
-.sidebar-filter-popover-heading-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  font-size: 9px;
-  font-weight: var(--font-weight-bold);
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: var(--radius-full);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.sidebar-filter-popover-heading-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-}
-
-/* ── Status: segmented pill control ──────────────────────── */
-
-.sidebar-filter-popover-segmented {
-  display: flex;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 2px;
-  gap: 2px;
-}
-
-.sidebar-filter-popover-segment {
-  flex: 1;
-  background: transparent;
-  border: none;
-  padding: 6px var(--space-sm);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: inherit;
-  letter-spacing: 0.2px;
-}
-
-.sidebar-filter-popover-segment:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.sidebar-filter-popover-segment:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.sidebar-filter-popover-segment.active {
-  background: var(--color-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px var(--color-accent-glow);
-}
-
-/* ── Chips: wrapping toggle pills ────────────────────────── */
-
-.sidebar-filter-popover-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-height: 132px;
-  overflow-y: auto;
-  padding: 1px;
-}
-
-.sidebar-filter-popover-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: inherit;
-  white-space: nowrap;
-  line-height: 1.3;
-}
-
-.sidebar-filter-popover-chip:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-accent);
-  background: var(--color-bg-hover);
-}
-
-.sidebar-filter-popover-chip:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.sidebar-filter-popover-chip.active {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: 0 2px 6px var(--color-accent-glow);
-}
-
-/* ── Year: dual compact inputs ───────────────────────────── */
-
-.sidebar-filter-popover-year {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.sidebar-filter-popover-year-input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 10px;
-  font-size: var(--font-size-xs);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-  font-family: inherit;
-  outline: none;
-  transition: all var(--transition-fast);
-  font-variant-numeric: tabular-nums;
-  /* Hide native spinner controls for compactness; range is enforced
-   * by min/max attributes on the input. */
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-
-.sidebar-filter-popover-year-input::-webkit-outer-spin-button,
-.sidebar-filter-popover-year-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.sidebar-filter-popover-year-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-glow);
-}
-
-.sidebar-filter-popover-year-dash {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  flex-shrink: 0;
-  user-select: none;
-}
-
-/* ── Rating: value badge + slider ────────────────────────── */
-
-.sidebar-filter-popover-rating-value {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  height: 20px;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  font-variant-numeric: tabular-nums;
-  transition: all var(--transition-fast);
-}
-
-.sidebar-filter-popover-rating-value.active {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: 0 0 8px var(--color-accent-glow);
-}
-
-.sidebar-filter-popover-slider {
-  width: 100%;
-  height: 4px;
-  appearance: none;
-  -webkit-appearance: none;
-  background: var(--color-border);
-  border-radius: var(--radius-full);
-  outline: none;
-  margin: var(--space-xs) 0 0 0;
-  cursor: pointer;
-}
-
-.sidebar-filter-popover-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  background: var(--color-accent);
-  border: 2px solid var(--color-surface-raised);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 0 8px var(--color-accent-glow);
-  transition: transform var(--transition-fast);
-}
-
-.sidebar-filter-popover-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-}
-
-.sidebar-filter-popover-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  background: var(--color-accent);
-  border: 2px solid var(--color-surface-raised);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 0 8px var(--color-accent-glow);
-}
-
-/* ── Sort: compact styled dropdown ─────────────────────────── */
-
-.sidebar-filter-popover-select {
-  width: 100%;
-  padding: 8px 30px 8px var(--space-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  outline: none;
-  cursor: pointer;
-  font-family: inherit;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa0b0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  transition: all var(--transition-fast);
-}
-
-.sidebar-filter-popover-select:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-glow);
-}
-
-.sidebar-filter-popover-select:hover {
-  border-color: var(--color-text-secondary);
-}
-
-/* ── Footer: live result count ───────────────────────────── */
-
-.sidebar-filter-popover-footer {
-  padding: var(--space-sm) var(--space-lg);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-  flex-shrink: 0;
-}
-
-.sidebar-filter-popover-count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-.sidebar-filter-popover-count strong {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  font-variant-numeric: tabular-nums;
-}
-/* Steam Integration styles live in src/styles/settings.css */
-
-/* ===========================================================================
-   Phase 2.9 PR 2 ("Motion & Tactile Feedback"): library empty-state accent
-   icon pulse
-   ────────────────────────────────
-   The empty-state's primary action card icon ("Import an EXE") gets a
-   gentle infinite scale-pulse so first-time users' eyes land on the
-   fastest time-to-value path. The pulse is intentionally slow (2.4s)
-   and small (1.08x) so it stays in the "ambient invitation" register
-   rather than competing with the hero's one-shot entrance animation
-   (`.libraryEmptyIn`, 460ms cubic-bezier). Appended at the end of the
-   file so cascade ordering puts this rule after any earlier
-   `.library-empty-hero-card-icon` modifier rules. */
-
-@keyframes libraryEmptyIconPulse {
-  0%, 100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.08);
-  }
-}
-
-.library-empty-hero-card-icon--accent {
-  /* transform-origin: center (the default) stated explicitly so a
-   * future tweak that introduces left/right motion (e.g. shimmer)
-   * doesn't accidentally drift the pulse origin sideways. */
-  transform-origin: center;
-  animation: libraryEmptyIconPulse 2.4s ease-in-out infinite;
-  /* Will-change nudges the browser into promoting the icon to its
-   * own compositor layer so the 60fps scale animation doesn't
-   * periodically trigger a paint of the surrounding card. */
-  will-change: transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .library-empty-hero-card-icon--accent {
-    animation: none;
-  }
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Library Refactor — Toolbar, Search, Sidebar Collapse, Virtual Grid
-   ════════════════════════════════════════════════════════════════════ */
-
-/* ── Header: title block + toolbar controls ─────────────────────────── */
-
-.library-header {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-sm) 0;
-  margin-bottom: var(--space-md);
-  flex-wrap: wrap;
-  background: linear-gradient(
-    to bottom,
-    var(--color-bg-primary) 70%,
-    transparent
-  );
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
-.library-header-title {
+.bigscreen-library-title-row {
   display: flex;
   align-items: baseline;
-  gap: var(--space-sm);
+  gap: var(--space-md);
 }
 
-.library-header-result-count {
+.bigscreen-library-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  margin: 0;
+  letter-spacing: -0.4px;
+}
+
+.bigscreen-library-count {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-  font-weight: var(--font-weight-medium);
   font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
 }
 
-.library-toolbar-controls {
+.bigscreen-library-chips-row {
   display: flex;
-  align-items: center;
-  gap: var(--space-sm);
   flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: center;
 }
 
-/* Inline search box living in the sticky toolbar — gives the most-used
-   filter first-class, always-visible real estate instead of hiding it in
-   the sidebar. Themed to the same glass surface as the density pill. */
-.library-toolbar-search {
-  display: flex;
+.bigscreen-filter-chip {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 var(--space-sm);
-  height: 36px;
+  padding: 8px var(--space-md);
   background: var(--color-surface-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
 }
 
-.library-toolbar-search:focus-within {
+.bigscreen-filter-chip span {
+  color: var(--color-text-primary);
+}
+
+.bigscreen-filter-chip:hover,
+.bigscreen-filter-chip:focus-visible {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.bigscreen-filter-chip--search {
+  padding-left: var(--space-md);
+}
+
+.bigscreen-filter-chip--search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.bigscreen-filter-chip--search.search-active {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
 
-.library-toolbar-search svg {
-  width: 15px;
-  height: 15px;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.library-toolbar-search input {
+.bigscreen-filter-chip--search input {
   border: none;
   background: transparent;
   outline: none;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   font-family: inherit;
-  width: 180px;
+  width: 140px;
   padding: 0;
 }
 
-.library-toolbar-search input::placeholder {
+.bigscreen-filter-chip--search input::placeholder {
   color: var(--color-text-muted);
 }
 
-/* ── Sidebar wrapper: collapse toggle + collapsible panel ────────────── */
+.bigscreen-filter-chip--reset {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
 
-.library-sidebar-wrap {
-  position: relative;
-  flex-shrink: 0;
+.bigscreen-filter-chip--reset:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.bigscreen-library-grid-container {
+  min-height: 200px;
+}
+
+.bigscreen-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-lg);
+}
+
+.bigscreen-library-empty-state {
   display: flex;
-  gap: var(--space-sm);
-  align-items: flex-start;
-  transition: width var(--transition-normal);
-}
-
-/* When collapsed, the panel is gone but the toggle rail stays put. */
-.library-sidebar-wrap.collapsed {
-  width: 44px;
-}
-
-.library-sidebar-toggle {
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  background: var(--color-surface-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.library-sidebar-toggle svg {
-  width: 16px;
-  height: 16px;
-}
-
-.library-sidebar-toggle:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-accent);
-  background: var(--color-bg-hover);
-  box-shadow: 0 0 10px var(--color-accent-glow);
-}
-
-.library-sidebar-toggle:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* Slot the existing sidebar into the wrap; keep its sticky behaviour. */
-.library-sidebar-wrap .library-filter-sidebar {
-  position: sticky;
-  top: var(--space-lg);
-  margin: 0;
-}
-
-/* ── Virtualized grid ─────────────────────────────────────────────────
-   The scroll container owns the height; an inner spacer reserves the
-   full scrollable height, and the grid is translated to the visible
-   offset so only on-screen rows mount. */
-
-/* The grid now scrolls with the page (no nested clipped scroll box),
-   so the sort menu / sidebar popovers are never cut off and the list
-   always reaches the end of the page. The height is reserved purely
-   by the inner spacer; this wrapper owns no overflow. */
-.library-grid-scroll {
-  position: relative;
-  width: 100%;
-}
-
-.library-grid-spacer {
-  position: relative;
-  width: 100%;
-}
-
-.library-cards--virtual {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  will-change: transform;
-}
-
-/* ── Sort menu (in toolbar) ─────────────────────────────────────────── */
-
-.library-sort-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.library-sort-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 var(--space-sm) 0 var(--space-md);
-  background: var(--color-surface-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  font-family: inherit;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.library-sort-trigger-icon {
-  display: inline-flex;
-  color: var(--color-text-secondary);
-}
-
-.library-sort-trigger-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.library-sort-trigger-label {
-  white-space: nowrap;
-}
-
-.library-sort-chevron {
-  width: 14px;
-  height: 14px;
+  padding: var(--space-3xl);
+  text-align: center;
   color: var(--color-text-muted);
-  transition: transform var(--transition-fast);
+  gap: var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
 }
 
-.library-sort-trigger.open .library-sort-chevron {
-  transform: rotate(180deg);
-}
-
-.library-sort-trigger:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.library-sort-trigger:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.library-sort-list {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 200px;
+.bigscreen-library-empty-state h3 {
+  color: var(--color-text-primary);
   margin: 0;
-  padding: var(--space-2xs) 0;
-  list-style: none;
+  font-size: var(--font-size-lg);
+}
+
+.bigscreen-library-empty-state p {
+  margin: 0;
+  max-width: 360px;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+/* Big Screen overlay drawer */
+.bigscreen-overlay-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: libEmptyIn 180ms ease;
+}
+
+.bigscreen-overlay-drawer-panel {
+  width: min(420px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-accent-glow);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  z-index: 50;
-  animation: sortMenuIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
 
-@keyframes sortMenuIn {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.bigscreen-overlay-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.library-sort-option {
+.bigscreen-overlay-drawer-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.bigscreen-overlay-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  transition: all var(--transition-fast);
+}
+
+.bigscreen-overlay-drawer-close:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.bigscreen-overlay-drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.bigscreen-overlay-options-list,
+.bigscreen-overlay-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.bigscreen-overlay-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.bigscreen-overlay-drawer-option {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  width: 100%;
-  padding: var(--space-xs) var(--space-md);
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   font-family: inherit;
   cursor: pointer;
   text-align: left;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 
-.library-sort-option:hover {
+.bigscreen-overlay-options-grid .bigscreen-overlay-drawer-option {
+  justify-content: flex-start;
+}
+
+.bigscreen-overlay-drawer-option:hover,
+.bigscreen-overlay-drawer-option:focus-visible {
+  border-color: var(--color-accent);
   background: var(--color-bg-hover);
-  color: var(--color-text-primary);
 }
 
-.library-sort-option-icon {
+.bigscreen-overlay-drawer-option.option-active {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.option-checkbox {
   display: inline-flex;
-  color: var(--color-text-muted);
-}
-
-.library-sort-option-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.library-sort-option.active {
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  font-size: 11px;
   color: var(--color-accent);
+  flex-shrink: 0;
 }
 
-.library-sort-option.active .library-sort-option-icon {
-  color: var(--color-accent);
+.option-label {
+  flex: 1;
 }
 
-.library-sort-check {
-  width: 15px;
-  height: 15px;
-  margin-left: auto;
-  color: var(--color-accent);
-}
+/* ────────────────────────────────────────────────────────────────────
+   RESPONSIVE
+   ──────────────────────────────────────────────────────────────────── */
 
-/* ── Sticky toolbar responsive ──────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .lib-page {
+    padding: var(--space-lg) var(--space-xl) var(--space-2xl);
+  }
+  .lib-hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 
 @media (max-width: 800px) {
-  .library-header {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: transparent;
-    position: static;
+  .lib-page {
+    padding: var(--space-md) var(--space-lg) var(--space-xl);
   }
-
-  .library-toolbar-search input {
-    width: 120px;
+  .lib-layout {
+    flex-direction: column;
+  }
+  .lib-filter {
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+  .lib-cards.density-cinematic {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+  .lib-toolbar {
+    position: static;
+    border-radius: var(--radius-lg);
+  }
+  .lib-search {
+    max-width: none;
+  }
+  .lib-empty {
+    margin: var(--space-xl) auto;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .library-sort-list,
-  .library-hero,
-  .library-stat-card,
-  .library-rail {
+  .lib-page,
+  .lib-hero,
+  .lib-stat,
+  .lib-rail,
+  .lib-sort-list,
+  .lib-empty,
+  .lib-filtered-empty,
+  .bigscreen-overlay-drawer {
     animation: none !important;
   }
-  .library-cards--virtual {
+  .lib-cards--virtual {
     will-change: auto;
+  }
+  .lib-empty-card-icon--accent {
+    animation: none;
   }
 }

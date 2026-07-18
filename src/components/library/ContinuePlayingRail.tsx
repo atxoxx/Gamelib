@@ -9,50 +9,17 @@ import { useSteamAppId } from "../../hooks/useSteamAppId";
 
 interface ContinuePlayingRailProps {
   games: Game[];
-  /** Maximum number of cards to render. Defaults to 12. */
   maxItems?: number;
-  /** Window in days — a game counts as "continue-worthy" if its
-   *  `lastPlayed` falls within the last N days. Defaults to 14. */
   windowDays?: number;
-  /**
-   * Optional click handler. When supplied, clicking a card invokes
-   * this callback instead of the default "navigate to game page"
-   * behavior. The LibraryPage uses the default.
-   */
   onCardClick?: (game: Game) => void;
 }
 
-/** localStorage key for the Continue Playing rail's collapsed state.
- *  Versioned suffix so a schema change can co-exist with stale reads. */
 const COLLAPSED_STORAGE_KEY = "gamelib:rail:continue-playing:collapsed:v1";
 
 /**
- * "Continue Playing" rail: surfaces games the user has played in the
- * last N days, sorted by most-recently-played first.
- *
- * **Always renders** when the Library isn't empty — the rail shows a
- * friendly empty state instead of vanishing when no games have been
- * played yet, so the user always knows the feature exists and where
- * finished sessions will land.
- *
- * **Filtering:**
- *  - Only games with a `lastPlayed` timestamp in the window survive.
- *  - The cutoff is recomputed on every render so the rail naturally
- *    drops off old games as the user plays new ones — no separate
- *    cleanup pass needed.
- *  - Sorted desc by `lastPlayed` so the most recently active title
- *    sits on the left (matches the user's mental model: "what did
- *    I just play?").
- *
- * **Steam player count:** each card mounts its own
- * `ContinuePlayingCard` subcomponent which runs `useSteamAppId` to
- * resolve + persist the game's Steam appid (so non-Steam games also
- * get the live concurrent-player badge after a one-shot Steam name
- * lookup). The subcomponent extraction keeps hooks out of the
- * `.map()` callback — `useSteamAppId` is per-card, deduped via the
- * hook's session/in-flight cache so multiple rail mounts across the
- * app round-trip exactly once per gameId in lockstep with the
- * activity dashboard, Game hero, and session rows.
+ * "Continue Playing" rail: surfaces games played in the last N days, sorted
+ * by most-recently-played first. Always rendered when the Library isn't
+ * empty (shows a friendly empty state when nothing qualifies).
  */
 export default function ContinuePlayingRail({
   games,
@@ -72,13 +39,6 @@ export default function ContinuePlayingRail({
       .slice(0, maxItems);
   }, [games, maxItems, windowDays]);
 
-  // Collapsed-by-default: rail is hidden until the user expands it.
-  // The `hasContent` arg drives the "auto-expand when empty" rule
-  // inside the hook — when `recent.length === 0` we always show
-  // the friendly "play a game to start tracking" message so first
-  // visitors can learn the feature exists. The user's actual
-  // collapsed preference is still stored, so when a session
-  // timestamps back into the window later, their choice is restored.
   const [collapsed, toggleCollapsed] = useCollapsedState(
     COLLAPSED_STORAGE_KEY,
     recent.length > 0,
@@ -86,114 +46,69 @@ export default function ContinuePlayingRail({
   );
 
   function handleClick(game: Game) {
-    if (onCardClick) {
-      onCardClick(game);
-      return;
-    }
+    if (onCardClick) return onCardClick(game);
     setSelectedGameId(game.id);
     navigate(`/library/${game.id}`);
   }
 
-  const viewportId = "library-rail-continue-playing-viewport";
+  const viewportId = "lib-rail-continue-viewport";
 
   return (
     <section
-      className={`library-rail library-rail--continue${collapsed ? " library-rail--collapsed" : ""}`}
+      className={`lib-rail lib-rail--continue${collapsed ? " lib-rail--collapsed" : ""}`}
       aria-label="Continue playing — recently played games"
     >
-      <div className="library-rail-header">
-        <div className="library-rail-title-row">
-          <div
-            className="library-rail-icon library-rail-icon--continue"
-            aria-hidden
-          >
-            {/* Play triangle — signals "this rail is about active sessions".
-             * Reuses the same tinted-pill pattern as the hero stat-card
-             * icons so the page reads as one cohesive system. */}
+      <div className="lib-rail-header">
+        <div className="lib-rail-title-row">
+          <div className="lib-rail-icon lib-rail-icon--continue" aria-hidden>
             <svg viewBox="0 0 24 24" fill="currentColor">
               <polygon points="6 4 20 12 6 20 6 4" />
             </svg>
           </div>
-          <h3 className="library-rail-title">Continue Playing</h3>
-          <button
-            type="button"
-            className="library-rail-toggle"
-            onClick={toggleCollapsed}
-            aria-expanded={!collapsed}
-            aria-controls={viewportId}
-            aria-label={
-              collapsed
-                ? "Expand Continue Playing rail"
-                : "Collapse Continue Playing rail"
-            }
-            title={collapsed ? "Expand" : "Collapse"}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
+          <div style={{ minWidth: 0 }}>
+            <h3 className="lib-rail-title">Continue Playing</h3>
+            <p className="lib-rail-subtitle">Pick up where you left off</p>
+          </div>
         </div>
-        <p className="library-rail-subtitle">
-          Pick up where you left off
-        </p>
+        <button
+          type="button"
+          className="lib-rail-toggle"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-controls={viewportId}
+          aria-label={collapsed ? "Expand Continue Playing rail" : "Collapse Continue Playing rail"}
+          title={collapsed ? "Expand" : "Collapse"}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
       </div>
 
-      <div
-        id={viewportId}
-        className={`library-rail-viewport-wrapper${collapsed ? " library-rail-viewport-wrapper--collapsed" : ""}`}
-      >
-        <div className="library-rail-viewport">
+      <div id={viewportId} className={`lib-rail-body${collapsed ? " lib-rail-body--collapsed" : ""}`}>
+        <div className="lib-rail-viewport">
           {recent.length === 0 ? (
-            /* Empty state — the rail stays visible so the user knows
-             * the feature exists and where to look once they've played
-             * a game. Centered icon + caption reads as an intentional
-             * "nothing here yet" surface instead of a broken card. */
-            <div className="library-rail-empty">
-              <div className="library-rail-empty-icon" aria-hidden>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden
-                >
+            <div className="lib-rail-empty">
+              <div className="lib-rail-empty-icon" aria-hidden>
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <polygon points="6 4 20 12 6 20 6 4" />
                 </svg>
               </div>
-              <p>
-                Play a game to start tracking your sessions — finished
-                sessions will show up here.
-              </p>
+              <span>
+                Play a game to start tracking your sessions — finished sessions will show up here.
+              </span>
             </div>
           ) : (
             <>
-              <div className="library-rail-track" ref={railRef}>
+              <div className="lib-rail-track" ref={railRef}>
                 {recent.map((game, i) => (
-                  <div
-                    key={game.id}
-                    className={`library-rail-item animate-fade-in stagger-${Math.min(i + 1, 8)}`}
-                  >
-                    <ContinuePlayingCard
-                      game={game}
-                      onClick={handleClick}
-                    />
+                  <div key={game.id} className={`lib-rail-item animate-fade-in stagger-${Math.min(i + 1, 8)}`}>
+                    <ContinuePlayingCard game={game} onClick={handleClick} />
                   </div>
                 ))}
               </div>
-              <div
-                className="library-rail-fade library-rail-fade--left"
-                aria-hidden
-              />
-              <div
-                className="library-rail-fade library-rail-fade--right"
-                aria-hidden
-              />
+              <div className="lib-rail-fade lib-rail-fade--left" aria-hidden />
+              <div className="lib-rail-fade lib-rail-fade--right" aria-hidden />
             </>
           )}
         </div>
@@ -202,14 +117,6 @@ export default function ContinuePlayingRail({
   );
 }
 
-/**
- * Per-card subcomponent. Extracted so `useSteamAppId` can be called
- * per card (hooks can't live inside a `.map()` callback) while keeping
- * the rail's outer component declarative. The hook also persists
- * positive resolutions back onto the game row via `updateGame`, so a
- * second visit to the rail fires zero Steam round-trips for already-
- * known titles.
- */
 function ContinuePlayingCard({
   game,
   onClick,
@@ -219,56 +126,30 @@ function ContinuePlayingCard({
 }) {
   const { appId: resolvedSteamAppId } = useSteamAppId(game);
   const steamAppId =
-    typeof resolvedSteamAppId === "number"
-      ? resolvedSteamAppId
-      : game.steamAppId ?? null;
+    typeof resolvedSteamAppId === "number" ? resolvedSteamAppId : game.steamAppId ?? null;
 
   return (
-    <Card
-      variant="surface"
-      elevation="1"
-      hoverLift
-      className="library-rail-card"
-      onClick={() => onClick(game)}
-    >
-      <div className="library-rail-card-cover">
+    <Card variant="surface" elevation="1" hoverLift className="lib-rail-card" onClick={() => onClick(game)}>
+      <div className="lib-rail-cover">
         {game.coverArtUrl ? (
           <img src={game.coverArtUrl} alt={game.name} />
         ) : (
-          <div className="library-rail-card-cover-placeholder">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              aria-hidden
-            >
+          <div className="lib-rail-cover-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden>
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
           </div>
         )}
-        <span className="library-rail-card-platform">{game.platform}</span>
-        {/* Live Steam concurrent-player chip overlaid bottom-left on
-            the cover. Hidden automatically when the lookup is in
-            flight or Steam has no data, so non-Steam titles still
-            render cleanly. */}
-        {steamAppId != null ? (
-          <div className="library-rail-card-cover__player-chip">
-            <SteamPlayerCount
-              appId={steamAppId}
-              className="library-rail-card-cover__player-chip-badge"
-            />
+        <span className="lib-rail-platform">{game.platform}</span>
+        {steamAppId != null && (
+          <div className="lib-rail-player-chip">
+            <SteamPlayerCount appId={steamAppId} className="lib-rail-player-chip-badge" />
           </div>
-        ) : null}
+        )}
       </div>
-      <div className="library-rail-card-body">
-        <div className="library-rail-card-name" title={game.name}>
-          {game.name}
-        </div>
-        <div
-          className="library-rail-card-meta library-rail-card-meta--continue"
-          title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}
-        >
+      <div className="lib-rail-body">
+        <div className="lib-rail-name" title={game.name}>{game.name}</div>
+        <div className="lib-rail-meta lib-rail-meta--continue" title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}>
           {formatAgo(game.lastPlayed ?? 0)}
         </div>
       </div>
@@ -276,25 +157,6 @@ function ContinuePlayingCard({
   );
 }
 
-/** Persistence + collapse logic now lives in `useCollapsedState`
- *  (`src/hooks/useCollapsedState.ts`) so the Continue Playing and
- *  Recently Added rails can't drift their storage conventions out
- *  of sync. */
-
-/**
- * Compact "time since" formatter. Matches the look of the existing
- * "1h 30m" playtime strings so the card meta line stays uniform
- * across both rails:
- *
- *  - `< 1h` ago → `"<1h ago"`  (sub-hour precision is noise here)
- *  - `< 24h` ago → `"Xh ago"`
- *  - `< 7d` ago → `"Xd ago"`
- *  - otherwise → `"Xw ago"`
- *
- * `0` (never played — shouldn't appear because the rail filters on
- * the cutoff, but defensive) renders as `"never"` to surface a
- * obviously-bad state instead of "0s ago".
- */
 function formatAgo(timestamp: number): string {
   if (!timestamp) return "never";
   const diffMs = Date.now() - timestamp;

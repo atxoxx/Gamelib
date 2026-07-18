@@ -41,10 +41,8 @@ const SORT_ICONS: Record<LibrarySort, React.ReactNode> = {
 };
 
 /**
- * LibrarySortMenu: a compact dropdown that lets the user reorder the
- * library grid. Themskinned to match the existing density toolbar /
- * segmented controls so it reads as one surface. Closes on outside
- * click and on Escape for keyboard parity.
+ * LibrarySortMenu: compact dropdown to reorder the library grid. Closes on
+ * outside click and Escape.
  */
 export default function LibrarySortMenu({
   value,
@@ -73,47 +71,38 @@ export default function LibrarySortMenu({
   }, [open]);
 
   return (
-    <div
-      ref={rootRef}
-      className={`library-sort-menu${className ? " " + className : ""}`}
-    >
+    <div ref={rootRef} className={`lib-sort${className ? " " + className : ""}`}>
       <button
         type="button"
-        className={`library-sort-trigger${open ? " open" : ""}`}
+        className={`lib-sort-trigger${open ? " open" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         title="Sort library"
       >
-        <span className="library-sort-trigger-icon" aria-hidden="true">
-          {SORT_ICONS[value]}
-        </span>
-        <span className="library-sort-trigger-label">
-          {SORT_LABELS[value]}
-        </span>
-        <svg className="library-sort-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <span className="lib-sort-trigger-icon" aria-hidden="true">{SORT_ICONS[value]}</span>
+        <span className="lib-sort-trigger-label">{SORT_LABELS[value]}</span>
+        <svg className="lib-sort-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
 
       {open && (
-        <ul className="library-sort-list" role="listbox" aria-label="Sort order">
+        <ul className="lib-sort-list" role="listbox" aria-label="Sort order">
           {SORT_OPTIONS.map((opt) => (
             <li key={opt} role="option" aria-selected={opt === value}>
               <button
                 type="button"
-                className={`library-sort-option${opt === value ? " active" : ""}`}
+                className={`lib-sort-option${opt === value ? " active" : ""}`}
                 onClick={() => {
                   onChange(opt);
                   setOpen(false);
                 }}
               >
-                <span className="library-sort-option-icon" aria-hidden="true">
-                  {SORT_ICONS[opt]}
-                </span>
+                <span className="lib-sort-option-icon" aria-hidden="true">{SORT_ICONS[opt]}</span>
                 <span>{SORT_LABELS[opt]}</span>
                 {opt === value && (
-                  <svg className="library-sort-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <svg className="lib-sort-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 )}
