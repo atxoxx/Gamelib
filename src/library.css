@@ -2592,3 +2592,341 @@
     animation: none;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Library Refactor — Toolbar, Search, Sidebar Collapse, Virtual Grid
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Header: title block + toolbar controls ─────────────────────────── */
+
+.library-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
+  background: linear-gradient(
+    to bottom,
+    var(--color-bg-primary) 70%,
+    transparent
+  );
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.library-header-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.library-header-result-count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* Inline search box living in the sticky toolbar — gives the most-used
+   filter first-class, always-visible real estate instead of hiding it in
+   the sidebar. Themed to the same glass surface as the density pill. */
+.library-toolbar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-sm);
+  height: 36px;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.library-toolbar-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.library-toolbar-search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.library-toolbar-search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  width: 180px;
+  padding: 0;
+}
+
+.library-toolbar-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ── Sidebar wrapper: collapse toggle + collapsible panel ────────────── */
+
+.library-sidebar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-sm);
+  align-items: flex-start;
+  transition: width var(--transition-normal);
+}
+
+/* When collapsed, the panel is gone but the toggle rail stays put. */
+.library-sidebar-wrap.collapsed {
+  width: 44px;
+}
+
+.library-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.library-sidebar-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.library-sidebar-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+.library-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Slot the existing sidebar into the wrap; keep its sticky behaviour. */
+.library-sidebar-wrap .library-filter-sidebar {
+  position: sticky;
+  top: var(--space-lg);
+  margin: 0;
+}
+
+/* ── Virtualized grid ─────────────────────────────────────────────────
+   The scroll container owns the height; an inner spacer reserves the
+   full scrollable height, and the grid is translated to the visible
+   offset so only on-screen rows mount. */
+
+/* The grid now scrolls with the page (no nested clipped scroll box),
+   so the sort menu / sidebar popovers are never cut off and the list
+   always reaches the end of the page. The height is reserved purely
+   by the inner spacer; this wrapper owns no overflow. */
+.library-grid-scroll {
+  position: relative;
+  width: 100%;
+}
+
+.library-grid-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.library-cards--virtual {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+
+/* ── Sort menu (in toolbar) ─────────────────────────────────────────── */
+
+.library-sort-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.library-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--space-sm) 0 var(--space-md);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.library-sort-trigger-icon {
+  display: inline-flex;
+  color: var(--color-text-secondary);
+}
+
+.library-sort-trigger-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.library-sort-trigger-label {
+  white-space: nowrap;
+}
+
+.library-sort-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.library-sort-trigger.open .library-sort-chevron {
+  transform: rotate(180deg);
+}
+
+.library-sort-trigger:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.library-sort-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.library-sort-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  margin: 0;
+  padding: var(--space-2xs) 0;
+  list-style: none;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-accent-glow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 50;
+  animation: sortMenuIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes sortMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.library-sort-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.library-sort-option:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.library-sort-option-icon {
+  display: inline-flex;
+  color: var(--color-text-muted);
+}
+
+.library-sort-option-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.library-sort-option.active {
+  color: var(--color-accent);
+}
+
+.library-sort-option.active .library-sort-option-icon {
+  color: var(--color-accent);
+}
+
+.library-sort-check {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  color: var(--color-accent);
+}
+
+/* ── Sticky toolbar responsive ──────────────────────────────────────── */
+
+@media (max-width: 800px) {
+  .library-header {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: transparent;
+    position: static;
+  }
+
+  .library-toolbar-search input {
+    width: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-sort-list,
+  .library-hero,
+  .library-stat-card,
+  .library-rail {
+    animation: none !important;
+  }
+  .library-cards--virtual {
+    will-change: auto;
+  }
+}
