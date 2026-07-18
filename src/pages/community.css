@@ -196,6 +196,144 @@
   letter-spacing: 0.5px;
 }
 
+/* ── Most Played Games Breakdown ─────────────────────────────────────── */
+
+.community-breakdown-card {
+  border: 1px solid var(--color-border);
+}
+
+.community-breakdown-total {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.community-breakdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.community-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.community-breakdown-rank {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.community-breakdown-cover {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+.community-breakdown-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.community-breakdown-cover-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.community-breakdown-cover-fallback svg {
+  width: 20px;
+  height: 20px;
+}
+
+.community-breakdown-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.community-breakdown-name-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xs);
+}
+
+.community-breakdown-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.community-breakdown-time {
+  flex: 0 0 auto;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+}
+
+.community-breakdown-bar {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+}
+
+.community-breakdown-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    90deg,
+    var(--color-accent),
+    color-mix(in srgb, var(--color-accent) 60%, var(--color-info))
+  );
+  transition: width var(--transition-normal);
+}
+
+.community-breakdown-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.community-breakdown-platform {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  color: var(--color-info);
+  font-weight: var(--font-weight-medium);
+}
+
 /* ══════════════════════════════════════════════════════════════════════
    Screenshots Section
    ══════════════════════════════════════════════════════════════════════ */

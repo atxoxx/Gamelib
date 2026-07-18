@@ -139,9 +139,13 @@ const DONUT_PALETTE = [
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatHours(totalMinutes: number): string {
+  if (!totalMinutes || totalMinutes <= 0) return "0m";
   const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
   if (h >= 1000) return `${(h / 1000).toFixed(1)}k h`;
-  return `${h}h`;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -269,6 +273,23 @@ function ProfileSection() {
 
   const totalGames = games.length;
 
+  // Ranked top games (most played) with cover art + progress bars
+  const topGames = useMemo(() => {
+    const maxMin = stats.topGames.length > 0 ? stats.topGames[0].minutes : 0;
+    return stats.topGames.map((g) => {
+      const libGame = games.find((lg) => lg.id === g.gameId);
+      return {
+        ...g,
+        coverArtUrl: libGame?.coverArtUrl,
+        platform: libGame?.platform,
+        pct: maxMin > 0 ? Math.round((g.minutes / maxMin) * 100) : 0,
+      };
+    });
+  }, [stats.topGames, games]);
+
+  // Distinct genres / platforms played
+  const distinctGenres = stats.genreBreakdown.length;
+
   return (
     <div className="community-profile">
       {/* ── KPI Tile Row ─────────────────────────────────────────────── */}
@@ -395,8 +416,20 @@ function ProfileSection() {
             <span className="community-year-stat-label">Games in Library</span>
           </div>
           <div className="community-year-stat">
-            <span className="community-year-stat-value">{stats.mostPlayedGame}</span>
-            <span className="community-year-stat-label">Most Played</span>
+            <span className="community-year-stat-value">{stats.topGames.length}</span>
+            <span className="community-year-stat-label">Games Played</span>
+          </div>
+          <div className="community-year-stat">
+            <span className="community-year-stat-value">{stats.longestSessionMin > 0 ? formatHours(stats.longestSessionMin) : "—"}</span>
+            <span className="community-year-stat-label">Longest Session</span>
+          </div>
+          <div className="community-year-stat">
+            <span className="community-year-stat-value">{stats.avgSessionMin > 0 ? formatHours(stats.avgSessionMin) : "—"}</span>
+            <span className="community-year-stat-label">Avg Session</span>
+          </div>
+          <div className="community-year-stat">
+            <span className="community-year-stat-value">{distinctGenres}</span>
+            <span className="community-year-stat-label">Genres Played</span>
           </div>
           {stats.avgFpsAll > 0 && (
             <div className="community-year-stat">
@@ -405,6 +438,61 @@ function ProfileSection() {
             </div>
           )}
         </div>
+      </Card>
+
+      {/* ── Most Played Games Breakdown ─────────────────────────────────── */}
+      <Card
+        variant="surface"
+        elevation="1"
+        className="community-year-card community-breakdown-card"
+        header={
+          <div className="community-year-header">
+            <span className="community-year-icon">🏆</span>
+            <span>Most Played Games</span>
+            {topGames.length > 0 && (
+              <span className="community-breakdown-total">
+                {topGames.length} of {stats.topGames.length} ranked
+              </span>
+            )}
+          </div>
+        }
+      >
+        {topGames.length > 0 ? (
+          <ol className="community-breakdown-list">
+            {topGames.map((g, i) => (
+              <li key={g.gameId} className="community-breakdown-row">
+                <span className="community-breakdown-rank">{i + 1}</span>
+                <div className="community-breakdown-cover">
+                  {g.coverArtUrl ? (
+                    <img src={g.coverArtUrl} alt="" loading="lazy" />
+                  ) : (
+                    <div className="community-breakdown-cover-fallback">{GamepadIcon}</div>
+                  )}
+                </div>
+                <div className="community-breakdown-info">
+                  <div className="community-breakdown-name-row">
+                    <span className="community-breakdown-name" title={g.gameName}>{g.gameName}</span>
+                    <span className="community-breakdown-time">{formatHours(g.minutes)}</span>
+                  </div>
+                  <div className="community-breakdown-bar">
+                    <div
+                      className="community-breakdown-bar-fill"
+                      style={{ width: `${g.pct}%` }}
+                    />
+                  </div>
+                  <div className="community-breakdown-meta">
+                    {g.platform && <span className="community-breakdown-platform">{g.platform}</span>}
+                    <span>{g.sessions} session{g.sessions !== 1 ? "s" : ""}</span>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="community-empty-chart">
+            <p>Play some games to see your most played breakdown</p>
+          </div>
+        )}
       </Card>
     </div>
   );

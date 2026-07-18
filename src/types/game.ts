@@ -1180,6 +1180,15 @@ export interface ActivityStats {
   weeklyLabels: string[];
   genreBreakdown: { genre: string; minutes: number }[];
   platformBreakdown: { platform: string; minutes: number }[];
+  /** Top played games ranked by total playtime (descending). */
+  topGames: {
+    gameId: string;
+    gameName: string;
+    minutes: number;
+    sessions: number;
+  }[];
+  /** Longest single session in minutes. */
+  longestSessionMin: number;
   avgFpsAll: number;
   avgGpuAll: number;
   avgCpuAll: number;

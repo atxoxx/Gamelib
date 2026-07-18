@@ -284,6 +284,8 @@ function computeStats(sessions: GameSession[], games: Game[]): ActivityStats {
       weeklyLabels: [],
       genreBreakdown: [],
       platformBreakdown: [],
+      topGames: [],
+      longestSessionMin: 0,
       avgFpsAll: 0,
       avgGpuAll: 0,
       avgCpuAll: 0,
@@ -307,6 +309,27 @@ function computeStats(sessions: GameSession[], games: Game[]): ActivityStats {
       mostPlayedGame = name;
     }
   });
+
+  // Top played games — ranked by total playtime, with session counts
+  const topGames = Array.from(gameMap.entries())
+    .map(([gameName, minutes]) => {
+      const gameSessions = sessions.filter((s) => s.gameName === gameName);
+      const game = games.find((g) => g.name === gameName);
+      return {
+        gameId: game?.id ?? gameSessions[0]?.gameId ?? gameName,
+        gameName,
+        minutes,
+        sessions: gameSessions.length,
+      };
+    })
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, 10);
+
+  // Longest single session
+  const longestSessionMin = sessions.reduce(
+    (max, s) => (s.durationMin > max ? s.durationMin : max),
+    0
+  );
 
   // Daily avg (last 7 days)
   const dailyAvg: number[] = [];
@@ -413,6 +436,8 @@ function computeStats(sessions: GameSession[], games: Game[]): ActivityStats {
     weeklyLabels,
     genreBreakdown,
     platformBreakdown,
+    topGames,
+    longestSessionMin,
     avgFpsAll,
     avgGpuAll,
     avgCpuAll,
