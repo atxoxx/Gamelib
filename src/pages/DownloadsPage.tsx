@@ -46,7 +46,14 @@ import { ConfirmModal } from "../components/ui";
 
 const HISTORY_PREVIEW = 5;
 
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenSystem from "../components/bigscreen/BigScreenSystem";
+
 export default function DownloadsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenSystem />;
+  }
   const {
     downloads,
     activeDownloads,

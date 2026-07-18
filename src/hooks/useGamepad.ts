@@ -83,6 +83,7 @@ export interface GamepadState {
    */
   registerTabCycler: (
     fn: (direction: "forward" | "back") => void,
+    priority?: number,
   ) => () => void;
 }
 
@@ -120,9 +121,9 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
   );
 
   // Tab cycler subscription (BigScreenNav uses this for LB/RB).
-  const tabCyclerRef = useRef<
-    ((direction: "forward" | "back") => void) | null
-  >(null);
+  const tabCyclersRef = useRef<
+    { fn: (direction: "forward" | "back") => void; priority: number }[]
+  >([]);
 
   // ── Polling-loop state refs ────────────────────────────────
   const holdDirectionRef = useRef<{ h: number; v: number } | null>(null);
@@ -220,10 +221,13 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
 
   // ── Register tab cycler for BigScreenNav LB/RB ─────────────
   const registerTabCycler = useCallback(
-    (fn: (direction: "forward" | "back") => void): (() => void) => {
-      tabCyclerRef.current = fn;
+    (fn: (direction: "forward" | "back") => void, priority = 0): (() => void) => {
+      const entry = { fn, priority };
+      tabCyclersRef.current.push(entry);
+      // Sort descending by priority so the highest priority is first
+      tabCyclersRef.current.sort((a, b) => b.priority - a.priority);
       return () => {
-        if (tabCyclerRef.current === fn) tabCyclerRef.current = null;
+        tabCyclersRef.current = tabCyclersRef.current.filter((x) => x !== entry);
       };
     },
     [],
@@ -495,14 +499,16 @@ export function useGamepadInternal(enabled: boolean): GamepadState {
       // ── LB (button 4) → BigScreenNav cycle back ────────────
       const lbPressed = gp.buttons[4]?.pressed ?? false;
       if (lbPressed && !prevButtonsRef.current.lb) {
-        tabCyclerRef.current?.("back");
+        const activeCycler = tabCyclersRef.current[0];
+        if (activeCycler) activeCycler.fn("back");
       }
       prevButtonsRef.current.lb = lbPressed;
 
       // ── RB (button 5) → BigScreenNav cycle forward ─────────
       const rbPressed = gp.buttons[5]?.pressed ?? false;
       if (rbPressed && !prevButtonsRef.current.rb) {
-        tabCyclerRef.current?.("forward");
+        const activeCycler = tabCyclersRef.current[0];
+        if (activeCycler) activeCycler.fn("forward");
       }
       prevButtonsRef.current.rb = rbPressed;
 

@@ -11,7 +11,14 @@ import "./news/NewsPage.css";
 
 const ITEMS_PER_PAGE = 20;
 
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenHome from "../components/bigscreen/BigScreenHome";
+
 export default function NewsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenHome />;
+  }
   const {
     articles,
     allArticles,

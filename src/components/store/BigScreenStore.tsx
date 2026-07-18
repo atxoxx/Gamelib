@@ -1,45 +1,48 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { StoreGameSummary } from "../../types/game";
+import { useWishlistContext } from "../../context/WishlistContext";
 import { useFocusable } from "../../hooks/useFocusable";
 import { useGamepad } from "../../hooks/GamepadProvider";
 import BigScreenStoreRail from "./BigScreenStoreRail";
 import BigScreenPill from "../bigscreen/BigScreenPill";
+import BigScreenTabBar, { type TabDef } from "../bigscreen/BigScreenTabBar";
+import type { StoreGameSummary } from "../../types/game";
+import type { DealItem } from "../../types/deals";
 
-interface BigScreenStoreProps {
-  onCardClick: (game: StoreGameSummary) => void;
-}
+type StoreTab = "trending" | "deals" | "wishlist";
 
-const StoreIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="20" height="20">
-    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-    <polyline points="17 6 23 6 23 12" />
-  </svg>
-);
+const STORE_TABS: TabDef<StoreTab>[] = [
+  { id: "trending", label: "Discover" },
+  { id: "deals", label: "Deals" },
+  { id: "wishlist", label: "Wishlist" },
+];
 
-const DetailsIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-    <circle cx="12" cy="12" r="10" />
-    <line x1="12" y1="16" x2="12" y2="12" />
-    <line x1="12" y1="8" x2="12.01" y2="8" />
-  </svg>
-);
-
-export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
+export default function BigScreenStore() {
   const gamepad = useGamepad();
+  const navigate = useNavigate();
+  const { wishlist } = useWishlistContext();
+
+  const [activeTab, setActiveTab] = useState<StoreTab>("trending");
+
+  // Trending state
   const [trending, setTrending] = useState<StoreGameSummary[]>([]);
   const [popular, setPopular] = useState<StoreGameSummary[]>([]);
   const [top, setTop] = useState<StoreGameSummary[]>([]);
   const [comingSoon, setComingSoon] = useState<StoreGameSummary[]>([]);
-  const [newReleases, setNewReleases] = useState<StoreGameSummary[]>([]);
+  const [loadingTrending, setLoadingTrending] = useState(true);
 
-  const [loading, setLoading] = useState(true);
+  // Deals state
+  const [deals, setDeals] = useState<DealItem[]>([]);
+  const [loadingDeals, setLoadingDeals] = useState(false);
 
-  // Fetch all rails concurrently on mount
+  const [selectedGame, setSelectedGame] = useState<StoreGameSummary | null>(null);
+
+  // Fetch Trending categories
   useEffect(() => {
     let active = true;
-    const fetchAll = async () => {
-      setLoading(true);
+    const fetchTrending = async () => {
+      setLoadingTrending(true);
       try {
         const fetchCat = (cat: string) =>
           invoke<StoreGameSummary[]>("fetch_store_games", {
@@ -48,12 +51,11 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
             limit: 12,
           });
 
-        const [tr, pop, tp, cs, nr] = await Promise.all([
+        const [tr, pop, tp, cs] = await Promise.all([
           fetchCat("trending"),
           fetchCat("popular"),
           fetchCat("top"),
           fetchCat("coming_soon"),
-          fetchCat("new_releases"),
         ]);
 
         if (active) {
@@ -61,222 +63,310 @@ export default function BigScreenStore({ onCardClick }: BigScreenStoreProps) {
           setPopular(pop);
           setTop(tp);
           setComingSoon(cs);
-          setNewReleases(nr);
+          if (tr[0] && !selectedGame) setSelectedGame(tr[0]);
         }
       } catch (err) {
-        console.error("Failed to load store categories:", err);
+        console.error("Failed to load trending storefront:", err);
       } finally {
-        if (active) setLoading(false);
+        if (active) setLoadingTrending(false);
       }
     };
-    fetchAll();
+    fetchTrending();
     return () => {
       active = false;
     };
   }, []);
 
-  // ── Featured game & focus-watcher ─────────────────────────────
-  // Same architecture as BigScreenLibrary:
-  //
-  //   1. Build a flat Map<id, StoreGameSummary> across every rail.
-  //   2. Subscribe directly to `gamepad.focusedElement` and read
-  //      `data-game-id` off the focused card to resolve the
-  //      currently-featured game.
-  //   3. Update `featuredGame` only when the focused element really
-  //      points at a different game.
-  //
-  // Initial featuredGame: the first item from `trending` (falling
-  // back through the standard heatmap order) so the Details pane
-  // has something to render before the user touches a gamepad.
-  const initialFeatured = useMemo<StoreGameSummary | null>(
-    () =>
-      trending[0] ?? popular[0] ?? top[0] ?? comingSoon[0] ?? newReleases[0] ?? null,
-    [trending, popular, top, comingSoon, newReleases]
-  );
-  const [featuredGame, setFeaturedGame] = useState<StoreGameSummary | null>(null);
-
-  // Re-anchor the featured game to the freshest rail each time new
-  // store data lands. If a featured game is already showing and a
-  // fresh copy of the SAME id arrives in a rail, the lookup below
-  // swaps in the new reference (so platform / rating updates
-  // picked up via IGDB propagate immediately).
+  // Fetch Deals
   useEffect(() => {
-    if (featuredGame) {
-      const updated = [trending, popular, top, comingSoon, newReleases]
-        .flat()
-        .find((g) => g.id === featuredGame.id);
-      if (updated && updated !== featuredGame) {
-        setFeaturedGame(updated);
-        return;
+    if (activeTab !== "deals") return;
+    let active = true;
+    const fetchDealsList = async () => {
+      setLoadingDeals(true);
+      try {
+        const data = await invoke<DealItem[]>("fetch_isthereanydeal_deals", {
+          offset: 0,
+          limit: 20,
+          platform: "all",
+          minDiscount: 0,
+          store: "all",
+        });
+        if (active) {
+          setDeals(data);
+        }
+      } catch (err) {
+        console.error("Failed to load deals:", err);
+      } finally {
+        if (active) setLoadingDeals(false);
       }
-    }
-    if (!featuredGame && initialFeatured) {
-      setFeaturedGame(initialFeatured);
-    }
-  }, [featuredGame, initialFeatured, trending, popular, top, comingSoon, newReleases]);
+    };
+    fetchDealsList();
+    return () => {
+      active = false;
+    };
+  }, [activeTab]);
 
-  const allGamesById = useMemo(() => {
+  // Sync selected game on load or when trending list changes
+  useEffect(() => {
+    if (!selectedGame && trending[0]) {
+      setSelectedGame(trending[0]);
+    }
+  }, [trending, selectedGame]);
+
+  // Spatial navigation watcher for backdrop sync in trending tab
+  const trendingGamesMap = useMemo(() => {
     const map = new Map<string, StoreGameSummary>();
-    for (const list of [trending, popular, top, comingSoon, newReleases]) {
+    for (const list of [trending, popular, top, comingSoon]) {
       for (const g of list) map.set(String(g.id), g);
     }
     return map;
-  }, [trending, popular, top, comingSoon, newReleases]);
+  }, [trending, popular, top, comingSoon]);
+
+  // Keep selectedGame reference fresh from trending list
+  const featuredGame = useMemo(() => {
+    if (!selectedGame) return null;
+    return trendingGamesMap.get(String(selectedGame.id)) ?? selectedGame;
+  }, [trendingGamesMap, selectedGame]);
 
   useEffect(() => {
+    if (activeTab !== "trending") return;
     const el = gamepad.focusedElement;
     if (!el) return;
     const id = el.getAttribute("data-game-id");
     if (!id) return;
-    const game = allGamesById.get(id);
-    if (game && game !== featuredGame) {
-      setFeaturedGame(game);
+    const game = trendingGamesMap.get(id);
+    if (game && game.id !== selectedGame?.id) {
+      setSelectedGame(game);
     }
-  }, [gamepad.focusedElement, allGamesById, featuredGame]);
+  }, [gamepad.focusedElement, trendingGamesMap, selectedGame, activeTab]);
+
+  // LB/RB tab switcher
+  useEffect(() => {
+    return gamepad.registerTabCycler((direction) => {
+      const currentIndex = STORE_TABS.findIndex((t) => t.id === activeTab);
+      const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+      const nextIndex =
+        direction === "forward"
+          ? (baseIndex + 1) % STORE_TABS.length
+          : (baseIndex - 1 + STORE_TABS.length) % STORE_TABS.length;
+      setActiveTab(STORE_TABS[nextIndex].id);
+    }, 1);
+  }, [gamepad, activeTab]);
+
+  const handleCardClick = useCallback(
+    (game: StoreGameSummary) => {
+      navigate(`/store/${game.slug}`);
+    },
+    [navigate]
+  );
 
   const handleDetails = useCallback(() => {
     if (featuredGame) {
-      onCardClick(featuredGame);
+      handleCardClick(featuredGame);
     }
-  }, [featuredGame, onCardClick]);
+  }, [featuredGame, handleCardClick]);
 
   const detailsFocusable = useFocusable(handleDetails);
 
-  if (loading) {
-    return (
-      <div className="bigscreen-store-dashboard bigscreen-store-dashboard--loading">
-        <div className="store-spinner" />
-        <span>Loading store categories...</span>
-      </div>
-    );
-  }
-
-  // Fallback backdrop image or banner
-  const backdropUrl = featuredGame?.coverUrl
-    ? featuredGame.coverUrl.replace("cover_big", "screenshot_huge").replace("co_svg", "screenshot_huge")
-    : "";
-
   return (
     <div className="bigscreen-store-dashboard">
-      {/* ── Dynamic Backdrop ── */}
-      <div className="bigscreen-dashboard-backdrop-container">
-        {featuredGame && backdropUrl && (
-          <img
-            key={featuredGame.id}
-            src={backdropUrl}
-            alt=""
-            className="bigscreen-dashboard-backdrop-img animate-fade-in"
-            onError={(e) => {
-              // fallback to regular cover if screenshot_huge fails
-              if (featuredGame?.coverUrl) {
-                e.currentTarget.src = featuredGame.coverUrl;
-              }
-            }}
-          />
-        )}
-        <div className="bigscreen-dashboard-backdrop-overlay" />
-      </div>
+      {/* Dynamic full-bleed backdrop (only on trending page for premium vibes) */}
+      {activeTab === "trending" && (
+        <div className="bigscreen-dashboard-backdrop-container">
+          {featuredGame && featuredGame.coverUrl && (
+            <img
+              key={featuredGame.id}
+              src={featuredGame.coverUrl}
+              alt=""
+              className="bigscreen-dashboard-backdrop-img animate-fade-in"
+              style={{ opacity: 1 }}
+            />
+          )}
+          <div className="bigscreen-dashboard-backdrop-overlay" />
+        </div>
+      )}
 
+      {/* Main scrolling wrapper */}
       <div className="bigscreen-dashboard-scrollable-content">
-        {/* ── Spotlight Featured Details ── */}
-        {featuredGame && (
-          <section className="bigscreen-dashboard-details-pane" aria-label="Featured item details">
-            <div className="bigscreen-details-pane-content">
-              <span className="bigscreen-store-tag">SPOTLIGHT</span>
-              <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+        {/* Navigation tabs */}
+        <div className="bigscreen-store-tabs-wrapper">
+          <BigScreenTabBar
+            tabs={STORE_TABS}
+            activeTab={activeTab}
+            onActivate={setActiveTab}
+          />
+        </div>
 
-              <div className="bigscreen-details-meta">
-                {featuredGame.rating != null && (
-                  <BigScreenPill tone="accent" size="sm">
-                    ★ {Math.round(featuredGame.rating)} Rating
-                  </BigScreenPill>
-                )}
-                {featuredGame.platforms.length > 0 && (
-                  <BigScreenPill tone="muted" size="sm">
-                    {featuredGame.platforms.slice(0, 2).join(" / ")}
-                  </BigScreenPill>
-                )}
-                {featuredGame.firstReleaseDate && (
-                  <BigScreenPill tone="muted" size="sm">
-                    {new Date(featuredGame.firstReleaseDate).getFullYear()}
-                  </BigScreenPill>
-                )}
-              </div>
+        {/* Categories Panel */}
+        <div className="bigscreen-store-panel-content">
+          {activeTab === "trending" && (
+            <div className="store-trending-panel">
+              {loadingTrending ? (
+                <div className="store-tab-loading">
+                  <div className="store-spinner" />
+                  <span>Loading Discover Storefront...</span>
+                </div>
+              ) : (
+                <>
+                  {/* Spotlight Pane */}
+                  {featuredGame && (
+                    <section className="bigscreen-dashboard-details-pane" aria-label="Game info">
+                      <div className="bigscreen-details-pane-content">
+                        <div className="bigscreen-details-logo-area">
+                          <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+                        </div>
 
-              {featuredGame.genres.length > 0 && (
-                <div className="bigscreen-details-genres" style={{ marginTop: "12px", display: "flex", gap: "8px" }}>
-                  {featuredGame.genres.slice(0, 3).map((genre) => (
-                    <span key={genre} className="store-card-genre" style={{ background: "rgba(255,255,255,0.08)", padding: "4px 8px", borderRadius: "4px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                      {genre}
-                    </span>
-                  ))}
+                        <div className="bigscreen-details-meta">
+                          {featuredGame.rating && (
+                            <BigScreenPill tone="accent" size="sm">
+                              Score: {Math.round(featuredGame.rating)}
+                            </BigScreenPill>
+                          )}
+                          {featuredGame.genres && featuredGame.genres.slice(0, 2).map((g) => (
+                            <BigScreenPill key={g} tone="muted" size="sm">
+                              {g}
+                            </BigScreenPill>
+                          ))}
+                        </div>
+
+                        {featuredGame.summary && (
+                          <p className="bigscreen-details-description">
+                            {featuredGame.summary.length > 200
+                              ? `${featuredGame.summary.substring(0, 200)}...`
+                              : featuredGame.summary}
+                          </p>
+                        )}
+
+                        <div className="bigscreen-details-actions">
+                          <button
+                            type="button"
+                            className="bigscreen-details-btn bigscreen-details-btn--primary"
+                            {...detailsFocusable}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+                              <circle cx="12" cy="12" r="10" />
+                              <line x1="12" y1="16" x2="12" y2="12" />
+                              <line x1="12" y1="8" x2="12.01" y2="8" />
+                            </svg>
+                            <span>Store Details</span>
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Rails */}
+                  <div className="store-rails-group">
+                    <BigScreenStoreRail
+                      title="Trending"
+                      games={trending}
+                      onCardClick={handleCardClick}
+                    />
+                    <BigScreenStoreRail
+                      title="Popular Now"
+                      games={popular}
+                      onCardClick={handleCardClick}
+                    />
+                    <BigScreenStoreRail
+                      title="Top Critic Scores"
+                      games={top}
+                      onCardClick={handleCardClick}
+                    />
+                    <BigScreenStoreRail
+                      title="Coming Soon"
+                      games={comingSoon}
+                      onCardClick={handleCardClick}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === "deals" && (
+            <div className="store-deals-panel">
+              {loadingDeals ? (
+                <div className="store-tab-loading">
+                  <div className="store-spinner" />
+                  <span>Scanning active gaming deals...</span>
+                </div>
+              ) : (
+                <div className="store-deals-grid">
+                  {deals.map((deal) => {
+                    const dealProps = useFocusable(() => {
+                      if (deal.storeUrl) {
+                        invoke("open_folder", { path: deal.storeUrl }).catch((err) =>
+                          console.error("Failed to open deal URL:", err)
+                        );
+                      }
+                    });
+                    return (
+                      <div
+                        key={deal.id}
+                        className="bigscreen-game-card store-deal-card"
+                        {...dealProps}
+                      >
+                        <div className="bigscreen-game-card-cover">
+                          {deal.thumbnail ? (
+                            <img src={deal.thumbnail} alt={deal.gameTitle} loading="lazy" />
+                          ) : (
+                            <div className="bigscreen-game-card-cover-placeholder">🛒</div>
+                          )}
+                          <div className="deal-discount-badge">-{deal.discountPercent}%</div>
+                        </div>
+                        <div className="bigscreen-store-card-details">
+                          <h4 className="deal-game-title">{deal.gameTitle}</h4>
+                          <div className="deal-price-row">
+                            <span className="deal-price-new">€{deal.dealPrice.toFixed(2)}</span>
+                          </div>
+                          <div className="deal-store-tag">{deal.storeName}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-
-              <div className="bigscreen-details-actions" style={{ marginTop: "24px" }}>
-                <button
-                  type="button"
-                  className="bigscreen-details-btn bigscreen-details-btn--primary"
-                  {...detailsFocusable}
-                >
-                  {DetailsIcon}
-                  <span>View Details</span>
-                </button>
-              </div>
             </div>
-          </section>
-        )}
-
-        {/* ── Category Rails ── */}
-        <div className="bigscreen-store-rails" style={{ marginTop: "40px" }}>
-          {trending.length > 0 && (
-            <BigScreenStoreRail
-              title="Trending Now"
-              icon={StoreIcon}
-              games={trending}
-              onCardClick={onCardClick}
-              railId="trending"
-            />
           )}
 
-          {popular.length > 0 && (
-            <BigScreenStoreRail
-              title="Most Popular"
-              icon={StoreIcon}
-              games={popular}
-              onCardClick={onCardClick}
-              railId="popular"
-            />
-          )}
-
-          {top.length > 0 && (
-            <BigScreenStoreRail
-              title="Top Critics"
-              icon={StoreIcon}
-              games={top}
-              onCardClick={onCardClick}
-              railId="top"
-            />
-          )}
-
-          {comingSoon.length > 0 && (
-            <BigScreenStoreRail
-              title="Coming Soon"
-              icon={StoreIcon}
-              games={comingSoon}
-              onCardClick={onCardClick}
-              railId="coming-soon"
-            />
-          )}
-
-          {newReleases.length > 0 && (
-            <BigScreenStoreRail
-              title="New Releases"
-              icon={StoreIcon}
-              games={newReleases}
-              onCardClick={onCardClick}
-              railId="new-releases"
-            />
+          {activeTab === "wishlist" && (
+            <div className="store-wishlist-panel">
+              {wishlist.length === 0 ? (
+                <div className="wishlist-empty-state">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" width="64" height="64" opacity="0.3">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                  </svg>
+                  <h3>Your Wishlist is empty</h3>
+                  <p>Add games to your wishlist in store or search tabs to track them here.</p>
+                </div>
+              ) : (
+                <div className="store-wishlist-grid">
+                  {wishlist.map((item) => {
+                    const wishProps = useFocusable(() => {
+                      navigate(`/store/${item.slug}`);
+                    });
+                    return (
+                      <div
+                        key={item.id}
+                        className="bigscreen-game-card store-wishlist-card"
+                        {...wishProps}
+                      >
+                        <div className="bigscreen-game-card-cover">
+                          {item.coverUrl ? (
+                            <img src={item.coverUrl} alt={item.name} loading="lazy" />
+                          ) : (
+                            <div className="bigscreen-game-card-cover-placeholder">❤️</div>
+                          )}
+                        </div>
+                        <div className="bigscreen-store-card-details">
+                          <h4 className="deal-game-title">{item.name}</h4>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

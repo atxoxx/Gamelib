@@ -18,7 +18,14 @@ type DateRangePreset = "7d" | "30d" | "90d" | "all";
 type AggregationType = "day" | "week" | "month";
 type ChartType = "bar" | "line";
 
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenHome from "../components/bigscreen/BigScreenHome";
+
 export default function ActivityPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenHome />;
+  }
   const { sessions, deleteSession } = useActivity();
   const { games } = useGames();
   // Toast feedback for screenshot success / error (matches the rest of

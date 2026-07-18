@@ -171,7 +171,21 @@ export default function LibraryPage() {
   return (
     <div className={`library-grid${isBigScreen ? " library-grid--bigscreen" : ""}`}>
       {isBigScreen && !isLibraryEmpty ? (
-        <BigScreenLibrary filteredGames={filteredGames} totalGames={games.length} onSelectGame={handleCardClick} />
+        <BigScreenLibrary
+          filteredGames={filteredGames}
+          totalGames={games.length}
+          onSelectGame={handleCardClick}
+          filters={filters}
+          availableGenres={availableGenres}
+          availablePlatforms={availablePlatforms}
+          setSearch={setSearch}
+          setGenres={setGenres}
+          setPlatforms={setPlatforms}
+          setStatus={setStatus}
+          setSource={setSource}
+          setSort={setSort}
+          reset={reset}
+        />
       ) : (
         <>
           <LibraryHero games={games} />

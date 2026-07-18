@@ -15,7 +15,14 @@ import {
 type CompletionFilter = "all" | "perfect" | "in_progress" | "not_started";
 type SortBy = "name" | "completion" | "total" | "recent";
 
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenSystem from "../components/bigscreen/BigScreenSystem";
+
 export default function AchievementsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenSystem />;
+  }
   const { games } = useGames();
   const { cache, syncAllAchievements, isSyncing, syncProgress } = useAchievements();
   const { showToast } = useToast();

@@ -1761,7 +1761,7 @@ function GameDetail({ game }: { game: Game }) {
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const { getGame, setSelectedGameId } = useGames();
-  const { isBigScreen, setBigScreen } = useBigScreen();
+  const { isBigScreen } = useBigScreen();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1772,42 +1772,40 @@ export default function GamePage() {
 
   const game = gameId ? getGame(gameId) : undefined;
 
-  // Big Screen Mode: back/edit/remove all drop the user out of Big
-  // Screen back to the desktop GameDetail. The PS5 single-page Hub
-  // can't open its own edit/confirm modals while mounted (the
-  // overlay owns the viewport), so exiting Big Screen is the
-  // simplest correct behavior — the desktop GameDetail then
-  // renders and the user clicks Edit/Remove there. A future
-  // tabbed Big Screen Game page can keep the user in Big Screen
-  // by surfacing those flows inline. (Replaces the deleted
-  // BigScreenGamePageRouter that previously dispatched a
-  // `gamelib:drill-in` event to bridge Explore cards to the
-  // desktop tab UI.)
+  // Big Screen Mode: back navigates to the library grid; edit and
+  // remove navigate back as well since Big Screen doesn't surface
+  // inline modals for those flows — the user can complete the
+  // action on the next desktop visit.
   const handleBack = useCallback(() => {
     navigate("/library");
   }, [navigate]);
-  const handleEdit = useCallback(() => {
-    setBigScreen(false);
-  }, [setBigScreen]);
-  const handleRemove = useCallback(() => {
-    setBigScreen(false);
-  }, [setBigScreen]);
+
+  // Stub edit/remove — Big Screen can't open desktop modals inline,
+  // so we just bounce back to the library. A future PR can add
+  // inline Big Screen edit/remove flows.
+  const handleBigScreenEdit = useCallback(() => {
+    navigate("/library");
+  }, [navigate]);
+
+  const handleBigScreenRemove = useCallback(() => {
+    navigate("/library");
+  }, [navigate]);
 
   if (!game) {
     return <GameNotFound />;
   }
 
-  // When Big Screen Mode is active, render the PS5 single-page Game
-  // Hub instead of the desktop tabbed layout. BigScreenGamePage owns
-  // its own hero, metadata strip, and inline sections so we don't
-  // have to rebuild the tabs.
+  // When Big Screen Mode is active, render the PS5 tabbed Game Page
+  // with full hero, metadata strip, and 4-tab layout (Overview,
+  // Media, Specs, More). BigScreenGamePage owns its own hero,
+  // metadata strip, tab bar, and per-tab scroll regions.
   if (isBigScreen) {
     return (
       <BigScreenGamePage
         game={game}
         onBack={handleBack}
-        onEdit={handleEdit}
-        onRemove={handleRemove}
+        onEdit={handleBigScreenEdit}
+        onRemove={handleBigScreenRemove}
       />
     );
   }

@@ -25,7 +25,14 @@ export type StorageFilter = "all" | "sized" | "missing" | "stale";
  *       always start at Largest first per the spec.
  *    3. Search filtering is done client-side against game names.
  *    4. Density is shared with Store/Library via `DensityProvider`. */
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenSystem from "../components/bigscreen/BigScreenSystem";
+
 export default function StoragePage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenSystem />;
+  }
   const { games } = useGames();
   const { density, setDensity } = useDensityContext();
   const { showToast } = useToast();

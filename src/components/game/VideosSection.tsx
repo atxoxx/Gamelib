@@ -2,26 +2,44 @@ import { useState } from "react";
 import type { Game } from "../../types/game";
 import { IconVideo } from "./icons";
 import { getVideoEmbedUrl, getVideoThumbnail } from "./video";
-
-/**
- * VideosSection
- *
- *  Main-column "Trailers & Videos" card. Embeds the active video
- *  in a 16:9 iframe and renders a horizontally-scrolling strip of
- *  thumbnails below when there's more than one. Clicking a thumb
- *  swaps the embed.
- *
- *  The thumbnail generation helpers (`getVideoEmbedUrl`,
- *  `getVideoThumbnail`) live in `./video` so the same logic can
- *  be reused by the Store GameDetail page without forking.
- */
+import { useBigScreen } from "../../context/BigScreenContext";
+import { useFocusable } from "../../hooks/useFocusable";
 
 interface VideosSectionProps {
   game: Game;
 }
 
+function BigScreenVideoSelectorBtn({
+  url,
+  idx,
+  isSelected,
+  setActiveUrl,
+  children,
+}: {
+  url: string;
+  idx: number;
+  isSelected: boolean;
+  setActiveUrl: (url: string) => void;
+  children: React.ReactNode;
+}) {
+  const focusProps = useFocusable(() => setActiveUrl(url));
+  return (
+    <button
+      type="button"
+      {...focusProps}
+      className={`video-selector-btn ${isSelected ? "active" : ""}`}
+      aria-label={`Play trailer ${idx + 1}`}
+      aria-pressed={isSelected}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function VideosSection({ game }: VideosSectionProps) {
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
+  const { isBigScreen } = useBigScreen();
+
   if (!game.videos || game.videos.length === 0) return null;
 
   const current = activeUrl || game.videos[0];
@@ -56,14 +74,8 @@ export default function VideosSection({ game }: VideosSectionProps) {
             {game.videos.map((url, idx) => {
               const isSelected = current === url;
               const thumb = getVideoThumbnail(url);
-              return (
-                <button
-                  key={idx}
-                  className={`video-selector-btn ${isSelected ? "active" : ""}`}
-                  onClick={() => setActiveUrl(url)}
-                  aria-label={`Play trailer ${idx + 1}`}
-                  aria-pressed={isSelected}
-                >
+              const innerContent = (
+                <>
                   {thumb?.kind === "youtube" ? (
                     <>
                       <img
@@ -98,6 +110,33 @@ export default function VideosSection({ game }: VideosSectionProps) {
                       Trailer {idx + 1}
                     </span>
                   )}
+                </>
+              );
+
+              if (isBigScreen) {
+                return (
+                  <BigScreenVideoSelectorBtn
+                    key={idx}
+                    url={url}
+                    idx={idx}
+                    isSelected={isSelected}
+                    setActiveUrl={setActiveUrl}
+                  >
+                    {innerContent}
+                  </BigScreenVideoSelectorBtn>
+                );
+              }
+
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`video-selector-btn ${isSelected ? "active" : ""}`}
+                  onClick={() => setActiveUrl(url)}
+                  aria-label={`Play trailer ${idx + 1}`}
+                  aria-pressed={isSelected}
+                >
+                  {innerContent}
                 </button>
               );
             })}

@@ -1,4 +1,11 @@
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenSystem from "../components/bigscreen/BigScreenSystem";
+
 export default function PluginsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenSystem />;
+  }
   return (
     <div className="page-placeholder">
       <svg className="page-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

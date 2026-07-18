@@ -95,7 +95,14 @@ const DESCRIPTOR_LABELS: Record<ThemeDescriptor, string> = {
 
 type SettingsTab = "appearance" | "hardware" | "integrations" | "downloads" | "launcher";
 
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenSystem from "../components/bigscreen/BigScreenSystem";
+
 export default function SettingsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenSystem />;
+  }
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames, updateGame } = useGames();

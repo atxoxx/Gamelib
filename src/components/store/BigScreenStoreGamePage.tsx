@@ -80,7 +80,7 @@ export default function BigScreenStoreGamePage({
             : (idx - 1 + STORE_PAGE_TABS.length) % STORE_PAGE_TABS.length;
         return STORE_PAGE_TABS[nextIdx].id;
       });
-    });
+    }, 1);
   }, [gamepad.registerTabCycler, lightbox]);
 
   const focusableBack = useFocusable(onBack);

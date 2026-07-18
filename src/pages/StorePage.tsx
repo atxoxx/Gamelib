@@ -60,7 +60,7 @@ export default function StorePage() {
   );
 
   if (isBigScreen) {
-    return <BigScreenStore onCardClick={handleCardClick} />;
+    return <BigScreenStore />;
   }
 
 

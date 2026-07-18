@@ -148,7 +148,14 @@ function storeTint(storeName: string): string {
   return "#3a4a63";
 }
 
+import { useBigScreen } from "../../context/BigScreenContext";
+import BigScreenStore from "../../components/store/BigScreenStore";
+
 export default function DealsPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenStore />;
+  }
   const { density } = useDensityContext();
   const { showToast } = useToast();
 

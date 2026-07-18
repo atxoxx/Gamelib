@@ -77,7 +77,14 @@ function isReleased(entry: WishlistEntry): boolean {
  * Density is read from `DensityContext` (also lifted), so toggling the density
  * in the Store page updates this page automatically.
  */
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenStore from "../components/store/BigScreenStore";
+
 export default function WishlistPage() {
+  const { isBigScreen } = useBigScreen();
+  if (isBigScreen) {
+    return <BigScreenStore />;
+  }
   const navigate = useNavigate();
   const { wishlist, hydrated, toggle, setNote, clear } = useWishlistContext();
 
