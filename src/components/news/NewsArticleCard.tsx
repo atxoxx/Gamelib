@@ -9,11 +9,12 @@ interface NewsArticleCardProps {
 }
 
 export default function NewsArticleCard({ article, onClick, density = "cozy" }: NewsArticleCardProps) {
+  const isList = density === "list";
   const showBody = density !== "compact";
 
   return (
     <div
-      className={`news-article-card density-${density} hover-lift`}
+      className={`news-article-card density-${density} hover-lift${isList ? " news-article-card-list" : ""}`}
       onClick={() => onClick(article)}
       role="button"
       tabIndex={0}
@@ -79,8 +80,12 @@ export default function NewsArticleCard({ article, onClick, density = "cozy" }: 
 /** Skeleton loader for news article cards shown during loading. */
 export function NewsArticleCardSkeleton({ density = "cozy" }: { density?: ViewDensity }) {
   const showBody = density !== "compact";
+  const isList = density === "list";
   return (
-    <div className={`news-article-card news-article-card-skeleton density-${density}`} aria-hidden="true">
+    <div
+      className={`news-article-card news-article-card-skeleton density-${density}${isList ? " news-article-card-list" : ""}`}
+      aria-hidden="true"
+    >
       <div className="news-card-cover-skeleton" />
       {showBody && (
         <div className="news-card-body-skeleton">

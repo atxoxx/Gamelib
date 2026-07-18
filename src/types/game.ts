@@ -732,8 +732,9 @@ export interface PlayerCountHistory {
  *   - compact   : cover-only, minimal footprint
  *   - cozy      : default; cover + small body with genres/platforms
  *   - cinematic : larger cards with body overlaid on the cover
+ *   - list      : horizontal row with small image preview + text
  */
-export type ViewDensity = "compact" | "cozy" | "cinematic";
+export type ViewDensity = "compact" | "cozy" | "cinematic" | "list";
 
 /** localStorage key for the user's chosen density. */
 export const VIEW_DENSITY_STORAGE_KEY = "gamelib_store_density_v1";
@@ -746,6 +747,7 @@ export const VIEW_DENSITIES: readonly ViewDensity[] = [
   "compact",
   "cozy",
   "cinematic",
+  "list",
 ] as const;
 
 // ─── Size Unit ──────────────────────────────────────────────────────────────

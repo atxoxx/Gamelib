@@ -24,7 +24,7 @@ export function useViewDensity(): {
   const [density, setDensityState] = useState<ViewDensity>(() => {
     try {
       const raw = localStorage.getItem(VIEW_DENSITY_STORAGE_KEY);
-      if (raw === "compact" || raw === "cozy" || raw === "cinematic") {
+      if (raw === "compact" || raw === "cozy" || raw === "cinematic" || raw === "list") {
         return raw;
       }
     } catch {
@@ -47,7 +47,7 @@ export function useViewDensity(): {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== VIEW_DENSITY_STORAGE_KEY || !e.newValue) return;
       const next = e.newValue;
-      if (next === "compact" || next === "cozy" || next === "cinematic") {
+      if (next === "compact" || next === "cozy" || next === "cinematic" || next === "list") {
         setDensityState(next);
       }
     };

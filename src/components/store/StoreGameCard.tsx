@@ -99,7 +99,7 @@ export default function StoreGameCard({
 
   return (
     <div
-      className={`store-game-card density-${density}`}
+      className={`store-game-card density-${density}${density === "list" ? " store-game-card-list" : ""}`}
       onClick={() => onClick(game)}
       data-density={density}
       data-wishlisted={wishlisted ? "true" : "false"}

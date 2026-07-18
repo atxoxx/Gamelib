@@ -55,6 +55,26 @@ const OPTIONS: DensityOption[] = [
       </svg>
     ),
   },
+  {
+    value: "list",
+    ariaLabel: "List view with small preview",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden="true"
+      >
+        <rect x="3" y="4" width="6" height="6" rx="1" />
+        <line x1="12" y1="6" x2="21" y2="6" />
+        <line x1="12" y1="9" x2="21" y2="9" />
+        <rect x="3" y="14" width="6" height="6" rx="1" />
+        <line x1="12" y1="16" x2="21" y2="16" />
+        <line x1="12" y1="19" x2="21" y2="19" />
+      </svg>
+    ),
+  },
 ];
 
 /**

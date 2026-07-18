@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useContext } from "react";
 import StoreGameCard from "./StoreGameCard";
 import { Button } from "../ui";
+import { DensityContext } from "../../context/DensityContext";
 import type { StoreGameSummary } from "../../types/game";
 
 interface StoreGameGridProps {
@@ -26,9 +27,9 @@ interface StoreGameGridProps {
 }
 
 /** Card skeleton placeholder shown while the initial batch loads. */
-function CardSkeleton() {
+function CardSkeleton({ list = false }: { list?: boolean }) {
   return (
-    <div className="store-game-card store-game-card-skeleton">
+    <div className={`store-game-card store-game-card-skeleton${list ? " store-game-card-list" : ""}`}>
       <div className="store-card-cover">
         <div className="store-card-cover-skeleton" />
       </div>
@@ -52,6 +53,8 @@ export default function StoreGameGrid({
   isSourceCheckPending = false,
 }: StoreGameGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const density = useContext(DensityContext)?.density ?? "cozy";
+  const isList = density === "list";
 
   // ── Infinite scroll: observe sentinel div ─────────────────────────────
   const handleIntersect = useCallback(
@@ -147,9 +150,9 @@ export default function StoreGameGrid({
   // ── Initial loading (no games yet) — skeleton grid ────────────────────
   if (loading && games.length === 0) {
     return (
-      <div className="store-game-grid">
+      <div className={`store-game-grid${isList ? " density-list" : ""}`}>
         {Array.from({ length: 12 }).map((_, i) => (
-          <CardSkeleton key={i} />
+          <CardSkeleton key={i} list={isList} />
         ))}
       </div>
     );
@@ -157,7 +160,7 @@ export default function StoreGameGrid({
 
   // ── Game grid ──────────────────────────────────────────────────────────
   return (
-    <div className="store-game-grid">
+    <div className={`store-game-grid${isList ? " density-list" : ""}`}>
       {games.map((game) => (
         <StoreGameCard key={game.id} game={game} onClick={onCardClick} />
       ))}

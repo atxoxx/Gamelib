@@ -370,6 +370,47 @@
 
 /* ── Store Game Card ───────────────────────────────────────────────────── */
 
+/* List density: single-column horizontal rows with small cover preview */
+.store-game-grid.density-list {
+  grid-template-columns: 1fr;
+}
+
+.store-game-card.density-list {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.store-game-card.density-list .store-card-cover {
+  width: 150px;
+  flex-shrink: 0;
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 100px;
+}
+
+.store-game-card.density-list .store-card-body {
+  padding: var(--space-md) var(--space-lg);
+  justify-content: center;
+}
+
+.store-game-card.density-list .store-card-name {
+  font-size: var(--font-size-md);
+  white-space: normal;
+  -webkit-line-clamp: 1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.store-game-card.density-list .store-card-platforms {
+  margin-top: var(--space-xs);
+}
+
+@media (max-width: 600px) {
+  .store-game-card.density-list .store-card-cover {
+    width: 110px;
+  }
+}
+
 .store-game-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -508,6 +549,18 @@
 .store-game-card-skeleton {
   pointer-events: none;
   cursor: default;
+}
+
+.store-game-card-skeleton.density-list .store-card-cover,
+.store-game-card-skeleton.store-game-card-list .store-card-cover {
+  width: 150px;
+  flex-shrink: 0;
+  aspect-ratio: auto;
+  min-height: 100px;
+}
+
+.store-game-card-skeleton.store-game-card-list {
+  flex-direction: row;
 }
 
 .store-game-card-skeleton .store-card-body {

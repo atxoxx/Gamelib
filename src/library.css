@@ -1762,6 +1762,10 @@
   justify-items: center;
 }
 
+.library-cards.density-list {
+  grid-template-columns: 1fr;
+}
+
 /*
  * Card-level width guards. Without these, hardcoded cover widths or
  * unbreakable body text (long platform strings, long genre chains) push
@@ -1859,6 +1863,75 @@
 .library-card.density-cinematic .library-card-playtime-badge,
 .library-card.density-cinematic .library-card-status-badge {
   z-index: 2;
+}
+
+/* ── List density: horizontal rows with small cover preview ─────────────
+ * NOTE: `.library-card` is a `ui-card` primitive whose children are wrapped
+ * in `.ui-card__body`. So the flex row must be applied to THAT wrapper, not
+ * directly to `.library-card`, otherwise the cover + body stay stacked. */
+
+.library-card.density-list {
+  min-height: 86px;
+}
+
+.library-card.density-list > .ui-card__body {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.library-card.density-list .library-card-cover {
+  width: 150px;
+  flex-shrink: 0;
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.library-card.density-list .library-card-body {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-lg);
+  justify-content: center;
+  gap: 2px;
+}
+
+/* Name on its own line, slightly larger, single line */
+.library-card.density-list .library-card-name {
+  font-size: var(--font-size-md);
+  -webkit-line-clamp: 1;
+}
+
+/* Meta badges sit on the same row as the name */
+.library-card.density-list .library-card-meta-row {
+  margin-top: 2px;
+}
+
+/* Developer + genres share a single compact line under the name */
+.library-card.density-list .library-card-developer {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  -webkit-line-clamp: 1;
+}
+
+.library-card.density-list .library-card-genres {
+  margin-top: 2px;
+}
+
+.library-card.density-list .library-card-notes {
+  margin: 2px 0 0 0;
+  font-size: var(--font-size-xs);
+  -webkit-line-clamp: 1;
+}
+
+@media (max-width: 600px) {
+  .library-card.density-list {
+    min-height: 76px;
+  }
+
+  .library-card.density-list .library-card-cover {
+    width: 110px;
+  }
 }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
