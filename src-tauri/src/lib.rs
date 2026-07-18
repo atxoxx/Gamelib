@@ -22,6 +22,7 @@ mod steam;
 mod epic;
 #[cfg_attr(not(test), allow(dead_code))] // re-exported only via `inventory`
 mod gog;
+mod humble;
 mod steam_game_watcher;
 mod size;
 // New modules for the download feature. See each module's
@@ -40,6 +41,10 @@ use epic::auth::{epic_start_login, epic_finish_login, epic_login_with_refresh_to
 use epic::sync::{epic_sync_library, epic_get_filters};
 use gog::auth::{gog_is_authenticated, gog_logout, gog_start_login};
 use gog::sync::gog_sync_library;
+use humble::{
+    humble_get_settings, humble_is_authenticated, humble_logout, humble_save_settings,
+    humble_start_login, humble_sync_library,
+};
 use steam::auth::{
     steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
 };
@@ -158,6 +163,16 @@ struct GameData {
     epic_namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     epic_catalog_item_id: Option<String>,
+    // Humble Bundle integration fields
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    humble_game_id: Option<String>,
+    /// True when sourced from the Humble Trove catalog (subscriber
+    /// streaming library) — drives `humble://launch/` behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    humble_is_trove: Option<bool>,
+    /// True when this entry is a non-game extra (soundtrack/artbook/…).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    humble_is_extra: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     launch_arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2302,6 +2317,8 @@ pub fn run() {
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,
+            humble_start_login, humble_sync_library, humble_is_authenticated, humble_logout,
+            humble_get_settings, humble_save_settings,
             // Download-feature commands. The torrent engine manages
             // its own global session; the source manager and store
             // checker are passed through `tauri::State`.

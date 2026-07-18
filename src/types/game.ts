@@ -41,6 +41,17 @@ export interface Game {
    *  coverage check. Stored as `string` because GOG is inconsistent
    *  about returning the id as JSON number vs stringified integer. */
   gogGameId?: string;
+  /** ── Humble Bundle integration fields ─────────────────────────
+   *  Mirrors the GOG/Steam shape so the Library filter sidebar can
+   *  tag Humble-synced titles uniformly. */
+  /** Stable Humble game id: `<machineName>_<humanName>` for orders,
+   *  `<machineName>` for Trove, `humble_extras_…` for extras. */
+  humbleGameId?: string;
+  /** True when sourced from the Humble Trove catalog (subscriber
+   *  streaming library) — drives `humble://launch/` behaviour. */
+  humbleIsTrove?: boolean;
+  /** True when this entry is a non-game extra (soundtrack/artbook/…). */
+  humbleIsExtra?: boolean;
   /** Playtime in minutes reported by the GOG gameplay endpoint
    *  `https://gameplay.gog.com/clients/<user_id>/playtime`. */
   gogPlaytime?: number;
@@ -504,7 +515,7 @@ export const STORE_SOURCES: readonly StoreSource[] = [
  * Library source filter for distinguishing between different game
  * origins (Steam sync, local imports, GOG, etc.).
  */
-export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic";
+export type LibrarySource = "all" | "steam" | "local" | "gog" | "epic" | "humble";
 
 export type PlayStatus = "backlog" | "playing" | "completed" | "abandoned" | "on_hold";
 

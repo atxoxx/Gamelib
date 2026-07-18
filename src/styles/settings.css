@@ -934,6 +934,15 @@
   box-shadow: 0 0 14px rgba(230, 230, 230, 0.2);
 }
 
+.integration-tile.humble .integration-tile-icon {
+  color: #1fb6a6;
+  box-shadow: 0 0 14px rgba(31, 182, 166, 0.35);
+}
+
+.integration-tile.humble::before {
+  background: linear-gradient(90deg, #1d2b32, #1fb6a6);
+}
+
 .integration-tile-icon svg {
   width: 24px;
   height: 24px;
@@ -1100,6 +1109,59 @@
   padding-top: var(--space-md);
   border-top: 1px solid var(--color-border);
   font-style: italic;
+}
+
+/* ── Humble settings toggles (Playnite parity) ─────────────────── */
+
+.humble-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-sm) var(--space-lg);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px dashed var(--color-border);
+}
+
+.humble-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.humble-toggle.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.humble-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.humble-toggle-label {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.humble-toggle-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.humble-toggle input[type="checkbox"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: #1fb6a6;
+  flex-shrink: 0;
+  cursor: inherit;
 }
 
 /* ── 8. Launcher tab + checkbox inline-text blocks ───────────────── */

@@ -10,6 +10,7 @@ import { useSettings, type LandingPage, type SyncIntervalMinutes } from "../cont
 import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } from "../types/steam";
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import type { GogAuthState, GogSyncResult } from "../types/gog";
+import type { HumbleAuthState, HumbleSettings, HumbleSyncResult } from "../types/humble";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { useAchievements } from "../context/AchievementContext";
@@ -285,6 +286,34 @@ export default function SettingsPage() {
   const [isGogLoggingIn, setIsGogLoggingIn] = useState(false);
   const [isGogSyncing, setIsGogSyncing] = useState(false);
 
+  // Humble Bundle integration state. Cookie-based auth (no OAuth) — a
+  // WebView drives humblebundle.com/login and we snapshot the session
+  // cookies. The mount probe checks `humble_is_authenticated` (cookie
+  // blob present) and hydrates the persisted settings + sync info,
+  // mirroring the GOG/Epic pattern.
+  const [humbleAuth, setHumbleAuth] = useState<HumbleAuthState>({ isAuthenticated: false });
+  const [humbleSyncResult, setHumbleSyncResult] = useState<HumbleSyncResult | null>(null);
+  const [humbleSettings, setHumbleSettings] = useState<HumbleSettings>({
+    connectAccount: false,
+    ignoreThirdPartyStoreGames: true,
+    importThirdPartyDrmFree: false,
+    importGeneralLibrary: true,
+    importGameExtras: false,
+    importTroveGames: false,
+    launchViaHumbleApp: true,
+  });
+  const [isHumbleLoggingIn, setIsHumbleLoggingIn] = useState(false);
+  const [isHumbleSyncing, setIsHumbleSyncing] = useState(false);
+
+  async function loadHumbleSettings() {
+    try {
+      const s = await invoke<HumbleSettings>("humble_get_settings");
+      if (s) setHumbleSettings(s);
+    } catch (e) {
+      console.error("Failed to load Humble settings:", e);
+    }
+  }
+
   // Theme state — powered by ThemeContext
   function handleThemeChange(themeId: string) {
     setTheme(themeId);
@@ -381,6 +410,27 @@ export default function SettingsPage() {
           }
         }
       } catch { /* not authenticated */ }
+    })();
+
+    (async () => {
+      // Humble probe: cookie-based auth — check the persisted cookie
+      // blob, then hydrate the persisted settings + sync info so the
+      // tile renders correctly on first paint.
+      try {
+        const authenticated: boolean = await invoke("humble_is_authenticated");
+        if (cancelled) return;
+        setHumbleAuth({ isAuthenticated: authenticated });
+        if (authenticated) {
+          const saved = localStorage.getItem("gamelib-humble-sync-info");
+          if (saved) {
+            try {
+              const info = JSON.parse(saved);
+              setHumbleAuth((prev) => ({ ...prev, ...info }));
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* not authenticated */ }
+      await loadHumbleSettings();
     })();
 
     try {
@@ -950,13 +1000,145 @@ export default function SettingsPage() {
     }
   }
 
+  // ── Humble handlers ───────────────────────────────────────────────
+
+  async function handleHumbleLogin() {
+    setIsHumbleLoggingIn(true);
+    try {
+      showToast("A login window will open — log in to Humble Bundle there", "info");
+      const session = await invoke<{ username: string }>("humble_start_login");
+      setHumbleAuth({ isAuthenticated: true, username: session.username });
+      await loadHumbleSettings();
+      localStorage.setItem(
+        "gamelib-humble-sync-info",
+        JSON.stringify({ username: session.username })
+      );
+      showToast(
+        `Connected to Humble${session.username ? ` as ${session.username}` : ""}`,
+        "success"
+      );
+      await handleHumbleSync();
+    } catch (err) {
+      showToast(`Humble connection failed: ${err}`, "error");
+    } finally {
+      setIsHumbleLoggingIn(false);
+    }
+  }
+
+  async function handleHumbleSync() {
+    setIsHumbleSyncing(true);
+    setHumbleSyncResult(null);
+    try {
+      const result: HumbleSyncResult = await invoke("humble_sync_library");
+      setHumbleSyncResult(result);
+      if (result.success) {
+        const existingHumbleIds = new Set(
+          games.filter((gm) => gm.humbleGameId).map((gm) => gm.humbleGameId)
+        );
+        const newGames: Game[] = [];
+        for (const entry of result.syncedGames ?? []) {
+          if (existingHumbleIds.has(entry.humbleGameId)) continue;
+          newGames.push({
+            id: entry.id,
+            name: entry.title,
+            path: entry.installPath ?? "",
+            platform: "Humble",
+            installed: entry.isInstalled,
+            playTime: "0h",
+            addedAt: Date.now(),
+            humbleGameId: entry.humbleGameId,
+            humbleIsTrove: entry.isTrove,
+            humbleIsExtra: entry.isExtra,
+            coverArtUrl: entry.coverUrl,
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt:
+              entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+          });
+        }
+
+        for (const entry of result.syncedGames ?? []) {
+          if (!existingHumbleIds.has(entry.humbleGameId)) continue;
+          const game = games.find((g) => g.humbleGameId === entry.humbleGameId);
+          if (game && entry.isInstalled && game.installed !== entry.isInstalled) {
+            updateGame(game.id, {
+              installed: true,
+              path: entry.installPath ?? game.path,
+            });
+          }
+        }
+
+        if (newGames.length > 0) {
+          addGames(newGames);
+          showToast(
+            `Synced ${result.gamesImported} Humble games · ${newGames.length} new`,
+            "success"
+          );
+        } else {
+          showToast(
+            `Synced ${result.gamesImported} Humble games (all already in library)`,
+            "success"
+          );
+        }
+
+        setHumbleAuth((prev) => ({ ...prev, lastSync: result.lastSync }));
+        localStorage.setItem(
+          "gamelib-humble-sync-info",
+          JSON.stringify({
+            username: humbleAuth.username,
+            lastSync: result.lastSync,
+          })
+        );
+      }
+    } catch (err) {
+      setHumbleSyncResult({
+        success: false,
+        gamesImported: 0,
+        gamesSkipped: 0,
+        errors: [String(err)],
+        lastSync: 0,
+        syncedGames: [],
+      });
+      showToast(`Humble sync failed: ${err}`, "error");
+    } finally {
+      setIsHumbleSyncing(false);
+    }
+  }
+
+  async function handleHumbleDisconnect() {
+    if (!confirm("Remove your Humble Bundle connection?")) return;
+    try {
+      await invoke("humble_logout");
+      setHumbleAuth({ isAuthenticated: false });
+      setHumbleSyncResult(null);
+      localStorage.removeItem("gamelib-humble-sync-info");
+      showToast("Humble Bundle disconnected", "info");
+    } catch (err) {
+      showToast(`Failed: ${err}`, "error");
+    }
+  }
+
+  async function updateHumbleSetting<K extends keyof HumbleSettings>(
+    key: K,
+    value: HumbleSettings[K]
+  ) {
+    const next = { ...humbleSettings, [key]: value };
+    setHumbleSettings(next);
+    try {
+      await invoke("humble_save_settings", { settings: next });
+    } catch (err) {
+      showToast(`Failed to save Humble setting: ${err}`, "error");
+    }
+  }
+
   // Live count of connected integrations — drives the badge on the
   // Integrations pill in the sub-nav. Lints to 0 when none are
-  // connected and to 3 when Steam + Epic + GOG are all linked.
+  // connected and to 4 when Steam + Epic + GOG + Humble are all linked.
   const connectedIntegrations =
     (steamAuth.isAuthenticated ? 1 : 0) +
     (epicAuth.isAuthenticated ? 1 : 0) +
-    (gogAuth.isAuthenticated ? 1 : 0);
+    (gogAuth.isAuthenticated ? 1 : 0) +
+    (humbleAuth.isAuthenticated ? 1 : 0);
 
   return (
     <div className="settings-container">
@@ -1739,6 +1921,139 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* ── Humble Bundle ── */}
+          <div className="integration-tile humble">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><HumbleIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">Humble Bundle</h3>
+                    {humbleAuth.isAuthenticated && (
+                      <span className="integration-badge active">Connected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Import your Humble library — orders, Trove games, and
+                    bonus extras — plus installed games detected from the
+                    Humble App.
+                  </p>
+                </div>
+              </div>
+
+              <div className="integration-tile-body">
+                {humbleAuth.isAuthenticated ? (
+                  <div className="auth-status">
+                    Connected
+                    {humbleAuth.username ? ` as ${humbleAuth.username}` : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    Log in with your Humble Bundle account to import your
+                    library. A login window will open inside the app.
+                  </p>
+                )}
+
+                <p className="auth-note">
+                  Your session stays local — only the Humble session cookie
+                  is stored, just like GOG and Epic.
+                </p>
+
+                <div className="integration-tile-actions">
+                  {humbleAuth.isAuthenticated ? (
+                    <Button
+                      variant="primary"
+                      onClick={handleHumbleSync}
+                      isLoading={isHumbleSyncing}
+                    >
+                      Sync Library
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      onClick={handleHumbleLogin}
+                      isLoading={isHumbleLoggingIn}
+                    >
+                      Connect Humble Account
+                    </Button>
+                  )}
+                </div>
+
+                {humbleSyncResult && (
+                  <div className={`sync-result ${humbleSyncResult.success ? "success" : "error"}`}>
+                    {humbleSyncResult.success
+                      ? `✓ Imported ${humbleSyncResult.gamesImported} games${humbleSyncResult.errors.length ? ` · ${humbleSyncResult.errors.length} warning(s)` : ""}`
+                      : `✗ ${humbleSyncResult.errors?.[0] || "Sync failed"}`}
+                  </div>
+                )}
+
+                {humbleAuth.lastSync && (
+                  <p className="sync-result-time">
+                    Last sync: {new Date(humbleAuth.lastSync * 1000).toLocaleString()}
+                  </p>
+                )}
+
+                {/* Humble settings toggles (Playnite parity) */}
+                <div className="humble-settings-grid">
+                  <HumbleToggle
+                    label="Import general library"
+                    hint="Import owned library subproducts from your Humble orders."
+                    checked={humbleSettings.importGeneralLibrary}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("importGeneralLibrary", v)}
+                  />
+                  <HumbleToggle
+                    label="Import game extras"
+                    hint="Import soundtracks, artbooks, and other bonus downloads as separate entries."
+                    checked={humbleSettings.importGameExtras}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("importGameExtras", v)}
+                  />
+                  <HumbleToggle
+                    label="Import Trove games"
+                    hint="Import the Humble Trove subscriber catalog."
+                    checked={humbleSettings.importTroveGames}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("importTroveGames", v)}
+                  />
+                  <HumbleToggle
+                    label="Ignore third-party store games"
+                    hint="Skip games provided via a partner store (e.g. Steam) rather than drm-free downloads."
+                    checked={humbleSettings.ignoreThirdPartyStoreGames}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("ignoreThirdPartyStoreGames", v)}
+                  />
+                  <HumbleToggle
+                    label="Import third-party DRM-free"
+                    hint="Still import a third-party game when it also has a drm-free download."
+                    checked={humbleSettings.importThirdPartyDrmFree}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("importThirdPartyDrmFree", v)}
+                  />
+                  <HumbleToggle
+                    label="Launch via Humble App"
+                    hint="Prefer humble://launch for Trove games over the on-disk executable."
+                    checked={humbleSettings.launchViaHumbleApp}
+                    disabled={!humbleAuth.isAuthenticated}
+                    onChange={(v) => updateHumbleSetting("launchViaHumbleApp", v)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {humbleAuth.isAuthenticated && (
+              <div className="danger-zone">
+                <p className="danger-zone-text">
+                  <strong>Disconnect Humble Bundle.</strong> Clears local
+                  session cookies — your Humble account is unaffected.
+                </p>
+                <Button variant="danger" size="sm" onClick={handleHumbleDisconnect}>
+                  Disconnect
+                </Button>
+              </div>
+            )}
+          </div>
+
           <p className="integration-footer">
             More integrations coming soon — itch.io and more.
           </p>
@@ -2403,6 +2718,48 @@ function GogIcon() {
         d="M7.15 15.24H4.36a.4.4 0 0 0-.4.4v2c0 .21.18.4.4.4h2.8v1.32h-3.5c-.56 0-1.02-.46-1.02-1.03v-3.39c0-.56.46-1.02 1.03-1.02h3.48v1.32zM8.16 11.54c0 .58-.47 1.05-1.05 1.05H2.63v-1.35h3.78a.4.4 0 0 0 .4-.4V6.39a.4.4 0 0 0-.4-.4H4.39a.4.4 0 0 0-.41.4v2.02c0 .23.18.4.4.4H6v1.35H3.68c-.58 0-1.05-.46-1.05-1.04V5.68c0-.57.47-1.04 1.05-1.04H7.1c.58 0 1.05.47 1.05 1.04v5.86zM21.36 19.36h-1.32v-4.12h-.93a.4.4 0 0 0-.4.4v3.72h-1.33v-4.12h-.93a.4.4 0 0 0-.4.4v3.72h-1.33v-4.42c0-.56.46-1.02 1.03-1.02h5.61v5.44zM21.37 11.54c0 .58-.47 1.05-1.05 1.05h-4.48v-1.35h3.78a.4.4 0 0 0 .4-.4V6.39a.4.4 0 0 0-.4-.4h-2.03a.4.4 0 0 0-.4.4v2.02c0 .23.18.4.4.4h1.62v1.35H16.9c-.58 0-1.05-.46-1.05-1.04V5.68c0-.57.47-1.04 1.05-1.04h3.43c.58 0 1.05.47 1.05 1.04v5.86zM13.72 4.64h-3.44c-.58 0-1.04.47-1.04 1.04v3.44c0 .58.46 1.04 1.04 1.04h3.44c.57 0 1.04-.46 1.04-1.04V5.68c0-.57-.47-1.04-1.04-1.04m-.3 1.75v2.02a.4.4 0 0 1-.4.4h-2.03a.4.4 0 0 1-.4-.4V6.4c0-.22.17-.4.4-.4H13c.23 0 .4.18.4.4zM12.63 13.92H9.24c-.57 0-1.03.46-1.03 1.02v3.39c0 .57.46 1.03 1.03 1.03h3.39c.57 0 1.03-.46 1.03-1.03v-3.39c0-.56-.46-1.02-1.03-1.02m-.3 1.72v2a.4.4 0 0 1-.4.4v-.01H9.94a.4.4 0 0 1-.4-.4v-1.99c0-.22.18-.4.4-.4h2c.22 0 .4.18.4.4zM23.49 1.1a1.74 1.74 0 0 0-1.24-.52H1.75A1.74 1.74 0 0 0 0 2.33v19.34a1.74 1.74 0 0 0 1.75 1.75h20.5A1.74 1.74 0 0 0 24 21.67V2.33c0-.48-.2-.92-.51-1.24m0 20.58a1.23 1.23 0 0 1-1.24 1.24H1.75A1.23 1.23 0 0 1 .5 21.67V2.33a1.23 1.23 0 0 1 1.24-1.24h20.5a1.24 1.24 0 0 1 1.24 1.24v19.34z"
       />
     </svg>
+  );
+}
+
+function HumbleIcon() {
+  // Stylized "h" mark in Humble's green/teal palette.
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+      <rect x="0.5" y="0.5" width="23" height="23" rx="5" fill="#1d2b32" />
+      <path
+        fill="#1fb6a6"
+        d="M15.4 6.4h2.1v11.2h-2.1v-4.2h-4.4v4.2h-2.1V6.4h2.1v3.9h4.4V6.4z"
+      />
+    </svg>
+  );
+}
+
+function HumbleToggle({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className={`humble-toggle ${disabled ? "disabled" : ""}`}>
+      <span className="humble-toggle-text">
+        <span className="humble-toggle-label">{label}</span>
+        {hint && <span className="humble-toggle-hint">{hint}</span>}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
   );
 }
 

@@ -105,6 +105,7 @@ function gameMatchesFilters(game: Game, filters: LibraryFilters): boolean {
     if (filters.source === "local" && game.platform !== "Local") return false;
     if (filters.source === "gog" && game.platform !== "GOG") return false;
     if (filters.source === "epic" && game.platform !== "Epic") return false;
+    if (filters.source === "humble" && game.platform !== "Humble") return false;
   }
 
   // Genres (OR — game must have at least one selected genre)
@@ -156,7 +157,7 @@ function parseStoredFilters(raw: unknown): LibraryFilters {
     yearMax: typeof obj.yearMax === "number" && Number.isFinite(obj.yearMax) ? obj.yearMax : null,
     ratingMin: typeof obj.ratingMin === "number" && Number.isFinite(obj.ratingMin) ? obj.ratingMin : null,
     status: obj.status === "installed" || obj.status === "not_installed" ? obj.status : "all",
-    source: obj.source === "steam" || obj.source === "local" || obj.source === "gog" || obj.source === "epic" ? obj.source : "all",
+    source: obj.source === "steam" || obj.source === "local" || obj.source === "gog" || obj.source === "epic" || obj.source === "humble" ? obj.source : "all",
     playStatus:
       obj.playStatus === "backlog" ||
       obj.playStatus === "playing" ||

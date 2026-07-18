@@ -50,6 +50,7 @@ export default function LibraryFilterChips({
     local: "Local",
     gog: "GOG",
     epic: "Epic",
+    humble: "Humble",
   };
 
   const hasAny =
