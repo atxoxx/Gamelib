@@ -32,6 +32,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tauri_plugin_opener::OpenerExt;
 
 /// Result returned to the frontend after a successful size detection.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -239,6 +240,142 @@ pub fn detect_game_size(
 #[tauri::command]
 pub fn check_paths_exist(paths: Vec<String>) -> Vec<bool> {
     paths.iter().map(|p| Path::new(p).exists()).collect()
+}
+
+/// Reveal `path` in the OS file manager (Explorer / Finder / file
+/// browser). Mirrors `torrent_open_folder` but takes an arbitrary path
+/// so the Storage tab can jump straight to a game's measured folder.
+///
+/// If `path` is a file, its parent directory is opened (you can't
+/// "open" a file in a file manager, only its container). Returns an
+/// error if the resolved target does not exist, so the frontend can
+/// surface a toast instead of silently doing nothing.
+#[tauri::command]
+pub fn open_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("open_folder: empty path".into());
+    }
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Folder does not exist: {}", path));
+    }
+    let target = if p.is_file() {
+        p.parent().unwrap_or(p)
+    } else {
+        p
+    };
+    app.opener()
+        .open_path(target.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("Failed to open folder: {}", e))
+}
+
+/// Disk-space statistics for the volume that hosts `path`.
+///
+/// Returns total / free / available bytes for the filesystem containing
+/// `path`. `available` (bytes usable by an unprivileged user, which may
+/// be less than `free` because of root reservations on Unix) is what the
+/// Storage tab should compare against game usage. Used to render the
+/// "used of total" utilization bar in the "By drive" breakdown card.
+///
+/// Implemented dependency-free: Windows uses `GetDiskFreeSpaceExW` via
+/// the already-vendored `windows` crate; Unix shells out to `df` (a
+/// mandatory, always-present utility). If the platform query fails we
+/// return `None` rather than aborting — the card simply hides the
+/// utilization portion.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskUsage {
+    /// Total capacity of the volume, in bytes.
+    pub total: u64,
+    /// Free bytes on the volume (raw).
+    pub free: u64,
+    /// Bytes available to the current user (≤ free on Unix).
+    pub available: u64,
+}
+
+#[tauri::command]
+pub fn disk_usage(path: String) -> Result<DiskUsage, String> {
+    let probe = if path.trim().is_empty() {
+        None
+    } else {
+        Some(path.clone())
+    };
+    disk_usage_inner(probe.as_deref())
+}
+
+#[cfg(windows)]
+fn disk_usage_inner(path: Option<&str>) -> Result<DiskUsage, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = std::ffi::OsStr::new(path.unwrap_or("."))
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free_to_caller: u64 = 0;
+    let mut total: u64 = 0;
+    let mut free: u64 = 0;
+    // SAFETY: we pass a valid, NUL-termined wide string and valid
+    // out-pointers. GetDiskFreeSpaceExW writes all three.
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            Some(&mut free_to_caller),
+            Some(&mut total),
+            Some(&mut free),
+        )
+        .is_ok()
+    };
+    if !ok {
+        return Err("GetDiskFreeSpaceExW failed".into());
+    }
+    Ok(DiskUsage {
+        total,
+        free,
+        available: free_to_caller,
+    })
+}
+
+#[cfg(not(windows))]
+fn disk_usage_inner(path: Option<&str>) -> Result<DiskUsage, String> {
+    use std::process::Command;
+
+    let target = path.unwrap_or(".");
+    let out = Command::new("df")
+        .arg("-P") // POSIX portable format, single line per mount
+        .arg("-k") // 1024-byte blocks (portable across df variants)
+        .arg("--")
+        .arg(target)
+        .output()
+        .map_err(|e| format!("df failed to spawn: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "df exited {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    // Parse the second line: `Filesystem 1024-blocks Used Available Capacity Mounted`
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().nth(1).ok_or("df produced no data row")?;
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    // Available is the 4th field; total (1024-blocks) is the 2nd.
+    let total_k = cols
+        .get(1)
+        .and_then(|c| c.parse::<u64>().ok())
+        .ok_or("df: could not parse total blocks")?;
+    let available_k = cols
+        .get(3)
+        .and_then(|c| c.parse::<u64>().ok())
+        .ok_or("df: could not parse available blocks")?;
+    let total = total_k.saturating_mul(1024);
+    let available = available_k.saturating_mul(1024);
+    let free = available; // exact free unavailable without root-resv math; available is the safe upper bound
+    Ok(DiskUsage {
+        total,
+        free,
+        available,
+    })
 }
 
 #[cfg(test)]

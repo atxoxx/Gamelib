@@ -96,7 +96,7 @@ serde_yaml = "0.9"
 # Win32_UI_Shell/WindowsAndMessaging are used for UAC elevation when a game
 # executable requires administrator privileges. Win32_System_Registry is a
 # transitive feature required by Win32_UI_Shell in windows crate 0.58.
-windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus"] }
+windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_Threading", "Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_Storage_FileSystem"] }
 # Torrent engine. Pure-Rust, no C++/Boost/MSVC build step on Windows.
 # Pinned to a major version (`8`) — librqbit's API moves fast and we
 # want `cargo update` to refuse silent breaking changes.

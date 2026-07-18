@@ -19,6 +19,10 @@ interface Props {
    *  The StoragePage orchestrator uses this to refresh the per-row
    *  staleness check (the new path may or may not exist yet). */
   onSizeUpdated?: () => void;
+  /** Reveal the game's measured folder in the OS file manager. The
+   *  StoragePage owns the `invoke("open_folder", ...)` call (and toast
+   *  surfacing) so a single failure path is shared across every row. */
+  onOpenFolder?: () => void;
 }
 
 interface SizeDetectionResult {
@@ -34,7 +38,7 @@ interface SizeDetectionResult {
  *  Tauri command convention from earlier work -- args are camelCase on
  *  the JS side (`exePath`, `gameName`, `rootOverride`) and map to the
  *  snake_case Rust parameters via Tauri's default rename behavior. */
-export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdated }: Props) {
+export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdated, onOpenFolder }: Props) {
   const { updateGame } = useGames();
   const { showToast } = useToast();
   const { unit } = useSizeUnit();
@@ -173,7 +177,11 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
 
       {/* Expanded panel */}
       {expanded && (
-        <div className="storage__row-panel">
+        <div
+          className="storage__row-panel"
+          role="region"
+          aria-label={`${game.name} storage details`}
+        >
           <div className="storage__row-path">
             <span className="storage__row-path-label">Path</span>
             <span className="storage__row-path-value" title={game.sizeRootPath ?? ""}>
@@ -219,6 +227,16 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
                 disabled={detecting}
               >
                 Clear
+              </Button>
+            )}
+            {isSized && (
+              <Button
+                variant="ghost"
+                onClick={() => onOpenFolder?.()}
+                disabled={detecting}
+                title="Open this game's folder in your file manager"
+              >
+                Open folder
               </Button>
             )}
             <span className="storage__row-spacer" />

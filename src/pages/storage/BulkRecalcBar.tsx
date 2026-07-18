@@ -9,6 +9,9 @@ interface Props {
   /** Installed games whose size hasn't been measured yet. The bar hides
    *  itself when this array is empty (nothing to do -> nothing shown). */
   unsizedGames: Game[];
+  /** Fired once the batch finishes (success or stop), so the parent can
+   *  re-check stale paths now that sizes/roots may have changed. */
+  onComplete?: () => void;
 }
 
 interface DetectResult {
@@ -34,7 +37,7 @@ interface DetectResult {
  *  safe -- the second run will see an empty-or-shorter list and either
  *  hide or finish faster.
  */
-export function BulkRecalcBar({ unsizedGames }: Props) {
+export function BulkRecalcBar({ unsizedGames, onComplete }: Props) {
   const { updateGame } = useGames();
   const { showToast } = useToast();
 
@@ -111,7 +114,8 @@ export function BulkRecalcBar({ unsizedGames }: Props) {
     }
 
     setRunning(false);
-  }, [running, target, updateGame, showToast]);
+    onComplete?.();
+  }, [running, target, updateGame, showToast, onComplete]);
 
   const stop = useCallback(() => {
     abortedRef.current = true;

@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useGames } from "../context/GameContext";
 import { useDensityContext } from "../context/DensityContext";
+import { useToast } from "../context/ToastContext";
 import DensityToggle from "../components/DensityToggle";
 import { DEFAULT_SORT, sortGames, type SortKey } from "./storage/utils";
 import { Button } from "../components/ui";
@@ -10,6 +12,9 @@ import { StorageSortSelect } from "./storage/StorageSortSelect";
 import { StorageRow } from "./storage/StorageRow";
 import { useStalePaths } from "./storage/useStalePaths";
 import "./StoragePage.css";
+
+/** Active list filter for the Storage tab. */
+export type StorageFilter = "all" | "sized" | "missing" | "stale";
 
 /** Refactored Storage page — density-aware, searchable, themed.
  *
@@ -23,8 +28,10 @@ import "./StoragePage.css";
 export default function StoragePage() {
   const { games } = useGames();
   const { density, setDensity } = useDensityContext();
+  const { showToast } = useToast();
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<StorageFilter>("all");
 
   // Storage is only meaningful for games actually installed on disk.
   const installedGames = useMemo(
@@ -32,14 +39,41 @@ export default function StoragePage() {
     [games]
   );
 
+  const { staleMap, refresh, refreshAll } = useStalePaths(installedGames);
+  const staleCount = useMemo(
+    () =>
+      Array.from(staleMap.values()).reduce((n, stale) => (stale ? n + 1 : n), 0),
+    [staleMap]
+  );
+
+  // Status filter (All / Sized / Missing / Stale) applied before search,
+  // so the search box narrows within the chosen cohort.
+  const statusFilteredGames = useMemo(() => {
+    switch (filter) {
+      case "sized":
+        return installedGames.filter(
+          (g) => g.sizeBytes != null && g.sizeBytes > 0
+        );
+      case "missing":
+        return installedGames.filter(
+          (g) => g.sizeBytes == null || g.sizeBytes <= 0
+        );
+      case "stale":
+        return installedGames.filter((g) => staleMap.get(g.id) === true);
+      case "all":
+      default:
+        return installedGames;
+    }
+  }, [installedGames, filter, staleMap]);
+
   // Client-side name search filter.
   const filteredGames = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return installedGames;
-    return installedGames.filter((g) =>
+    if (!q) return statusFilteredGames;
+    return statusFilteredGames.filter((g) =>
       g.name.toLowerCase().includes(q)
     );
-  }, [installedGames, search]);
+  }, [statusFilteredGames, search]);
 
   const sortedGames = useMemo(
     () => sortGames(filteredGames, sort),
@@ -59,12 +93,6 @@ export default function StoragePage() {
     [installedGames]
   );
 
-  const { staleMap, refresh } = useStalePaths(installedGames);
-  const staleCount = useMemo(
-    () =>
-      Array.from(staleMap.values()).reduce((n, stale) => (stale ? n + 1 : n), 0),
-    [staleMap]
-  );
   const handleRowSizeUpdated = useCallback(
     (gameId: string) => {
       void refresh(gameId);
@@ -73,6 +101,34 @@ export default function StoragePage() {
   );
 
   const showingFiltered = search.trim().length > 0;
+
+  // Re-check every measured path's existence on disk (e.g. after a
+  // drive was re-plugged). Exposed to the user via the toolbar refresh
+  // button so the stale count updates on demand, not only on mount.
+  const [refreshingPaths, setRefreshingPaths] = useState(false);
+  const handleRefreshPaths = useCallback(() => {
+    setRefreshingPaths(true);
+    refreshAll();
+    // refreshAll bumps an internal counter; the check resolves fast, so
+    // we just clear the spinner after a tick to avoid a stuck state.
+    setTimeout(() => setRefreshingPaths(false), 600);
+  }, [refreshAll]);
+
+  const handleOpenFolder = useCallback(
+    async (game: { sizeRootPath?: string; path?: string; name: string }) => {
+      const target = game.sizeRootPath || game.path;
+      if (!target) {
+        showToast(`No folder known for ${game.name}`, "info");
+        return;
+      }
+      try {
+        await invoke("open_folder", { path: target });
+      } catch (err) {
+        showToast(`Could not open folder: ${err}`, "error");
+      }
+    },
+    [showToast]
+  );
 
   return (
     <div className="storage-page">
@@ -97,6 +153,41 @@ export default function StoragePage() {
 
       {/* ── Dashboard cards ──────────────────────────────────── */}
       <StorageHeader games={installedGames} staleCount={staleCount} />
+
+      {/* ── Status filter chips ──────────────────────────────── */}
+      <div className="storage__filters" role="group" aria-label="Filter games by storage status">
+        {(
+          [
+            { key: "all", label: "All", count: installedGames.length },
+            {
+              key: "sized",
+              label: "Sized",
+              count: installedGames.filter(
+                (g) => g.sizeBytes != null && g.sizeBytes > 0
+              ).length,
+            },
+            {
+              key: "missing",
+              label: "Missing",
+              count: unsizedCount,
+            },
+            { key: "stale", label: "Stale", count: staleCount },
+          ] as { key: StorageFilter; label: string; count: number }[]
+        ).map(({ key, label, count }) => (
+          <button
+            key={key}
+            type="button"
+            className={`storage__filter-chip${
+              filter === key ? " storage__filter-chip--active" : ""
+            }`}
+            aria-pressed={filter === key}
+            onClick={() => setFilter(key)}
+          >
+            {label}
+            <span className="storage__filter-chip-count">{count}</span>
+          </button>
+        ))}
+      </div>
 
       {/* ── Toolbar ──────────────────────────────────────────── */}
       <div className="storage__toolbar">
@@ -140,12 +231,22 @@ export default function StoragePage() {
         </div>
 
         <div className="storage__toolbar-right">
-          <BulkRecalcBar unsizedGames={missingGames} />
+          <BulkRecalcBar unsizedGames={missingGames} onComplete={refreshAll} />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefreshPaths}
+            isLoading={refreshingPaths}
+            title="Re-check every measured folder against the disk"
+          >
+            Refresh
+          </Button>
           <span className="storage__toolbar-count">
             {sortedGames.length} game{sortedGames.length === 1 ? "" : "s"}
-            {showingFiltered && installedGames.length !== sortedGames.length &&
+            {(showingFiltered || filter !== "all") &&
+              installedGames.length !== sortedGames.length &&
               ` of ${installedGames.length}`}
-            {!showingFiltered && unsizedCount > 0 &&
+            {!showingFiltered && filter === "all" && unsizedCount > 0 &&
               ` ${"·"} ${unsizedCount} missing`}
           </span>
         </div>
@@ -166,9 +267,15 @@ export default function StoragePage() {
           <p className="storage__empty-state-title">
             {showingFiltered
               ? "No games match your search"
-              : installedGames.length === 0
-                ? "No installed games detected"
-                : "No sized games yet"}
+              : filter === "stale"
+                ? "No stale games"
+                : filter === "missing"
+                  ? "No missing sizes"
+                  : filter === "sized"
+                    ? "No sized games"
+                    : installedGames.length === 0
+                      ? "No installed games detected"
+                      : "No sized games yet"}
           </p>
           <p className="storage__empty-state-subtitle">
             {showingFiltered
@@ -195,6 +302,7 @@ export default function StoragePage() {
               stale={staleMap.get(g.id) === true}
               density={density}
               onSizeUpdated={() => handleRowSizeUpdated(g.id)}
+              onOpenFolder={() => handleOpenFolder(g)}
             />
           ))}
         </ul>
