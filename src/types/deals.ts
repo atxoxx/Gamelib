@@ -80,24 +80,23 @@ export interface DealsFilters {
   store?: string | null;
 }
 
-/** A single free-game giveaway (one game inside a bundle).
- * Returned by `fetch_giveaways`. */
+/** A single free game from ITAD's giveaways list.
+ * Returned by `fetch_giveaways`. One entry per individual game. */
 export interface Giveaway {
-  /** Composite id (`"{bundleId}-{gameId}"`). */
+  /** Composite id (`"{giveawayId}-{gameId}"`). */
   id: string;
-  /** Individual game title. */
+  /** Individual game title (e.g. "The Life and Suffering of Sir Brante"). */
   title: string;
-  /** Parent bundle title (e.g. "Humble Summer Bundle") for context. */
+  /** Parent giveaway title for context (e.g. "...free on Steam"). */
   bundleTitle: string;
-  /** Cover image URL. `null` when the bundle page doesn't expose
-   * an image for this game — the frontend shows a fallback icon. */
-  imageUrl?: string | null;
-  /** Storefront display name (e.g. "Humble Bundle", "Fanatical"). */
+  /** Storefront display name (e.g. "Steam", "Humble Bundle"). */
   storeName: string;
-  /** Direct claim URL — the per-game URL when present, otherwise
-   * the parent bundle's tracking URL. */
+  /** Cover image URL. `null` when ITAD doesn't expose one — the
+   * frontend shows a fallback icon. */
+  imageUrl?: string | null;
+  /** Direct claim URL (the giveaway's store/claim page). */
   dealUrl: string;
-  /** 18+ flag inherited from the parent bundle. */
+  /** 18+ flag. */
   isMature: boolean;
   /** ISO 8601 expiration timestamp. `null` when no expiry is set. */
   expiry?: string | null;

@@ -639,11 +639,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 32px;
-  background: linear-gradient(135deg,
+  background: var(--store-tint, linear-gradient(135deg,
     color-mix(in srgb, var(--color-success) 14%, var(--color-bg-tertiary)),
-    var(--color-bg-tertiary));
+    var(--color-bg-tertiary)));
 }
 
 .deals-giveaway-card-free-badge {

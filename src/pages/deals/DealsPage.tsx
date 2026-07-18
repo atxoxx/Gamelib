@@ -128,6 +128,26 @@ function buildDealsPayload(filters: DealsFiltersState): DealsFilters {
   };
 }
 
+/// Pick a stable accent color for a storefront so the fallback
+/// image tile (shown when ITAD doesn't expose a cover) still reads
+/// as a distinct, branded card.
+function storeTint(storeName: string): string {
+  const palette: Record<string, string> = {
+    "Humble Bundle": "#ff3e1b",
+    Fanatical: "#ff9800",
+    IndieGala: "#ffb4e0",
+    GOG: "#b6883a",
+    Steam: "#1b2838",
+    Epic: "#2a2a72",
+  };
+  for (const key of Object.keys(palette)) {
+    if (storeName.toLowerCase().includes(key.toLowerCase())) {
+      return palette[key];
+    }
+  }
+  return "#3a4a63";
+}
+
 export default function DealsPage() {
   const { density } = useDensityContext();
   const { showToast } = useToast();
@@ -905,8 +925,8 @@ export default function DealsPage() {
           <div className="deals-filters">
             <div className="deals-filters-info">
               <span>
-                Free game bundles and individual giveaways from IsThereAnyDeal.
-                Click any card to open the claim page in your browser.
+                Individual free games currently live on IsThereAnyDeal.
+                Click any card to open its claim page in your browser.
               </span>
             </div>
             <Button
@@ -1007,7 +1027,12 @@ export default function DealsPage() {
                           loading="lazy"
                         />
                       ) : (
-                        <div className="deals-giveaway-card-image-fallback">
+                        <div
+                          className="deals-giveaway-card-image-fallback"
+                          style={{
+                            background: storeTint(giveaway.storeName),
+                          }}
+                        >
                           <svg
                             viewBox="0 0 24 24"
                             fill="none"
@@ -1038,7 +1063,7 @@ export default function DealsPage() {
                       {giveaway.bundleTitle &&
                         giveaway.bundleTitle !== giveaway.title && (
                           <div className="deals-giveaway-card-bundle">
-                            from {giveaway.bundleTitle}
+                            {giveaway.bundleTitle}
                           </div>
                         )}
                       <div className="deals-giveaway-card-meta">
