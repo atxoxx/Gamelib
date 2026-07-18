@@ -354,6 +354,82 @@ export function getActivityMessage(download: TorrentDownload): string | null {
   }
 }
 
+// ─── Filtering & sorting (Downloads page) ───────────────────────────────────
+
+/**
+ * Status filter buckets for the Downloads page. `all` shows every
+ * download; the rest map onto one or more `DownloadStatus.kind`
+ * values so the UI can offer coarse, human-meaningful groupings
+ * (e.g. "Seeding" lumps together downloads that are uploading).
+ */
+export type DownloadStatusFilter =
+  | "all"
+  | "downloading"
+  | "paused"
+  | "completed"
+  | "error";
+
+/** Sort keys for the Downloads page list. */
+export type DownloadSort =
+  | "added-desc"
+  | "added-asc"
+  | "name-asc"
+  | "size-desc"
+  | "progress-desc"
+  | "speed-desc";
+
+/** Return true if a download matches the given status filter. */
+export function matchesStatusFilter(
+  download: TorrentDownload,
+  filter: DownloadStatusFilter,
+): boolean {
+  if (filter === "all") return true;
+  const kind = download.status.kind;
+  switch (filter) {
+    case "downloading":
+      // Anything still working toward completion (excluding paused/error).
+      return kind === "downloading" || kind === "queued" || kind === "fetchingMetadata";
+    case "paused":
+      return kind === "paused";
+    case "completed":
+      return kind === "completed";
+    case "error":
+      return kind === "error";
+  }
+}
+
+/**
+ * Case-insensitive substring match against the download name and
+ * its source name. Empty/whitespace queries match everything.
+ */
+export function matchesSearchQuery(download: TorrentDownload, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    download.name.toLowerCase().includes(q) ||
+    download.sourceName.toLowerCase().includes(q)
+  );
+}
+
+/** Comparator factory for the Downloads page sort dropdown. */
+export function compareDownloads(sort: DownloadSort): (a: TorrentDownload, b: TorrentDownload) => number {
+  switch (sort) {
+    case "added-asc":
+      return (a, b) => a.addedAt - b.addedAt;
+    case "name-asc":
+      return (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    case "size-desc":
+      return (a, b) => (b.totalSize ?? 0) - (a.totalSize ?? 0);
+    case "progress-desc":
+      return (a, b) => (b.progress ?? 0) - (a.progress ?? 0);
+    case "speed-desc":
+      return (a, b) => b.downloadSpeed - a.downloadSpeed;
+    case "added-desc":
+    default:
+      return (a, b) => b.addedAt - a.addedAt;
+  }
+}
+
 /** Safe hostname extractor for direct-download URIs. Returns "" for
  *  magnet links / non-URL inputs. */
 function extractHostname(uri: string): string {

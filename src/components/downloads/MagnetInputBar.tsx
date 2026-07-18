@@ -13,6 +13,15 @@
 //   * It doesn't conflict with the modal — the modal is the
 //     "browse, pick a source, save path" flow; this is the
 //     "I already have a URI" flow.
+//
+// Two conveniences layered on top of the basic paste-and-add flow:
+//
+//   1. Default save path — when the user has set a default download
+//      folder in Settings (and hasn't enabled "always ask"), we skip
+//      the folder picker and drop the download straight in.
+//   2. Drag-and-drop — dropping a magnet link (as text) or a
+//      `.torrent` file URL onto the bar fills the input, so the user
+//      can drag from a browser without copying to the clipboard.
 
 import { useState } from "react";
 import { useDownloads } from "../../context/DownloadContext";
@@ -21,14 +30,29 @@ import { Button } from "../ui";
 
 const URI_PATTERN = /^(magnet:|https?:\/\/)/i;
 
+/** Resolve the save folder: honour the configured default unless the
+ *  user asked to always be prompted (or no default is set). Returns
+ *  null when the user cancels the picker. */
+async function resolveSavePath(
+  selectSavePath: () => Promise<string | null>,
+): Promise<string | null> {
+  const defaultPath = localStorage.getItem("gamelib-default-download-path") || "";
+  const alwaysAsk = localStorage.getItem("gamelib-download-always-ask-path") !== "false";
+  if (defaultPath && !alwaysAsk) {
+    return defaultPath;
+  }
+  return selectSavePath();
+}
+
 export default function MagnetInputBar() {
   const { addDownload, addDirectDownload, selectSavePath } = useDownloads();
   const { showToast } = useToast();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
-  async function handleAdd() {
-    const trimmed = value.trim();
+  async function startFromUri(rawUri: string) {
+    const trimmed = rawUri.trim();
     if (!trimmed) return;
     if (!URI_PATTERN.test(trimmed)) {
       showToast("Must be a magnet: link or http(s):// .torrent URL", "error");
@@ -36,11 +60,11 @@ export default function MagnetInputBar() {
     }
     setSubmitting(true);
     try {
-      const path = await selectSavePath();
+      const path = await resolveSavePath(selectSavePath);
       if (!path) {
         return;
       }
-      
+
       const isMagnet = trimmed.startsWith("magnet:");
       const isTorrentFile = trimmed.endsWith(".torrent") || trimmed.includes(".torrent?");
       const isDirect = !isMagnet && !isTorrentFile;
@@ -54,7 +78,7 @@ export default function MagnetInputBar() {
             filename = lastSeg;
           }
         } catch {}
-        
+
         const fullPath = `${path}/${filename}`.replace(/\\/g, "/");
         await addDirectDownload(trimmed, fullPath, null, "Manual Direct Link");
       } else {
@@ -70,8 +94,47 @@ export default function MagnetInputBar() {
     }
   }
 
+  async function handleAdd() {
+    await startFromUri(value);
+  }
+
+  // Drag-and-drop: accept plain text (a magnet link dragged from a
+  // browser) or a URI list. We only *fill* the input on drop — we
+  // don't auto-start, so the user gets a chance to eyeball the URI
+  // before committing. If the dropped text is a valid URI we could
+  // start it directly, but filling is the safer default.
+  function extractUriFromDrop(e: React.DragEvent): string | null {
+    const uriList = e.dataTransfer.getData("text/uri-list");
+    const plain = e.dataTransfer.getData("text/plain");
+    const candidate = (uriList || plain || "").trim();
+    if (candidate && URI_PATTERN.test(candidate)) {
+      // A uri-list may contain multiple lines; take the first URI-ish one.
+      const first = candidate.split(/\r?\n/).find((l) => URI_PATTERN.test(l.trim()));
+      return (first ?? candidate).trim();
+    }
+    return null;
+  }
+
   return (
-    <div className="dl-magnet-bar">
+    <div
+      className={`dl-magnet-bar${dragOver ? " drag-over" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!submitting) setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (submitting) return;
+        const uri = extractUriFromDrop(e);
+        if (uri) {
+          setValue(uri);
+        } else {
+          showToast("Dropped item isn't a magnet or .torrent URL", "error");
+        }
+      }}
+    >
       <svg
         className="dl-magnet-bar-icon"
         viewBox="0 0 24 24"
@@ -88,7 +151,7 @@ export default function MagnetInputBar() {
       <input
         className="dl-magnet-bar-input"
         type="text"
-        placeholder="Paste a magnet link or .torrent URL…"
+        placeholder="Paste or drop a magnet link or .torrent URL…"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {

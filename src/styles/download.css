@@ -2327,3 +2327,282 @@
 .modal-backdrop[data-busy="true"] {
   cursor: progress;
 }
+
+/* ===========================================================================
+ * DownloadRow badges, mirror selector, and file checkboxes
+ *
+ * These rules replace the inline `style={{...}}` objects that used to
+ * live in DownloadRow.tsx. Moving them here keeps the row component
+ * lean, lets the badges/select participate in theming, and avoids
+ * re-allocating style objects on every render.
+ * ========================================================================== */
+
+/* Source-kind badges next to the download name. */
+.dl-row-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 4px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.3px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.dl-row-badge--direct {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+}
+
+.dl-row-badge--debrid {
+  background: rgba(0, 240, 255, 0.15);
+  color: #00f0ff;
+}
+
+/* Mirror / hoster selector inside the actions column. */
+.dl-row-mirror-select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+}
+
+.dl-row-mirror-select {
+  padding: 4px 24px 4px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.dl-row-mirror-select:hover,
+.dl-row-mirror-select:focus-visible {
+  border-color: var(--color-accent);
+}
+
+.dl-row-mirror-select-caret {
+  position: absolute;
+  right: 8px;
+  font-size: 9px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* File-list checkbox + rows in the expanded drawer. */
+.dl-file-item--skipped {
+  opacity: 0.45;
+}
+
+.dl-file-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.dl-file-checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.dl-file-name--skipped {
+  text-decoration: line-through;
+}
+
+/* ===========================================================================
+ * Downloads page filter / sort / search bar
+ *
+ * A single row above the Active section that lets the user narrow a
+ * large download list. Sits alongside the bulk-action toolbar.
+ * ========================================================================== */
+
+.dl-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-xs);
+}
+
+.dl-filters-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
+}
+
+.dl-filters-search-icon {
+  position: absolute;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.dl-filters-search-input {
+  width: 100%;
+  padding: 7px 28px 7px 30px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  outline: none;
+  transition: border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.dl-filters-search-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.dl-filters-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.dl-filters-search-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: color var(--transition-fast);
+}
+
+.dl-filters-search-clear:hover {
+  color: var(--color-text-primary);
+}
+
+/* Status filter pills. */
+.dl-filters-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.dl-filters-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.dl-filters-pill:hover:not(.active) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.dl-filters-pill.active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.dl-filters-pill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-filters-pill.active .dl-filters-pill-count {
+  background: color-mix(in srgb, #ffffff 25%, transparent);
+  color: #fff;
+}
+
+/* Sort dropdown. */
+.dl-filters-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.dl-filters-sort-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.dl-filters-sort-select {
+  padding: 6px 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.dl-filters-sort-select:hover,
+.dl-filters-sort-select:focus-visible {
+  border-color: var(--color-accent);
+}
+
+/* No-results-after-filter state (distinct from the true empty state). */
+.dl-list-no-match {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-xl) var(--space-lg);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Drag-and-drop overlay on the magnet quick-add bar. */
+.dl-magnet-bar.drag-over {
+  border-color: var(--color-accent);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}

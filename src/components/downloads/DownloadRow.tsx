@@ -139,10 +139,10 @@ const DownloadRow = React.memo(({
             <span className="dl-row-name" title={download.name}>
               {download.name}
               {download.id.startsWith("dd_") && (
-                <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(124, 102, 255, 0.15)", color: "var(--color-accent)", borderRadius: "3px", fontWeight: "bold" }}>DIRECT</span>
+                <span className="dl-row-badge dl-row-badge--direct">DIRECT</span>
               )}
               {download.id.startsWith("db_") && (
-                <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(0, 240, 255, 0.15)", color: "#00f0ff", borderRadius: "3px", fontWeight: "bold" }}>DEBRID</span>
+                <span className="dl-row-badge dl-row-badge--debrid">DEBRID</span>
               )}
             </span>
             <span className="dl-row-source" title={`Source: ${download.sourceName}`}>
@@ -242,8 +242,9 @@ const DownloadRow = React.memo(({
 
         <div className="dl-row-actions">
           {download.uris && download.uris.length > 1 && (
-            <div className="dl-row-mirror-select-wrapper" style={{ position: "relative", display: "inline-flex", alignItems: "center", marginRight: "8px" }}>
+            <div className="dl-row-mirror-select-wrapper">
               <select
+                className="dl-row-mirror-select"
                 value={download.sourceUri}
                 onChange={async (e) => {
                   try {
@@ -254,18 +255,7 @@ const DownloadRow = React.memo(({
                   }
                 }}
                 title="Switch mirror hoster"
-                style={{
-                  padding: "4px 24px 4px 8px",
-                  background: "var(--color-bg-secondary)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "var(--radius-sm)",
-                  color: "var(--color-text-secondary)",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                  appearance: "none",
-                  fontWeight: "var(--font-weight-medium)",
-                  outline: "none",
-                }}
+                aria-label="Switch mirror hoster"
               >
                 {download.uris.map((uri, idx) => {
                   let hoster = "Mirror " + (idx + 1);
@@ -280,7 +270,7 @@ const DownloadRow = React.memo(({
                   );
                 })}
               </select>
-              <span style={{ position: "absolute", right: "8px", pointerEvents: "none", fontSize: "9px", opacity: 0.6 }} aria-hidden>▼</span>
+              <span className="dl-row-mirror-select-caret" aria-hidden>▼</span>
             </div>
           )}
           <button
@@ -357,21 +347,24 @@ const DownloadRow = React.memo(({
         <div className="dl-row-details">
           <div className="dl-files-list">
             {download.files.map((file, idx) => (
-              <div key={idx} className="dl-file-item" style={{ opacity: file.selected ? 1 : 0.45 }}>
+              <div key={idx} className={`dl-file-item${file.selected ? "" : " dl-file-item--skipped"}`}>
                 <input
                   type="checkbox"
+                  className="dl-file-checkbox"
                   checked={file.selected}
                   disabled={isCompleted}
                   onChange={() => handleToggleFile(idx)}
+                  aria-label={
+                    file.selected
+                      ? `Deselect ${file.name}`
+                      : `Select ${file.name}`
+                  }
                   title={file.selected ? "File selected for download" : "File skipped"}
-                  style={{
-                    cursor: isCompleted ? "not-allowed" : "pointer",
-                    width: "14px",
-                    height: "14px",
-                    margin: "0"
-                  }}
                 />
-                <span className="dl-file-name" title={file.name} style={{ textDecoration: file.selected ? "none" : "line-through" }}>
+                <span
+                  className={`dl-file-name${file.selected ? "" : " dl-file-name--skipped"}`}
+                  title={file.name}
+                >
                   {file.name}
                 </span>
                 <span className="dl-file-size">

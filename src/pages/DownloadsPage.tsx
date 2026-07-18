@@ -22,15 +22,25 @@
 // library doesn't dominate the viewport) and exposes a "Show
 // more" affordance when the user does want to browse it.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useDownloads } from "../context/DownloadContext";
 import { useToast } from "../context/ToastContext";
 import { useSizeUnit } from "../hooks/useSizeUnit";
-import { formatBytesShort, type TorrentDownload } from "../types/download";
+import {
+  compareDownloads,
+  formatBytesShort,
+  isActiveStatus,
+  matchesSearchQuery,
+  matchesStatusFilter,
+  type DownloadSort,
+  type DownloadStatusFilter,
+  type TorrentDownload,
+} from "../types/download";
 import BandwidthHero from "../components/downloads/BandwidthHero";
 import BandwidthSparkline from "../components/downloads/BandwidthSparkline";
 import MagnetInputBar from "../components/downloads/MagnetInputBar";
 import DownloadsToolbar from "../components/downloads/DownloadsToolbar";
+import DownloadsFilterBar from "../components/downloads/DownloadsFilterBar";
 import DownloadRow from "../components/downloads/DownloadRow";
 import { ConfirmModal } from "../components/ui";
 
@@ -38,6 +48,7 @@ const HISTORY_PREVIEW = 5;
 
 export default function DownloadsPage() {
   const {
+    downloads,
     activeDownloads,
     completedDownloads,
     pauseDownload,
@@ -49,6 +60,61 @@ export default function DownloadsPage() {
   const { unit } = useSizeUnit();
   const [historyExpanded, setHistoryExpanded] = useState(false);
 
+  // ── Search / filter / sort state ─────────────────────────────────
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<DownloadStatusFilter>("all");
+  const [sort, setSort] = useState<DownloadSort>("added-desc");
+
+  // Per-bucket counts for the filter pill badges (computed over the
+  // full list, unaffected by the current search query so the badges
+  // stay stable as the user types).
+  const counts = useMemo<Record<DownloadStatusFilter, number>>(() => {
+    const c: Record<DownloadStatusFilter, number> = {
+      all: downloads.length,
+      downloading: 0,
+      paused: 0,
+      completed: 0,
+      error: 0,
+    };
+    for (const d of downloads) {
+      if (matchesStatusFilter(d, "downloading")) c.downloading += 1;
+      else if (matchesStatusFilter(d, "paused")) c.paused += 1;
+      else if (matchesStatusFilter(d, "completed")) c.completed += 1;
+      else if (matchesStatusFilter(d, "error")) c.error += 1;
+    }
+    return c;
+  }, [downloads]);
+
+  // Apply search + status filter + sort to each section. The status
+  // pills act as a cross-section filter: picking "Completed" empties
+  // the Active section and vice-versa, which is the expected mental
+  // model when the user narrows to a single state.
+  const comparator = useMemo(() => compareDownloads(sort), [sort]);
+
+  const filteredActive = useMemo(
+    () =>
+      activeDownloads
+        .filter(
+          (d) =>
+            matchesSearchQuery(d, query) && matchesStatusFilter(d, statusFilter),
+        )
+        .sort(comparator),
+    [activeDownloads, query, statusFilter, comparator],
+  );
+
+  const filteredHistory = useMemo(
+    () =>
+      completedDownloads
+        .filter(
+          (d) =>
+            matchesSearchQuery(d, query) && matchesStatusFilter(d, statusFilter),
+        )
+        .sort(comparator),
+    [completedDownloads, query, statusFilter, comparator],
+  );
+
+  const isFiltering = query.trim() !== "" || statusFilter !== "all";
+
   // ── "Delete from disk" confirmation state ────────────────────────
   // At most one modal at a time. `deletingContext` carries the full
   // record so the dialog can render name / size / save path context;
@@ -57,6 +123,13 @@ export default function DownloadsPage() {
   // can't fire the destructive command twice.
   const [deletingContext, setDeletingContext] = useState<TorrentDownload | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
+
+  // ── "Remove active download" confirmation state ──────────────────
+  // Removing an in-progress download discards its partial progress,
+  // so we guard it behind a confirm dialog (completed/history rows
+  // remove silently since there's nothing to lose).
+  const [removingContext, setRemovingContext] = useState<TorrentDownload | null>(null);
+  const [removingBusy, setRemovingBusy] = useState(false);
 
   // Pause / resume / remove handlers. Errors are surfaced via the
   // shared toast so the failure mode is consistent with the
@@ -76,6 +149,14 @@ export default function DownloadsPage() {
     }
   }
   async function handleRemove(id: string) {
+    // For active (still-in-flight) downloads, open a confirmation
+    // dialog first — removing them throws away partial progress.
+    // Completed / history rows remove immediately.
+    const target = downloads.find((d) => d.id === id);
+    if (target && isActiveStatus(target.status)) {
+      setRemovingContext(target);
+      return;
+    }
     try {
       await removeDownload(id, false);
       showToast("Download removed", "info");
@@ -83,6 +164,22 @@ export default function DownloadsPage() {
       showToast(`Remove failed: ${err}`, "error");
     }
   }
+
+  async function confirmRemoveActive() {
+    if (!removingContext) return;
+    const target = removingContext;
+    setRemovingBusy(true);
+    try {
+      await removeDownload(target.id, false);
+      showToast(`Removed "${target.name}"`, "info");
+      setRemovingContext(null);
+    } catch (err) {
+      showToast(`Remove failed: ${err}`, "error");
+    } finally {
+      setRemovingBusy(false);
+    }
+  }
+
 
   // "Delete from disk" — opens the confirmation dialog with full
   // download context. The actual Rust call (`removeDownload` with
@@ -126,6 +223,16 @@ export default function DownloadsPage() {
       <BandwidthHero />
       <BandwidthSparkline />
 
+      <DownloadsFilterBar
+        query={query}
+        onQueryChange={setQuery}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        sort={sort}
+        onSortChange={setSort}
+        counts={counts}
+      />
+
       <section
         className="dl-section"
         aria-labelledby="dl-section-active"
@@ -133,8 +240,8 @@ export default function DownloadsPage() {
         <div className="dl-section-header">
           <h3 id="dl-section-active" className="dl-section-title">
             Active
-            {activeDownloads.length > 0 && (
-              <span className="dl-section-count">{activeDownloads.length}</span>
+            {filteredActive.length > 0 && (
+              <span className="dl-section-count">{filteredActive.length}</span>
             )}
           </h3>
           <DownloadsToolbar
@@ -148,6 +255,10 @@ export default function DownloadsPage() {
             <div className="dl-list-empty">
               <div className="spinner-small" />
               <span>Loading downloads…</span>
+            </div>
+          ) : filteredActive.length === 0 && activeDownloads.length > 0 ? (
+            <div className="dl-list-no-match">
+              No active downloads match your filters.
             </div>
           ) : activeDownloads.length === 0 ? (
             <div className="dl-list-empty">
@@ -172,7 +283,7 @@ export default function DownloadsPage() {
               </p>
             </div>
           ) : (
-            activeDownloads.map((d) => (
+            filteredActive.map((d) => (
               <DownloadRow
                 key={d.id}
                 download={d}
@@ -193,14 +304,18 @@ export default function DownloadsPage() {
         <div className="dl-section-header">
           <h3 id="dl-section-history" className="dl-section-title">
             History
-            {completedDownloads.length > 0 && (
-              <span className="dl-section-count">{completedDownloads.length}</span>
+            {filteredHistory.length > 0 && (
+              <span className="dl-section-count">{filteredHistory.length}</span>
             )}
           </h3>
         </div>
 
         <div className="dl-list">
-          {completedDownloads.length === 0 ? (
+          {filteredHistory.length === 0 && completedDownloads.length > 0 ? (
+            <div className="dl-list-no-match">
+              No completed downloads match your filters.
+            </div>
+          ) : completedDownloads.length === 0 ? (
             <div className="dl-list-empty">
               <svg
                 className="dl-list-empty-icon"
@@ -222,9 +337,9 @@ export default function DownloadsPage() {
             </div>
           ) : (
             <>
-              {(historyExpanded
-                ? completedDownloads
-                : completedDownloads.slice(0, HISTORY_PREVIEW)
+              {(historyExpanded || isFiltering
+                ? filteredHistory
+                : filteredHistory.slice(0, HISTORY_PREVIEW)
               ).map((d) => (
                 <DownloadRow
                   key={d.id}
@@ -235,14 +350,14 @@ export default function DownloadsPage() {
                   onDeleteFiles={handleDeleteFiles}
                 />
               ))}
-              {completedDownloads.length > HISTORY_PREVIEW && (
+              {!isFiltering && filteredHistory.length > HISTORY_PREVIEW && (
                 <button
                   className="dl-list-show-more"
                   onClick={() => setHistoryExpanded((v) => !v)}
                 >
                   {historyExpanded
                     ? "Show less"
-                    : `Show ${completedDownloads.length - HISTORY_PREVIEW} more`}
+                    : `Show ${filteredHistory.length - HISTORY_PREVIEW} more`}
                   <svg
                     viewBox="0 0 24 24"
                     fill="none"
@@ -316,6 +431,46 @@ export default function DownloadsPage() {
         onConfirm={confirmDelete}
         onCancel={() => {
           if (!deletingBusy) setDeletingContext(null);
+        }}
+      />
+
+      {/* ── "Remove active download" confirmation ────────────────
+       * Guards the plain Remove (X) action for still-in-flight
+       * downloads. Files are kept on disk — this only discards the
+       * queue entry and its partial progress. */}
+      <ConfirmModal
+        open={removingContext !== null}
+        title={
+          removingContext ? (
+            <>
+              Remove <strong>{removingContext.name}</strong>?
+            </>
+          ) : (
+            "Remove download?"
+          )
+        }
+        message={
+          removingContext && (
+            <>
+              This download is still in progress. Removing it discards its
+              partial progress
+              {removingContext.progress != null && removingContext.progress > 0 ? (
+                <>
+                  {" "}(
+                  <strong>{Math.round(removingContext.progress * 100)}%</strong>{" "}
+                  downloaded)
+                </>
+              ) : null}
+              . The downloaded files are kept on disk — use "Delete from disk"
+              to remove those too.
+            </>
+          )
+        }
+        confirmLabel="Remove download"
+        busy={removingBusy}
+        onConfirm={confirmRemoveActive}
+        onCancel={() => {
+          if (!removingBusy) setRemovingContext(null);
         }}
       />
     </div>

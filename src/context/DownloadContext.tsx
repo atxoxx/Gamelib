@@ -32,6 +32,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useToast } from "./ToastContext";
 import {
   getStatusError,
   isActiveStatus,
@@ -114,6 +115,31 @@ const DownloadContext = createContext<DownloadContextValue | null>(null);
 const EMPTY_DOWNLOADS: TorrentDownload[] = [];
 
 /**
+ * Fire an OS-level notification via the Web Notifications API (which
+ * works inside the Tauri webview). Best-effort: requests permission
+ * on first use and silently no-ops if the user denies it or the API
+ * is unavailable. We keep this on the web API rather than adding the
+ * Tauri notification plugin so no extra Rust registration / capability
+ * wiring is required.
+ */
+function fireOsNotification(title: string, body: string): void {
+  try {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    } else if (Notification.permission !== "denied") {
+      void Notification.requestPermission().then((perm) => {
+        if (perm === "granted") {
+          new Notification(title, { body });
+        }
+      });
+    }
+  } catch (err) {
+    console.debug("[DownloadContext] OS notification failed:", err);
+  }
+}
+
+/**
  * Sort: active downloads first (most recently added at the top of
  * that group), completed next (newest first). This matches what
  * the Rust `list()` does so the panel ordering is consistent
@@ -178,11 +204,75 @@ function areDownloadsEqual(a: TorrentDownload[], b: TorrentDownload[]): boolean 
 export function DownloadProvider({ children }: { children: ReactNode }) {
   const [downloads, setDownloads] = useState<TorrentDownload[]>(EMPTY_DOWNLOADS);
   const [loading, setLoading] = useState(true);
+  const { showToast } = useToast();
   // Keep a stable ref to the latest list so the `download-progress`
   // event handler (which we register once on mount) doesn't capture
   // a stale snapshot.
   const downloadsRef = useRef(downloads);
   downloadsRef.current = downloads;
+
+  // Track the last-seen status kind per download id so we can detect
+  // the "not-completed → completed" transition and surface a
+  // completion toast (and, when enabled, an OS notification). We seed
+  // this from the first snapshot so pre-completed downloads present
+  // at boot don't fire a spurious "finished" toast.
+  const statusKindsRef = useRef<Map<string, DownloadStatus["kind"]>>(new Map());
+  const seededStatusRef = useRef(false);
+
+  /**
+   * Compare an incoming list against the last-seen statuses and fire
+   * a completion notification for each download that just finished.
+   * Idempotent per-id: once a download is recorded as completed we
+   * won't notify again unless it leaves and re-enters the completed
+   * state.
+   */
+  const notifyCompletions = useCallback(
+    (incoming: TorrentDownload[]) => {
+      const prev = statusKindsRef.current;
+      // First snapshot: seed without notifying so we don't announce
+      // downloads that were already done when the app launched.
+      if (!seededStatusRef.current) {
+        for (const d of incoming) prev.set(d.id, d.status.kind);
+        seededStatusRef.current = true;
+        return;
+      }
+
+      const notifyEnabled =
+        localStorage.getItem("gamelib-download-notify-complete") !== "false";
+      const osNotifyEnabled =
+        localStorage.getItem("gamelib-download-notify-os") === "true";
+
+      for (const d of incoming) {
+        const before = prev.get(d.id);
+        const now = d.status.kind;
+        if (now === "completed" && before !== undefined && before !== "completed") {
+          if (notifyEnabled) {
+            showToast(`Download complete: ${d.name}`, "success");
+            if (osNotifyEnabled) {
+              fireOsNotification("Download complete", d.name);
+            }
+          }
+        }
+        prev.set(d.id, now);
+      }
+
+      // Drop ids that are no longer present so the map doesn't grow
+      // unbounded across long sessions with lots of removals.
+      if (prev.size > incoming.length) {
+        const liveIds = new Set(incoming.map((d) => d.id));
+        for (const id of Array.from(prev.keys())) {
+          if (!liveIds.has(id)) prev.delete(id);
+        }
+      }
+    },
+    [showToast],
+  );
+
+  // Stable ref to the latest notifier so the mount effect (which
+  // registers the event listener exactly once) can call it without
+  // taking it as a dependency and re-subscribing.
+  const notifyCompletionsRef = useRef(notifyCompletions);
+  notifyCompletionsRef.current = notifyCompletions;
 
   // ── Initial load + event subscription ──────────────────────────────
   useEffect(() => {
@@ -218,6 +308,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         //    any routes mount — but this ordering is still safer.)
         const unlistenFn = await listen<TorrentDownload[]>("download-progress", (event) => {
           if (Array.isArray(event.payload)) {
+            notifyCompletionsRef.current(event.payload);
             setDownloads((prev) => {
               if (areDownloadsEqual(prev, event.payload)) {
                 return prev;
@@ -240,6 +331,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         try {
           const initial = await invoke<TorrentDownload[]>("torrent_get_all");
           if (!cancelled && Array.isArray(initial)) {
+            notifyCompletionsRef.current(initial);
             setDownloads(initial);
           }
         } catch (err) {

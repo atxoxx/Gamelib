@@ -69,7 +69,14 @@ export default function DownloadModal({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedMirrorIdx, setSelectedMirrorIdx] = useState(0);
   const [savePath, setSavePath] = useState<string | null>(() => {
-    return localStorage.getItem("gamelib-last-download-path") || null;
+    // Prefer the last-used path (so repeated downloads stay in one
+    // place), then fall back to the configured default download
+    // folder from Settings, then to "no path picked yet".
+    return (
+      localStorage.getItem("gamelib-last-download-path") ||
+      localStorage.getItem("gamelib-default-download-path") ||
+      null
+    );
   });
   const [error, setError] = useState<string | null>(null);
 

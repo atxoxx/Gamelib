@@ -103,7 +103,7 @@ export default function SettingsPage() {
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
   const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
-  const { updateSpeedLimits } = useDownloads();
+  const { updateSpeedLimits, selectSavePath } = useDownloads();
   // New settings slice (covers all 12 settings added in this drop:
   // Rust-backed launcher settings + localStorage knobs for sync
   // intervals / privacy / accent / blocklist / discord presence /
@@ -145,6 +145,16 @@ export default function SettingsPage() {
   const [ulLimitValue, setUlLimitValue] = useState(0);
   const [disableUpload, setDisableUpload] = useState(false);
 
+  // Default download path + "always ask" toggle. When a default path
+  // is set and "always ask" is off, the magnet quick-add bar skips
+  // the folder picker and drops downloads straight into this folder.
+  const [defaultDownloadPath, setDefaultDownloadPath] = useState("");
+  const [alwaysAskPath, setAlwaysAskPath] = useState(true);
+
+  // Completion notification toggles.
+  const [notifyComplete, setNotifyComplete] = useState(true);
+  const [notifyOs, setNotifyOs] = useState(false);
+
   // Load limits on mount
   useEffect(() => {
     try {
@@ -153,10 +163,30 @@ export default function SettingsPage() {
       setUlLimitEnabled(localStorage.getItem("gamelib-dl-limit-upload-enabled") === "true");
       setUlLimitValue(parseInt(localStorage.getItem("gamelib-dl-limit-upload-value") || "0", 10));
       setDisableUpload(localStorage.getItem("gamelib-dl-limit-disable-upload") === "true");
+      setDefaultDownloadPath(localStorage.getItem("gamelib-default-download-path") || "");
+      // Default to "always ask" unless the user explicitly turned it off.
+      setAlwaysAskPath(localStorage.getItem("gamelib-download-always-ask-path") !== "false");
+      setNotifyComplete(localStorage.getItem("gamelib-download-notify-complete") !== "false");
+      setNotifyOs(localStorage.getItem("gamelib-download-notify-os") === "true");
     } catch (e) {
       console.error("Failed to load speed limit settings:", e);
     }
   }, []);
+
+  const handlePickDefaultPath = async () => {
+    try {
+      const path = await selectSavePath();
+      if (path) {
+        setDefaultDownloadPath(path);
+        localStorage.setItem("gamelib-default-download-path", path);
+        // Picking a default path implies the user wants to use it.
+        setAlwaysAskPath(false);
+        localStorage.setItem("gamelib-download-always-ask-path", "false");
+      }
+    } catch (e) {
+      showToast(`Couldn't open folder picker: ${e}`, "error");
+    }
+  };
 
   // Debrid Settings State
   const [debridProvider, setDebridProvider] = useState("none");
@@ -2570,6 +2600,125 @@ export default function SettingsPage() {
       {/* Downloads — manage download sources for finding game mirrors. */}
       {activeSettingsTab === "downloads" && (
         <>
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Default download location</h2>
+                <p className="settings-section-desc">
+                  Where quick-added magnet links and torrent URLs are saved.
+                  When set, the Downloads page skips the folder picker unless
+                  "Always ask" is enabled.
+                </p>
+              </div>
+            </header>
+
+            <div className="settings-card" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+              <div className="dl-save-path" style={{ marginTop: 0 }}>
+                <svg
+                  className="dl-save-path-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                <span
+                  className={`dl-save-path-text${defaultDownloadPath ? "" : " placeholder"}`}
+                  title={defaultDownloadPath}
+                >
+                  {defaultDownloadPath || "No default folder — downloads will always prompt"}
+                </span>
+                <div style={{ display: "flex", gap: "var(--space-xs)", flexShrink: 0 }}>
+                  <Button variant="secondary" size="sm" onClick={handlePickDefaultPath}>
+                    {defaultDownloadPath ? "Change" : "Choose…"}
+                  </Button>
+                  {defaultDownloadPath && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setDefaultDownloadPath("");
+                        localStorage.removeItem("gamelib-default-download-path");
+                        setAlwaysAskPath(true);
+                        localStorage.setItem("gamelib-download-always-ask-path", "true");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <label
+                className="settings-checkbox-label"
+                style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", opacity: defaultDownloadPath ? 1 : 0.5 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={alwaysAskPath}
+                  disabled={!defaultDownloadPath}
+                  onChange={(e) => {
+                    setAlwaysAskPath(e.target.checked);
+                    localStorage.setItem("gamelib-download-always-ask-path", String(e.target.checked));
+                  }}
+                />
+                <span>Always ask where to save (ignore the default folder)</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <header className="settings-section-header">
+              <span className="settings-section-icon"><DownloadIcon /></span>
+              <div className="settings-section-header-text">
+                <h2 className="settings-section-title">Notifications</h2>
+                <p className="settings-section-desc">
+                  Get notified when a download finishes so you can leave
+                  transfers running in the background.
+                </p>
+              </div>
+            </header>
+
+            <div className="settings-card" style={{ padding: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+              <label className="settings-checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={notifyComplete}
+                  onChange={(e) => {
+                    setNotifyComplete(e.target.checked);
+                    localStorage.setItem("gamelib-download-notify-complete", String(e.target.checked));
+                  }}
+                />
+                <span>Show an in-app toast when a download completes</span>
+              </label>
+
+              <label className="settings-checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", opacity: notifyComplete ? 1 : 0.5 }}>
+                <input
+                  type="checkbox"
+                  checked={notifyOs}
+                  disabled={!notifyComplete}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setNotifyOs(on);
+                    localStorage.setItem("gamelib-download-notify-os", String(on));
+                    // Proactively request permission so the first real
+                    // completion notification isn't swallowed while the
+                    // browser prompt is still pending.
+                    if (on && typeof Notification !== "undefined" && Notification.permission === "default") {
+                      void Notification.requestPermission();
+                    }
+                  }}
+                />
+                <span>Also send a desktop notification</span>
+              </label>
+            </div>
+          </section>
+
           <section className="settings-section">
             <header className="settings-section-header">
               <span className="settings-section-icon"><DownloadIcon /></span>
