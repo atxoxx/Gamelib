@@ -383,6 +383,69 @@ export default function DownloadModal({
     [ownership, step],
   );
 
+  // Confidence gate. The Rust side already filters out anything below
+  // a 0.5 similarity floor, so every result shown is at least a
+  // plausible match — but a 0.5–0.8 result can still be a *similar
+  // game name* (e.g. searching "Doom" and landing on "Doom Eternal"
+  // when the user wanted the 2016 reboot). Surface an explicit
+  // warning when the best available result isn't a high-confidence
+  // match so the user double-checks before downloading the wrong
+  // game.
+  const topMatchesWarning = useMemo<React.ReactNode>(() => {
+    if (step !== "results" && step !== "starting") return null;
+    if (matches.length === 0) return null;
+    const best = matches.reduce(
+      (acc, m) => (m.matchScore > acc ? m.matchScore : acc),
+      0,
+    );
+    if (best >= 0.8) return null;
+    const label =
+      best >= 0.5 ? "partial match" : "low-confidence match";
+    return (
+      <div
+        className="dl-confirm-warning"
+        role="alert"
+        style={{
+          display: "flex",
+          gap: "var(--space-xs)",
+          alignItems: "flex-start",
+          background: "rgba(245, 158, 11, 0.08)",
+          border: "1px solid rgba(245, 158, 11, 0.35)",
+          borderRadius: "var(--radius-md)",
+          padding: "var(--space-sm) var(--space-md)",
+          marginBottom: "var(--space-sm)",
+          color: "#f59e0b",
+          fontSize: "var(--font-size-xs)",
+          lineHeight: 1.4,
+        }}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          width="16"
+          height="16"
+          style={{ flexShrink: 0, marginTop: 1 }}
+          aria-hidden
+        >
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span>
+          Search returned only a <strong>{label}</strong> for
+          &nbsp;“{gameName}”. Verify the title below is the exact game
+          you want before downloading — pick a higher-confidence result
+          if one appears, or refine via <strong>Settings → Download
+          Sources</strong>.
+        </span>
+      </div>
+    );
+  }, [step, matches, gameName]);
+
   // Render the modal into `document.body` via a React Portal so it
   // escapes any stacking context created by ancestor elements
   // (e.g. the Game page's hero cards). Without this, the modal's
@@ -424,6 +487,8 @@ export default function DownloadModal({
 
         <div className="modal-body" style={{ padding: "var(--space-md)" }}>
           {ownershipBanner}
+
+          {topMatchesWarning}
 
           {step === "checking" && (
             <div className="dl-search-loading">
@@ -686,7 +751,7 @@ function ResultsSection({
     <div className="dl-results-list">
       {matches.map((match, i) => {
         const score = match.matchScore;
-        const scoreLabel = score >= 0.8 ? "High match" : score >= 0.5 ? "Good match" : "Possible";
+        const scoreLabel = score >= 0.8 ? "High match" : score >= 0.5 ? "Partial match" : "Possible";
         return (
           <button
             key={`${match.sourceId}-${i}`}

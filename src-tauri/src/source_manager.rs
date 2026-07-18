@@ -391,9 +391,44 @@ impl SourceManager {
     /// FTS5-backed offline search. Crucially this is now a single
     /// `MATCH ... ORDER BY bm25(downloads_fts) LIMIT N` query — the
     /// in-memory `score_match` O(N) scan is gone.
+    ///
+    /// bm25 only guarantees the *best within the indexed corpus*; it
+    /// does not know whether that best hit is actually the game the
+    /// user clicked. After fetching the bm25-ranked candidates we
+    /// re-score each title against the *normalised* query with
+    /// [`title_similarity`] and drop any that fall below a
+    /// confidence floor — this is what stops "search for X, get an
+    /// unrelated-but-similar Y" from ever reaching the modal.
     pub fn search(&self, query: &str) -> Vec<MatchedDownload> {
-        match db::sources::search(&self.db, query, 50) {
-            Ok(results) => rescale_scores(results),
+        let q = query.trim();
+        if q.is_empty() {
+            return Vec::new();
+        }
+        match db::sources::search(&self.db, q, 50) {
+            Ok(results) => {
+                let filtered: Vec<MatchedDownload> = results
+                    .into_iter()
+                    .map(|mut m| {
+                        // Re-score against the real query (bm25's raw
+                        // value has no absolute scale and cannot tell a
+                        // 0.4 match from a 0.9 match on its own).
+                        m.match_score = title_similarity(q, &m.title);
+                        m
+                    })
+                    .filter(|m| m.match_score >= 0.5)
+                    .collect();
+                // Keep a stable, similarity-sorted order (highest
+                // confidence first). rescale_scores is intentionally
+                // NOT used here: it would re-inflate a single weak hit
+                // to 0.5 and mislabel it as "Good match".
+                let mut out = filtered;
+                out.sort_by(|a, b| {
+                    b.match_score
+                        .partial_cmp(&a.match_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                out
+            }
             Err(e) => {
                 eprintln!("[source_manager] FTS search failed: {e}");
                 Vec::new()
@@ -443,14 +478,15 @@ impl SourceManager {
         }
 
         if !repacks.is_empty() {
-            let query_tokens: Vec<String> = q
-                .split_whitespace()
-                .map(|t| t.to_ascii_lowercase())
-                .collect();
             let mut results = Vec::new();
             for repack in repacks {
-                let score = score_match(&query_tokens, q, &repack.title);
-                if score < 0.3 {
+                let score = title_similarity(q, &repack.title);
+                // Only surface genuinely-relevant repacks. A 0.5 floor
+                // rejects "similar-name" false positives (e.g. searching
+                // "Doom" and getting "Doom Eternal mod tools" or a
+                // completely unrelated "Doomlord") while still allowing
+                // edition-subtitle variants of the right game through.
+                if score < 0.5 {
                     continue;
                 }
                 let local_id = hydra_to_local
@@ -824,10 +860,6 @@ impl SourceManager {
         }
 
         let trimmed_title = title.trim();
-        let query_tokens: Vec<String> = trimmed_title
-            .split_whitespace()
-            .map(|t| t.to_ascii_lowercase())
-            .collect();
         let best_match = search_result.edges.iter().max_by(|a, b| {
             let a_exact = a.title.eq_ignore_ascii_case(trimmed_title);
             let b_exact = b.title.eq_ignore_ascii_case(trimmed_title);
@@ -838,8 +870,8 @@ impl SourceManager {
                     std::cmp::Ordering::Less
                 };
             }
-            let score_a = score_match(&query_tokens, trimmed_title, &a.title);
-            let score_b = score_match(&query_tokens, trimmed_title, &b.title);
+            let score_a = title_similarity(trimmed_title, &a.title);
+            let score_b = title_similarity(trimmed_title, &b.title);
             score_a
                 .partial_cmp(&score_b)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -847,7 +879,7 @@ impl SourceManager {
         let Some(best_match) = best_match else {
             return Ok(Vec::new());
         };
-        if score_match(&query_tokens, trimmed_title, &best_match.title) < 0.3 {
+        if title_similarity(trimmed_title, &best_match.title) < 0.5 {
             return Ok(Vec::new());
         }
 
@@ -904,41 +936,6 @@ fn cache_hydra_response(
         db::sources::update_game_count(db, &local_source_id, hydra_resp.download_count)?;
     }
     Ok(())
-}
-
-/// Match bm25's "more negative = better" output back to the
-/// frontend's `[0, 1]` range. bm25 doesn't have a fixed scale per
-/// corpus, so we apply a simple saturation curve — strong matches
-/// map near 1.0, weak matches near 0.0.
-fn rescale_scores(input: Vec<MatchedDownload>) -> Vec<MatchedDownload> {
-    let min = input
-        .iter()
-        .map(|m| m.match_score)
-        .fold(f32::INFINITY, f32::min);
-    let max = input
-        .iter()
-        .map(|m| m.match_score)
-        .fold(f32::NEG_INFINITY, f32::max);
-    let span = (max - min).abs();
-    let only_one = input.len() == 1;
-    input
-        .into_iter()
-        .map(|mut m| {
-            m.match_score = if only_one {
-                // Isolated result: bm25 has no relative scale, so
-                // we don't claim "perfect match". Surface a neutral
-                // 0.5 so the UI's match-score ordering is not
-                // misleading when the corpus returned exactly one
-                // fuzzy hit.
-                0.5
-            } else if span > 0.0 {
-                1.0 - ((m.match_score - min) / span)
-            } else {
-                0.5
-            };
-            m
-        })
-        .collect()
 }
 
 fn clean_search_title(title: &str) -> String {
@@ -1003,24 +1000,122 @@ fn derive_name_from_url(url: &str) -> String {
         .join(" ")
 }
 
-fn score_match(query_tokens: &[String], raw_query: &str, title: &str) -> f32 {
-    let title_lc = title.to_ascii_lowercase();
-    if query_tokens.is_empty() {
-        return 0.0;
-    }
-    let mut hits = 0;
-    for tok in query_tokens {
-        if title_lc.contains(tok) {
-            hits += 1;
+/// Normalise a game title for matching. Strips punctuation and
+/// registered/trademark/copyright glyphs, lowercases, and removes
+/// common "edition" / platform / subtitle noise so "Hollow Knight:
+/// Voidheart Edition", "HOLLOW KNIGHT™", and "Hollow Knight (PC)"
+/// all collapse to the same token set as the bare query.
+///
+/// We deliberately keep subtitle separators (`-` / `:`) only long
+/// enough to split the title into a primary name + optional
+/// subtitle; the subtitle is dropped so a search for "Elden Ring"
+/// doesn't get dragged down by a "Shadow of the Erdtree" repack
+/// whose primary name is still "Elden Ring".
+fn normalize_title(title: &str) -> String {
+    let t = title
+        .replace('®', "")
+        .replace('™', "")
+        .replace('©', "")
+        .to_ascii_lowercase();
+
+    // Take the primary name before a `:` or `-` subtitle separator,
+    // but only when the primary part is long enough to be meaningful
+    // (avoids splitting "Half-Life" into "half" + "life").
+    let primary = if let Some(pos) = t.find(|c| c == ':' || c == '-') {
+        let first = t[..pos].trim();
+        if first.chars().count() >= 4 {
+            first.to_string()
+        } else {
+            t.clone()
+        }
+    } else {
+        t.clone()
+    };
+
+    // Drop trailing year (19xx/20xx) and parenthetical tags like
+    // "(PC)", "(GOG)", "(v1.2)".
+    let without_year = regex_year(&primary);
+    let without_parens = without_year
+        .replace(['(', ')', '[', ']', '{', '}'], " ")
+        .replace(['.', ',', '!', '?', '/', '\\', '"', '\''], " ");
+
+    // Remove well-known edition / collection / platform noise tokens
+    // that inflate catalog titles but are irrelevant to identity.
+    const NOISE_TOKENS: &[&str] = &[
+        "edition", "definitive", "game", "of", "the", "year", "goty", "deluxe", "collectors",
+        "collector", "complete", "special", "ultimate", "premium", "standard", "gold", "platinum",
+        "anniversary", "remastered", "remaster", "enhanced", "directors", "director", "cut",
+        "pc", "windows", "linux", "mac", "steam", "gog", "epic", "fitgirl", "repack", "v",
+    ];
+    let tokens: Vec<String> = without_parens
+        .split_whitespace()
+        .map(|tok| tok.trim_matches('-').to_string())
+        .filter(|tok| !tok.is_empty() && !NOISE_TOKENS.contains(&tok.as_str()))
+        .collect();
+    tokens.join(" ")
+}
+
+/// Strip a trailing 4-digit year (1900–2099) from the end of a title,
+/// whether bare ("cyberpunk 2077") or preceded by a space.
+fn regex_year(s: &str) -> String {
+    // Find a 4-digit token that looks like a year at the very end.
+    let trimmed = s.trim_end();
+    let last_word = trimmed.split_whitespace().last().unwrap_or("");
+    if last_word.len() == 4 && last_word.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(y) = last_word.parse::<u32>() {
+            if (1900..=2099).contains(&y) {
+                let cut = trimmed.len() - last_word.len();
+                return trimmed[..cut].trim_end().to_string();
+            }
         }
     }
-    let token_score = hits as f32 / query_tokens.len() as f32;
-    let substring_bonus = if title_lc.contains(&raw_query.to_ascii_lowercase()) {
-        0.2
+    s.to_string()
+}
+
+/// Tokenise a normalised title into a de-duplicated, sorted set of
+/// tokens. Used by [`title_similarity`].
+fn token_set(s: &str) -> Vec<String> {
+    let mut toks: Vec<String> = s.split_whitespace().map(|t| t.to_string()).collect();
+    toks.sort();
+    toks.dedup();
+    toks
+}
+
+/// Robust similarity between the (normalised) query and a candidate
+/// title. Combines a token-set Jaccard overlap with a strong bonus
+/// for an exact whole-string match (after normalisation), so a
+/// genuinely-correct repack ("elden ring") scores ~1.0 even against
+/// a noisier catalog title ("elden ring deluxe edition repack"),
+/// while an unrelated game ("elden ring of war") scores low.
+fn title_similarity(raw_query: &str, title: &str) -> f32 {
+    let qn = normalize_title(raw_query);
+    let tn = normalize_title(title);
+    if qn.is_empty() || tn.is_empty() {
+        return 0.0;
+    }
+    if qn == tn {
+        return 1.0;
+    }
+    // Exact substring containment (either direction) is a strong
+    // positive signal but not a perfect match.
+    let containment = if tn.contains(&qn) || qn.contains(&tn) {
+        0.15
     } else {
         0.0
     };
-    (token_score * 0.8 + substring_bonus).min(1.0)
+
+    let q_tokens = token_set(&qn);
+    let t_tokens = token_set(&tn);
+    if q_tokens.is_empty() {
+        return 0.0;
+    }
+    let inter = q_tokens.iter().filter(|t| t_tokens.contains(t)).count() as f32;
+    let union = (q_tokens.len() + t_tokens.len()) as f32 - inter;
+    let jaccard = if union > 0.0 { inter / union } else { 0.0 };
+
+    // Weight: strong Jaccard overlap dominates; containment adds a
+    // smaller nudge. Cap at 1.0.
+    (jaccard * 0.85 + containment).min(1.0)
 }
 
 /// Count `tr=` parameter occurrences in a magnet URI.
