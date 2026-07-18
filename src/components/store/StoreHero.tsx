@@ -1,100 +1,104 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
 
-interface HeroFeatureProps {
+interface StoreHeroProps {
   /** Called when the user clicks "View" on a featured game. */
   onCardClick?: (game: StoreGameSummary) => void;
 }
 
 const HERO_ROTATE_MS = 6000;
 const HERO_FETCH_LIMIT = 12;
-const HERO_POOL_SIZE = 3; // pick the top 3 to rotate through
+const HERO_POOL_SIZE = 5; // preload a wider pool; rotate through it
 
 /**
- * HeroFeature: full-width banner that auto-rotates through the top 3 trending
- * IGDB games. Used at the top of the Discover landing.
+ * StoreHero: full-width auto-rotating banner of top trending IGDB games.
  *
- * - Fetches 12 trending games on mount.
- * - Picks the top 3 by highest hype.
- * - Auto-advances every 6 s (pauses on hover).
- * - Click "View →" → navigates to /store/{slug}.
- *
- * If the trending list is empty, the component renders nothing.
+ * Modernized Discover hero:
+ * - Preloads a wider pool (up to 5) and cross-fades between slides.
+ * - Pauses on hover/focus, and exposes explicit prev/next + dot controls.
+ * - Full keyboard support (Left/Right/Enter/Space) for accessible nav.
+ * - A thin progress bar visualizes the autoplay countdown.
+ * - Respects `prefers-reduced-motion` (no auto-rotation, no progress sweep).
+ * - Memoized so unrelated Store re-renders don't re-fetch the trending pool.
  */
-export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
+function StoreHero({ onCardClick }: StoreHeroProps) {
   const navigate = useNavigate();
 
   const [pool, setPool] = useState<StoreGameSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  // ── Fetch trending top 12 once on mount ────────────────────────────
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       try {
-        const results = await invoke<StoreGameSummary[]>(
-          "fetch_store_games",
-          {
-            category: "trending",
-            offset: 0,
-            limit: HERO_FETCH_LIMIT,
-          }
-        );
-
+        const results = await invoke<StoreGameSummary[]>("fetch_store_games", {
+          category: "trending",
+          offset: 0,
+          limit: HERO_FETCH_LIMIT,
+        });
         if (!cancelled) {
-          // Pick top 3 with covers for the rotation
-          const top3 = results
+          const top = results
             .filter((g) => g.coverUrl)
             .slice(0, HERO_POOL_SIZE);
-          setPool(top3);
+          setPool(top);
           setLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("HeroFeature fetch failed:", err);
+          console.error("StoreHero fetch failed:", err);
           setLoading(false);
         }
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // ── Auto-rotate every HERO_ROTATE_MS (paused on hover) ─────────────
-  // Also respect prefers-reduced-motion: never auto-rotate, and self-stop
-  // the interval mid-flight if the user flips the preference on while we
-  // are rotating. CSS animations and skeletons are already gated by the
-  // same media query in store-discover.css; this effect covers the
-  // JS-driven rotation in both directions without listener/closure churn.
+  const reduceMotion = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    []
+  );
+
+  // ── Auto-rotation + progress sweep ─────────────────────────────────
   useEffect(() => {
-    if (paused || pool.length <= 1) return;
+    if (paused || reduceMotion || pool.length <= 1) return;
+    const start = performance.now();
 
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (mq.matches) return;
+    let raf = 0;
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const pct = Math.min(100, (elapsed / HERO_ROTATE_MS) * 100);
+      setProgress(pct);
+      if (elapsed >= HERO_ROTATE_MS) {
+        setActiveIdx((idx) => (idx + 1) % pool.length);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
 
-    const id = window.setInterval(() => {
-      // Self-stop if reduced-motion was enabled since the interval started
-      // (e.g., user toggled OS settings mid-session).
-      if (mq.matches) return;
-      setActiveIdx((idx) => (idx + 1) % pool.length);
-    }, HERO_ROTATE_MS);
+    return () => cancelAnimationFrame(raf);
+  }, [paused, reduceMotion, pool.length, activeIdx]);
 
-    return () => window.clearInterval(id);
-  }, [paused, pool.length]);
+  const goTo = useCallback((idx: number) => {
+    setActiveIdx(((idx % pool.length) + pool.length) % pool.length);
+    setProgress(0);
+  }, [pool.length]);
+
+  const next = useCallback(() => goTo(activeIdx + 1), [goTo, activeIdx]);
+  const prev = useCallback(() => goTo(activeIdx - 1), [goTo, activeIdx]);
 
   const active = pool[activeIdx];
 
-  // Extract the Steam appid from the active title's IGDB website list
-  // so we can show the live concurrent-player badge on the rotating
-  // hero. Mirrors the URL-matching pattern used in StoreGameDetail.
   const steamAppId = useMemo(() => {
     if (!active?.websites) return undefined;
     for (const url of active.websites) {
@@ -115,14 +119,27 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
 
   const handleView = useCallback(() => {
     if (!active) return;
-    if (onCardClick) {
-      onCardClick(active);
-    } else {
-      navigate(`/store/${active.slug}`);
-    }
+    if (onCardClick) onCardClick(active);
+    else navigate(`/store/${active.slug}`);
   }, [active, onCardClick, navigate]);
 
-  // ── Skeleton while loading ─────────────────────────────────────────
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        next();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        prev();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleView();
+      }
+    },
+    [next, prev, handleView]
+  );
+
+  // ── Skeleton ───────────────────────────────────────────────────────
   if (loading) {
     return (
       <div
@@ -143,9 +160,7 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
     );
   }
 
-  if (!pool.length || !active) {
-    return null;
-  }
+  if (!pool.length || !active) return null;
 
   const backdrop = active.coverUrl ?? "";
 
@@ -154,10 +169,14 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
       className="store-hero"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={() => setPaused(false)}
+      onKeyDown={onKeyDown}
+      tabIndex={0}
       role="region"
+      aria-roledescription="carousel"
       aria-label="Featured trending games"
     >
-      {/* Backdrop image with blur + heavy darken */}
       <div
         className="store-hero-bg"
         style={{ backgroundImage: `url(${backdrop})` }}
@@ -165,24 +184,13 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
       />
       <div className="store-hero-veil" aria-hidden="true" />
 
-      {/* Live Steam concurrent-player badge. Anchored absolute in the
-          top-right of the hero so it doesn't fight the dot indicators
-          (which sit bottom-right) for the same corner. */}
       <div className="store-hero-player-count">
         <SteamPlayerCount appId={steamAppId} />
       </div>
 
-      {/* Sharp foreground cover so the actual game art is visible.
-          Sits on top of the blurred backdrop + veil; positioned absolute
-          in the lower-right of the hero pane so the left-aligned text
-          doesn't overlap.
-
-          No `key={active.id}` here on purpose: keying would unmount and
-          remount on every rotation tick, re-firing the cover-in
-          animation. We want a calm in-place `<img src>` swap instead
-          (cross-fade only on the backdrop, which is a CSS background). */}
       {active.coverUrl && (
         <img
+          key={active.id}
           className="store-hero-cover"
           src={active.coverUrl}
           alt={active.name}
@@ -232,11 +240,7 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
             </span>
           )}
 
-          <button
-            type="button"
-            className="store-hero-cta"
-            onClick={handleView}
-          >
+          <button type="button" className="store-hero-cta" onClick={handleView}>
             View {active.name}
             <svg
               viewBox="0 0 24 24"
@@ -254,17 +258,54 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
         </div>
       </div>
 
-      {/* Rotation dot indicators */}
+      {/* Prev / Next controls */}
       {pool.length > 1 && (
-        <div className="store-hero-dots" aria-hidden="true">
+        <>
+          <button
+            type="button"
+            className="store-hero-nav store-hero-nav-prev"
+            onClick={prev}
+            aria-label="Previous featured game"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="store-hero-nav store-hero-nav-next"
+            onClick={next}
+            aria-label="Next featured game"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        </>
+      )}
+
+      {/* Autoplay progress bar */}
+      {pool.length > 1 && !reduceMotion && (
+        <div className="store-hero-progress" aria-hidden="true">
+          <span
+            className="store-hero-progress-bar"
+            style={{ width: `${paused ? 0 : progress}%` }}
+          />
+        </div>
+      )}
+
+      {/* Dot indicators */}
+      {pool.length > 1 && (
+        <div className="store-hero-dots" role="tablist" aria-label="Featured games">
           {pool.map((g, i) => (
             <button
               key={g.id + "-" + i}
               type="button"
-              className={`store-hero-dot${i === activeIdx ? " active" : ""}`}
+              role="tab"
+              aria-selected={i === activeIdx}
               aria-label={`Show featured game ${i + 1}: ${g.name}`}
-              aria-pressed={i === activeIdx}
-              onClick={() => setActiveIdx(i)}
+              className={`store-hero-dot${i === activeIdx ? " active" : ""}`}
+              onClick={() => goTo(i)}
             />
           ))}
         </div>
@@ -272,3 +313,5 @@ export default function HeroFeature({ onCardClick }: HeroFeatureProps) {
     </div>
   );
 }
+
+export default memo(StoreHero);

@@ -1,13 +1,13 @@
 /* ============================================================================
-   Store Page — Discover Landing
+   Store Page — Discover Landing (modernized refactor)
 
-   Self-contained stylesheet for the Switchpad-style Discover landing:
-   - Hero feature (auto-rotating banner with backdrop, blur+veil, eyebrow,
-     title, meta, rating, CTA, dot indicators, skeleton state)
-   - Snap rails (horizontal scrollers with snap-align, mouse-wheel hijack,
-     skeleton placeholder, "See all" link)
+   Self-contained stylesheet for the Discover landing:
+   - StoreHero         : auto-rotating banner with backdrop, blur+veil, eyebrow,
+                         title, meta, rating, CTA, prev/next + dot controls,
+                         autoplay progress bar, keyboard nav, skeleton state.
+   - Rails (row scroller w/ arrows, skeletons, error+retry, "See all").
 
-   Loaded from src/main.tsx. All values reference theme tokens defined in
+   Loaded from src/main.tsx. Every value references theme tokens from
    App.css so it adapts to dark / light / Nord / Cyberpunk / Dracula / Emerald.
    ============================================================================ */
 
@@ -16,21 +16,12 @@
   flex-direction: column;
   gap: var(--space-2xl);
   padding: var(--space-lg) 0 var(--space-3xl) 0;
-  /* Tight fade-in now that the per-card stagger + hero cover
-     re-mount animation have been removed (Phase 2.6). 220ms with
-     a 4px lift feels nervous-system-light rather than slidy. */
   animation: store-discover-in 220ms ease both;
 }
 
 @keyframes store-discover-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Hero feature ─────────────────────────────────────────────────────────── */
@@ -38,19 +29,21 @@
 .store-hero {
   position: relative;
   width: 100%;
-  height: clamp(280px, 32vw, 440px);
+  height: clamp(300px, 34vw, 460px);
   border-radius: var(--radius-xl);
   overflow: hidden;
   isolation: isolate;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
+  outline: none;
   transition: filter var(--transition-fast);
 }
 
-/* Hero skeleton state. The static grey gradient is the resting base;
-   the loading motion (sweep) is handled by `.store-hero-shimmer` on
-   top, not by an animated background here, so we don't get two layers
-   of conflicting motion. */
+.store-hero:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
 .store-hero-loading {
   background: linear-gradient(
     120deg,
@@ -68,15 +61,9 @@
   z-index: 0;
   filter: blur(22px) saturate(140%);
   transform: scale(1.15);
+  transition: background-image 600ms ease;
 }
 
-/*
- * Sharp foreground cover placed as an actual `<img>` element on top of
- * the blurred backdrop + veil. Without this, the hero is just text on
- * top of a heavily blurred background — viewers couldn't see the game
- * cover itself. Position in the lower-right of the hero pane so the
- * text overlay on the left stays legible while the cover is visible.
- */
 .store-hero-cover {
   position: absolute;
   right: var(--space-xl);
@@ -89,19 +76,16 @@
     0 18px 48px rgba(0, 0, 0, 0.55),
     0 4px 12px rgba(0, 0, 0, 0.45);
   z-index: 2;
-  /* No animation here on purpose. With `key` driven by `active.id`
-     the cover re-mounted on every rotation tick and re-fired this
-     fade-in, which felt "strange" to users entering Discover. The
-     React render now keeps the same DOM node and just swaps
-     `<img src>`. */
+  animation: store-hero-cover-in 500ms ease both;
 }
 
-/* On very narrow viewports the side cover would crowd out the eyebrow
-   + title; drop it and let the backdrop carry the visual weight. */
+@keyframes store-hero-cover-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @media (max-width: 640px) {
-  .store-hero-cover {
-    display: none;
-  }
+  .store-hero-cover { display: none; }
 }
 
 .store-hero-veil {
@@ -111,8 +95,7 @@
     radial-gradient(120% 80% at 0% 100%, color-mix(in srgb, var(--color-bg-primary) 60%, transparent), transparent 60%),
     linear-gradient(180deg,
       color-mix(in srgb, var(--color-bg-primary) 25%, transparent) 0%,
-      color-mix(in srgb, var(--color-bg-primary) 75%, transparent) 100%
-    );
+      color-mix(in srgb, var(--color-bg-primary) 75%, transparent) 100%);
   z-index: 1;
 }
 
@@ -143,10 +126,7 @@
   border-radius: var(--radius-full);
 }
 
-.store-hero-eyebrow svg {
-  width: 12px;
-  height: 12px;
-}
+.store-hero-eyebrow svg { width: 12px; height: 12px; }
 
 .store-hero-title {
   margin: 0;
@@ -229,31 +209,83 @@
   box-shadow: 0 0 32px color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
-/* Phase 2.9 PR 2 ("Motion & Tactile Feedback"): physical press
- * feedback on the discover hero CTA. The visible press compresses
- * the button to 97% of its scale and zeroes the hover lift so the
- * user feels a single solid "tap" rather than hover-then-settle.
- * The hover transition's `transform` covers `translateY(-1px)` so
- * setting `translateY(0)` here cleanly cancels the lift on press,
- * then `scale(0.97)` adds the tactile press on top. */
 .store-hero-cta:active {
   transform: translateY(0) scale(0.97);
   box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 25%, transparent);
   transition-duration: 80ms;
 }
 
-.store-hero-cta svg {
-  width: 16px;
-  height: 16px;
+.store-hero-cta svg { width: 16px; height: 16px; }
+
+/* Prev / Next nav arrows */
+.store-hero-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-bg-primary) 45%, transparent);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
 }
 
+.store-hero-nav svg { width: 20px; height: 20px; }
+.store-hero-nav-prev { left: var(--space-md); }
+.store-hero-nav-next { right: var(--space-md); }
+
+.store-hero:hover .store-hero-nav,
+.store-hero:focus-within .store-hero-nav {
+  opacity: 1;
+}
+
+.store-hero-nav:hover {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  transform: translateY(-50%) scale(1.06);
+}
+
+.store-hero-nav:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .store-hero-nav { display: none; }
+}
+
+/* Autoplay progress bar */
+.store-hero-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+  z-index: 3;
+}
+
+.store-hero-progress-bar {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+  transition: width 120ms linear;
+}
+
+/* Dot indicators */
 .store-hero-dots {
   position: absolute;
   bottom: var(--space-lg);
   right: var(--space-2xl);
-  /* z-index 3 sits above `.store-hero-cover` (z-index 2) so the dot
-     indicators stay clickable when the sharp foreground cover sits
-     in the lower-right of the hero. */
   z-index: 3;
   display: flex;
   gap: var(--space-xs);
@@ -267,36 +299,22 @@
   background: color-mix(in srgb, var(--color-text-primary) 30%, transparent);
   border: none;
   cursor: pointer;
-  transition:
-    width var(--transition-fast),
-    background var(--transition-fast);
+  transition: width var(--transition-fast), background var(--transition-fast);
 }
 
-.store-hero-dot:hover {
-  background: color-mix(in srgb, var(--color-text-primary) 55%, transparent);
-}
-
-/* Phase 2.9 PR 2: press compresses the dot indicator so a tap on
- * the carousel pagination reads as a single physical gesture rather
- * than a hover-then-jump-to-active. */
-.store-hero-dot:active {
-  transform: scale(0.85);
-  transition-duration: 80ms;
-}
-
+.store-hero-dot:hover { background: color-mix(in srgb, var(--color-text-primary) 55%, transparent); }
+.store-hero-dot:active { transform: scale(0.85); transition-duration: 80ms; }
 .store-hero-dot.active {
   width: 22px;
   background: var(--color-accent);
   box-shadow: 0 0 8px var(--color-accent-glow);
 }
 
+/* Skeleton */
 .store-hero-shimmer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  /* Explicit z-index so future JSX reordering cannot accidentally
-     place this after `.store-hero-content` and wash the shimmer
-     over the skeleton text bars. */
   z-index: 1;
   background: linear-gradient(
     105deg,
@@ -316,19 +334,9 @@
   width: 60%;
   margin-bottom: var(--space-sm);
 }
-
-.store-hero-shimmer-line.title {
-  height: 28px;
-  width: 50%;
-}
-
-.store-hero-shimmer-line.subtitle {
-  width: 70%;
-}
-
-.store-hero-shimmer-line.short {
-  width: 25%;
-}
+.store-hero-shimmer-line.title { height: 28px; width: 50%; }
+.store-hero-shimmer-line.subtitle { width: 70%; }
+.store-hero-shimmer-line.short { width: 25%; }
 
 .store-hero-eyebrow-skeleton {
   background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
@@ -338,7 +346,7 @@
   align-self: flex-start;
 }
 
-/* ── Snap rails ──────────────────────────────────────────────────────────── */
+/* ── Rails ────────────────────────────────────────────────────────────────── */
 
 .store-rails {
   display: flex;
@@ -356,6 +364,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-md);
   padding: 0 var(--space-2xs);
 }
 
@@ -389,22 +398,18 @@
   cursor: pointer;
   transition: all var(--transition-fast);
 }
-
 .store-rail-see-all:hover {
   background: var(--color-bg-hover);
   border-color: var(--color-accent);
   color: var(--color-accent);
   transform: translateX(2px);
 }
+.store-rail-see-all svg { width: 14px; height: 14px; transition: transform var(--transition-fast); }
+.store-rail-see-all:hover svg { transform: translateX(2px); }
 
-.store-rail-see-all svg {
-  width: 14px;
-  height: 14px;
-  transition: transform var(--transition-fast);
-}
-
-.store-rail-see-all:hover svg {
-  transform: translateX(2px);
+/* Row scroller with arrows */
+.store-rail-scroller {
+  position: relative;
 }
 
 .store-rail-track {
@@ -418,21 +423,44 @@
   scroll-snap-type: x mandatory;
 }
 
-.store-rail-track::-webkit-scrollbar {
-  height: 6px;
-}
-
-.store-rail-track::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+.store-rail-track::-webkit-scrollbar { height: 6px; }
+.store-rail-track::-webkit-scrollbar-track { background: transparent; }
 .store-rail-track::-webkit-scrollbar-thumb {
   background-color: var(--color-border);
   border-radius: var(--radius-sm);
 }
+.store-rail-track::-webkit-scrollbar-thumb:hover { background-color: var(--color-accent); }
 
-.store-rail-track::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-accent);
+.store-rail-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+.store-rail-arrow svg { width: 18px; height: 18px; }
+.store-rail-arrow-prev { left: -6px; }
+.store-rail-arrow-next { right: -6px; }
+
+.store-rail-scroller:hover .store-rail-arrow,
+.store-rail-scroller:focus-within .store-rail-arrow { opacity: 1; }
+.store-rail-arrow:hover { background: var(--color-accent); color: #fff; }
+.store-rail-arrow:focus-visible { opacity: 1; outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .store-rail-arrow { display: none; }
 }
 
 .store-rail-card-snap {
@@ -442,24 +470,12 @@
 }
 
 @keyframes store-card-snap-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .store-rail-card-snap .store-game-card {
   width: 165px;
-  /* Phase 2.8d: allow the rail card to shrink below the intrinsic
-     min-width of its widest unbreakable child (the platforms line
-     or a long title). Combined with `.store-card-body { overflow:
-     hidden; min-width: 0 }` in store.css, this prevents the card
-     from growing past its 165px column and overlapping the next
-     card. */
   min-width: 0;
 }
 
@@ -473,14 +489,16 @@
     var(--color-bg-tertiary) 60%,
     var(--color-bg-secondary)
   );
-  /* `position: relative` + `overflow: hidden` are required so the
-     absolutely-positioned `.store-rail-shimmer` overlay is clipped
-     to the 165x290 skeleton card — without these it leaks out to
-     the nearest positioned ancestor (or the viewport) and paints
-     across the entire Discover row. */
   position: relative;
   overflow: hidden;
   border: 1px solid var(--color-border);
+}
+
+.store-rail-grid .store-rail-card-skeleton {
+  flex: initial;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  height: auto;
 }
 
 .store-rail-shimmer {
@@ -498,33 +516,68 @@
   animation: store-shimmer-sweep 2s linear infinite;
 }
 
-/* Subtle stagger so the six rail skeletons feel like distinct cards
-   rather than a single synchronized mass. */
-.store-rail-card-skeleton:nth-child(2) .store-rail-shimmer {
-  animation-delay: 0.12s;
-}
-.store-rail-card-skeleton:nth-child(3) .store-rail-shimmer {
-  animation-delay: 0.24s;
-}
-.store-rail-card-skeleton:nth-child(4) .store-rail-shimmer {
-  animation-delay: 0.36s;
-}
-.store-rail-card-skeleton:nth-child(5) .store-rail-shimmer {
-  animation-delay: 0.48s;
-}
-.store-rail-card-skeleton:nth-child(6) .store-rail-shimmer {
-  animation-delay: 0.6s;
-}
+.store-rail-card-skeleton:nth-child(2) .store-rail-shimmer { animation-delay: 0.12s; }
+.store-rail-card-skeleton:nth-child(3) .store-rail-shimmer { animation-delay: 0.24s; }
+.store-rail-card-skeleton:nth-child(4) .store-rail-shimmer { animation-delay: 0.36s; }
+.store-rail-card-skeleton:nth-child(5) .store-rail-shimmer { animation-delay: 0.48s; }
+.store-rail-card-skeleton:nth-child(6) .store-rail-shimmer { animation-delay: 0.6s; }
 
-/* Shared shimmer sweep — a tight, slightly-diagonal accent band slides
-   off-canvas left → off-canvas right, indicating active loading.
-   Replaces the (now removed) `store-hero-skeleton-shift` slide which
-   was sweeping a 200%-wide full-bleed gradient; that pattern was
-   barely-visible at 8% opacity and competed against the skeleton's
-   own background animation, producing a busy/jittery look. */
 @keyframes store-shimmer-sweep {
   0%   { background-position: -120% 0; }
   100% { background-position:  220% 0; }
+}
+
+/* Error + retry */
+.store-rail-error-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: var(--radius-md);
+  background: rgba(220, 50, 50, 0.12);
+  border: 1px solid rgba(220, 50, 50, 0.35);
+}
+
+.store-rail-error-message {
+  margin: 0;
+  font-size: 0.85rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-error, #fca5a5);
+  word-break: break-word;
+  flex: 1 1 240px;
+}
+
+.store-rail-retry {
+  padding: 6px 16px;
+  background: var(--color-accent);
+  color: #fff;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+.store-rail-retry:hover { background: var(--color-accent-hover); transform: translateY(-1px); }
+.store-rail-retry:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.store-rail-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--radius-full);
+  margin-left: var(--space-xs);
 }
 
 @media (max-width: 700px) {
@@ -532,77 +585,39 @@
   .store-rail-card-skeleton {
     flex: 0 0 140px;
   }
-  .store-rail-card-snap .store-game-card {
-    width: 140px;
-  }
+  .store-rail-card-snap .store-game-card { width: 140px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .store-discover,
   .store-rail-card-snap,
+  .store-hero-cover,
   .store-hero-shimmer,
   .store-rail-shimmer {
-    /* `animation: none` shorthand also clears the cascaded
-       `animation-delay` set on `.store-rail-card-skeleton:nth-child(n)
-       .store-rail-shimmer`, so users see a still, calm loading state. */
     animation: none !important;
   }
-  .store-rail-track {
-    scroll-behavior: auto;
-  }
+  .store-rail-track { scroll-behavior: auto; }
 }
 
-/* ── Tab bar overflow fix ─────────────────────────────────────────────────
-   Eight tabs (Discover + 4 categories + Coming Soon + New Releases + All +
-   Search) overflow on narrow screens. Enable horizontal scrolling and
-   hide the scrollbar so the bar still feels polished. */
-
+/* Tab bar overflow fix */
 .store-tab-bar {
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  /* `flex-shrink: 0` keeps the bar from collapsing to zero height when
-     the page is a flex column and the discover content is tall. Without
-     this, the bar visually disappears on long hero + rail layouts. */
   flex-shrink: 0;
 }
+.store-tab-bar::-webkit-scrollbar { display: none; }
+.store-tab { flex-shrink: 0; }
 
-.store-tab-bar::-webkit-scrollbar {
-  display: none;
-}
-
-.store-tab {
-  flex-shrink: 0;
-}
-
-/* ============================================================================
-   Phase 2 — Wishlist heart toggle + density variants + density toolbar
-
-   - .store-card-heart : top-right heart on every card; shown on hover, fills
-     red and stays visible when wishlisted. Stops propagation so the outer
-     card click (which navigates) is not triggered.
-   - .density-compact  : cover-only card, body hidden; smallest footprint.
-   - .density-cinematic: larger card with body overlaid on the cover using
-     a dark gradient for contrast.
-   - .density-cozy     : default; explicitly defined for visibility (this
-     matches the existing App.css baseline).
-   - .store-density-toolbar + .store-density-toggle + .store-density-btn:
-     segmented control rendered beside the store tab bar.
-   - .store-rail-count : numeric pill showing how many games are in a rail
-     (e.g. wishlist).
-   ============================================================================ */
-
-/* ── Card heart toggle ─────────────────────────────────────────────────── */
-
+/* Card heart toggle (shared with grid) */
 .store-card-heart {
   position: absolute;
   top: 8px;
   right: 8px;
   width: 32px;
   height: 32px;
-  /* Higher z-index than the rating badge so it owns the corner on hover. */
   z-index: 4;
   display: inline-flex;
   align-items: center;
@@ -622,186 +637,67 @@
     color var(--transition-fast),
     background var(--transition-fast);
 }
-
 .store-game-card:hover .store-card-heart,
-.store-card-heart:focus-visible {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.store-card-heart.active {
-  /* Always visible when wishlisted, full red fill. */
-  opacity: 1;
-  color: var(--color-accent);
-  background: rgba(0, 0, 0, 0.55);
-}
-
-.store-card-heart:hover {
-  transform: scale(1.08);
-  background: rgba(0, 0, 0, 0.65);
-}
-
-.store-card-heart:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.store-card-heart svg {
-  width: 18px;
-  height: 18px;
-}
-
-/* When the user has reduced motion, drop the heart pop animation so it
-   still appears but without a scale transition. */
+.store-card-heart:focus-visible { opacity: 1; transform: scale(1); }
+.store-card-heart.active { opacity: 1; color: var(--color-accent); background: rgba(0, 0, 0, 0.55); }
+.store-card-heart:hover { transform: scale(1.08); background: rgba(0, 0, 0, 0.65); }
+.store-card-heart:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.store-card-heart svg { width: 18px; height: 18px; }
 @media (prefers-reduced-motion: reduce) {
   .store-card-heart,
   .store-game-card:hover .store-card-heart,
-  .store-card-heart:hover {
-    transition: none;
-  }
+  .store-card-heart:hover { transition: none; }
 }
 
-/* ── Density variants ───────────────────────────────────────────────────── */
+/* Density variants (shared with grid) */
+.store-game-card.density-compact .store-card-body { display: none; }
+.store-game-card.density-compact { width: 100%; max-width: 130px; }
+.store-game-card.density-compact .store-card-cover { aspect-ratio: 2 / 3; }
+.store-game-card.density-compact .store-card-rating { padding: 3px 7px; font-size: var(--font-size-xs); }
 
-/* Compact: cover-only, smallest footprint, body hidden entirely. The
-   rating badge shrinks slightly so the cover still feels balanced. */
-.store-game-card.density-compact .store-card-body {
-  display: none;
-}
-
-.store-game-card.density-compact {
-  /* Phase 2.8e: fill the parent column/slot (grid column or rail
-     card) up to a 130px maximum. The previous hardcoded
-     `width: 130px` made the card refuse to shrink in narrower
-     grid columns, causing it to overflow into the next column. */
-  width: 100%;
-  max-width: 130px;
-}
-
-.store-game-card.density-compact .store-card-cover {
-  aspect-ratio: 2 / 3;
-}
-
-.store-game-card.density-compact .store-card-rating {
-  padding: 3px 7px;
-  font-size: var(--font-size-xs);
-}
-
-/* Cinematic: taller card with name + genres overlaid on the cover so
-   big screens feel like a hi-fi storefront. The card uses a 3/4
-   portrait aspect ratio (Phase 2.8) so the cover fills the entire
-   card area — no more dead space between the bottom of the cover
-   image and the body overlay. Width is 280px to give the overlay
-   text visible breathing room. */
 .store-game-card.density-cinematic {
-  /* Phase 2.8e: fill the parent column/slot up to a 280px maximum.
-     The previous hardcoded `width: 280px` made the card refuse to
-     shrink in narrower grid columns (minmax 220px → 1fr), causing
-     the 280px card to overflow the column and bleed into the next
-     card. Combined with `aspect-ratio: 3 / 4` the height still
-     scales proportionally. */
   width: 100%;
   max-width: 280px;
   aspect-ratio: 3 / 4;
   position: relative;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
-
-.store-game-card.density-cinematic:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-}
-
-/* Cover fills the entire card so the body overlay sits on the image,
-   not in dead space. Overrides the base 2/3 (or whatever) cover
-   aspect-ratio on `.store-card-cover`. */
-.store-game-card.density-cinematic .store-card-cover {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
-}
-
-.store-game-card.density-cinematic .store-card-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
+.store-game-card.density-cinematic:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45); }
+.store-game-card.density-cinematic .store-card-cover { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+.store-game-card.density-cinematic .store-card-cover img { width: 100%; height: 100%; object-fit: cover; }
 .store-game-card.density-cinematic .store-card-body {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 0; right: 0; bottom: 0;
   z-index: 3;
-  /* Phase 2.7: looser padding gives the wider cinematic card visible
-     breathing room around the overlaid text. Vertical padding pulls
-     the gradient fade out of the corner. */
   padding: var(--space-lg) var(--space-xl) var(--space-xl);
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    color-mix(in srgb, var(--color-bg-primary) 78%, transparent) 65%,
-    color-mix(in srgb, var(--color-bg-primary) 92%, transparent) 100%
-  );
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--color-bg-primary) 78%, transparent) 65%, color-mix(in srgb, var(--color-bg-primary) 92%, transparent) 100%);
   color: var(--color-text-primary);
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  /* The cinematic overlay absorbs clicks so genre chips and titles
-     consistently bubble up to the card's outer onClick (which navigates
-     to the detail page). DO NOT place interactive elements (buttons,
-     links, inputs) inside this body — they would be unclickable. The
-     heart toggle lives on `.store-card-cover` above this layer. */
   pointer-events: none;
-  /* Phase 2.8: long platforms strings (e.g. "Xbox Series X|S ·
-     PlayStation 5 · PC (Microsoft Windows)") would otherwise push
-     the body past the card's column boundary. Combined with
-     `.store-game-grid > .store-game-card { min-width: 0 }` in
-     store.css, this lets the text wrap inside the card instead of
-     bleeding into the next column. */
   overflow-wrap: break-word;
   word-break: break-word;
   overflow: hidden;
 }
-
 .store-game-card.density-cinematic .store-card-name {
   color: var(--color-text-primary);
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
   font-size: var(--font-size-lg);
 }
-
 .store-game-card.density-cinematic .store-card-genre {
   background: color-mix(in srgb, var(--color-text-primary) 10%, transparent);
   border-color: color-mix(in srgb, var(--color-text-primary) 20%, transparent);
   color: var(--color-text-primary);
 }
-
 .store-game-card.density-cinematic .store-card-platforms {
   color: color-mix(in srgb, var(--color-text-primary) 75%, transparent);
 }
 
-/* Cozy (default) baseline is defined by the existing App.css rules; we
-   intentionally do NOT redefine its width here to avoid duplication.
-   Add a rule only if you want to override the cozy baseline width. */
+.store-rail-card-snap .store-game-card.density-compact { width: 130px; }
+.store-rail-card-snap .store-game-card.density-cinematic { width: 100%; max-width: 260px; }
 
-/* Tighten rail cards so compact/cozy sizes both feel proportional. */
-.store-rail-card-snap .store-game-card.density-compact {
-  width: 130px;
-}
-
-.store-rail-card-snap .store-game-card.density-cinematic {
-  /* Phase 2.8e: fill the 165px rail wrapper up to a 260px maximum.
-     The previous hardcoded `width: 260px` was WIDER than the
-     wrapper (165px), causing the card to overflow the wrapper and
-     visually overlap the next card in the rail. */
-  width: 100%;
-  max-width: 260px;
-}
-
-/* ── Density toolbar & toggle ───────────────────────────────────────────── */
-
+/* Density toolbar & toggle (kept for parity) */
 .store-density-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -811,15 +707,6 @@
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
-
-.store-density-toolbar-label {
-  letter-spacing: 0.4px;
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  font-size: var(--font-size-xs);
-  opacity: 0.85;
-}
-
 .store-density-toggle {
   display: inline-flex;
   gap: 2px;
@@ -828,7 +715,6 @@
   border-radius: var(--radius-md);
   padding: 2px;
 }
-
 .store-density-btn {
   display: inline-flex;
   align-items: center;
@@ -840,456 +726,69 @@
   border: none;
   border-radius: calc(var(--radius-md) - 2px);
   cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    color var(--transition-fast),
-    transform var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
-
-.store-density-btn svg {
-  width: 16px;
-  height: 16px;
-}
-
-.store-density-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
+.store-density-btn svg { width: 16px; height: 16px; }
+.store-density-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .store-density-btn.active {
   background: var(--color-accent);
   color: #fff;
   box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
+.store-density-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-.store-density-btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* ── Rail count pill ────────────────────────────────────────────────────── */
-
-.store-rail-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 8px;
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  color: var(--color-accent);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  font-variant-numeric: tabular-nums;
-  border-radius: var(--radius-full);
-  margin-left: var(--space-xs);
-}
-
-/* Wishlist rail gets a stronger accent so it stands out from the IGDB
-   rails around it. */
-.store-rail[aria-label="Your wishlist"] .store-rail-title {
-  color: var(--color-accent);
-}
-
-.store-rail[aria-label="Your wishlist"] .store-rail-count {
-  background: var(--color-accent);
-  color: #fff;
-}
-
-/* Empty-state placeholder shown when the wishlist has no entries yet.
-   Keeps the rail discoverable from Discover mode so first-time users
-   can see the feature exists and learn how to populate it. */
-.store-rail-empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-lg) var(--space-xl);
-  background: var(--color-bg-secondary);
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  text-align: center;
-}
-
-.store-rail-empty-state svg {
-  width: 18px;
-  height: 18px;
-  color: var(--color-accent);
-  flex-shrink: 0;
-}
-
-/* ============================================================================
-   Phase 2.6 — Filter disclosure + upgraded wishlist empty state
-
-   - .store-filter-disclosure : a `<details>`-backed collapsible panel that
-     wraps StoreFilterSidebar inside Discover mode. Open by default so the
-     actual filter controls (Genres / Platforms / Year / Rating / Apply /
-     Reset) are visible, not just the chip strip (which self-hides when
-     no filters are active).
-   - .store-rail-empty-state : upgraded CTA placeholder shown when
-     WishlistRail has no entries. Bigger icon, stronger heading, an inline
-     "Browse trending games" action wired via the `onBrowseTrending` prop.
-   ============================================================================ */
-
-.store-filter-disclosure {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  transition: border-color var(--transition-fast);
-}
-
-.store-filter-disclosure[open] {
-  border-color: var(--color-accent);
-}
-
-.store-filter-disclosure > summary {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-}
-
-.store-filter-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-
-.store-filter-disclosure > summary::after {
-  content: "BE";
-  margin-left: auto;
-  font-size: var(--font-size-md);
-  transition: transform var(--transition-fast);
-}
-
-.store-filter-disclosure[open] > summary::after {
-  transform: rotate(180deg);
-}
-
-.store-filter-disclosure > summary:hover {
-  color: var(--color-text-primary);
-}
-
-.store-filter-disclosure-body {
-  padding: var(--space-md) var(--space-lg) var(--space-lg);
-  border-top: 1px solid var(--color-border);
-}
-
-.store-filter-disclosure .store-filter-sidebar {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-xl);
-  align-items: flex-start;
-  background: transparent;
-  padding: 0;
-  border: none;
-  width: 100%;
-  position: static;
-}
-
-.store-filter-disclosure .store-filter-section {
-  flex: 1 1 200px;
-  min-width: 0;
-}
-
-.store-filter-disclosure .store-filter-actions {
-  align-self: center;
-  margin-left: auto;
-}
-
-.store-rail-empty-state {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-xl) var(--space-2xl);
-}
-
-.store-rail-empty-state svg {
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-}
-
-.store-rail-empty-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.store-rail-empty-content strong {
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  font-weight: var(--font-weight-bold);
-}
-
-.store-rail-empty-content p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
-}
-
-.store-rail-empty-cta {
-  align-self: flex-start;
-  margin-top: var(--space-sm);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--color-accent);
-  color: #fff;
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    border-color var(--transition-fast),
-    transform var(--transition-fast);
-}
-
-.store-rail-empty-cta:hover {
-  background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-  transform: translateY(-1px);
-}
-
-.store-rail-empty-cta:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.store-rail-empty-cta svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* ============================================================================
-   Source-filter sidebar rows + chips.
-
-   The Download Sources section mirrors the genre/checkbox layout but
-   adds a right-aligned count pill so the user can spot which sources
-   have the largest catalogs at a glance. The chip variant gets a tiny
-   download icon (matching the empty-state SVG) and the in-flight
-   "Checking N…" chip gets its own subtle spinner so the user can tell
-   the result set is still narrowing.
-   ============================================================================ */
-
+/* Source-filter sidebar rows + chips (kept for parity in filters) */
 .store-filter-source-row {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   width: 100%;
   cursor: pointer;
-  /* Match the genre/checkbox row's vertical rhythm so the section
-     doesn't visually pop. */
   padding: 4px 0;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   border-radius: var(--radius-sm);
   transition: color var(--transition-fast);
 }
-
-.store-filter-source-row:hover {
-  color: var(--color-text-primary);
-}
-
+.store-filter-source-row:hover { color: var(--color-text-primary); }
 .store-filter-source-row input[type="checkbox"] {
-  /* Reuse the existing checkbox pill from `.store-filter-checkbox`
-     so theme-ability / hit-targets stay identical. */
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  flex: 0 0 auto;
-  accent-color: var(--color-accent);
-  cursor: pointer;
+  width: 16px; height: 16px; margin: 0; flex: 0 0 auto;
+  accent-color: var(--color-accent); cursor: pointer;
 }
-
 .store-filter-source-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  /* Long source URLs occasionally surface as the user-entered name
-     when the backend falls back to deriving one from the URL path.
-     Allow the name to wrap rather than overflow the sidebar column. */
-  overflow-wrap: anywhere;
-  line-height: 1.3;
+  flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.3;
 }
-
 .store-filter-source-count {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 18px;
-  padding: 0 6px;
-  /* Use a muted pill so it reads as metadata (numerical hint) rather
-     than a primary affordance — the checkbox is the affordance. */
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  font-size: 10px;
-  font-weight: var(--font-weight-semibold);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 18px; padding: 0 6px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-full);
+  font-size: 10px; font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.3px;
 }
-
 .store-filter-empty-text {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  line-height: 1.5;
+  margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); line-height: 1.5;
 }
-
-/* Chip variant for downloaded-from-source — adds a leading icon so
-   download-source chips visually stand out from genre/platform/year
-   chips, even when several chips are stacked in a tight row. */
-.store-filter-chip-source {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.store-filter-chip-source-icon {
-  width: 10px;
-  height: 10px;
-  color: var(--color-accent);
-  flex: 0 0 auto;
-}
-
-/* In-flight "Checking…" chip. Visually softer than active filter
-   chips so the user understands it's a transient state, not a real
-   filter. Spinner is a tiny inline ring so it doesn't introduce a
-   layout shift at the end of the chip row. */
+.store-filter-chip-source { display: inline-flex; align-items: center; gap: 4px; }
+.store-filter-chip-source-icon { width: 10px; height: 10px; color: var(--color-accent); flex: 0 0 auto; }
 .store-filter-chip-pending {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  border: 1px dashed var(--color-border);
-  /* Slightly muted so it doesn't compete with active filter chips;
-     Semibold weight keeps it readable at small sizes. */
-  font-weight: var(--font-weight-semibold);
-  cursor: default;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  border: 1px dashed var(--color-border); font-weight: var(--font-weight-semibold); cursor: default;
 }
-
 .store-filter-chip-spinner {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+  display: inline-block; width: 10px; height: 10px;
   border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
+  border-top-color: var(--color-accent); border-radius: 50%;
   animation: store-chip-spin 0.8s linear infinite;
 }
-
-@keyframes store-chip-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Respect user motion preferences so the spinner doesn't spin for
-   users who've opted out of motion. The chip still shows the count
-   text so the affordance is preserved. */
+@keyframes store-chip-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .store-filter-chip-spinner {
-    animation: none;
-    border-top-color: var(--color-accent);
-    opacity: 0.7;
-  }
+  .store-filter-chip-spinner { animation: none; border-top-color: var(--color-accent); opacity: 0.7; }
 }
 
-/* ============================================================================
-   Discover landing — Genre quick filters + hero glow polish
-
-   - .store-genre-quickfilters : a single row of pill buttons above the
-     rails for one-tap genre jumps (see StoreGenreQuickFilters.tsx).
-   - .store-hero-glow : a soft accent bloom behind the hero content that
-     breathes slowly so the landing feels alive without competing with the
-     rotating cover.
-   ============================================================================ */
-
-.store-genre-quickfilters {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-  padding: 0 var(--space-2xs);
-}
-
-.store-genre-quickfilters-label {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.store-genre-quickfilters-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-}
-
-.store-genre-quickfilter {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    border-color var(--transition-fast),
-    color var(--transition-fast),
-    transform var(--transition-fast),
-    box-shadow var(--transition-fast);
-}
-
-.store-genre-quickfilter:hover {
-  color: #fff;
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  border-color: var(--color-accent);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 25%, transparent);
-}
-
-.store-genre-quickfilter:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.store-genre-quickfilter:active {
-  transform: translateY(0) scale(0.97);
-}
-
-.store-genre-quickfilter.active {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 45%, transparent);
-}
-
-/* ── Hero glow bloom ─────────────────────────────────────────────────── */
-
+/* Hero glow bloom */
 .store-hero::after {
   content: "";
   position: absolute;
@@ -1305,21 +804,10 @@
   animation: storeHeroGlow 7s ease-in-out infinite;
   mix-blend-mode: screen;
 }
-
 @keyframes storeHeroGlow {
-  0%, 100% {
-    opacity: 0.35;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.04);
-  }
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.04); }
 }
-
 @media (prefers-reduced-motion: reduce) {
-  .store-hero::after {
-    animation: none;
-    opacity: 0.4;
-  }
+  .store-hero::after { animation: none; opacity: 0.4; }
 }

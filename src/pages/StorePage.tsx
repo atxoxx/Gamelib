@@ -10,8 +10,7 @@ import StoreSearchBar from "../components/store/StoreSearchBar";
 import StoreGameGrid from "../components/store/StoreGameGrid";
 import StoreFilterChips from "../components/store/StoreFilterChips";
 import StoreFilterSidebar from "../components/store/StoreFilterSidebar";
-import HeroFeature from "../components/store/HeroFeature";
-import SnapRail from "../components/store/SnapRail";
+import StoreDiscover from "../components/store/StoreDiscover";
 import DensityToggle from "../components/DensityToggle";
 import type { StoreGameSummary, StoreCategory } from "../types/game";
 import { useBigScreen } from "../context/BigScreenContext";
@@ -309,53 +308,10 @@ export default function StorePage() {
       />
 
       {isDiscover ? (
-        /* ── Discover landing: hero + 5 IGDB rails. The wishlist rail
-             was removed in Phase 2.7; wishlist content now lives on its
-             own /wishlist page (top-nav tab) — Discover stays focused
-             on IGDB discovery. Source filter doesn't apply here
-             (rails are IGDB catalogue highlights, not narrowed
-             views). */
-        <div className="store-discover">
-          <HeroFeature onCardClick={handleCardClick} />
-
-          <div className="store-rails">
-            <SnapRail
-              title="Trending Now"
-              category="trending"
-              onCardClick={handleCardClick}
-              onSeeAll={handleSeeAll}
-              badge="🔥"
-            />
-            <SnapRail
-              title="Most Popular"
-              category="popular"
-              onCardClick={handleCardClick}
-              onSeeAll={handleSeeAll}
-              badge="⭐"
-            />
-            <SnapRail
-              title="Top Critics"
-              category="top"
-              onCardClick={handleCardClick}
-              onSeeAll={handleSeeAll}
-              badge="🏆"
-            />
-            <SnapRail
-              title="Coming Soon"
-              category="coming_soon"
-              onCardClick={handleCardClick}
-              onSeeAll={handleSeeAll}
-              badge="🎮"
-            />
-            <SnapRail
-              title="New Releases"
-              category="new_releases"
-              onCardClick={handleCardClick}
-              onSeeAll={handleSeeAll}
-              badge="✨"
-            />
-          </div>
-        </div>
+        <StoreDiscover
+          onCardClick={handleCardClick}
+          onSeeAll={handleSeeAll}
+        />
       ) : (
         /* ── Category / search detail view ───────────────────────── */
         <div className="store-detail">
