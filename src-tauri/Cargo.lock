@@ -1735,6 +1735,7 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rand 0.8.6",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "scraper",

@@ -86,6 +86,9 @@ wmi = "0.14"
 # dependency tree uniform across platforms avoids a `#[cfg]` ladder
 # in `gog::installed`.
 winreg = "0.52"
+# Rockstar uninstall-string parsing (mirrors Playnite's
+# `Regex.Match(UninstallString, @"(?:Launcher|uninstall)\.exe.+uninstall=(.+)$")`).
+regex = "1"
 # Win32_UI_Shell/WindowsAndMessaging are used for UAC elevation when a game
 # executable requires administrator privileges. Win32_System_Registry is a
 # transitive feature required by Win32_UI_Shell in windows crate 0.58.

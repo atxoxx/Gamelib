@@ -18,6 +18,7 @@ const SOURCE_OPTIONS: readonly { value: LibrarySource; label: string }[] = [
   { value: "gog", label: "GOG" },
   { value: "epic", label: "Epic" },
   { value: "humble", label: "Humble" },
+  { value: "rockstar", label: "Rockstar" },
 ];
 
 const PLAY_STATUS_OPTIONS: readonly { value: PlayStatus | "all"; label: string }[] = [

@@ -11,6 +11,7 @@ import type { SteamSyncResult, SteamSettings, SteamSession, SteamAuthState } fro
 import type { EpicAuthState, EpicSyncResult } from "../types/epic";
 import type { GogAuthState, GogSyncResult } from "../types/gog";
 import type { HumbleAuthState, HumbleSettings, HumbleSyncResult } from "../types/humble";
+import type { RockstarSyncResult } from "../types/rockstar";
 import { formatPlayTime, type Game, type SizeUnit } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { useAchievements } from "../context/AchievementContext";
@@ -285,6 +286,12 @@ export default function SettingsPage() {
   const [gogSyncResult, setGogSyncResult] = useState<GogSyncResult | null>(null);
   const [isGogLoggingIn, setIsGogLoggingIn] = useState(false);
   const [isGogSyncing, setIsGogSyncing] = useState(false);
+
+  // Rockstar Games Launcher integration state. No account/auth —
+  // it's a pure installed-games scan + launcher client, so the
+  // only state is the last scan result + the in-flight flag.
+  const [rockstarSyncResult, setRockstarSyncResult] = useState<RockstarSyncResult | null>(null);
+  const [isRockstarSyncing, setIsRockstarSyncing] = useState(false);
 
   // Humble Bundle integration state. Cookie-based auth (no OAuth) — a
   // WebView drives humblebundle.com/login and we snapshot the session
@@ -997,6 +1004,86 @@ export default function SettingsPage() {
       showToast("GOG Galaxy disconnected", "info");
     } catch (err) {
       showToast(`Failed: ${err}`, "error");
+    }
+  }
+
+  // ── Rockstar handlers ─────────────────────────────────────────────
+  // No account/auth — just a local scan of installed Rockstar titles
+  // plus launcher-client status. Mirrors the GOG/Epic sync flow's
+  // import-into-library half, minus the connect/login step.
+
+  async function handleRockstarSync() {
+    setIsRockstarSyncing(true);
+    setRockstarSyncResult(null);
+    try {
+      const result: RockstarSyncResult = await invoke("rockstar_sync_library");
+      setRockstarSyncResult(result);
+      if (result.success) {
+        // Persist scanned games to the library (dedupe by id).
+        const existingRockstarIds = new Set(
+          games.filter((gm) => gm.rockstarTitleId).map((gm) => gm.id)
+        );
+        const newGames: Game[] = [];
+        for (const entry of result.syncedGames ?? []) {
+          if (existingRockstarIds.has(entry.id)) continue;
+          newGames.push({
+            id: entry.id,
+            name: entry.title,
+            path: entry.installPath ?? "",
+            platform: "Rockstar",
+            installed: entry.isInstalled,
+            playTime: "0h 0m",
+            addedAt: Date.now(),
+            rockstarTitleId: entry.titleId,
+            iconUrl: entry.iconPath,
+            sizeBytes: entry.sizeBytes,
+            sizeRootPath: entry.sizeRootPath,
+            sizeDetectedAt:
+              entry.sizeBytes !== undefined ? new Date().toISOString() : undefined,
+          });
+        }
+        if (newGames.length > 0) {
+          addGames(newGames);
+          showToast(
+            `Scanned ${result.gamesImported} Rockstar games · ${newGames.length} new`,
+            "success"
+          );
+        } else {
+          showToast(
+            `Scanned ${result.gamesImported} Rockstar games (all already in library)`,
+            "success"
+          );
+        }
+
+        // Update `installed` / size for existing Rockstar entries when
+        // the scan reports a different install state.
+        for (const entry of result.syncedGames ?? []) {
+          const game = games.find((g) => g.id === entry.id);
+          if (!game) continue;
+          const patch: Partial<Game> = {};
+          if (game.installed !== entry.isInstalled) patch.installed = entry.isInstalled;
+          if (entry.sizeBytes !== undefined) {
+            patch.sizeBytes = entry.sizeBytes;
+            patch.sizeRootPath = entry.sizeRootPath;
+            patch.sizeDetectedAt = new Date().toISOString();
+          }
+          if (Object.keys(patch).length > 0) updateGame(game.id, patch);
+        }
+      }
+    } catch (err) {
+      setRockstarSyncResult({
+        success: false,
+        gamesImported: 0,
+        gamesSkipped: 0,
+        errors: [String(err)],
+        lastSync: 0,
+        clientInstalled: false,
+        clientPath: "",
+        syncedGames: [],
+      });
+      showToast(`Rockstar scan failed: ${err}`, "error");
+    } finally {
+      setIsRockstarSyncing(false);
     }
   }
 
@@ -2054,6 +2141,73 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* ── Rockstar Games Launcher ── */}
+          <div className="integration-tile rockstar">
+            <div className="integration-tile-body-wrap">
+              <div className="integration-tile-header">
+                <span className="integration-tile-icon"><RockstarIcon /></span>
+                <div className="integration-tile-info">
+                  <div className="integration-tile-name-row">
+                    <h3 className="integration-tile-name">Rockstar Games Launcher</h3>
+                    {rockstarSyncResult?.clientInstalled && (
+                      <span className="integration-badge active">Detected</span>
+                    )}
+                  </div>
+                  <p className="integration-tile-desc">
+                    Scan installed Rockstar Games Launcher titles (GTA,
+                    Red Dead, Max Payne &amp; more) and launch them
+                    through the Rockstar client. No account required.
+                  </p>
+                </div>
+              </div>
+
+              <div className="integration-tile-body">
+                {rockstarSyncResult?.clientInstalled ? (
+                  <div className="auth-status">
+                    Rockstar Games Launcher detected
+                    {rockstarSyncResult.clientPath
+                      ? ` at ${rockstarSyncResult.clientPath}`
+                      : ""}
+                  </div>
+                ) : (
+                  <p className="connect-prompt">
+                    The Rockstar Games Launcher isn't installed — only
+                    titles already on disk can be detected.
+                  </p>
+                )}
+
+                <p className="auth-note">
+                  Detection is fully local: Gamelib reads the Windows
+                  uninstall registry for installed Rockstar titles.
+                </p>
+
+                <div className="integration-tile-actions">
+                  <Button
+                    variant="primary"
+                    onClick={handleRockstarSync}
+                    isLoading={isRockstarSyncing}
+                  >
+                    Scan Installed Games
+                  </Button>
+                </div>
+
+                {rockstarSyncResult && (
+                  <div className={`sync-result ${rockstarSyncResult.success ? "success" : "error"}`}>
+                    {rockstarSyncResult.success
+                      ? `✓ Scanned ${rockstarSyncResult.gamesImported} game(s)${rockstarSyncResult.errors.length ? ` · ${rockstarSyncResult.errors.length} warning(s)` : ""}`
+                      : `✗ ${rockstarSyncResult.errors?.[0] || "Scan failed"}`}
+                  </div>
+                )}
+
+                {rockstarSyncResult?.lastSync ? (
+                  <p className="sync-result-time">
+                    Last scan: {new Date(rockstarSyncResult.lastSync * 1000).toLocaleString()}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
           <p className="integration-footer">
             More integrations coming soon — itch.io and more.
           </p>
@@ -2729,6 +2883,19 @@ function HumbleIcon() {
       <path
         fill="#1fb6a6"
         d="M15.4 6.4h2.1v11.2h-2.1v-4.2h-4.4v4.2h-2.1V6.4h2.1v3.9h4.4V6.4z"
+      />
+    </svg>
+  );
+}
+
+function RockstarIcon() {
+  // Stylized Rockstar "R*" mark in Rockstar gold (#ffd344).
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+      <rect x="0.5" y="0.5" width="23" height="23" rx="5" fill="#1a1305" />
+      <path
+        fill="#ffd344"
+        d="M8.6 6.4h6.8c.95 0 1.72.77 1.72 1.72v8.42c0 .95-.77 1.72-1.72 1.72H8.6c-.95 0-1.72-.77-1.72-1.72v-8.42C6.88 7.17 7.65 6.4 8.6 6.4zm.86 1.5v9h1.5v-3.16h2.46v-1.47H10.96V8.9h3.18v-1.0H9.46zm9.0-.3l1.04-.78.94 1.24-1.04.78-.94-1.24z"
       />
     </svg>
   );

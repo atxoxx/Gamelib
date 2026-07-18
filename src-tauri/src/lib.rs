@@ -24,6 +24,7 @@ mod epic;
 mod gog;
 mod humble;
 mod steam_game_watcher;
+mod rockstar;
 mod size;
 // New modules for the download feature. See each module's
 // top-of-file doc comment for the design rationale.
@@ -44,6 +45,10 @@ use gog::sync::gog_sync_library;
 use humble::{
     humble_get_settings, humble_is_authenticated, humble_logout, humble_save_settings,
     humble_start_login, humble_sync_library,
+};
+use rockstar::sync::{
+    rockstar_launch_game, rockstar_open_client, rockstar_sync_library,
+    rockstar_uninstall_game,
 };
 use steam::auth::{
     steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
@@ -2319,6 +2324,10 @@ pub fn run() {
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,
             humble_start_login, humble_sync_library, humble_is_authenticated, humble_logout,
             humble_get_settings, humble_save_settings,
+            // Rockstar Games Launcher integration — installed-games scan
+            // + launcher client actions (no cloud auth).
+            rockstar_sync_library, rockstar_launch_game, rockstar_open_client,
+            rockstar_uninstall_game,
             // Download-feature commands. The torrent engine manages
             // its own global session; the source manager and store
             // checker are passed through `tauri::State`.

@@ -570,7 +570,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
 
     try {
-      // ── Unified launch: single Tauri command for all game types ──────
+      // ── Rockstar: launch through the Rockstar Games Launcher ──
+      // Playnite routes play via `Launcher.exe -launchTitleInFolder
+      // "<installDir>"` so Rockstar's DRM / Social Club bootstrap
+      // runs. We do the same when the game carries a `rockstarTitleId`.
+      if (game.rockstarTitleId) {
+        await invoke<string>("rockstar_launch_game", {
+          titleId: game.rockstarTitleId,
+        });
+        if (splashOn) splash.updateStatus("started");
+        showToast(`Launched ${game.name}`, "success");
+        return;
+      }
+
+      // ── Unified launch: single Tauri command for all game types ─────
       // The Rust backend handles:
       //   * Direct exe spawn (Local games, Steam with known path)
       //   * steam:// protocol (Steam without local exe)
