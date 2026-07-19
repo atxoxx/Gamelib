@@ -8696,6 +8696,57 @@
   background: var(--color-bg-hover);
 }
 
+/* Export dropdown (CSV / JSON) */
+.game-activity-export-group {
+  position: relative;
+}
+
+.game-activity-export-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
+}
+
+.game-activity-export-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.game-activity-export-menu button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* Estimated-curve disclaimer under the performance charts */
+.game-activity-perf-estimated-note {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
 /* Two-column layout */
 .game-activity-layout {
   display: grid;

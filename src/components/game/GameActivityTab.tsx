@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import html2canvas from "html2canvas";
@@ -8,6 +8,7 @@ import { useToast } from "../../context/ToastContext";
 import { type Game, type GameSession, formatPlayTime } from "../../types/game";
 import BarChart from "../charts/BarChart";
 import LineChart from "../charts/LineChart";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 type Timeframe = "7d" | "30d" | "90d" | "all";
 type ViewMode = "playtime" | "performance";
@@ -73,6 +74,10 @@ export function GameActivityTab({ game }: { game: Game }) {
   const [playtimeChartStyle, setPlaytimeChartStyle] = useState<PlaytimeChartStyle>("bar");
   const [playtimeAgg, setPlaytimeAgg] = useState<PlaytimeAggregation>("AGG_DAY");
   const [isolatedSessionIndex, setIsolatedSessionIndex] = useState<number | null>(null);
+  // Pending session id awaiting delete confirmation via ConfirmModal
+  // (replaces the native window.confirm so the dialog matches the app's
+  // design language instead of a blocking browser prompt).
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const handleCaptureScreenshot = async () => {
     try {
@@ -124,7 +129,79 @@ export function GameActivityTab({ game }: { game: Game }) {
     }
   };
 
-  // Timeframe-filtered sessions (for stats computation and sessions list)
+  // Build a CSV / JSON export of the currently filtered sessions and open
+  // the native save dialog. Telemetry columns are only present when the
+  // session recorded hardware metrics, so missing values render as empty.
+  const handleExportSessions = async (format: "csv" | "json") => {
+    try {
+      const baseName = `${game.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_sessions_${new Date().toISOString().slice(0, 10)}`;
+      const filePath = await save({
+        title: `Export ${game.name} Sessions`,
+        defaultPath: `${baseName}.${format}`,
+        filters: [{ name: format === "csv" ? "CSV File" : "JSON File", extensions: [format] }],
+      });
+      if (!filePath) return;
+
+      let contents: string;
+      if (format === "csv") {
+        const header = [
+          "date", "start_time", "duration_min",
+          "avg_fps", "min_fps", "max_fps",
+          "avg_cpu", "avg_gpu", "avg_ram",
+          "avg_cpu_temp", "avg_gpu_temp", "resolution",
+        ];
+        const rows = filteredSessions.map((s) => {
+          const m = s.metrics;
+          const start = new Date(s.date).toLocaleTimeString("en-GB", { hour12: false });
+          return [
+            s.date.slice(0, 10),
+            start,
+            String(s.durationMin),
+            m ? String(m.avgFps) : "",
+            m ? String(m.minFps) : "",
+            m ? String(m.maxFps) : "",
+            m ? String(m.avgCpuUsage) : "",
+            m ? String(m.avgGpuUsage) : "",
+            m ? String(m.avgRamUsage) : "",
+            m ? String(m.avgCpuTemp) : "",
+            m ? String(m.avgGpuTemp) : "",
+            m ? m.resolution : "",
+          ].join(",");
+        });
+        contents = [header.join(","), ...rows].join("\n");
+      } else {
+        contents = JSON.stringify(
+          filteredSessions.map((s) => ({
+            date: s.date,
+            durationMin: s.durationMin,
+            metrics: s.metrics ?? null,
+          })),
+          null,
+          2,
+        );
+      }
+
+      await invoke("save_text_file", { filePath, contents });
+      showToast(`Sessions exported as ${format.toUpperCase()}`, "success");
+    } catch (error) {
+      console.error("Export error:", error);
+      showToast(`Failed to export sessions: ${error}`, "error");
+    }
+  };
+
+  // Close the export dropdown when clicking outside of it.
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        const menu = exportMenuRef.current.querySelector(".game-activity-export-menu") as HTMLElement | null;
+        if (menu) menu.style.display = "none";
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
   const filteredSessions = useMemo(() => {
     if (timeframe === "all") return sessions;
     const days = timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : timeframe === "90d" ? 90 : 365;
@@ -468,7 +545,8 @@ export function GameActivityTab({ game }: { game: Game }) {
   }
 
   return (
-    <div className="game-activity-tab">
+    <>
+      <div className="game-activity-tab">
       {/* Top Header Panel */}
       <div className="game-activity-header">
         <div className="game-activity-title-group">
@@ -524,6 +602,26 @@ export function GameActivityTab({ game }: { game: Game }) {
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" />
             </svg>
           </button>
+
+          {/* Export sessions (CSV / JSON) */}
+          <div className="game-activity-export-group" ref={exportMenuRef}>
+            <button
+              className="game-activity-action-btn"
+              title="Export Sessions"
+              onClick={(e) => {
+                const menu = (e.currentTarget.nextElementSibling as HTMLElement | null);
+                if (menu) menu.style.display = menu.style.display === "block" ? "none" : "block";
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+            <div className="game-activity-export-menu">
+              <button onClick={() => handleExportSessions("csv")}>Export as CSV</button>
+              <button onClick={() => handleExportSessions("json")}>Export as JSON</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -663,10 +761,7 @@ export function GameActivityTab({ game }: { game: Game }) {
                     title="Delete Session"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (confirm("Delete this session?")) {
-                        deleteSession(session.id);
-                        setIsolatedSessionIndex(null);
-                      }
+                      setPendingDeleteId(session.id);
                     }}
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -753,7 +848,7 @@ export function GameActivityTab({ game }: { game: Game }) {
 
               {/* Heatmap Panel */}
               <div className="game-activity-panel">
-                <WeeklyHeatmap sessions={filteredSessions} />
+                <WeeklyHeatmap sessions={filteredSessions} timeframeDays={timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : timeframe === "90d" ? 90 : 365} />
               </div>
             </>
           ) : (
@@ -812,6 +907,11 @@ export function GameActivityTab({ game }: { game: Game }) {
                   {/* Stacked Charts */}
                   {perfTimelineData && (
                     <div className="game-activity-stacked-charts">
+                      <p className="game-activity-perf-estimated-note">
+                        Curves are estimated from each session's average / peak metrics — raw
+                        per-sample telemetry is not stored, so these lines illustrate shape, not
+                        exact readings.
+                      </p>
                       <ChartSection title="CPU & GPU Load">
                         <LineChart
                           series={[
@@ -873,7 +973,15 @@ export function GameActivityTab({ game }: { game: Game }) {
                     <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
                     <line x1="9" y1="9" x2="15" y2="15" />
                   </svg>
-                  <p>No performance data recorded for these sessions. Launch the game with the performance monitor active.</p>
+                  {filteredSessions.length > 0 ? (
+                    <p>
+                      {filteredSessions.length} session{filteredSessions.length > 1 ? "s" : ""} recorded in this
+                      period, but no performance telemetry was captured. Launch the game with the performance
+                      monitor active to start collecting FPS, CPU, GPU and temperature data.
+                    </p>
+                  ) : (
+                    <p>No performance data recorded for these sessions. Launch the game with the performance monitor active.</p>
+                  )}
                 </div>
               )}
             </>
@@ -881,6 +989,25 @@ export function GameActivityTab({ game }: { game: Game }) {
         </div>
       </div>
     </div>
+    <ConfirmModal
+      open={pendingDeleteId !== null}
+      title="Delete this session?"
+      message={
+        <span>
+          This will permanently remove the selected play session from your activity history. This action cannot be undone.
+        </span>
+      }
+      confirmLabel="Delete Session"
+      onCancel={() => setPendingDeleteId(null)}
+      onConfirm={() => {
+        if (pendingDeleteId) {
+          deleteSession(pendingDeleteId);
+          setIsolatedSessionIndex(null);
+        }
+        setPendingDeleteId(null);
+      }}
+    />
+    </>
   );
 }
 
@@ -936,8 +1063,7 @@ function ChartSection({ title, children }: { title: string; children: React.Reac
 }
 
 // ─── Heatmap Subcomponent ─────────────────────────────────────────────────────
-function WeeklyHeatmap({ sessions }: { sessions: GameSession[] }) {
-  const timeframeDays = 365;
+function WeeklyHeatmap({ sessions, timeframeDays = 365 }: { sessions: GameSession[]; timeframeDays?: number }) {
   
   const cells = useMemo(() => {
     const list: { date: string; duration: number }[] = [];

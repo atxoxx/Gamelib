@@ -1371,22 +1371,31 @@ fn list_image_files_flat(dir: &std::path::Path) -> Vec<String> {
 /// Save screenshot image base64 data to the specified path.
 #[tauri::command]
 fn save_screenshot(file_path: String, base64_data: String) -> Result<(), String> {
-    use base64::{Engine as _, engine::general_purpose};
+     use base64::{Engine as _, engine::general_purpose};
 
-    let clean_data = if base64_data.contains(",") {
-        base64_data.split(',').nth(1).unwrap_or(&base64_data)
-    } else {
-        &base64_data
-    };
+     let clean_data = if base64_data.contains(",") {
+         base64_data.split(',').nth(1).unwrap_or(&base64_data)
+     } else {
+         &base64_data
+     };
 
-    let bytes = general_purpose::STANDARD
-        .decode(clean_data)
-        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+     let bytes = general_purpose::STANDARD
+         .decode(clean_data)
+         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    std::fs::write(&file_path, bytes)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+     std::fs::write(&file_path, bytes)
+         .map_err(|e| format!("Failed to write file: {}", e))?;
 
-    Ok(())
+     Ok(())
+}
+
+/// Write an arbitrary text payload (CSV / JSON export) to the specified
+/// path. Kept separate from `save_screenshot` because that command only
+/// accepts base64 image payloads; exports are plain UTF-8 text.
+#[tauri::command]
+fn save_text_file(file_path: String, contents: String) -> Result<(), String> {
+     std::fs::write(&file_path, contents)
+         .map_err(|e| format!("Failed to write file: {}", e))
 }
 
 fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
@@ -2374,7 +2383,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,
