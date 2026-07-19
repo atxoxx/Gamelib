@@ -9,7 +9,6 @@ import StorePage from "./pages/StorePage";
 import StoreGameDetail from "./pages/StoreGameDetail";
 import CommunityPage from "./pages/CommunityPage";
 import SettingsPage from "./pages/SettingsPage";
-import PluginsPage from "./pages/PluginsPage";
 import ActivityPage from "./pages/ActivityPage";
 import StoragePage from "./pages/StoragePage";
 import WishlistPage from "./pages/WishlistPage";
@@ -122,7 +121,6 @@ function AppShell() {
           <Route path="store/:gameSlug" element={<StoreGameDetail />} />
           <Route path="community" element={<CommunityPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="plugins" element={<PluginsPage />} />
         </Route>
       </Routes>
     </GamepadProvider>

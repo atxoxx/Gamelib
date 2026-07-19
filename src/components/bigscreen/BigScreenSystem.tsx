@@ -9,13 +9,12 @@ import { useDriveUsage } from "../../pages/storage/useDriveUsage";
 import { useFocusable } from "../../hooks/useFocusable";
 import { driveBuckets } from "../../pages/storage/utils";
 
-type SystemSection = "downloads" | "storage" | "achievements" | "plugins" | "settings";
+type SystemSection = "downloads" | "storage" | "achievements" | "settings";
 
 const SECTIONS: { id: SystemSection; label: string; icon: string }[] = [
   { id: "downloads", label: "Downloads Queue", icon: "📥" },
   { id: "storage", label: "Storage Manager", icon: "💾" },
   { id: "achievements", label: "Achievements Hub", icon: "🏆" },
-  { id: "plugins", label: "Plugin Manager", icon: "🔌" },
   { id: "settings", label: "System Preferences", icon: "⚙️" },
 ];
 
@@ -29,7 +28,6 @@ export default function BigScreenSystem() {
     if (path.startsWith("/storage")) return "storage";
     if (path.startsWith("/downloads")) return "downloads";
     if (path.startsWith("/achievements")) return "achievements";
-    if (path.startsWith("/plugins")) return "plugins";
     return "settings";
   }, [location.pathname]);
 
@@ -44,8 +42,6 @@ export default function BigScreenSystem() {
       setActiveSection("downloads");
     } else if (path.startsWith("/achievements")) {
       setActiveSection("achievements");
-    } else if (path.startsWith("/plugins")) {
-      setActiveSection("plugins");
     } else if (path.startsWith("/settings")) {
       setActiveSection("settings");
     }
@@ -88,7 +84,6 @@ export default function BigScreenSystem() {
         {activeSection === "downloads" && <DownloadsView />}
         {activeSection === "storage" && <StorageView />}
         {activeSection === "achievements" && <AchievementsHubView />}
-        {activeSection === "plugins" && <PluginsView />}
         {activeSection === "settings" && <SettingsView />}
       </div>
     </div>
@@ -257,21 +252,6 @@ function AchievementsHubView() {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-// 4. Plugins View
-function PluginsView() {
-  return (
-    <div className="bigscreen-system-section-view">
-      <h3>Plugin Manager</h3>
-      <div className="system-view-empty">
-        <div className="plugin-badge-placeholder">🔌 COMING SOON</div>
-        <p style={{ marginTop: "12px", color: "rgba(255,255,255,0.5)" }}>
-          Extend Gamelib with community plugins for IGDB metadata scraping, custom styling engines, and stores integrations.
-        </p>
-      </div>
     </div>
   );
 }

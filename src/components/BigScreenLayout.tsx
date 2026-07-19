@@ -38,7 +38,6 @@ export default function BigScreenLayout() {
     "/achievements",
     "/downloads",
     "/storage",
-    "/plugins",
     "/settings"
   ];
   const isDashboardRoute = dashboardPaths.some((path) => location.pathname === path);
