@@ -1162,9 +1162,11 @@ export default function FriendsPage() {
 
   // Compare Tab States
   const [selectedCompareFriendId, setSelectedCompareFriendId] = useState<string>("");
+  const [compareSubTab, setCompareSubTab] = useState<"overview" | "games" | "genres" | "insights">("overview");
   const [compareFilter, setCompareFilter] = useState<"all" | "shared" | "me_only" | "friend_only">("all");
-  const [compareSort, setCompareSort] = useState<"name" | "myPlaytime" | "friendPlaytime">("name");
+  const [compareSort, setCompareSort] = useState<"name" | "myPlaytime" | "friendPlaytime" | "gap" | "achievement">("name");
   const [compareGenre, setCompareGenre] = useState<string>("all");
+  const [compareSearch, setCompareSearch] = useState<string>("");
 
   // Create Session Form State
   const [sessionGameId, setSessionGameId] = useState("");
@@ -2340,6 +2342,7 @@ export default function FriendsPage() {
     return compareList;
   }, [games, cache, compareFriend]);
 
+  // Jaccard-style similarity: shared games over the union of both libraries.
   const matchScore = useMemo(() => {
     if (!compareFriend || comparisonData.length === 0) return 0;
     const sharedGamesCount = comparisonData.filter((i) => i.ownedByMe && i.ownedByFriend).length;
@@ -2348,17 +2351,22 @@ export default function FriendsPage() {
   }, [compareFriend, comparisonData]);
 
   const filteredCompareData = useMemo(() => {
+    const q = compareSearch.trim().toLowerCase();
     return comparisonData.filter((item) => {
-      if (compareFilter === "shared") return item.ownedByMe && item.ownedByFriend;
-      if (compareFilter === "me_only") return item.ownedByMe && !item.ownedByFriend;
-      if (compareFilter === "friend_only") return !item.ownedByMe && item.ownedByFriend;
+      // Ownership filter.
+      if (compareFilter === "shared" && !(item.ownedByMe && item.ownedByFriend)) return false;
+      if (compareFilter === "me_only" && !(item.ownedByMe && !item.ownedByFriend)) return false;
+      if (compareFilter === "friend_only" && !(!item.ownedByMe && item.ownedByFriend)) return false;
+      // Genre filter (applies on top of ownership filter).
       if (compareGenre !== "all") {
         const genres: string[] = item.genres || [];
-        return genres.some((g) => g.toLowerCase() === compareGenre.toLowerCase());
+        if (!genres.some((g) => g.toLowerCase() === compareGenre.toLowerCase())) return false;
       }
+      // Text search.
+      if (q && !item.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [comparisonData, compareFilter, compareGenre]);
+  }, [comparisonData, compareFilter, compareGenre, compareSearch]);
 
   // Unique genres across both libraries for the genre filter dropdown.
   const compareGenres = useMemo(() => {
@@ -2374,6 +2382,16 @@ export default function FriendsPage() {
     }
     if (compareSort === "friendPlaytime") {
       return list.sort((a, b) => b.playTimeFriend - a.playTimeFriend);
+    }
+    if (compareSort === "gap") {
+      return list.sort(
+        (a, b) => Math.abs(b.playTimeMe - b.playTimeFriend) - Math.abs(a.playTimeMe - a.playTimeFriend)
+      );
+    }
+    if (compareSort === "achievement") {
+      return list.sort(
+        (a, b) => Math.max(b.achievementMe, b.achievementFriend) - Math.max(a.achievementMe, a.achievementFriend)
+      );
     }
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [filteredCompareData, compareSort]);
@@ -2403,12 +2421,99 @@ export default function FriendsPage() {
 
     return {
       sharedCount,
+      myOwned,
+      friendOwned,
+      meOnlyCount: comparisonData.filter((i) => i.ownedByMe && !i.ownedByFriend).length,
+      friendOnlyCount: comparisonData.filter((i) => !i.ownedByMe && i.ownedByFriend).length,
       myPlaytime,
       friendPlaytime,
       averageMyAchievements,
       averageFriendAchievements,
     };
   }, [comparisonData]);
+
+  // Per-genre breakdown of who owns / plays more, used by the Genres sub-tab.
+  const genreBreakdown = useMemo(() => {
+    if (!comparisonData.length) return [];
+    const map = new Map<
+      string,
+      { genre: string; meOwned: number; friendOwned: number; shared: number; mePlay: number; friendPlay: number; total: number }
+    >();
+    comparisonData.forEach((item) => {
+      const genres: string[] = (item.genres && item.genres.length ? item.genres : ["Uncategorized"]);
+      genres.forEach((g) => {
+        const key = g || "Uncategorized";
+        const row =
+          map.get(key) ||
+          { genre: key, meOwned: 0, friendOwned: 0, shared: 0, mePlay: 0, friendPlay: 0, total: 0 };
+        row.total++;
+        if (item.ownedByMe) {
+          row.meOwned++;
+          row.mePlay += item.playTimeMe;
+        }
+        if (item.ownedByFriend) {
+          row.friendOwned++;
+          row.friendPlay += item.playTimeFriend;
+        }
+        if (item.ownedByMe && item.ownedByFriend) row.shared++;
+        map.set(key, row);
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [comparisonData]);
+
+  // Genre taste affinity: overlap of genres where both own at least one game.
+  const genreAffinity = useMemo(() => {
+    if (!genreBreakdown.length) return 0;
+    const shared = genreBreakdown.filter((g) => g.meOwned > 0 && g.friendOwned > 0).length;
+    return Math.round((shared / genreBreakdown.length) * 100);
+  }, [genreBreakdown]);
+
+  // Overall compatibility blends library overlap with genre-taste affinity.
+  const compatibilityScore = useMemo(() => {
+    return Math.round(matchScore * 0.6 + genreAffinity * 0.4);
+  }, [matchScore, genreAffinity]);
+
+  // Actionable insights: top playtime gaps, recommendations, achievement leaders.
+  const compareInsights = useMemo(() => {
+    if (!comparisonData.length || !compareFriend) return null;
+    const shared = comparisonData.filter((i) => i.ownedByMe && i.ownedByFriend);
+    const meOnly = comparisonData.filter((i) => i.ownedByMe && !i.ownedByFriend);
+    const friendOnly = comparisonData.filter((i) => !i.ownedByMe && i.ownedByFriend);
+
+    // Games where you crush the friend on time / vice versa (shared titles).
+    const iPlayMore = [...shared]
+      .filter((i) => i.playTimeMe > i.playTimeFriend)
+      .sort((a, b) => (b.playTimeMe - b.playTimeFriend) - (a.playTimeMe - a.playTimeFriend))
+      .slice(0, 5);
+    const theyPlayMore = [...shared]
+      .filter((i) => i.playTimeFriend > i.playTimeMe)
+      .sort((a, b) => (b.playTimeFriend - b.playTimeMe) - (a.playTimeFriend - a.playTimeMe))
+      .slice(0, 5);
+
+    // Recommendations = what they love that you don't own, ranked by their playtime.
+    const forYou = [...friendOnly].sort((a, b) => b.playTimeFriend - a.playTimeFriend).slice(0, 6);
+    const forThem = [...meOnly].sort((a, b) => b.playTimeMe - a.playTimeMe).slice(0, 6);
+
+    // Best co-op candidate: shared game with the highest combined playtime.
+    const topShared = [...shared].sort(
+      (a, b) => (b.playTimeMe + b.playTimeFriend) - (a.playTimeMe + a.playTimeFriend)
+    )[0];
+
+    // Achievement leader per shared game.
+    const achLeaderMe = shared.filter((i) => i.achievementMe > i.achievementFriend).length;
+    const achLeaderFriend = shared.filter((i) => i.achievementFriend > i.achievementMe).length;
+
+    return { shared, meOnly, friendOnly, iPlayMore, theyPlayMore, forYou, forThem, topShared, achLeaderMe, achLeaderFriend };
+  }, [comparisonData, compareFriend]);
+
+  // Reset sub-tab-affecting UI when switching friends.
+  useEffect(() => {
+    setCompareSubTab("overview");
+    setCompareFilter("all");
+    setCompareGenre("all");
+    setCompareSearch("");
+  }, [selectedCompareFriendId]);
 
   // Set of the viewer's own game ids, used for "games in common" on cards.
   const myGameIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
@@ -3652,7 +3757,7 @@ export default function FriendsPage() {
           <div className="compare-section">
             <div className="compare-selector-bar">
               <div className="compare-selector-group">
-                <label htmlFor="compareFriendSelect">Friend:</label>
+                <label htmlFor="compareFriendSelect">Compare with:</label>
                 <select
                   id="compareFriendSelect"
                   className="profile-input"
@@ -3670,22 +3775,27 @@ export default function FriendsPage() {
               </div>
 
               {compareFriend && (
-                <div className="compare-match-score-badge">
-                  <span>🎯 Similarity:</span>
-                  <strong>{matchScore}% Match</strong>
-                </div>
-              )}
-
-              {compareFriend && comparisonData.length > 0 && (
-                <div
-                  className={`compare-data-badge ${comparisonData.some((i) => i.estimated) ? "estimated" : "real"}`}
-                  title={
-                    comparisonData.some((i) => i.estimated)
-                      ? "This friend hasn't shared game-level data yet — numbers are estimated."
-                      : "Based on real per-game data shared by your friend."
-                  }
-                >
-                  {comparisonData.some((i) => i.estimated) ? "⚠ Estimated" : "✓ Real data"}
+                <div className="compare-selector-badges">
+                  <div className="compare-match-score-badge">
+                    <span>🎯 Match</span>
+                    <strong>{matchScore}%</strong>
+                  </div>
+                  <div className="compare-match-score-badge compat">
+                    <span>🤝 Compatibility</span>
+                    <strong>{compatibilityScore}%</strong>
+                  </div>
+                  {comparisonData.length > 0 && (
+                    <div
+                      className={`compare-data-badge ${comparisonData.some((i) => i.estimated) ? "estimated" : "real"}`}
+                      title={
+                        comparisonData.some((i) => i.estimated)
+                          ? "This friend hasn't shared game-level data yet — numbers are estimated."
+                          : "Based on real per-game data shared by your friend."
+                      }
+                    >
+                      {comparisonData.some((i) => i.estimated) ? "⚠ Estimated" : "✓ Real data"}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -3694,8 +3804,9 @@ export default function FriendsPage() {
               <div className="friends-empty-state">
                 <h3 className="friends-empty-title">Select a Friend</h3>
                 <p className="friends-empty-desc">
-                  Select one of your friends from the list above to compare owned games,
-                  playtimes, and achievement stats side-by-side!
+                  Choose one of your friends above to compare owned games, playtimes,
+                  achievements, genre tastes, and get personalized recommendations
+                  side-by-side!
                 </p>
               </div>
             ) : (
@@ -3725,182 +3836,437 @@ export default function FriendsPage() {
                   </div>
                 </div>
 
-                {/* KPI stats */}
-                {comparisonSummary && (
-                  <div className="compare-stats-grid">
-                    <div className="compare-stat-card">
-                      <span className="compare-stat-val left">{selfStats.gamesCount}</span>
-                      <span className="compare-stat-label">Games Owned</span>
-                      <span className="compare-stat-val right">{compareFriend.libStats?.gamesCount || 0}</span>
-                    </div>
-
-                    <div className="compare-stat-card">
-                      <span className="compare-stat-val left">{comparisonSummary.sharedCount}</span>
-                      <span className="compare-stat-label">Shared Games</span>
-                      <span className="compare-stat-val right">{comparisonSummary.sharedCount}</span>
-                    </div>
-
-                    <div className="compare-stat-card">
-                      <span className="compare-stat-val left">{formatHours(selfStats.playtimeMinutes)}</span>
-                      <span className="compare-stat-label">Total Playtime</span>
-                      <span className="compare-stat-val right">{formatHours(compareFriend.libStats?.playtimeMinutes || 0)}</span>
-                    </div>
-
-                    <div className="compare-stat-card">
-                      <span className="compare-stat-val left">{comparisonSummary.averageMyAchievements}%</span>
-                      <span className="compare-stat-label">Avg Achievements</span>
-                      <span className="compare-stat-val right">{comparisonSummary.averageFriendAchievements}%</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Filter and Sort Chips Row */}
-                <div className="compare-controls-row">
-                  <div className="compare-filter-chips">
+                {/* Sub-tab navigation */}
+                <div className="compare-subtabs" role="tablist">
+                  {([
+                    { id: "overview", label: "Overview", icon: "📊" },
+                    { id: "games", label: "Games", icon: "🎮" },
+                    { id: "genres", label: "Genres", icon: "🏷️" },
+                    { id: "insights", label: "Insights", icon: "💡" },
+                  ] as const).map((t) => (
                     <button
+                      key={t.id}
                       type="button"
-                      className={`compare-filter-chip${compareFilter === "all" ? " active" : ""}`}
-                      onClick={() => setCompareFilter("all")}
+                      role="tab"
+                      aria-selected={compareSubTab === t.id}
+                      className={`compare-subtab${compareSubTab === t.id ? " active" : ""}`}
+                      onClick={() => setCompareSubTab(t.id)}
                     >
-                      All Games ({comparisonData.length})
+                      <span className="compare-subtab-icon">{t.icon}</span>
+                      <span>{t.label}</span>
                     </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${compareFilter === "shared" ? " active" : ""}`}
-                      onClick={() => setCompareFilter("shared")}
-                    >
-                      Shared ({comparisonData.filter(i => i.ownedByMe && i.ownedByFriend).length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${compareFilter === "me_only" ? " active" : ""}`}
-                      onClick={() => setCompareFilter("me_only")}
-                    >
-                      Only Me ({comparisonData.filter(i => i.ownedByMe && !i.ownedByFriend).length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${compareFilter === "friend_only" ? " active" : ""}`}
-                      onClick={() => setCompareFilter("friend_only")}
-                    >
-                      Only Them ({comparisonData.filter(i => !i.ownedByMe && i.ownedByFriend).length})
-                    </button>
-                  </div>
-
-                  <div className="compare-selector-group compare-sort-group">
-                    <span>Sort:</span>
-                    <select
-                      className="profile-input"
-                      value={compareSort}
-                      onChange={(e) => setCompareSort(e.target.value as any)}
-                    >
-                      <option value="name">Game Name</option>
-                      <option value="myPlaytime">My Playtime</option>
-                      <option value="friendPlaytime">Friend's Playtime</option>
-                    </select>
-                  </div>
-
-                  {compareGenres.length > 0 && (
-                    <div className="compare-selector-group compare-sort-group">
-                      <span>Genre:</span>
-                      <select
-                        className="profile-input"
-                        value={compareGenre}
-                        onChange={(e) => setCompareGenre(e.target.value)}
-                      >
-                        <option value="all">All Genres</option>
-                        {compareGenres.map((g) => (
-                          <option key={g} value={g}>
-                            {g}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  ))}
                 </div>
 
-                {/* Game comparison grid */}
-                <div>
-                  <div className="compare-library-title-row">
-                    <h3 className="compare-library-title">Comparison List</h3>
-                    <span className="compare-count">{sortedCompareData.length} games</span>
-                  </div>
-
-                  {sortedCompareData.length === 0 ? (
-                    <div className="game-search-no-results" style={{ padding: "40px" }}>
-                      No games match this filter criteria.
-                    </div>
-                  ) : (
-                    <div className="compare-games-grid">
-                      {sortedCompareData.map((game) => {
-                        const maxPlayTime = Math.max(game.playTimeMe, game.playTimeFriend, 1);
-                        const myPlayPercent = (game.playTimeMe / maxPlayTime) * 100;
-                        const friendPlayPercent = (game.playTimeFriend / maxPlayTime) * 100;
-
+                {/* ── Overview sub-tab ─────────────────────────────── */}
+                {compareSubTab === "overview" && comparisonSummary && (
+                  <div className="compare-overview">
+                    {/* Head-to-head KPI rows */}
+                    <div className="compare-h2h">
+                      {[
+                        {
+                          label: "Games Owned",
+                          me: selfStats.gamesCount,
+                          friend: compareFriend.libStats?.gamesCount || comparisonSummary.friendOwned,
+                          fmt: (v: number) => `${v}`,
+                        },
+                        {
+                          label: "Total Playtime",
+                          me: selfStats.playtimeMinutes,
+                          friend: compareFriend.libStats?.playtimeMinutes || comparisonSummary.friendPlaytime,
+                          fmt: (v: number) => formatHours(v),
+                        },
+                        {
+                          label: "Avg Achievements",
+                          me: comparisonSummary.averageMyAchievements,
+                          friend: comparisonSummary.averageFriendAchievements,
+                          fmt: (v: number) => `${v}%`,
+                        },
+                        {
+                          label: "Unique Titles",
+                          me: comparisonSummary.meOnlyCount,
+                          friend: comparisonSummary.friendOnlyCount,
+                          fmt: (v: number) => `${v}`,
+                        },
+                      ].map((row) => {
+                        const max = Math.max(row.me, row.friend, 1);
+                        const mePct = (row.me / max) * 100;
+                        const friendPct = (row.friend / max) * 100;
+                        const meWins = row.me > row.friend;
+                        const friendWins = row.friend > row.me;
                         return (
-                          <div key={game.id} className="compare-game-card">
-                            <div className="compare-game-card-head">
-                              <span className="compare-game-name" title={game.name}>{game.name}</span>
-                              <span className={`compare-own-badge ${
-                                game.ownedByMe && game.ownedByFriend
-                                  ? "both"
-                                  : game.ownedByMe
-                                  ? "me"
-                                  : "friend"
-                              }`}>
-                                {game.ownedByMe && game.ownedByFriend
-                                  ? "Both Own"
-                                  : game.ownedByMe
-                                  ? "You Own"
-                                  : "They Own"}
-                              </span>
+                          <div key={row.label} className="compare-h2h-row">
+                            <div className="compare-h2h-side left">
+                              <span className={`compare-h2h-val${meWins ? " win" : ""}`}>{row.fmt(row.me)}</span>
+                              <div className="compare-h2h-bar">
+                                <div className="compare-h2h-fill left" style={{ width: `${mePct}%` }} />
+                              </div>
                             </div>
-
-                            <div className="compare-game-stats">
-                              <div className="compare-player-stat">
-                                <div className="compare-player-label">
-                                  <span className="dot left" /> You
-                                </div>
-                                {game.ownedByMe ? (
-                                  <>
-                                    <div className="compare-bar-row">
-                                      <span className="compare-bar-value">{formatHours(game.playTimeMe)}</span>
-                                      <div className="compare-playtime-bar">
-                                        <div className="compare-playtime-fill left" style={{ width: `${myPlayPercent}%` }} />
-                                      </div>
-                                    </div>
-                                    <span className="compare-ach">{game.achievementMe}% achievements</span>
-                                  </>
-                                ) : (
-                                  <span className="compare-not-owned">Not in your library</span>
-                                )}
+                            <span className="compare-h2h-label">{row.label}</span>
+                            <div className="compare-h2h-side right">
+                              <div className="compare-h2h-bar">
+                                <div className="compare-h2h-fill right" style={{ width: `${friendPct}%` }} />
                               </div>
-
-                              <div className="compare-player-stat">
-                                <div className="compare-player-label">
-                                  <span className="dot right" /> {compareFriend.name}
-                                </div>
-                                {game.ownedByFriend ? (
-                                  <>
-                                    <div className="compare-bar-row">
-                                      <span className="compare-bar-value">{formatHours(game.playTimeFriend)}</span>
-                                      <div className="compare-playtime-bar">
-                                        <div className="compare-playtime-fill right" style={{ width: `${friendPlayPercent}%` }} />
-                                      </div>
-                                    </div>
-                                    <span className="compare-ach">{game.achievementFriend}% achievements</span>
-                                  </>
-                                ) : (
-                                  <span className="compare-not-owned">Not in their library</span>
-                                )}
-                              </div>
+                              <span className={`compare-h2h-val${friendWins ? " win" : ""}`}>{row.fmt(row.friend)}</span>
                             </div>
                           </div>
                         );
                       })}
                     </div>
-                  )}
-                </div>
+
+                    {/* Library overlap venn-ish summary */}
+                    <div className="compare-overlap">
+                      <div className="compare-overlap-seg me">
+                        <span className="compare-overlap-num">{comparisonSummary.meOnlyCount}</span>
+                        <span className="compare-overlap-lbl">Only You</span>
+                      </div>
+                      <div className="compare-overlap-seg shared">
+                        <span className="compare-overlap-num">{comparisonSummary.sharedCount}</span>
+                        <span className="compare-overlap-lbl">Shared</span>
+                      </div>
+                      <div className="compare-overlap-seg friend">
+                        <span className="compare-overlap-num">{comparisonSummary.friendOnlyCount}</span>
+                        <span className="compare-overlap-lbl">Only {compareFriend.name}</span>
+                      </div>
+                    </div>
+
+                    {/* Quick highlights */}
+                    {compareInsights && (
+                      <div className="compare-highlights">
+                        {compareInsights.topShared && (
+                          <div className="compare-highlight-card">
+                            <span className="compare-highlight-icon">🤝</span>
+                            <div className="compare-highlight-body">
+                              <span className="compare-highlight-title">Best game to play together</span>
+                              <span className="compare-highlight-value">{compareInsights.topShared.name}</span>
+                              <span className="compare-highlight-sub">
+                                {formatHours(compareInsights.topShared.playTimeMe)} you · {formatHours(compareInsights.topShared.playTimeFriend)} them
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <div className="compare-highlight-card">
+                          <span className="compare-highlight-icon">🏆</span>
+                          <div className="compare-highlight-body">
+                            <span className="compare-highlight-title">Achievement leader (shared games)</span>
+                            <span className="compare-highlight-value">
+                              {compareInsights.achLeaderMe === compareInsights.achLeaderFriend
+                                ? "Neck and neck"
+                                : compareInsights.achLeaderMe > compareInsights.achLeaderFriend
+                                ? `${profile.name} (You)`
+                                : compareFriend.name}
+                            </span>
+                            <span className="compare-highlight-sub">
+                              You lead {compareInsights.achLeaderMe} · They lead {compareInsights.achLeaderFriend}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="compare-highlight-card">
+                          <span className="compare-highlight-icon">🏷️</span>
+                          <div className="compare-highlight-body">
+                            <span className="compare-highlight-title">Genre taste affinity</span>
+                            <span className="compare-highlight-value">{genreAffinity}% aligned</span>
+                            <span className="compare-highlight-sub">
+                              {genreBreakdown.filter((g) => g.meOwned > 0 && g.friendOwned > 0).length} shared genres
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Games sub-tab ────────────────────────────────── */}
+                {compareSubTab === "games" && (
+                  <div className="compare-games-view">
+                    <div className="compare-controls-row">
+                      <div className="compare-filter-chips">
+                        <button
+                          type="button"
+                          className={`compare-filter-chip${compareFilter === "all" ? " active" : ""}`}
+                          onClick={() => setCompareFilter("all")}
+                        >
+                          All ({comparisonData.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`compare-filter-chip${compareFilter === "shared" ? " active" : ""}`}
+                          onClick={() => setCompareFilter("shared")}
+                        >
+                          Shared ({comparisonData.filter(i => i.ownedByMe && i.ownedByFriend).length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`compare-filter-chip${compareFilter === "me_only" ? " active" : ""}`}
+                          onClick={() => setCompareFilter("me_only")}
+                        >
+                          Only Me ({comparisonData.filter(i => i.ownedByMe && !i.ownedByFriend).length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`compare-filter-chip${compareFilter === "friend_only" ? " active" : ""}`}
+                          onClick={() => setCompareFilter("friend_only")}
+                        >
+                          Only Them ({comparisonData.filter(i => !i.ownedByMe && i.ownedByFriend).length})
+                        </button>
+                      </div>
+
+                      <div className="compare-controls-right">
+                        <input
+                          type="search"
+                          className="profile-input compare-search-input"
+                          placeholder="Search games..."
+                          value={compareSearch}
+                          onChange={(e) => setCompareSearch(e.target.value)}
+                        />
+                        <div className="compare-selector-group compare-sort-group">
+                          <span>Sort:</span>
+                          <select
+                            className="profile-input"
+                            value={compareSort}
+                            onChange={(e) => setCompareSort(e.target.value as any)}
+                          >
+                            <option value="name">Name</option>
+                            <option value="myPlaytime">My Playtime</option>
+                            <option value="friendPlaytime">Their Playtime</option>
+                            <option value="gap">Playtime Gap</option>
+                            <option value="achievement">Achievements</option>
+                          </select>
+                        </div>
+                        {compareGenres.length > 0 && (
+                          <div className="compare-selector-group compare-sort-group">
+                            <span>Genre:</span>
+                            <select
+                              className="profile-input"
+                              value={compareGenre}
+                              onChange={(e) => setCompareGenre(e.target.value)}
+                            >
+                              <option value="all">All Genres</option>
+                              {compareGenres.map((g) => (
+                                <option key={g} value={g}>
+                                  {g}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="compare-library-title-row">
+                      <span className="compare-count">{sortedCompareData.length} games shown</span>
+                    </div>
+
+                    {sortedCompareData.length === 0 ? (
+                      <div className="game-search-no-results" style={{ padding: "40px" }}>
+                        No games match these filters.
+                      </div>
+                    ) : (
+                      <div className="compare-games-grid">
+                        {sortedCompareData.map((game) => {
+                          const maxPlayTime = Math.max(game.playTimeMe, game.playTimeFriend, 1);
+                          const myPlayPercent = (game.playTimeMe / maxPlayTime) * 100;
+                          const friendPlayPercent = (game.playTimeFriend / maxPlayTime) * 100;
+
+                          return (
+                            <div key={game.id} className="compare-game-card">
+                              <div className="compare-game-card-head">
+                                <span className="compare-game-name" title={game.name}>{game.name}</span>
+                                <span className={`compare-own-badge ${
+                                  game.ownedByMe && game.ownedByFriend
+                                    ? "both"
+                                    : game.ownedByMe
+                                    ? "me"
+                                    : "friend"
+                                }`}>
+                                  {game.ownedByMe && game.ownedByFriend
+                                    ? "Both Own"
+                                    : game.ownedByMe
+                                    ? "You Own"
+                                    : "They Own"}
+                                </span>
+                              </div>
+
+                              <div className="compare-game-stats">
+                                <div className="compare-player-stat">
+                                  <div className="compare-player-label">
+                                    <span className="dot left" /> You
+                                  </div>
+                                  {game.ownedByMe ? (
+                                    <>
+                                      <div className="compare-bar-row">
+                                        <span className="compare-bar-value">{formatHours(game.playTimeMe)}</span>
+                                        <div className="compare-playtime-bar">
+                                          <div className="compare-playtime-fill left" style={{ width: `${myPlayPercent}%` }} />
+                                        </div>
+                                      </div>
+                                      <span className="compare-ach">{game.achievementMe}% achievements</span>
+                                    </>
+                                  ) : (
+                                    <span className="compare-not-owned">Not in your library</span>
+                                  )}
+                                </div>
+
+                                <div className="compare-player-stat">
+                                  <div className="compare-player-label">
+                                    <span className="dot right" /> {compareFriend.name}
+                                  </div>
+                                  {game.ownedByFriend ? (
+                                    <>
+                                      <div className="compare-bar-row">
+                                        <span className="compare-bar-value">{formatHours(game.playTimeFriend)}</span>
+                                        <div className="compare-playtime-bar">
+                                          <div className="compare-playtime-fill right" style={{ width: `${friendPlayPercent}%` }} />
+                                        </div>
+                                      </div>
+                                      <span className="compare-ach">{game.achievementFriend}% achievements</span>
+                                    </>
+                                  ) : (
+                                    <span className="compare-not-owned">Not in their library</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Genres sub-tab ───────────────────────────────── */}
+                {compareSubTab === "genres" && (
+                  <div className="compare-genres-view">
+                    {genreBreakdown.length === 0 ? (
+                      <div className="game-search-no-results" style={{ padding: "40px" }}>
+                        No genre data available to compare yet.
+                      </div>
+                    ) : (
+                      <div className="compare-genre-list">
+                        {genreBreakdown.map((g) => {
+                          const max = Math.max(g.meOwned, g.friendOwned, 1);
+                          return (
+                            <div key={g.genre} className="compare-genre-row">
+                              <div className="compare-genre-head">
+                                <span className="compare-genre-name">{g.genre}</span>
+                                <span className="compare-genre-shared">
+                                  {g.shared > 0 ? `${g.shared} shared` : "no overlap"}
+                                </span>
+                              </div>
+                              <div className="compare-genre-bars">
+                                <div className="compare-genre-bar-side">
+                                  <span className="compare-genre-count left">{g.meOwned}</span>
+                                  <div className="compare-genre-bar-track">
+                                    <div
+                                      className="compare-genre-bar-fill left"
+                                      style={{ width: `${(g.meOwned / max) * 100}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="compare-genre-bar-side">
+                                  <div className="compare-genre-bar-track reverse">
+                                    <div
+                                      className="compare-genre-bar-fill right"
+                                      style={{ width: `${(g.friendOwned / max) * 100}%` }}
+                                    />
+                                  </div>
+                                  <span className="compare-genre-count right">{g.friendOwned}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Insights sub-tab ─────────────────────────────── */}
+                {compareSubTab === "insights" && compareInsights && (
+                  <div className="compare-insights-view">
+                    <div className="compare-insight-columns">
+                      {/* Recommendations for you */}
+                      <div className="compare-insight-panel">
+                        <h4 className="compare-insight-title">
+                          <span className="dot right" /> Games {compareFriend.name} loves that you don't own
+                        </h4>
+                        {compareInsights.forYou.length === 0 ? (
+                          <p className="compare-insight-empty">You already own everything they play. Impressive!</p>
+                        ) : (
+                          <ul className="compare-insight-list">
+                            {compareInsights.forYou.map((g) => (
+                              <li key={g.id} className="compare-insight-item">
+                                <span className="compare-insight-game">{g.name}</span>
+                                <span className="compare-insight-meta">{formatHours(g.playTimeFriend)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Recommendations for them */}
+                      <div className="compare-insight-panel">
+                        <h4 className="compare-insight-title">
+                          <span className="dot left" /> Games you love that {compareFriend.name} is missing
+                        </h4>
+                        {compareInsights.forThem.length === 0 ? (
+                          <p className="compare-insight-empty">They own all of your favorites already.</p>
+                        ) : (
+                          <ul className="compare-insight-list">
+                            {compareInsights.forThem.map((g) => (
+                              <li key={g.id} className="compare-insight-item">
+                                <span className="compare-insight-game">{g.name}</span>
+                                <span className="compare-insight-meta">{formatHours(g.playTimeMe)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Where you play more */}
+                      <div className="compare-insight-panel">
+                        <h4 className="compare-insight-title">
+                          <span className="dot left" /> Shared games you've played more
+                        </h4>
+                        {compareInsights.iPlayMore.length === 0 ? (
+                          <p className="compare-insight-empty">No shared games where you're ahead — yet.</p>
+                        ) : (
+                          <ul className="compare-insight-list">
+                            {compareInsights.iPlayMore.map((g) => (
+                              <li key={g.id} className="compare-insight-item">
+                                <span className="compare-insight-game">{g.name}</span>
+                                <span className="compare-insight-meta win">
+                                  +{formatHours(g.playTimeMe - g.playTimeFriend)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Where they play more */}
+                      <div className="compare-insight-panel">
+                        <h4 className="compare-insight-title">
+                          <span className="dot right" /> Shared games {compareFriend.name} has played more
+                        </h4>
+                        {compareInsights.theyPlayMore.length === 0 ? (
+                          <p className="compare-insight-empty">You lead on every shared title.</p>
+                        ) : (
+                          <ul className="compare-insight-list">
+                            {compareInsights.theyPlayMore.map((g) => (
+                              <li key={g.id} className="compare-insight-item">
+                                <span className="compare-insight-game">{g.name}</span>
+                                <span className="compare-insight-meta win friend">
+                                  +{formatHours(g.playTimeFriend - g.playTimeMe)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
