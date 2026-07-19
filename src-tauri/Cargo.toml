@@ -116,8 +116,8 @@ windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_T
 # - Upload disablement is configured at runtime via `SessionOptions`.
 #   The `disable_upload` field is a runtime toggle in 8.x.
 librqbit = { version = "8", default-features = false, features = ["default-tls"] }
+igd-next = "0.17"
 # Magnet URI parsing — extract the info-hash, trackers, and
 # exact-topic fields without rolling our own URI parser.
 url = "2"
 percent-encoding = "2"
-

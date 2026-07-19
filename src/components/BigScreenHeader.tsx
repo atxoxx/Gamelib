@@ -90,7 +90,8 @@ export function getActiveTabPath(pathname: string): string {
     pathname.startsWith("/settings") ||
     pathname.startsWith("/storage") ||
     pathname.startsWith("/downloads") ||
-    pathname.startsWith("/achievements")
+    pathname.startsWith("/achievements") ||
+    pathname.startsWith("/friends")
   ) {
     return "/settings";
   }

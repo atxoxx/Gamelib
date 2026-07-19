@@ -35,6 +35,7 @@ export default function BigScreenLayout() {
     "/activity",
     "/news",
     "/community",
+    "/friends",
     "/achievements",
     "/downloads",
     "/storage",
