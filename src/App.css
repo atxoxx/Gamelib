@@ -1194,32 +1194,6 @@
   flex-wrap: wrap;
 }
 
-.sidebar-filter-btn {
-  padding: var(--space-xs) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-.sidebar-filter-btn:hover {
-  border-color: var(--color-border-light);
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.sidebar-filter-btn.active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #fff;
-  box-shadow: 0 2px 8px var(--color-accent-glow);
-}
-
 .sidebar-divider {
   margin: var(--space-sm) var(--space-lg);
   border: none;
@@ -1491,6 +1465,14 @@
 .app-sidebar.sidebar-icon-rail .sidebar-search,
 .app-sidebar.sidebar-icon-rail .sidebar-filter-btn,
 .app-sidebar.sidebar-icon-rail .sidebar-import-wrapper {
+  display: none;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-header-bar {
+  justify-content: center;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-header-title {
   display: none;
 }
 
@@ -1996,6 +1978,14 @@
   display: none;
 }
 
+.app-sidebar.sidebar-icon-rail .sidebar-header-bar {
+  justify-content: center;
+}
+
+.app-sidebar.sidebar-icon-rail .sidebar-header-title {
+  display: none;
+}
+
 /* In rail mode, the row shows only the cover thumbnail and the
  * tiny status dot. The title/meta are hidden but remain in the
  * DOM so the row keeps its semantic structure (good for
@@ -2449,15 +2439,35 @@
   border-color: var(--color-accent);
 }
 
+/* ── Sidebar header bar: collapse toggle + title ──────────────
+ * A compact top row that houses the icon-rail collapse toggle on
+ * the left and a small "Library" label next to it, so the header
+ * reads as an intentional toolbar instead of a lone centered
+ * button floating above the search field. */
+.sidebar-header-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.sidebar-header-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
 /* Sidebar collapse toggle (replaces import button in icon-rail
  * mode header). Round button, hover-glows the accent. */
 .sidebar-collapse-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: var(--space-xs) auto;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
@@ -2479,8 +2489,84 @@
 }
 
 .sidebar-collapse-toggle svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
+}
+
+/* ── Sidebar search row: search field + filter button ─────────
+ * The search input and the filter icon button share one rounded
+ * "toolbar" row. The search field flexes to fill the space while
+ * the filter button holds a fixed square hit-area on the right,
+ * so the two controls feel like a single, aligned unit. */
+.sidebar-search-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.sidebar-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 38px;
+  flex-shrink: 0;
+  padding: 0;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-filter-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-filter-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.sidebar-filter-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-filter-btn.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 10px var(--color-accent-glow);
+}
+
+.sidebar-filter-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  color: #fff;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-glass);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  pointer-events: none;
 }
 
 /* ── Sidebar hover preview (portal-based, anchored right) ── */
@@ -2791,6 +2877,396 @@
 .sidebar-import-option-desc {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+/* ==============================
+   Sidebar Filter Popover (modal)
+   ==============================
+   Anchored card that opens next to the sidebar's filter icon. Has no
+   full-page backdrop — it floats above the page with a strong shadow
+   and a 1px accent-tinted border so it reads as a focused dialog. */
+:root {
+  --sidebar-filter-popover-width: 300px;
+}
+
+.sidebar-filter-popover {
+  position: fixed;
+  width: var(--sidebar-filter-popover-width);
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl), 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
+  z-index: 10000;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-family: var(--font-system, system-ui);
+  animation: sidebarFilterPopIn 180ms var(--ease-enter);
+  transform-origin: top left;
+}
+
+.sidebar-filter-popover.from-right {
+  transform-origin: top left;
+}
+
+.sidebar-filter-popover.from-left {
+  transform-origin: top right;
+}
+
+@keyframes sidebarFilterPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-filter-popover {
+    animation: none;
+  }
+}
+
+/* Header ──────────────────────────────────────────────────── */
+.sidebar-filter-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar-filter-popover-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.sidebar-filter-popover-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+}
+
+.sidebar-filter-popover-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.sidebar-filter-popover-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-filter-popover-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar-filter-popover-icon-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-filter-popover-icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Body ────────────────────────────────────────────────────── */
+.sidebar-filter-popover-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.sidebar-filter-popover-body::-webkit-scrollbar {
+  width: 8px;
+}
+.sidebar-filter-popover-body::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+.sidebar-filter-popover-body::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+.sidebar-filter-popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.sidebar-filter-popover-heading {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.sidebar-filter-popover-heading-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+}
+
+.sidebar-filter-popover-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+/* Status segmented control */
+.sidebar-filter-popover-segmented {
+  display: flex;
+  padding: 3px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  gap: 2px;
+}
+
+.sidebar-filter-popover-segment {
+  flex: 1;
+  padding: var(--space-xs) var(--space-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border-radius: calc(var(--radius-md) - 3px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sidebar-filter-popover-segment:hover {
+  color: var(--color-text-primary);
+}
+
+.sidebar-filter-popover-segment.active {
+  color: #fff;
+  background: var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-accent-glow);
+}
+
+.sidebar-filter-popover-segment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Sort select */
+.sidebar-filter-popover-select {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a8adb9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-sm) center;
+  padding-right: 32px;
+}
+
+.sidebar-filter-popover-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 4px var(--color-accent-glow);
+}
+
+.sidebar-filter-popover-select option {
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+}
+
+/* Genre / platform chips */
+.sidebar-filter-popover-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.sidebar-filter-popover-chip {
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sidebar-filter-popover-chip:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-hover);
+}
+
+.sidebar-filter-popover-chip.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-accent-glow);
+}
+
+.sidebar-filter-popover-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Year range */
+.sidebar-filter-popover-year {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.sidebar-filter-popover-year-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.sidebar-filter-popover-year-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 4px var(--color-accent-glow);
+}
+
+.sidebar-filter-popover-year-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Hide native number spinners for a cleaner look */
+.sidebar-filter-popover-year-input::-webkit-outer-spin-button,
+.sidebar-filter-popover-year-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sidebar-filter-popover-year-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.sidebar-filter-popover-year-dash {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-bold);
+}
+
+/* Rating slider */
+.sidebar-filter-popover-rating-value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-filter-popover-rating-value.active {
+  color: var(--color-accent);
+}
+
+.sidebar-filter-popover-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  outline: none;
+  cursor: pointer;
+}
+
+.sidebar-filter-popover-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  cursor: pointer;
+}
+
+.sidebar-filter-popover-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  cursor: pointer;
+}
+
+/* Footer */
+.sidebar-filter-popover-footer {
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.sidebar-filter-popover-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.sidebar-filter-popover-count strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
 }
 
 /* Library styles now live in src/library.css (single source of truth).
