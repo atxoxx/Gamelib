@@ -9,7 +9,23 @@ export interface UserProfile {
   syncId: string; // Stable device id used as the outbox subfolder name
   /** Name of the game the user is currently playing, or undefined when idle. */
   currentlyPlaying?: string;
+  /** Free-text bio shown on the profile card. */
+  bio?: string;
+  /** Player region / country label. */
+  region?: string;
+  /** Unix seconds of the last time we published our outbox. */
+  lastPublished?: number;
 }
+
+/** Quick-pick status presets for the profile editor. */
+export const STATUS_PRESETS: { label: string; value: string; emoji: string }[] = [
+  { label: "Ready to Play", value: "Ready to Play!", emoji: "🎮" },
+  { label: "In Game", value: "In a game", emoji: "🕹️" },
+  { label: "Looking for Group", value: "Looking for Group (LFG)", emoji: "🔍" },
+  { label: "Away", value: "Away", emoji: "💤" },
+  { label: "Busy", value: "Busy — do not disturb", emoji: "⛔" },
+  { label: "Offline", value: "Offline", emoji: "⚪" },
+];
 
 export interface Friend {
   id: string;
@@ -25,7 +41,28 @@ export interface Friend {
   };
   addedAt: number;
   syncId: string; // Stored from their friend code
+  /** Local-only display override for the friend's name. */
+  nickname?: string;
+  /** Whether the friend is pinned to the top of the list. */
+  pinned?: boolean;
+  /** Epoch seconds of the last successful sync with this friend. */
+  lastSeen?: number;
+  /** Locally ignored peers — their outbox is skipped during sync. */
+  blocked?: boolean;
+  /** Friend's free-text bio (synced from their outbox). */
+  bio?: string;
+  /** Friend's region label (synced from their outbox). */
+  region?: string;
+  /** Per-game stats shared by the friend for truthful library comparison. */
+  games?: SharedGameStat[];
 }
+
+/** Returns the display name, preferring a local nickname override. */
+export function displayName(friend: Friend): string {
+  return friend.nickname?.trim() || friend.name;
+}
+
+export type RsvpStatus = "going" | "maybe" | "declined";
 
 export interface GameSession {
   id: string;
@@ -35,7 +72,9 @@ export interface GameSession {
   maxPlayers: number;
   description: string;
   creatorName: string;
-  attendees: string[]; // names of people attending
+  attendees: string[]; // names of people attending ("going")
+  /** Per-name RSVP status map (extends beyond `attendees`). */
+  rsvps?: Record<string, RsvpStatus>;
   updatedAt: number; // Unix timestamp for merging
   deleted?: boolean; // Tombstone for sync deletion
 }
@@ -45,6 +84,34 @@ export interface RecommendationComment {
   authorName: string;
   text: string;
   timestamp: number;
+}
+
+export type ReactionKind = "like" | "love" | "play";
+
+export interface GameRecommendation {
+  id: string;
+  gameId: string;
+  gameName: string;
+  recommendedBy: string; // Name of recommender
+  recommendedTo: string; // Name of friend, or "All Friends"
+  reason: string;
+  rating: number; // 1 to 5 stars
+  comments: RecommendationComment[];
+  /** Per-author reaction map (authorName -> reaction kind). */
+  reactions?: Record<string, ReactionKind>;
+  /** True when the current user wants to try this game (personal backlog). */
+  wantToPlay?: boolean;
+  createdAt: number;
+  updatedAt: number; // Unix timestamp for merging
+}
+
+/** Lightweight per-game stat shared in the outbox so friends can compare libraries truthfully. */
+export interface SharedGameStat {
+  id: string;
+  name: string;
+  playTimeMin: number;
+  achievementPercent: number;
+  genres: string[];
 }
 
 export interface GameRecommendation {
@@ -112,6 +179,8 @@ export function loadUserProfile(): UserProfile {
   const favoriteGameId = profile.favoriteGameId || "";
   const favoriteGameName = profile.favoriteGameName || "";
   const currentlyPlaying = profile.currentlyPlaying || undefined;
+  const bio = profile.bio || "";
+  const region = profile.region || "";
 
   // Stable device id: prefer what the backend generated (persisted across
   // runs), then a cached localStorage copy, then generate-and-cache once.
@@ -122,7 +191,7 @@ export function loadUserProfile(): UserProfile {
   }
 
   // Write key if newly generated
-  const updated = { name, avatar, status, favoriteGameId, favoriteGameName, syncId, currentlyPlaying };
+  const updated = { name, avatar, status, favoriteGameId, favoriteGameName, syncId, currentlyPlaying, bio, region };
   if (!profile.syncId || profile.syncId !== syncId) {
     writeJson(`${LS_PROFILE_PREFIX}${profileName}`, updated);
   }
@@ -384,9 +453,22 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
       const description = keepRemote ? remoteSession.description : localSession.description;
       const deleted = localSession.deleted || remoteSession.deleted || false;
       const updatedAt = Math.max(localSession.updatedAt, remoteSession.updatedAt);
-      
-      const attendees = Array.from(new Set([...localSession.attendees, ...remoteSession.attendees]));
-      
+
+      // Merge RSVP maps key-by-key; remote wins per key when its session is newer.
+      const rsvpMap: Record<string, RsvpStatus> = { ...(localSession.rsvps || {}) };
+      if (remoteSession.rsvps) {
+        for (const [name, status] of Object.entries(remoteSession.rsvps)) {
+          if (keepRemote || rsvpMap[name] === undefined) {
+            rsvpMap[name] = status;
+          }
+        }
+      }
+      // Attendees list should reflect "going" RSVPs for backward compatibility.
+      const attendees =
+        keepRemote
+          ? Array.from(new Set([...remoteSession.attendees, ...Object.keys(rsvpMap).filter((n) => rsvpMap[n] === "going")]))
+          : Array.from(new Set([...localSession.attendees, ...Object.keys(rsvpMap).filter((n) => rsvpMap[n] === "going")]));
+
       mergedMap.set(remoteSession.id, {
         id: localSession.id,
         gameId,
@@ -396,12 +478,13 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
         description,
         creatorName,
         attendees,
+        rsvps: rsvpMap,
         updatedAt,
         deleted,
       });
     }
   });
-  
+
   return Array.from(mergedMap.values()).filter((s) => !s.deleted);
 }
 
@@ -428,13 +511,24 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
       const rating = keepRemote ? remoteRec.rating : localRec.rating;
       const createdAt = Math.min(localRec.createdAt, remoteRec.createdAt);
       const updatedAt = Math.max(localRec.updatedAt, remoteRec.updatedAt);
-      
+
+      // Merge reactions key-by-key: union of author keys, remote wins per key
+      // when its rec is newer (and thus more likely authoritative).
+      const reactionMap: Record<string, ReactionKind> = { ...(localRec.reactions || {}) };
+      if (remoteRec.reactions) {
+        for (const [author, kind] of Object.entries(remoteRec.reactions)) {
+          if (keepRemote || reactionMap[author] === undefined) {
+            reactionMap[author] = kind;
+          }
+        }
+      }
+
       const commentMap = new Map<string, any>();
       localRec.comments.forEach((c) => commentMap.set(c.id, c));
       remoteRec.comments.forEach((c) => commentMap.set(c.id, c));
-      
+
       const comments = Array.from(commentMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-      
+
       mergedMap.set(remoteRec.id, {
         id: localRec.id,
         gameId,
@@ -443,13 +537,15 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
         recommendedTo,
         reason,
         rating,
+        reactions: reactionMap,
+        wantToPlay: keepRemote ? remoteRec.wantToPlay ?? localRec.wantToPlay : localRec.wantToPlay ?? remoteRec.wantToPlay,
         comments,
         createdAt,
         updatedAt,
       });
     }
   });
-  
+
   return Array.from(mergedMap.values());
 }
 
@@ -474,7 +570,8 @@ export async function pushMyOutbox(
   profile: UserProfile,
   stats: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
   sessions: GameSession[],
-  recs: GameRecommendation[]
+  recs: GameRecommendation[],
+  sharedGames?: SharedGameStat[]
 ): Promise<SyncResult> {
   const payload = {
     syncId: profile.syncId,
@@ -484,8 +581,11 @@ export async function pushMyOutbox(
       status: profile.status,
       favoriteGame: profile.favoriteGameName || "",
       currentlyPlaying: profile.currentlyPlaying || "",
+      bio: profile.bio || "",
+      region: profile.region || "",
       libStats: stats,
     },
+    games: sharedGames || [],
     sessions,
     recommendations: recs,
     updatedAt: Date.now(),
@@ -515,12 +615,15 @@ export async function fetchFriendOutbox(friendSyncId: string): Promise<{
     status: string;
     favoriteGame: string;
     currentlyPlaying?: string;
+    bio?: string;
+    region?: string;
     libStats: {
       gamesCount: number;
       playtimeMinutes: number;
       achievementsCount: number;
     };
   };
+  games?: SharedGameStat[];
   sessions: GameSession[];
   recommendations: GameRecommendation[];
 } | null> {
@@ -591,32 +694,10 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
     });
   }
 
-  // Also auto-add the remote profile as a friend if we don't have it!
-  if (remote.profile && remote.profile.syncId) {
-    const remoteProfileSyncId = remote.profile.syncId;
-    if (!mergedFriendsMap.has(remoteProfileSyncId)) {
-      mergedFriendsMap.set(remoteProfileSyncId, {
-        id: `friend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: remote.profile.name || "Friend",
-        avatar: remote.profile.avatar || "procedural",
-        status: remote.profile.status || "Offline",
-        favoriteGame: remote.profile.favoriteGameName || undefined,
-        currentlyPlaying: remote.profile.currentlyPlaying || undefined,
-        addedAt: Date.now(),
-        syncId: remoteProfileSyncId,
-      });
-    } else {
-      const existing = mergedFriendsMap.get(remoteProfileSyncId)!;
-      mergedFriendsMap.set(remoteProfileSyncId, {
-        ...existing,
-        name: remote.profile.name || existing.name,
-        avatar: remote.profile.avatar || existing.avatar,
-        status: remote.profile.status || existing.status,
-        favoriteGame: remote.profile.favoriteGameName || existing.favoriteGame,
-        currentlyPlaying: remote.profile.currentlyPlaying || existing.currentlyPlaying,
-      });
-    }
-  }
+  // NOTE: We intentionally do NOT auto-add the remote profile as a friend.
+  // Friends are added manually via friend codes only, so a peer's data sync
+  // (sessions/recommendations) never silently injects them into the list —
+  // which also prevents the local player's own outbox appearing as a "friend".
 
   const mergedFriends = Array.from(mergedFriendsMap.values());
   const mergedSessions = mergeSessions(local.sessions || [], remote.sessions || []);

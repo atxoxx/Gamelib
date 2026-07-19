@@ -5,11 +5,19 @@ import { useToast } from "../context/ToastContext";
 import { parsePlayTime } from "../types/game";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import QRCode from "qrcode";
 import {
   UserProfile,
   Friend,
   GameSession,
   GameRecommendation,
+  displayName,
+  STATUS_PRESETS,
+  SharedGameStat,
+  ReactionKind,
+  RsvpStatus,
+  getActiveProfileName,
+  setActiveProfileName,
   loadUserProfile,
   saveUserProfile,
   loadFriends,
@@ -26,7 +34,6 @@ import {
   mergeRecommendations,
   setDeviceId,
   getSyncFolder,
-  listPeerOutboxes,
   fetchFriendOutbox,
   pushMyOutbox,
   loadFriendsDbToLocalStorage,
@@ -123,6 +130,109 @@ function P2pSyncIcon() {
   );
 }
 
+// Render the friend code as a scannable QR image (data URL).
+function FriendCodeQR({ code }: { code: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!code) {
+      setDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(code, { margin: 1, width: 160, color: { dark: "#000000", light: "#ffffff" } })
+      .then((url) => {
+        if (!cancelled) setDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  if (!dataUrl) return null;
+  return <img src={dataUrl} alt="Friend code QR" className="friend-qr-img" width={160} height={160} />;
+}
+
+// Render a single session card with RSVP controls.
+function renderSessionCard(
+  session: GameSession,
+  profile: UserProfile,
+  onRsvp: (sessionId: string, status: RsvpStatus) => void,
+  onDelete: (sessionId: string) => void
+) {
+  const isCreator = session.creatorName === profile.name;
+  const myRsvp = session.rsvps?.[profile.name];
+  const going = Object.entries(session.rsvps || {}).filter(([, v]) => v === "going").map(([n]) => n);
+  const maybe = Object.entries(session.rsvps || {}).filter(([, v]) => v === "maybe").map(([n]) => n);
+  const declined = Object.entries(session.rsvps || {}).filter(([, v]) => v === "declined").map(([n]) => n);
+  const attendeeNames = going.length > 0 ? going : session.attendees;
+
+  return (
+    <div key={session.id} className="session-card">
+      <div className="session-header">
+        <div>
+          <div className="session-game-title">{session.gameName}</div>
+          <div className="session-date">{formatDateTime(session.scheduledAt)}</div>
+        </div>
+        <div className="session-card-actions">
+          <button
+            type="button"
+            className="friend-delete-btn"
+            style={{ opacity: 1, position: "static" }}
+            onClick={() => onDelete(session.id)}
+            title={isCreator ? "Remove Session" : "Remove from my list"}
+          >
+            <TrashIcon />
+          </button>
+        </div>
+      </div>
+
+      {session.description && <p className="session-desc">{session.description}</p>}
+
+      <div className="session-attendees">
+        {attendeeNames.map((name, i) => (
+          <span key={i} className={`attendee-badge${name === profile.name ? " self" : ""}`}>
+            {name}
+          </span>
+        ))}
+        {maybe.map((name, i) => (
+          <span key={`maybe-${i}`} className="attendee-badge maybe" title="Maybe">
+            {name}?
+          </span>
+        ))}
+        {declined.map((name, i) => (
+          <span key={`dec-${i}`} className="attendee-badge declined" title="Declined">
+            {name}✕
+          </span>
+        ))}
+      </div>
+
+      <div className="session-footer">
+        <span className="session-players-count">
+          👥 {going.length} / {session.maxPlayers} going
+        </span>
+        <span className="session-creator">By {isCreator ? "me" : session.creatorName}</span>
+      </div>
+
+      <div className="rsvp-row">
+        {(["going", "maybe", "declined"] as RsvpStatus[]).map((status) => (
+          <button
+            key={status}
+            type="button"
+            className={`rsvp-btn rsvp-${status}${myRsvp === status ? " active" : ""}`}
+            onClick={() => onRsvp(session.id, status)}
+          >
+            {status === "going" ? "✓ Going" : status === "maybe" ? "? Maybe" : "✕ Can't"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Format minutes to hours beautifully
 function formatHours(totalMinutes: number): string {
   if (!totalMinutes || totalMinutes <= 0) return "0h";
@@ -144,6 +254,42 @@ function formatDateTime(dateTimeStr: string): string {
   } catch {
     return dateTimeStr;
   }
+}
+
+// Human-friendly "last seen" relative string from epoch seconds
+function formatLastSeen(epochSecs?: number): string {
+  if (!epochSecs) return "Never";
+  const diffSecs = Math.floor(Date.now() / 1000) - epochSecs;
+  if (diffSecs < 60) return "Just now";
+  const mins = Math.floor(diffSecs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+// "Friends for X" relative string from addedAt epoch ms
+function formatFriendsSince(addedAt?: number): string {
+  if (!addedAt) return "";
+  const days = Math.floor((Date.now() - addedAt) / 86_400_000);
+  if (days < 1) return "Friends since today";
+  if (days < 30) return `Friends for ${days} day${days === 1 ? "" : "s"}`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `Friends for ${months} month${months === 1 ? "" : "s"}`;
+  return `Friends for ${Math.floor(months / 12)} year${months >= 24 ? "s" : ""}`;
+}
+
+// True online status derived from live `currentlyPlaying` or status text
+function isOnline(friend: Friend): boolean {
+  return (
+    !!friend.currentlyPlaying ||
+    (friend.status || "").toLowerCase().includes("online") ||
+    (friend.status || "").toLowerCase().includes("playing")
+  );
 }
 
 // ── Searchable Autocomplete Selector Component ──────────────────────
@@ -266,8 +412,21 @@ export default function FriendsPage() {
   const { cache } = useAchievements();
   const { showToast } = useToast();
 
-  // Multi-profile variables — single fixed profile ("A") is the only one used.
-  const profileName = "A";
+  // Multi-profile support — the storage layer namespaces all data by profile
+  // name (A/B/C...). Switching reloads the scoped state from localStorage.
+  const [profileName, setProfileName] = useState<string>(() => getActiveProfileName());
+  const PROFILE_KEYS = ["A", "B", "C"];
+
+  const switchProfile = (name: string) => {
+    if (name === profileName) return;
+    setActiveProfileName(name);
+    setProfileName(name);
+    setProfile(loadUserProfile());
+    setFriends(loadFriends());
+    setSessions(loadSessions());
+    setRecommendations(loadRecommendations());
+    showToast(`Switched to profile ${name}.`, "info");
+  };
 
   // Load state (scoped by active profile)
   const [profile, setProfile] = useState<UserProfile>(() => loadUserProfile());
@@ -278,6 +437,8 @@ export default function FriendsPage() {
   // Network Sync States
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>("Never");
+  // Recent sync activity log (most recent first) for the conflict/activity panel.
+  const [syncLog, setSyncLog] = useState<{ time: string; message: string; details: string[] }[]>([]);
 
   // Direct P2P Sync States
   const [showP2pModal, setShowP2pModal] = useState(false);
@@ -365,22 +526,32 @@ export default function FriendsPage() {
   const [friendCodeInput, setFriendCodeInput] = useState("");
   const [decodedFriend, setDecodedFriend] = useState<Friend | null>(null);
 
+  // Friends list controls (search / sort / filter)
+  const [friendSearch, setFriendSearch] = useState("");
+  const [friendSort, setFriendSort] = useState<"default" | "name" | "recent" | "online">("default");
+  const [friendFilter, setFriendFilter] = useState<"all" | "online" | "pinned">("all");
+
   // Compare Tab States
   const [selectedCompareFriendId, setSelectedCompareFriendId] = useState<string>("");
   const [compareFilter, setCompareFilter] = useState<"all" | "shared" | "me_only" | "friend_only">("all");
   const [compareSort, setCompareSort] = useState<"name" | "myPlaytime" | "friendPlaytime">("name");
+  const [compareGenre, setCompareGenre] = useState<string>("all");
 
   // Create Session Form State
   const [sessionGameId, setSessionGameId] = useState("");
   const [sessionDateTime, setSessionDateTime] = useState("");
   const [sessionMaxPlayers, setSessionMaxPlayers] = useState(4);
   const [sessionDesc, setSessionDesc] = useState("");
+  // Sessions view: upcoming list, past history, or agenda grouping
+  const [sessionView, setSessionView] = useState<"upcoming" | "past" | "agenda">("upcoming");
 
   // Create Recommendation Form State
   const [recGameId, setRecGameId] = useState("");
   const [recToFriend, setRecToFriend] = useState("All Friends");
   const [recRating, setRecRating] = useState(5);
   const [recReason, setRecReason] = useState("");
+  // Recommendations feed filter
+  const [recFilter, setRecFilter] = useState<"all" | "to_me" | "by_me" | "want">("all");
 
   // Comments Input states
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
@@ -406,6 +577,23 @@ export default function FriendsPage() {
     }
 
     return { gamesCount, playtimeMinutes, achievementsCount };
+  }, [games, cache]);
+
+  // Lightweight per-game snapshot published to friends for truthful comparison.
+  const selfSharedGames = useMemo<SharedGameStat[]>(() => {
+    return games.map((game) => {
+      const achData = cache?.games?.[game.id];
+      const achTotal = achData?.total || 0;
+      const achUnlocked = achData?.unlocked || 0;
+      const achievementPercent = achTotal > 0 ? Math.round((achUnlocked / achTotal) * 100) : 0;
+      return {
+        id: game.id,
+        name: game.name,
+        playTimeMin: parsePlayTime(game.playTime),
+        achievementPercent,
+        genres: (game as any).genres || [],
+      };
+    });
   }, [games, cache]);
 
   // Generate User's Friend Code
@@ -480,8 +668,15 @@ export default function FriendsPage() {
 
   // ── Sync Engine Implementation ──────────────────────────────────
 
+  // Manual sync requests that arrive while a sync is already running are
+  // queued so the user's "Sync" click is never silently dropped.
+  const pendingManualSync = useRef(false);
+
   const performSync = async (manual = false) => {
-    if (isSyncing) return;
+    if (isSyncing) {
+      if (manual) pendingManualSync.current = true;
+      return;
+    }
     setIsSyncing(true);
 
     // Make sure we always have a stable device id before publishing.
@@ -510,59 +705,51 @@ export default function FriendsPage() {
 
     const localSessions = loadSessions();
     const localRecs = loadRecommendations();
-    let localFriends = loadFriends();
+    const localFriends = loadFriends();
 
-    // Auto-discover peers in the sync folder and add any we don't know yet.
-    const peers = await listPeerOutboxes();
-    let discoveredNew = false;
-    const knownIds = new Set(localFriends.map((f) => f.syncId));
-    for (const peerId of peers) {
-      if (!knownIds.has(peerId)) {
-        const ob = await fetchFriendOutbox(peerId);
-        if (ob && ob.profile) {
-          const newFriend: Friend = {
-            id: `friend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: ob.profile.name || "Friend",
-            avatar: ob.profile.avatar || "procedural",
-            status: ob.profile.status || "Offline",
-            favoriteGame: ob.profile.favoriteGame || undefined,
-            libStats: ob.profile.libStats,
-            addedAt: Date.now(),
-            syncId: peerId,
-          };
-          localFriends = [...localFriends, newFriend];
-          knownIds.add(peerId);
-          discoveredNew = true;
-        }
-      }
-    }
-    if (discoveredNew) {
-      saveFriends(localFriends);
-      setFriends(localFriends);
-    }
+    // NOTE: Friends are added manually via friend codes only. We intentionally
+    // do NOT auto-discover peers in the shared sync folder, because that would
+    // also pull in the player's own outbox (appearing as a "friend").
 
     let changesMade = false;
     let friendsUpdated = false;
     let pulledSessions = 0;
     let pulledRecs = 0;
+    // Friends are no longer auto-discovered (added via friend codes only).
+    let discoveredNew = false;
     const pullErrors: string[] = [];
+    // Detailed per-friend activity for the sync log in the P2P modal.
+    const friendLogs: string[] = [];
 
     let mergedSessions = [...localSessions];
     let mergedRecs = [...localRecs];
 
     // Read the outbox of each friend from the sync folder
     const updatedFriends: Friend[] = [];
+    const nowSecs = Math.floor(Date.now() / 1000);
     for (const friend of localFriends) {
+      const friendName = displayName(friend);
+      // Skipped (blocked) peers: keep them locally but never sync their data.
+      if (friend.blocked) {
+        friendLogs.push(`⛔ ${friendName}: blocked — skipped`);
+        updatedFriends.push(friend);
+        continue;
+      }
       try {
         const remoteOutbox = await fetchFriendOutbox(friend.syncId);
         if (remoteOutbox) {
+          let friendSessions = 0;
+          let friendRecs = 0;
+          let profileChanged = false;
+
           // Merge sessions
           if (remoteOutbox.sessions && remoteOutbox.sessions.length > 0) {
             const prevLength = mergedSessions.length;
             mergedSessions = mergeSessions(mergedSessions, remoteOutbox.sessions);
             if (mergedSessions.length !== prevLength || JSON.stringify(mergedSessions) !== localStorage.getItem(`gamelib.friends.sessions.${profileName}`)) {
               changesMade = true;
-              pulledSessions += remoteOutbox.sessions.length;
+              friendSessions = remoteOutbox.sessions.length;
+              pulledSessions += friendSessions;
             }
           }
 
@@ -572,39 +759,73 @@ export default function FriendsPage() {
             mergedRecs = mergeRecommendations(mergedRecs, remoteOutbox.recommendations);
             if (mergedRecs.length !== prevLength || JSON.stringify(mergedRecs) !== localStorage.getItem(`gamelib.friends.recommendations.${profileName}`)) {
               changesMade = true;
-              pulledRecs += remoteOutbox.recommendations.length;
+              friendRecs = remoteOutbox.recommendations.length;
+              pulledRecs += friendRecs;
             }
           }
 
           // Sync friend profile information and live statistics (playtime, achievements, status)
           if (remoteOutbox.profile) {
+            const remoteProfile = remoteOutbox.profile;
             const hasDiff =
-              friend.name !== remoteOutbox.profile.name ||
-              friend.avatar !== remoteOutbox.profile.avatar ||
-              friend.status !== remoteOutbox.profile.status ||
-              friend.favoriteGame !== remoteOutbox.profile.favoriteGame ||
+              friend.name !== remoteProfile.name ||
+              friend.avatar !== remoteProfile.avatar ||
+              friend.status !== remoteProfile.status ||
+              friend.favoriteGame !== remoteProfile.favoriteGame ||
               friend.currentlyPlaying !== remoteOutbox.profile.currentlyPlaying ||
-              JSON.stringify(friend.libStats) !== JSON.stringify(remoteOutbox.profile.libStats);
+              (friend as any).bio !== (remoteProfile.bio || "") ||
+              (friend as any).region !== (remoteProfile.region || "") ||
+              JSON.stringify(friend.libStats) !== JSON.stringify(remoteProfile.libStats);
+
+            if (hasDiff) profileChanged = true;
 
             if (hasDiff) {
               friendsUpdated = true;
               updatedFriends.push({
                 ...friend,
-                name: remoteOutbox.profile.name,
-                avatar: remoteOutbox.profile.avatar,
-                status: remoteOutbox.profile.status,
-                favoriteGame: remoteOutbox.profile.favoriteGame || undefined,
-                currentlyPlaying: remoteOutbox.profile.currentlyPlaying || undefined,
-                libStats: remoteOutbox.profile.libStats,
+                name: remoteProfile.name,
+                avatar: remoteProfile.avatar,
+                status: remoteProfile.status,
+                favoriteGame: remoteProfile.favoriteGame || undefined,
+                currentlyPlaying: remoteProfile.currentlyPlaying || undefined,
+                bio: remoteProfile.bio || undefined,
+                region: remoteProfile.region || undefined,
+                libStats: remoteProfile.libStats,
+                games: remoteOutbox.games || friend.games,
+                lastSeen: nowSecs,
               });
+              friendLogs.push(
+                `🔄 ${friendName}: profile updated` +
+                  (friendSessions ? `, +${friendSessions} session(s)` : "") +
+                  (friendRecs ? `, +${friendRecs} rec(s)` : "")
+              );
               continue;
             }
           }
+
+          // Record a successful contact even when nothing changed.
+          if (friend.lastSeen !== nowSecs) {
+            friendsUpdated = true;
+            updatedFriends.push({ ...friend, lastSeen: nowSecs });
+            friendLogs.push(
+              `✓ ${friendName}: synced` +
+                (friendSessions ? `, +${friendSessions} session(s)` : "") +
+                (friendRecs ? `, +${friendRecs} rec(s)` : "") +
+                (profileChanged ? ", profile updated" : "")
+            );
+            continue;
+          }
+
+          // No change at all — still log a heartbeat contact.
+          friendLogs.push(`• ${friendName}: up to date`);
+        } else {
+          friendLogs.push(`⚠ ${friendName}: no outbox found`);
         }
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        pullErrors.push(`${friend.name}: ${reason}`);
-        console.error(`Sync error for friend ${friend.name}:`, reason);
+        pullErrors.push(`${friendName}: ${reason}`);
+        friendLogs.push(`✕ ${friendName}: error — ${reason}`);
+        console.error(`Sync error for friend ${friendName}:`, reason);
       }
       updatedFriends.push(friend);
     }
@@ -624,7 +845,24 @@ export default function FriendsPage() {
     // Always push our own updated outbox so friends can see us
     const pushed = await pushMyOutbox(profile, selfStats, mergedSessions, mergedRecs);
 
-    setLastSyncedTime(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
+    const syncedAt = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    setLastSyncedTime(syncedAt);
+
+    // Build a human-readable activity entry for the conflict/activity log.
+    const changes: string[] = [];
+    if (discoveredNew) changes.push(`${localFriends.length - friends.length + 0} new friend(s)`);
+    if (pulledSessions > 0) changes.push(`${pulledSessions} session(s)`);
+    if (pulledRecs > 0) changes.push(`${pulledRecs} rec(s)`);
+    if (friendsUpdated) changes.push("profile update(s)");
+    if (pullErrors.length > 0) changes.push(`${pullErrors.length} error(s)`);
+    const logMsg = pushed.ok
+      ? changes.length > 0
+        ? `Pulled ${changes.join(", ")}`
+        : "Up to date — outbox published"
+      : `Publish failed: ${pushed.reason || "unknown"}`;
+    setSyncLog((prev) =>
+      [{ time: syncedAt, message: logMsg, details: friendLogs }, ...prev].slice(0, 12)
+    );
 
     if (manual) {
       if (!pushed.ok) {
@@ -646,6 +884,12 @@ export default function FriendsPage() {
       }
     }
     setIsSyncing(false);
+
+    // Honor a manual sync that was requested while this one was running.
+    if (pendingManualSync.current) {
+      pendingManualSync.current = false;
+      performSync(true);
+    }
   };
 
   // Run initial sync on mount
@@ -653,16 +897,75 @@ export default function FriendsPage() {
     performSync(false);
   }, [profile.syncId, profileName]);
 
-  // Background polling timer (runs every 5 seconds for fast local responsiveness)
+  // Background polling timer. A 15s cadence is enough for P2P folder sync and
+  // avoids re-merging the whole friend graph every 5s on the main thread.
   useEffect(() => {
     const interval = setInterval(() => {
       performSync(false);
-    }, 5000);
+    }, 15000);
 
     return () => {
       clearInterval(interval);
     };
   }, [friends, profile.syncId, profileName]);
+
+  // Presence heartbeat: republish our outbox immediately whenever our local
+  // data changes (debounced) so friends see updates near-instantly, plus a
+  // shorter recurring interval (20s) so "last seen" stays fresh even when
+  // nothing else changed.
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      if (cancelled) return;
+      const updated = { ...profile, lastPublished: Math.floor(Date.now() / 1000) };
+      setProfile(updated);
+      saveUserProfile(updated);
+      try {
+        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+      } catch {
+        /* ignore heartbeat failures */
+      }
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [profile, selfStats, sessions, recommendations, selfSharedGames]);
+
+  // Recurring shorter-interval heartbeat to keep presence fresh.
+  useEffect(() => {
+    const heartbeat = setInterval(async () => {
+      const updated = { ...profile, lastPublished: Math.floor(Date.now() / 1000) };
+      setProfile(updated);
+      saveUserProfile(updated);
+      try {
+        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+      } catch {
+        /* ignore heartbeat failures */
+      }
+    }, 20000);
+    return () => clearInterval(heartbeat);
+  }, [profile, selfStats, sessions, recommendations, selfSharedGames]);
+
+  // Session start reminders: toast once when an upcoming session is ~15 min away.
+  const remindedSessionIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const now = Date.now();
+    const REMINDER_MS = 15 * 60 * 1000;
+    sessions.forEach((s) => {
+      if (s.deleted) return;
+      const start = new Date(s.scheduledAt).getTime();
+      const diff = start - now;
+      if (diff > 0 && diff <= REMINDER_MS && !remindedSessionIds.current.has(s.id)) {
+        remindedSessionIds.current.add(s.id);
+        showToast(`🔔 "${s.gameName}" starts in ${Math.round(diff / 60000)} min!`, "info");
+      }
+      // Reset the reminder flag once the session is well in the past.
+      if (diff < -60 * 60 * 1000) {
+        remindedSessionIds.current.delete(s.id);
+      }
+    });
+  }, [sessions]);
 
   const handleCommentInputChange = (recId: string, value: string) => {
     setCommentInputs((prev) => ({ ...prev, [recId]: value }));
@@ -698,7 +1001,7 @@ export default function FriendsPage() {
             const updated = { ...profile, avatar: compressedBase64 };
             setProfile(updated);
             saveUserProfile(updated);
-            pushMyOutbox(updated, selfStats, sessions, recommendations);
+            pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
             showToast("Custom avatar uploaded successfully!", "success");
           } catch {
             showToast("Failed to process image.", "error");
@@ -713,7 +1016,7 @@ export default function FriendsPage() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     saveUserProfile(profile);
-    await pushMyOutbox(profile, selfStats, sessions, recommendations);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames);
     showToast("Profile updated and synced successfully!", "success");
   };
 
@@ -749,6 +1052,39 @@ export default function FriendsPage() {
       setSelectedCompareFriendId("");
     }
     showToast(`Removed ${friendName} from friends.`, "info");
+  };
+
+  // Toggle pin (favorite) for a friend
+  const handleTogglePin = (friendId: string) => {
+    const updated = friends.map((f) =>
+      f.id === friendId ? { ...f, pinned: !f.pinned } : f
+    );
+    setFriends(updated);
+    saveFriends(updated);
+  };
+
+  // Set a local nickname override for a friend
+  const handleSetNickname = (friendId: string, nickname: string) => {
+    const updated = friends.map((f) =>
+      f.id === friendId ? { ...f, nickname: nickname.trim() || undefined } : f
+    );
+    setFriends(updated);
+    saveFriends(updated);
+  };
+
+  // Block / unblock a peer (skips their outbox during sync)
+  const handleToggleBlock = (friendId: string, friendName: string) => {
+    const friend = friends.find((f) => f.id === friendId);
+    if (!friend) return;
+    const updated = friends.map((f) =>
+      f.id === friendId ? { ...f, blocked: !f.blocked } : f
+    );
+    setFriends(updated);
+    saveFriends(updated);
+    showToast(
+      friend.blocked ? `Unblocked ${friendName}.` : `Blocked ${friendName} — their updates are ignored.`,
+      "info"
+    );
   };
 
   // Copy friend code
@@ -790,7 +1126,7 @@ export default function FriendsPage() {
     if (!game) return;
 
     const newSession: GameSession = {
-      id: `session_${Date.now()}`,
+      id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       gameId: sessionGameId,
       gameName: game.name,
       scheduledAt: sessionDateTime,
@@ -798,13 +1134,14 @@ export default function FriendsPage() {
       description: sessionDesc,
       creatorName: profile.name,
       attendees: [profile.name],
+      rsvps: { [profile.name]: "going" },
       updatedAt: Date.now(),
     };
 
     const updated = [newSession, ...sessions];
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
     showToast("Game session scheduled!", "success");
 
     // Reset Form
@@ -812,30 +1149,33 @@ export default function FriendsPage() {
     setSessionDateTime("");
     setSessionMaxPlayers(4);
     setSessionDesc("");
+    // Make sure the freshly created session is visible (it becomes "Upcoming").
+    setSessionView("upcoming");
   };
 
-  const handleToggleJoinSession = async (sessionId: string) => {
+  // Set an RSVP status (going / maybe / declined) for the current user.
+  const handleSetRsvp = async (sessionId: string, status: RsvpStatus) => {
     const updated = sessions.map((s) => {
       if (s.id !== sessionId) return s;
-
-      const isAttending = s.attendees.includes(profile.name);
-      if (isAttending) {
-        const filtered = s.attendees.filter((name) => name !== profile.name);
-        showToast("Left session.", "info");
-        return { ...s, attendees: filtered, updatedAt: Date.now() };
+      const rsvps = { ...(s.rsvps || {}) };
+      // Toggling the same status clears it back to no response.
+      if (rsvps[profile.name] === status) {
+        delete rsvps[profile.name];
       } else {
-        if (s.attendees.length >= s.maxPlayers) {
-          showToast("Session is already full!", "error");
-          return s;
-        }
-        showToast("Joined session!", "success");
-        return { ...s, attendees: [...s.attendees, profile.name], updatedAt: Date.now() };
+        rsvps[profile.name] = status;
       }
+      const isGoing = rsvps[profile.name] === "going";
+      const attendees = isGoing
+        ? Array.from(new Set([...s.attendees, profile.name]))
+        : s.attendees.filter((n) => n !== profile.name);
+      const label = rsvps[profile.name] ? rsvps[profile.name] : "no response";
+      showToast(`RSVP: ${label}.`, "info");
+      return { ...s, rsvps, attendees, updatedAt: Date.now() };
     });
 
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
   };
 
   // Remove a session entirely (hard delete from local list)
@@ -843,7 +1183,7 @@ export default function FriendsPage() {
     const updated = sessions.filter((s) => s.id !== sessionId);
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
     showToast("Session removed.", "info");
   };
 
@@ -922,80 +1262,128 @@ export default function FriendsPage() {
     showToast("Recommendation removed.", "info");
   };
 
+  // Toggle a reaction (like/love/play) on a recommendation. Toggling the same
+  // kind again removes the reaction.
+  const handleToggleReaction = async (recId: string, kind: ReactionKind) => {
+    const updated = recommendations.map((r) => {
+      if (r.id !== recId) return r;
+      const reactions = { ...(r.reactions || {}) };
+      if (reactions[profile.name] === kind) {
+        delete reactions[profile.name];
+      } else {
+        reactions[profile.name] = kind;
+      }
+      return { ...r, reactions, updatedAt: Date.now() };
+    });
+    setRecommendations(updated);
+    saveRecommendations(updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated);
+  };
+
+  // Toggle this user's personal "want to play" backlog flag.
+  const handleToggleWantToPlay = async (recId: string) => {
+    const updated = recommendations.map((r) => {
+      if (r.id !== recId) return r;
+      return { ...r, wantToPlay: !r.wantToPlay, updatedAt: Date.now() };
+    });
+    setRecommendations(updated);
+    saveRecommendations(updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated);
+    const rec = updated.find((r) => r.id === recId);
+    showToast(rec?.wantToPlay ? "Added to your Want to Play list." : "Removed from Want to Play.", "info");
+  };
+
+  // Delete a single comment (only allowed for the author's own comments).
+  const handleDeleteComment = async (recId: string, commentId: string, authorName: string) => {
+    if (authorName !== profile.name) {
+      showToast("You can only delete your own comments.", "error");
+      return;
+    }
+    const updated = recommendations.map((r) => {
+      if (r.id !== recId) return r;
+      return {
+        ...r,
+        comments: r.comments.filter((c) => c.id !== commentId),
+        updatedAt: Date.now(),
+      };
+    });
+    setRecommendations(updated);
+    saveRecommendations(updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated);
+  };
+
   // ── Game Comparison Logic ────────────────────────────────────────
 
   const compareFriend = useMemo(() => {
     return friends.find((f) => f.id === selectedCompareFriendId) || null;
   }, [friends, selectedCompareFriendId]);
 
-  // Procedural Library Generator (seeded by name)
+  // Builds the comparison list from REAL shared per-game data when the friend
+  // has published it. Falls back to a deterministic (seeded) estimate only for
+  // legacy peers who haven't shared game-level stats yet.
   const comparisonData = useMemo(() => {
     if (!compareFriend) return [];
 
+    const friendGames = compareFriend.games || [];
+    const friendGameMap = new Map(friendGames.map((g) => [g.id, g]));
+
+    // Deterministic legacy fallback (seeded by friend name) — only used when
+    // no real per-game data is available for this friend.
     const friendName = compareFriend.name;
     let hash = 0;
     for (let i = 0; i < friendName.length; i++) {
       hash = friendName.charCodeAt(i) + ((hash << 5) - hash);
     }
     let seed = Math.abs(hash);
-    function prng() {
+    const prng = () => {
       const x = Math.sin(seed++) * 10000;
       return x - Math.floor(x);
-    }
-
-    const popularGames = [
-      { id: "pop_1", name: "Elden Ring" },
-      { id: "pop_2", name: "The Witcher 3: Wild Hunt" },
-      { id: "pop_3", name: "Red Dead Redemption 2" },
-      { id: "pop_4", name: "Grand Theft Auto V" },
-      { id: "pop_5", name: "Baldur's Gate 3" },
-      { id: "pop_6", name: "Hades" },
-      { id: "pop_7", name: "Hollow Knight" },
-      { id: "pop_8", name: "Cyberpunk 2077" },
-    ];
+    };
 
     const compareList: any[] = [];
 
-    games.forEach((game) => {
-      const owned = prng() > 0.45;
-      const playTimeMin = owned ? Math.floor(prng() * 12000) + 120 : 0;
-      const achievementPercent = owned ? Math.floor(prng() * 100) : 0;
+    const selfById = new Map(games.map((g) => [g.id, g]));
 
-      const selfAchData = cache?.games?.[game.id];
-      const selfAchCount = selfAchData?.unlocked || 0;
+    // All unique game ids across both libraries.
+    const ids = new Set<string>([...games.map((g) => g.id), ...friendGames.map((g) => g.id)]);
+
+    ids.forEach((id) => {
+      const myGame = selfById.get(id);
+      const friendGame = friendGameMap.get(id);
+
+      const selfAchData = myGame ? cache?.games?.[myGame.id] : undefined;
       const selfAchTotal = selfAchData?.total || 0;
-      const selfAchPercent = selfAchTotal > 0 ? Math.round((selfAchCount / selfAchTotal) * 100) : 0;
+      const selfAchUnlocked = selfAchData?.unlocked || 0;
+      const selfAchPercent = selfAchTotal > 0 ? Math.round((selfAchUnlocked / selfAchTotal) * 100) : 0;
+
+      const name = myGame?.name || friendGame?.name || id;
+
+      // Legacy estimate when the friend hasn't shared real data.
+      const legacyOwned = friendGames.length === 0 ? prng() > 0.45 : false;
+      const ownedByFriend = friendGame ? true : legacyOwned;
+      const playTimeFriend = friendGame
+        ? friendGame.playTimeMin
+        : legacyOwned
+        ? Math.floor(prng() * 12000) + 120
+        : 0;
+      const achievementFriend = friendGame
+        ? friendGame.achievementPercent
+        : legacyOwned
+        ? Math.floor(prng() * 100)
+        : 0;
 
       compareList.push({
-        id: game.id,
-        name: game.name,
-        ownedByMe: true,
-        ownedByFriend: owned,
-        playTimeMe: parsePlayTime(game.playTime),
-        playTimeFriend: playTimeMin,
+        id,
+        name,
+        ownedByMe: !!myGame,
+        ownedByFriend,
+        playTimeMe: myGame ? parsePlayTime(myGame.playTime) : 0,
+        playTimeFriend,
         achievementMe: selfAchPercent,
-        achievementFriend: achievementPercent,
+        achievementFriend,
+        genres: (myGame as any)?.genres || friendGame?.genres || [],
+        estimated: friendGames.length === 0,
       });
-    });
-
-    popularGames.forEach((pop) => {
-      if (games.some((g) => g.name.toLowerCase() === pop.name.toLowerCase())) return;
-
-      if (prng() > 0.4) {
-        const playTimeMin = Math.floor(prng() * 9000) + 180;
-        const achievementPercent = Math.floor(prng() * 100);
-
-        compareList.push({
-          id: pop.id,
-          name: pop.name,
-          ownedByMe: false,
-          ownedByFriend: true,
-          playTimeMe: 0,
-          playTimeFriend: playTimeMin,
-          achievementMe: 0,
-          achievementFriend: achievementPercent,
-        });
-      }
     });
 
     return compareList;
@@ -1013,9 +1401,20 @@ export default function FriendsPage() {
       if (compareFilter === "shared") return item.ownedByMe && item.ownedByFriend;
       if (compareFilter === "me_only") return item.ownedByMe && !item.ownedByFriend;
       if (compareFilter === "friend_only") return !item.ownedByMe && item.ownedByFriend;
+      if (compareGenre !== "all") {
+        const genres: string[] = item.genres || [];
+        return genres.some((g) => g.toLowerCase() === compareGenre.toLowerCase());
+      }
       return true;
     });
-  }, [comparisonData, compareFilter]);
+  }, [comparisonData, compareFilter, compareGenre]);
+
+  // Unique genres across both libraries for the genre filter dropdown.
+  const compareGenres = useMemo(() => {
+    const set = new Set<string>();
+    comparisonData.forEach((item) => (item.genres || []).forEach((g: string) => set.add(g)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [comparisonData]);
 
   const sortedCompareData = useMemo(() => {
     const list = [...filteredCompareData];
@@ -1059,6 +1458,47 @@ export default function FriendsPage() {
       averageFriendAchievements,
     };
   }, [comparisonData]);
+
+  // ── Visible Friends (search / sort / filter) ──────────────────────
+
+  const visibleFriends = useMemo(() => {
+    const query = friendSearch.trim().toLowerCase();
+    let list = friends.filter((f) => {
+      const name = displayName(f).toLowerCase();
+      const matchesQuery = !query || name.includes(query) || (f.favoriteGame || "").toLowerCase().includes(query);
+      const matchesFilter =
+        friendFilter === "all"
+          ? true
+          : friendFilter === "online"
+          ? isOnline(f)
+          : friendFilter === "pinned"
+          ? !!f.pinned
+          : true;
+      return matchesQuery && matchesFilter;
+    });
+
+    list = [...list].sort((a, b) => {
+      if (friendSort === "name") {
+        return displayName(a).localeCompare(displayName(b));
+      }
+      if (friendSort === "recent") {
+        return (b.addedAt || 0) - (a.addedAt || 0);
+      }
+      if (friendSort === "online") {
+        const ao = isOnline(a) ? 1 : 0;
+        const bo = isOnline(b) ? 1 : 0;
+        if (bo !== ao) return bo - ao;
+        return (b.addedAt || 0) - (a.addedAt || 0);
+      }
+      // default: pinned first, then most recently added
+      const ap = a.pinned ? 1 : 0;
+      const bp = b.pinned ? 1 : 0;
+      if (bp !== ap) return bp - ap;
+      return (b.addedAt || 0) - (a.addedAt || 0);
+    });
+
+    return list;
+  }, [friends, friendSearch, friendFilter, friendSort]);
 
   return (
     <div className="friends-page">
@@ -1115,6 +1555,20 @@ export default function FriendsPage() {
             <UserIcon />
             <span>My Profile</span>
           </button>
+        </div>
+
+        <div className="profile-switcher" role="group" aria-label="Active profile">
+          {PROFILE_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`profile-switch-btn${profileName === key ? " active" : ""}`}
+              onClick={() => switchProfile(key)}
+              title={`Switch to profile ${key}`}
+            >
+              {key}
+            </button>
+          ))}
         </div>
 
         <div className="sync-status-container">
@@ -1184,60 +1638,174 @@ export default function FriendsPage() {
                 </button>
               </div>
             ) : (
-              <div className="friends-grid">
-                {friends.map((friend) => (
-                  <div
-                    key={friend.id}
-                    className={`friend-card hover-lift status-${
-                      friend.status.toLowerCase().includes("online") ||
-                      friend.status.toLowerCase().includes("playing")
-                        ? "online"
-                        : "offline"
-                    }`}
-                  >
-                    {renderAvatar(friend.avatar, friend.name)}
-                    <div className="friend-info">
-                      <div className="friend-name">{friend.name}</div>
-                      {friend.currentlyPlaying ? (
-                        <div className="friend-now-playing" title={`Playing ${friend.currentlyPlaying}`}>
-                          <span className="now-playing-dot" />
-                          {friend.currentlyPlaying}
-                        </div>
-                      ) : (
-                        <div className="friend-status-text" title={friend.status}>
-                          {friend.status}
-                        </div>
-                      )}
-                      {friend.libStats && (
-                        <div className="friend-stats">
-                          <span>{friend.libStats.gamesCount} games</span>
-                          <span>•</span>
-                          <span>{formatHours(friend.libStats.playtimeMinutes)}</span>
-                          {friend.libStats.achievementsCount > 0 && (
-                            <>
-                              <span>•</span>
-                              <span>🏆 {friend.libStats.achievementsCount}</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {friend.favoriteGame && (
-                        <div className="friend-favorite-game" title={`Fav: ${friend.favoriteGame}`}>
-                          ⭐ {friend.favoriteGame}
-                        </div>
-                      )}
-                    </div>
+              <>
+                {/* Search / Filter / Sort controls */}
+                <div className="friends-controls-row">
+                  <div className="friends-search-wrapper">
+                    <input
+                      type="text"
+                      className="friends-search-input"
+                      placeholder="Search friends or favorite games..."
+                      value={friendSearch}
+                      onChange={(e) => setFriendSearch(e.target.value)}
+                      aria-label="Search friends"
+                    />
+                    {friendSearch && (
+                      <button
+                        type="button"
+                        className="friends-search-clear"
+                        onClick={() => setFriendSearch("")}
+                        title="Clear search"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="friends-filter-chips">
                     <button
                       type="button"
-                      className="friend-delete-btn"
-                      title={`Remove ${friend.name}`}
-                      onClick={() => handleDeleteFriend(friend.id, friend.name)}
+                      className={`compare-filter-chip${friendFilter === "all" ? " active" : ""}`}
+                      onClick={() => setFriendFilter("all")}
                     >
-                      <TrashIcon />
+                      All ({friends.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${friendFilter === "online" ? " active" : ""}`}
+                      onClick={() => setFriendFilter("online")}
+                    >
+                      Online ({friends.filter(isOnline).length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${friendFilter === "pinned" ? " active" : ""}`}
+                      onClick={() => setFriendFilter("pinned")}
+                    >
+                      Pinned ({friends.filter((f) => f.pinned).length})
                     </button>
                   </div>
-                ))}
-              </div>
+
+                  <select
+                    className="profile-input friends-sort-select"
+                    value={friendSort}
+                    onChange={(e) => setFriendSort(e.target.value as any)}
+                    aria-label="Sort friends"
+                  >
+                    <option value="default">Pinned first</option>
+                    <option value="name">Name (A–Z)</option>
+                    <option value="recent">Recently added</option>
+                    <option value="online">Online first</option>
+                  </select>
+                </div>
+
+                {visibleFriends.length === 0 ? (
+                  <div className="game-search-no-results" style={{ padding: "40px" }}>
+                    No friends match your search or filter.
+                  </div>
+                ) : (
+                  <div className="friends-grid">
+                    {visibleFriends.map((friend) => {
+                      const online = isOnline(friend);
+                      return (
+                        <div
+                          key={friend.id}
+                          className={`friend-card hover-lift status-${online ? "online" : "offline"}${
+                            friend.pinned ? " pinned" : ""
+                          }${friend.blocked ? " blocked" : ""}`}
+                        >
+                          {friend.pinned && <span className="friend-pin-badge" title="Pinned">📌</span>}
+                          {renderAvatar(friend.avatar, friend.name)}
+                          <div className="friend-info">
+                            <div className="friend-name">
+                              {displayName(friend)}
+                              {friend.nickname && (
+                                <span className="friend-real-name">({friend.name})</span>
+                              )}
+                            </div>
+                            {friend.blocked ? (
+                              <div className="friend-status-text" title="Blocked — updates ignored">
+                                🚫 Blocked
+                              </div>
+                            ) : friend.currentlyPlaying ? (
+                              <div className="friend-now-playing" title={`Playing ${friend.currentlyPlaying}`}>
+                                <span className="now-playing-dot" />
+                                {friend.currentlyPlaying}
+                              </div>
+                            ) : (
+                              <div className="friend-status-text" title={friend.status}>
+                                {friend.status}
+                              </div>
+                            )}
+                            <div className="friend-last-seen" title="Last synced">
+                              Last seen: {formatLastSeen(friend.lastSeen)}
+                            </div>
+                            {friend.libStats && (
+                              <div className="friend-stats">
+                                <span>{friend.libStats.gamesCount} games</span>
+                                <span>•</span>
+                                <span>{formatHours(friend.libStats.playtimeMinutes)}</span>
+                                {friend.libStats.achievementsCount > 0 && (
+                                  <>
+                                    <span>•</span>
+                                    <span>🏆 {friend.libStats.achievementsCount}</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            {friend.favoriteGame && (
+                              <div className="friend-favorite-game" title={`Fav: ${friend.favoriteGame}`}>
+                                ⭐ {friend.favoriteGame}
+                              </div>
+                            )}
+                            {formatFriendsSince(friend.addedAt) && (
+                              <div className="friend-since">{formatFriendsSince(friend.addedAt)}</div>
+                            )}
+                          </div>
+                          <div className="friend-card-actions">
+                            <button
+                              type="button"
+                              className={`friend-icon-btn${friend.pinned ? " active" : ""}`}
+                              title={friend.pinned ? "Unpin" : "Pin to top"}
+                              onClick={() => handleTogglePin(friend.id)}
+                            >
+                              📌
+                            </button>
+                            <button
+                              type="button"
+                              className="friend-icon-btn"
+                              title="Set nickname"
+                              onClick={() => {
+                                const current = friend.nickname || friend.name;
+                                const next = window.prompt("Nickname for this friend (blank to reset):", current);
+                                if (next !== null) handleSetNickname(friend.id, next);
+                              }}
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              type="button"
+                              className={`friend-icon-btn${friend.blocked ? " active" : ""}`}
+                              title={friend.blocked ? "Unblock" : "Block (ignore updates)"}
+                              onClick={() => handleToggleBlock(friend.id, displayName(friend))}
+                            >
+                              🚫
+                            </button>
+                            <button
+                              type="button"
+                              className="friend-delete-btn"
+                              title={`Remove ${displayName(friend)}`}
+                              onClick={() => handleDeleteFriend(friend.id, displayName(friend))}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -1306,93 +1874,68 @@ export default function FriendsPage() {
 
               {/* Right Column: Sessions Grid */}
               <div className="profile-summary-section" style={{ gap: "var(--space-md)" }}>
-                <h3 className="friends-list-title">Upcoming Sessions ({sessions.filter(s => !s.deleted).length})</h3>
-
-                {sessions.filter(s => !s.deleted).length === 0 ? (
-                  <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
-                    <h3 className="friends-empty-title">No Events Scheduled</h3>
-                    <p className="friends-empty-desc">
-                      Create an event on the left to plan game sessions. It will sync automatically to all friends!
-                    </p>
+                <div className="sessions-view-header">
+                  <h3 className="friends-list-title">
+                    {sessionView === "past" ? "Past Sessions" : sessionView === "agenda" ? "Agenda" : "Upcoming Sessions"}
+                  </h3>
+                  <div className="compare-filter-chips">
+                    <button type="button" className={`compare-filter-chip${sessionView === "upcoming" ? " active" : ""}`} onClick={() => setSessionView("upcoming")}>Upcoming</button>
+                    <button type="button" className={`compare-filter-chip${sessionView === "agenda" ? " active" : ""}`} onClick={() => setSessionView("agenda")}>Agenda</button>
+                    <button type="button" className={`compare-filter-chip${sessionView === "past" ? " active" : ""}`} onClick={() => setSessionView("past")}>Past</button>
                   </div>
-                ) : (
-                  <div className="sessions-grid">
-                    {sessions.filter(s => !s.deleted).map((session) => {
-                      const isCreator = session.creatorName === profile.name;
-                      const isJoined = session.attendees.includes(profile.name);
+                </div>
 
-                      return (
-                        <div key={session.id} className="session-card">
-                          <div className="session-header">
-                            <div>
-                              <div className="session-game-title">{session.gameName}</div>
-                              <div className="session-date">{formatDateTime(session.scheduledAt)}</div>
+                {(() => {
+                  const now = Date.now();
+                  const active = sessions.filter((s) => !s.deleted);
+                  const upcoming = active.filter((s) => new Date(s.scheduledAt).getTime() >= now).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+                  const past = active.filter((s) => new Date(s.scheduledAt).getTime() < now).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
+
+                  const visible = sessionView === "past" ? past : sessionView === "agenda" ? upcoming : upcoming;
+
+                  if (visible.length === 0) {
+                    return (
+                      <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                        <h3 className="friends-empty-title">
+                          {sessionView === "past" ? "No Past Sessions" : "No Events Scheduled"}
+                        </h3>
+                        <p className="friends-empty-desc">
+                          {sessionView === "past"
+                            ? "Completed sessions you attended will appear here."
+                            : "Create an event on the left to plan game sessions. It will sync automatically to all friends!"}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  // Agenda view: group upcoming by date.
+                  if (sessionView === "agenda") {
+                    const groups = new Map<string, GameSession[]>();
+                    visible.forEach((s) => {
+                      const key = new Date(s.scheduledAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+                      if (!groups.has(key)) groups.set(key, []);
+                      groups.get(key)!.push(s);
+                    });
+                    return (
+                      <div className="sessions-agenda">
+                        {Array.from(groups.entries()).map(([day, daySessions]) => (
+                          <div key={day} className="agenda-day-group">
+                            <div className="agenda-day-label">{day}</div>
+                            <div className="sessions-grid">
+                              {daySessions.map((session) => renderSessionCard(session, profile, handleSetRsvp, handleDeleteSession))}
                             </div>
-                            <div className="session-card-actions">
-                            {isCreator && (
-                              <button
-                                type="button"
-                                className="friend-delete-btn"
-                                style={{ opacity: 1, position: "static" }}
-                                onClick={() => handleDeleteSession(session.id)}
-                                title="Remove Session"
-                              >
-                                <TrashIcon />
-                              </button>
-                            )}
-                            {!isCreator && (
-                              <button
-                                type="button"
-                                className="friend-delete-btn"
-                                style={{ opacity: 1, position: "static" }}
-                                onClick={() => handleDeleteSession(session.id)}
-                                title="Remove from my list"
-                              >
-                                <TrashIcon />
-                              </button>
-                            )}
                           </div>
-                          </div>
-                          
-                          {session.description && (
-                            <p className="session-desc">{session.description}</p>
-                          )}
+                        ))}
+                      </div>
+                    );
+                  }
 
-                          <div className="session-attendees">
-                            {session.attendees.map((name, i) => (
-                              <span
-                                key={i}
-                                className={`attendee-badge${name === profile.name ? " self" : ""}`}
-                              >
-                                {name}
-                              </span>
-                            ))}
-                          </div>
-
-                          <div className="session-footer">
-                            <span className="session-players-count">
-                              👥 {session.attendees.length} / {session.maxPlayers} players
-                            </span>
-                            <span className="session-creator">
-                              By {isCreator ? "me" : session.creatorName}
-                            </span>
-                          </div>
-
-                          {!isCreator && (
-                            <button
-                              type="button"
-                              className={`btn btn-${isJoined ? "secondary" : "primary"}`}
-                              onClick={() => handleToggleJoinSession(session.id)}
-                              style={{ width: "100%", fontSize: "11px", padding: "4px" }}
-                            >
-                              {isJoined ? "Leave Session" : "Join Session"}
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                  return (
+                    <div className="sessions-grid">
+                      {visible.map((session) => renderSessionCard(session, profile, handleSetRsvp, handleDeleteSession))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -1406,6 +1949,39 @@ export default function FriendsPage() {
               <div className="recs-feed">
                 <h3 className="friends-list-title">Friend Recommendations ({recommendations.length})</h3>
 
+                {recommendations.length > 0 && (
+                  <div className="compare-filter-chips rec-filter-chips">
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${recFilter === "all" ? " active" : ""}`}
+                      onClick={() => setRecFilter("all")}
+                    >
+                      All ({recommendations.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${recFilter === "to_me" ? " active" : ""}`}
+                      onClick={() => setRecFilter("to_me")}
+                    >
+                      To Me ({recommendations.filter((r) => r.recommendedTo === profile.name || r.recommendedTo === "All Friends").length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${recFilter === "by_me" ? " active" : ""}`}
+                      onClick={() => setRecFilter("by_me")}
+                    >
+                      By Me ({recommendations.filter((r) => r.recommendedBy === profile.name).length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`compare-filter-chip${recFilter === "want" ? " active" : ""}`}
+                      onClick={() => setRecFilter("want")}
+                    >
+                      Want to Play ({recommendations.filter((r) => r.wantToPlay).length})
+                    </button>
+                  </div>
+                )}
+
                 {recommendations.length === 0 ? (
                   <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
                     <h3 className="friends-empty-title">No Recommendations Yet</h3>
@@ -1414,71 +1990,122 @@ export default function FriendsPage() {
                     </p>
                   </div>
                 ) : (
-                  recommendations.map((rec) => (
-                    <div key={rec.id} className="rec-card">
-                       <div className="rec-header">
-                         <div className="rec-meta">
-                           <span className="rec-game">{rec.gameName}</span>
-                           <span className="rec-author">
-                             Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
-                           </span>
-                         </div>
-                         <div className="rec-header-actions">
-                           <div className="rating-stars">
-                             {Array.from({ length: 5 }).map((_, idx) => (
-                               <span key={idx} className={idx < rec.rating ? "active" : ""}>
-                                 ★
-                               </span>
-                             ))}
-                           </div>
-                           <button
-                             type="button"
-                             className="friend-delete-btn"
-                             style={{ opacity: 1, position: "static" }}
-                             onClick={() => handleDeleteRecommendation(rec.id)}
-                             title="Remove Recommendation"
-                           >
-                             <TrashIcon />
-                           </button>
-                         </div>
-                       </div>
-
-                      <p className="rec-reason">"{rec.reason}"</p>
-
-                      {/* Threaded comments */}
-                      <div className="rec-comments-section">
-                        <h4 className="rec-comments-title">Comments ({rec.comments.length})</h4>
-                        {rec.comments.length > 0 && (
-                          <div className="rec-comments-list">
-                            {rec.comments.map((comment) => (
-                              <div key={comment.id} className="comment-item">
-                                <span className="comment-author">{comment.authorName}</span>
-                                <span className="comment-text">{comment.text}</span>
-                                <span className="comment-time">{formatDateTime(new Date(comment.timestamp).toISOString())}</span>
+                  recommendations
+                    .filter((rec) => {
+                      if (recFilter === "to_me")
+                        return rec.recommendedTo === profile.name || rec.recommendedTo === "All Friends";
+                      if (recFilter === "by_me") return rec.recommendedBy === profile.name;
+                      if (recFilter === "want") return !!rec.wantToPlay;
+                      return true;
+                    })
+                    .map((rec) => {
+                      const myReaction = rec.reactions?.[profile.name];
+                      const reactionCounts: Record<string, number> = {};
+                      if (rec.reactions) {
+                        Object.values(rec.reactions).forEach((k) => {
+                          reactionCounts[k] = (reactionCounts[k] || 0) + 1;
+                        });
+                      }
+                      return (
+                        <div key={rec.id} className="rec-card">
+                          <div className="rec-header">
+                            <div className="rec-meta">
+                              <span className="rec-game">{rec.gameName}</span>
+                              <span className="rec-author">
+                                Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
+                              </span>
+                            </div>
+                            <div className="rec-header-actions">
+                              <div className="rating-stars">
+                                {Array.from({ length: 5 }).map((_, idx) => (
+                                  <span key={idx} className={idx < rec.rating ? "active" : ""}>
+                                    ★
+                                  </span>
+                                ))}
                               </div>
-                            ))}
+                              <button
+                                type="button"
+                                className="friend-delete-btn"
+                                style={{ opacity: 1, position: "static" }}
+                                onClick={() => handleDeleteRecommendation(rec.id)}
+                                title="Remove Recommendation"
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
                           </div>
-                        )}
 
-                        <form
-                          className="comment-form"
-                          onSubmit={(e) => handleAddComment(e, rec.id)}
-                        >
-                          <input
-                            type="text"
-                            className="comment-input"
-                            placeholder="Write a comment..."
-                            value={commentInputs[rec.id] || ""}
-                            onChange={(e) => handleCommentInputChange(rec.id, e.target.value)}
-                            required
-                          />
-                          <button type="submit" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px" }}>
-                            Post
-                          </button>
-                        </form>
-                      </div>
-                    </div>
-                  ))
+                          <p className="rec-reason">"{rec.reason}"</p>
+
+                          {/* Reactions + Want to Play */}
+                          <div className="rec-reactions-row">
+                            {(["like", "love", "play"] as ReactionKind[]).map((kind) => (
+                              <button
+                                key={kind}
+                                type="button"
+                                className={`rec-reaction-btn${myReaction === kind ? " active" : ""}`}
+                                onClick={() => handleToggleReaction(rec.id, kind)}
+                                title={`React: ${kind}`}
+                              >
+                                <span>{kind === "like" ? "👍" : kind === "love" ? "❤️" : "🎮"}</span>
+                                {reactionCounts[kind] ? <span className="rec-reaction-count">{reactionCounts[kind]}</span> : null}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className={`rec-want-btn${rec.wantToPlay ? " active" : ""}`}
+                              onClick={() => handleToggleWantToPlay(rec.id)}
+                              title="Add to Want to Play"
+                            >
+                              {rec.wantToPlay ? "✓ Want to Play" : "+ Want to Play"}
+                            </button>
+                          </div>
+
+                          {/* Threaded comments */}
+                          <div className="rec-comments-section">
+                            <h4 className="rec-comments-title">Comments ({rec.comments.length})</h4>
+                            {rec.comments.length > 0 && (
+                              <div className="rec-comments-list">
+                                {rec.comments.map((comment) => (
+                                  <div key={comment.id} className="comment-item">
+                                    <span className="comment-author">{comment.authorName}</span>
+                                    <span className="comment-text">{comment.text}</span>
+                                    <span className="comment-time">{formatDateTime(new Date(comment.timestamp).toISOString())}</span>
+                                    {comment.authorName === profile.name && (
+                                      <button
+                                        type="button"
+                                        className="comment-delete-btn"
+                                        onClick={() => handleDeleteComment(rec.id, comment.id, comment.authorName)}
+                                        title="Delete your comment"
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <form
+                              className="comment-form"
+                              onSubmit={(e) => handleAddComment(e, rec.id)}
+                            >
+                              <input
+                                type="text"
+                                className="comment-input"
+                                placeholder="Write a comment..."
+                                value={commentInputs[rec.id] || ""}
+                                onChange={(e) => handleCommentInputChange(rec.id, e.target.value)}
+                                required
+                              />
+                              <button type="submit" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                                Post
+                              </button>
+                            </form>
+                          </div>
+                        </div>
+                      );
+                    })
                 )}
               </div>
 
@@ -1577,6 +2204,19 @@ export default function FriendsPage() {
                 <div className="compare-match-score-badge">
                   <span>🎯 Similarity:</span>
                   <strong>{matchScore}% Match</strong>
+                </div>
+              )}
+
+              {compareFriend && comparisonData.length > 0 && (
+                <div
+                  className={`compare-data-badge ${comparisonData.some((i) => i.estimated) ? "estimated" : "real"}`}
+                  title={
+                    comparisonData.some((i) => i.estimated)
+                      ? "This friend hasn't shared game-level data yet — numbers are estimated."
+                      : "Based on real per-game data shared by your friend."
+                  }
+                >
+                  {comparisonData.some((i) => i.estimated) ? "⚠ Estimated" : "✓ Real data"}
                 </div>
               )}
             </div>
@@ -1690,6 +2330,24 @@ export default function FriendsPage() {
                       <option value="friendPlaytime">Friend's Playtime</option>
                     </select>
                   </div>
+
+                  {compareGenres.length > 0 && (
+                    <div className="compare-selector-group compare-sort-group">
+                      <span>Genre:</span>
+                      <select
+                        className="profile-input"
+                        value={compareGenre}
+                        onChange={(e) => setCompareGenre(e.target.value)}
+                      >
+                        <option value="all">All Genres</option>
+                        {compareGenres.map((g) => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Game comparison grid */}
@@ -1789,6 +2447,15 @@ export default function FriendsPage() {
                 </div>
                 <h3 className="profile-name-big">{profile.name}</h3>
                 <p className="profile-status-big">"{profile.status}"</p>
+                <p className="profile-last-active-big" title="Last time your outbox was published">
+                  🟢 Last active: {profile.lastPublished ? formatLastSeen(profile.lastPublished) : "Just now"}
+                </p>
+                {profile.region && (
+                  <p className="profile-region-big">📍 {profile.region}</p>
+                )}
+                {profile.bio && (
+                  <p className="profile-bio-big">{profile.bio}</p>
+                )}
 
                 <div className="profile-stats-grid">
                   <div className="profile-stat-box">
@@ -1813,6 +2480,9 @@ export default function FriendsPage() {
                 <p className="friends-modal-desc">
                   Share this code with your friends so they can add you to their network.
                 </p>
+                <div className="friend-code-qr">
+                  <FriendCodeQR code={generatedFriendCode} />
+                </div>
                 <div className="friend-code-box">{generatedFriendCode}</div>
                 <button
                   type="button"
@@ -1851,6 +2521,43 @@ export default function FriendsPage() {
                     value={profile.status}
                     onChange={(e) => setProfile({ ...profile, status: e.target.value })}
                     placeholder="E.g., Ready to play, Away..."
+                  />
+                  <div className="status-preset-row">
+                    {STATUS_PRESETS.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        className={`status-preset-chip${profile.status === preset.value ? " active" : ""}`}
+                        onClick={() => setProfile({ ...profile, status: preset.value })}
+                        title={preset.label}
+                      >
+                        {preset.emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="friends-input-group">
+                  <label htmlFor="profileRegionInput">Region</label>
+                  <input
+                    type="text"
+                    id="profileRegionInput"
+                    className="profile-input"
+                    value={profile.region || ""}
+                    onChange={(e) => setProfile({ ...profile, region: e.target.value })}
+                    placeholder="E.g., EU-West, North America..."
+                  />
+                </div>
+
+                <div className="friends-input-group">
+                  <label htmlFor="profileBioInput">Bio</label>
+                  <textarea
+                    id="profileBioInput"
+                    className="profile-input"
+                    style={{ height: "70px", resize: "none" }}
+                    value={profile.bio || ""}
+                    onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+                    placeholder="Tell your friends a bit about yourself..."
                   />
                 </div>
 
@@ -1906,7 +2613,7 @@ export default function FriendsPage() {
                           const updated = { ...profile, avatar: "procedural" };
                           setProfile(updated);
                           saveUserProfile(updated);
-                          await pushMyOutbox(updated, selfStats, sessions, recommendations);
+                          await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
                         }}
                         style={{ fontSize: "11px", padding: "4px 10px" }}
                       >
@@ -2039,51 +2746,44 @@ export default function FriendsPage() {
               </svg>
             </button>
 
-            <div className="friends-modal-body p2p-modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div className="p2p-status-card" style={{ padding: "16px", background: "rgba(255, 255, 255, 0.02)", borderRadius: "8px", border: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>Background Sync Status</span>
-                  <span className="badge" style={{
-                    background: internetSyncStatus?.externalIp ? "rgba(46, 204, 113, 0.15)" : "rgba(231, 76, 60, 0.15)",
-                    color: internetSyncStatus?.externalIp ? "#2ecc71" : "#e74c3c",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    fontSize: "11px",
-                    fontWeight: "bold"
-                  }}>
+            <div className="friends-modal-body p2p-modal-body p2p-modal-flex">
+              <div className="p2p-status-card">
+                <div className="p2p-status-row">
+                  <span className="p2p-status-label">Background Sync Status</span>
+                  <span className={`p2p-status-badge${internetSyncStatus?.externalIp ? " online" : " offline"}`}>
                     {internetSyncStatus?.externalIp ? "ONLINE" : "OFFLINE"}
                   </span>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>External IP:</span>
-                    <span style={{ fontFamily: "monospace" }}>{internetSyncStatus?.externalIp || "Resolving..."}</span>
+                <div className="p2p-status-details">
+                  <div className="p2p-detail-row">
+                    <span className="p2p-detail-key">External IP:</span>
+                    <span className="p2p-detail-val">{internetSyncStatus?.externalIp || "Resolving..."}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>Bound Port:</span>
-                    <span>{internetSyncStatus?.boundPort || "Resolving..."}</span>
+                  <div className="p2p-detail-row">
+                    <span className="p2p-detail-key">Bound Port:</span>
+                    <span className="p2p-detail-val">{internetSyncStatus?.boundPort || "Resolving..."}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>UPnP Router Mapping:</span>
-                    <span style={{ color: internetSyncStatus?.upnpMapped ? "#2ecc71" : "var(--color-text-muted)" }}>
+                  <div className="p2p-detail-row">
+                    <span className="p2p-detail-key">UPnP Router Mapping:</span>
+                    <span className={internetSyncStatus?.upnpMapped ? "p2p-mapped-ok" : "p2p-detail-key"}>
                       {internetSyncStatus?.upnpMapped ? "✅ Configured" : "⚠️ Disabled / Not Routeable"}
                     </span>
                   </div>
                 </div>
 
                 {internetSyncStatus?.errorMessage && (
-                  <div style={{ padding: "10px", background: "rgba(231, 76, 60, 0.1)", borderLeft: "3px solid #e74c3c", borderRadius: "4px", fontSize: "12px", color: "#e74c3c" }}>
+                  <div className="p2p-error-box">
                     {internetSyncStatus.errorMessage}
                   </div>
                 )}
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <h4 style={{ fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--color-accent)", margin: "0 0 4px 0" }}>Friend Sync Status</h4>
-                <div style={{ maxHeight: "150px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div className="p2p-friend-sync-block">
+                <h4 className="p2p-section-title">Friend Sync Status</h4>
+                <div className="p2p-friend-list">
                   {friends.length === 0 ? (
-                    <div style={{ fontSize: "12px", color: "var(--color-text-muted)", textAlign: "center", padding: "10px" }}>
+                    <div className="p2p-empty-note">
                       No friends added yet. Share friend codes to start syncing!
                     </div>
                   ) : (
@@ -2102,9 +2802,9 @@ export default function FriendsPage() {
                         }
                       }
                       return (
-                        <div key={friend.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.01)", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.03)", fontSize: "13px" }}>
+                        <div key={friend.id} className="p2p-friend-row">
                           <span>{friend.name}</span>
-                          <span style={{ fontSize: "11px", color: lastSyncSecs ? "var(--color-success)" : "var(--color-text-muted)" }}>
+                          <span className={lastSyncSecs ? "p2p-last-sync-ok" : "p2p-last-sync-muted"}>
                             Last Sync: {syncText}
                           </span>
                         </div>
@@ -2114,10 +2814,34 @@ export default function FriendsPage() {
                 </div>
               </div>
 
+              <div className="p2p-sync-log-block">
+                <h4 className="p2p-section-title">Recent Sync Activity</h4>
+                {syncLog.length === 0 ? (
+                  <div className="p2p-empty-note">No sync activity yet.</div>
+                ) : (
+                  <div className="p2p-sync-log">
+                    {syncLog.map((entry, i) => (
+                      <div key={i} className="p2p-log-entry">
+                        <div className="p2p-log-row">
+                          <span className="p2p-log-time">{entry.time}</span>
+                          <span className="p2p-log-msg">{entry.message}</span>
+                        </div>
+                        {entry.details.length > 0 && (
+                          <ul className="p2p-log-details">
+                            {entry.details.map((d, j) => (
+                              <li key={j} className="p2p-log-detail">{d}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
-                className="btn btn-primary"
-                style={{ width: "100%", padding: "10px", display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}
+                className="btn btn-primary p2p-sync-now-btn"
                 onClick={async () => {
                   try {
                     await invoke("trigger_internet_sync");
