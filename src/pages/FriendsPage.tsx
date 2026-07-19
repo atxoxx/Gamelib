@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useGames } from "../context/GameContext";
 import { useAchievements } from "../context/AchievementContext";
 import { useToast } from "../context/ToastContext";
+import { useWishlistContext } from "../context/WishlistContext";
+import { consumePendingSuggestion } from "./friendSuggestionSignal";
 import { parsePlayTime } from "../types/game";
 import type { StoreGameSummary } from "../types/game";
 import { invoke } from "@tauri-apps/api/core";
@@ -14,6 +17,9 @@ import {
   Friend,
   GameSession,
   GameRecommendation,
+  GameSuggestion,
+  SuggestionComment,
+  SuggestionReactionKind,
   SessionRole,
   SessionMessage,
   displayName,
@@ -29,6 +35,9 @@ import {
   saveSessions,
   loadRecommendations,
   saveRecommendations,
+  loadSuggestions,
+  saveSuggestions,
+  mergeSuggestions,
   encodeFriendCode,
   decodeFriendCode,
   getProceduralAvatarStyle,
@@ -86,6 +95,17 @@ function RecommendIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
       <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+    </svg>
+  );
+}
+
+// Suggestion (share from wishlist) Icon
+function SuggestionIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <circle cx="12" cy="14.5" r="0.6" fill="currentColor" />
     </svg>
   );
 }
@@ -899,10 +919,22 @@ interface FriendInvitation {
 // ── Main Page Component ─────────────────────────────────────────────
 
 export default function FriendsPage() {
-  const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "compare" | "leaderboard" | "profile">("friends");
+  const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "suggestions" | "compare" | "leaderboard" | "profile">("friends");
   const { games, runningGameIds } = useGames();
+  const { wishlist, toggle } = useWishlistContext();
   const { cache } = useAchievements();
   const { showToast } = useToast();
+  const navigate = useNavigate();
+
+  // When arriving from the Wishlist "Share to Friends" button, jump straight
+  // into the Wishlist Shares tab with the chosen game pre-selected.
+  useEffect(() => {
+    const pending = consumePendingSuggestion();
+    if (pending) {
+      setSuggestionGameId(pending.gameId);
+      setActiveTab("suggestions");
+    }
+  }, []);
 
   // Single profile support — hardcoded active profile name to "A"
   const profileName = "A";
@@ -912,6 +944,7 @@ export default function FriendsPage() {
   const [friends, setFriends] = useState<Friend[]>(() => loadFriends());
   const [sessions, setSessions] = useState<GameSession[]>(() => loadSessions());
   const [recommendations, setRecommendations] = useState<GameRecommendation[]>(() => loadRecommendations());
+  const [suggestions, setSuggestions] = useState<GameSuggestion[]>(() => loadSuggestions());
 
   // Pending Friend Invitations state
   const [invitations, setInvitations] = useState<FriendInvitation[]>([]);
@@ -978,20 +1011,23 @@ export default function FriendsPage() {
       // Merge local and remote
       const localSessions = loadSessions();
       const localRecommendations = loadRecommendations();
-      
+      const localSuggestions = loadSuggestions();
+
       const localDb: FriendsDatabase = {
         profile: localProfile,
         friends: localFriends,
         sessions: localSessions,
         recommendations: localRecommendations,
+        suggestions: localSuggestions,
       };
-      
+
       const merged = mergeDatabases(localDb, remoteDb);
-      
+
       // Save and update state
       setFriends(merged.friends);
       setSessions(merged.sessions);
       setRecommendations(merged.recommendations);
+      setSuggestions(merged.suggestions);
       
       saveFriends(merged.friends);
       saveSessions(merged.sessions);
@@ -1026,6 +1062,7 @@ export default function FriendsPage() {
         games: sharedGames || [],
         sessions: db.sessions,
         recommendations: db.recommendations,
+        suggestions: db.suggestions || [],
         updatedAt: Date.now(),
       };
       
@@ -1060,16 +1097,18 @@ export default function FriendsPage() {
     currStats: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
     currSessions: GameSession[],
     currRecs: GameRecommendation[],
-    currSharedGames?: SharedGameStat[]
+    currSharedGames?: SharedGameStat[],
+    currSuggestions?: GameSuggestion[]
   ) => {
-    const res = await pushMyOutboxStorage(currProfile, currStats, currSessions, currRecs, currSharedGames);
-    
+    const res = await pushMyOutboxStorage(currProfile, currStats, currSessions, currRecs, currSharedGames, currSuggestions);
+
     // Also publish to Nostr
     const db: FriendsDatabase = {
       profile: currProfile,
       friends: friends,
       sessions: currSessions,
       recommendations: currRecs,
+      suggestions: currSuggestions || [],
     };
     publishToNostr(db, currSharedGames);
     return res;
@@ -1195,6 +1234,15 @@ export default function FriendsPage() {
   // Recommendations feed filter
   const [recFilter, setRecFilter] = useState<"all" | "to_me" | "by_me" | "want">("all");
 
+  // Wishlist Suggestions feed state
+  const [suggestionGameId, setSuggestionGameId] = useState("");
+  const [suggestionNote, setSuggestionNote] = useState("");
+  const [suggestionToFriend, setSuggestionToFriend] = useState("All Friends");
+  const [suggestionFilter, setSuggestionFilter] = useState<"all" | "by_me" | "to_me" | "added" | "unadded">("all");
+  const [suggestionSort, setSuggestionSort] = useState<"newest" | "oldest" | "reactions" | "comments">("newest");
+  const [suggestionSearch, setSuggestionSearch] = useState("");
+  const [suggestionCommentInputs, setSuggestionCommentInputs] = useState<Record<string, string>>({});
+
   // Comments Input states
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
 
@@ -1316,6 +1364,7 @@ export default function FriendsPage() {
           setFriends(loadFriends());
           setSessions(loadSessions());
           setRecommendations(loadRecommendations());
+          setSuggestions(loadSuggestions());
         }
 
         // 2. Resolve device ID
@@ -1367,6 +1416,7 @@ export default function FriendsPage() {
 
     const localSessions = loadSessions();
     const localRecs = loadRecommendations();
+    const localSuggestions = loadSuggestions();
     const localFriends = loadFriends();
 
     // NOTE: Friends are added manually via friend codes only. We intentionally
@@ -1385,6 +1435,7 @@ export default function FriendsPage() {
 
     let mergedSessions = [...localSessions];
     let mergedRecs = [...localRecs];
+    let mergedSuggestions = [...localSuggestions];
 
     // Read the outbox of each friend from the sync folder
     const updatedFriends: Friend[] = [];
@@ -1423,6 +1474,15 @@ export default function FriendsPage() {
               changesMade = true;
               friendRecs = remoteOutbox.recommendations.length;
               pulledRecs += friendRecs;
+            }
+          }
+
+          // Merge wishlist game suggestions
+          if (remoteOutbox.suggestions && remoteOutbox.suggestions.length > 0) {
+            const prevLength = mergedSuggestions.length;
+            mergedSuggestions = mergeSuggestions(mergedSuggestions, remoteOutbox.suggestions);
+            if (mergedSuggestions.length !== prevLength || JSON.stringify(mergedSuggestions) !== localStorage.getItem(`gamelib.friends.suggestions.${profileName}`)) {
+              changesMade = true;
             }
           }
 
@@ -1495,8 +1555,10 @@ export default function FriendsPage() {
     if (changesMade) {
       saveSessions(mergedSessions);
       saveRecommendations(mergedRecs);
+      saveSuggestions(mergedSuggestions);
       setSessions(mergedSessions);
       setRecommendations(mergedRecs);
+      setSuggestions(mergedSuggestions);
     }
 
     if (friendsUpdated) {
@@ -1505,7 +1567,7 @@ export default function FriendsPage() {
     }
 
     // Always push our own updated outbox so friends can see us
-    const pushed = await pushMyOutbox(profile, selfStats, mergedSessions, mergedRecs, selfSharedGames);
+    const pushed = await pushMyOutbox(profile, selfStats, mergedSessions, mergedRecs, selfSharedGames, suggestions);
 
     const syncedAt = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     setLastSyncedTime(syncedAt);
@@ -1623,7 +1685,7 @@ export default function FriendsPage() {
       setProfile(updated);
       saveUserProfile(updated);
       try {
-        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames, suggestions);
       } catch {
         /* ignore heartbeat failures */
       }
@@ -1641,7 +1703,7 @@ export default function FriendsPage() {
       setProfile(updated);
       saveUserProfile(updated);
       try {
-        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+        await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames, suggestions);
       } catch {
         /* ignore heartbeat failures */
       }
@@ -1703,7 +1765,7 @@ export default function FriendsPage() {
             const updated = { ...profile, avatar: compressedBase64 };
             setProfile(updated);
             saveUserProfile(updated);
-            pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+            pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames, suggestions);
             showToast("Custom avatar uploaded successfully!", "success");
           } catch {
             showToast("Failed to process image.", "error");
@@ -1718,7 +1780,7 @@ export default function FriendsPage() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     saveUserProfile(profile);
-    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, suggestions);
     showToast("Profile updated and synced successfully!", "success");
   };
 
@@ -1963,7 +2025,7 @@ export default function FriendsPage() {
 
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
 
     // Reset Form
     setSessionGameId("");
@@ -2004,7 +2066,7 @@ export default function FriendsPage() {
 
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Remove a session entirely (hard delete from local list)
@@ -2014,7 +2076,7 @@ export default function FriendsPage() {
     );
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
     showToast("Session removed.", "info");
   };
 
@@ -2028,7 +2090,7 @@ export default function FriendsPage() {
     });
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Add a +1 guest (non-friend attendee) to a session.
@@ -2046,7 +2108,7 @@ export default function FriendsPage() {
     });
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
     showToast(`${guestName} added as a +1 guest.`, "success");
   };
 
@@ -2061,7 +2123,7 @@ export default function FriendsPage() {
     });
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Save the "what I'm bringing" note on the current user's RSVP.
@@ -2076,7 +2138,7 @@ export default function FriendsPage() {
     });
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Append a chat message to a session's shared thread.
@@ -2092,7 +2154,7 @@ export default function FriendsPage() {
     );
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Toggle a message's pinned state (host/cohost only, enforced in UI).
@@ -2104,7 +2166,7 @@ export default function FriendsPage() {
     });
     setSessions(updated);
     saveSessions(updated);
-    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames, suggestions);
   };
 
   // Resolve a cover image URL for a session's game (library coverArtUrl, or
@@ -2166,7 +2228,7 @@ export default function FriendsPage() {
     const updated = [newRec, ...recommendations];
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
     showToast("Game recommended!", "success");
 
     setRecGameId("");
@@ -2199,7 +2261,7 @@ export default function FriendsPage() {
 
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
     setCommentInputs((prev) => ({ ...prev, [recId]: "" }));
     showToast("Comment posted.", "success");
   };
@@ -2211,7 +2273,7 @@ export default function FriendsPage() {
     );
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
     showToast("Recommendation removed.", "info");
   };
 
@@ -2230,7 +2292,7 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
   };
 
   // Toggle this user's personal "want to play" backlog flag.
@@ -2241,7 +2303,7 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
     const rec = updated.find((r) => r.id === recId);
     showToast(rec?.wantToPlay ? "Added to your Want to Play list." : "Removed from Want to Play.", "info");
   };
@@ -2262,7 +2324,128 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames, suggestions);
+  };
+
+  // ── Wishlist Game Suggestions Logic ──────────────────────────────
+  // Share a game straight from the user's own wishlist tab with friends.
+
+  const handleCreateSuggestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!suggestionGameId) {
+      showToast("Pick a game from your wishlist to share.", "error");
+      return;
+    }
+    const wishItem = wishlist.find((w) => w.slug === suggestionGameId);
+    if (!wishItem) {
+      showToast("That game is no longer in your wishlist.", "error");
+      return;
+    }
+
+    const newSug: GameSuggestion = {
+      id: `sug_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`,
+      gameId: wishItem.slug,
+      gameName: wishItem.name,
+      coverUrl: wishItem.coverUrl || undefined,
+      note: suggestionNote.trim(),
+      suggestedBy: profile.name,
+      suggestedTo: suggestionToFriend,
+      comments: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const updated = [newSug, ...suggestions];
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
+    showToast(`Shared "${wishItem.name}" from your wishlist!`, "success");
+
+    setSuggestionGameId("");
+    setSuggestionNote("");
+    setSuggestionToFriend("All Friends");
+  };
+
+  const handleDeleteSuggestion = async (sugId: string) => {
+    const updated = suggestions.map((s) =>
+      s.id === sugId ? { ...s, deleted: true, updatedAt: Date.now() } : s
+    );
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
+    showToast("Suggestion removed.", "info");
+  };
+
+  const handleToggleSuggestionReaction = async (sugId: string, kind: SuggestionReactionKind) => {
+    const updated = suggestions.map((s) => {
+      if (s.id !== sugId) return s;
+      const reactions = { ...(s.reactions || {}) };
+      if (reactions[profile.name] === kind) {
+        delete reactions[profile.name];
+      } else {
+        reactions[profile.name] = kind;
+      }
+      return { ...s, reactions, updatedAt: Date.now() };
+    });
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
+  };
+
+  const handleAddSuggestionComment = async (e: React.FormEvent, sugId: string) => {
+    e.preventDefault();
+    const text = suggestionCommentInputs[sugId] || "";
+    if (!text.trim()) return;
+    const updated = suggestions.map((s) => {
+      if (s.id !== sugId) return s;
+      const comment: SuggestionComment = {
+        id: `sugc_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        authorName: profile.name,
+        text,
+        timestamp: Date.now(),
+      };
+      return { ...s, comments: [...s.comments, comment], updatedAt: Date.now() };
+    });
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
+    setSuggestionCommentInputs((prev) => ({ ...prev, [sugId]: "" }));
+  };
+
+  const handleDeleteSuggestionComment = async (sugId: string, commentId: string, authorName: string) => {
+    if (authorName !== profile.name) {
+      showToast("You can only delete your own comments.", "error");
+      return;
+    }
+    const updated = suggestions.map((s) => {
+      if (s.id !== sugId) return s;
+      return { ...s, comments: s.comments.filter((c) => c.id !== commentId), updatedAt: Date.now() };
+    });
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
+  };
+
+  // Add the shared game to the viewer's own wishlist (and mark the suggestion).
+  const handleAddSuggestionToWishlist = async (sug: GameSuggestion) => {
+    const alreadyThere = wishlist.some((w) => w.slug === sug.gameId);
+    if (alreadyThere) {
+      showToast(`"${sug.gameName}" is already in your wishlist.`, "info");
+    } else {
+      const asSummary: StoreGameSummary = {
+        slug: sug.gameId,
+        name: sug.gameName,
+        coverUrl: sug.coverUrl || null,
+      } as StoreGameSummary;
+      toggle(asSummary);
+      showToast(`Added "${sug.gameName}" to your wishlist!`, "success");
+    }
+    const updated = suggestions.map((s) =>
+      s.id === sug.id ? { ...s, addedToWishlist: true, updatedAt: Date.now() } : s
+    );
+    setSuggestions(updated);
+    saveSuggestions(updated);
+    await pushMyOutbox(profile, selfStats, sessions, recommendations, selfSharedGames, updated);
   };
 
   // ── Game Comparison Logic ────────────────────────────────────────
@@ -2715,6 +2898,16 @@ export default function FriendsPage() {
           >
             <RecommendIcon />
             <span>Recommendations</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "suggestions"}
+            className={`friends-tab${activeTab === "suggestions" ? " active" : ""}`}
+            onClick={() => setActiveTab("suggestions")}
+          >
+            <SuggestionIcon />
+            <span>Wishlist Shares</span>
           </button>
             <button
               type="button"
@@ -3752,6 +3945,320 @@ export default function FriendsPage() {
           </div>
         )}
 
+        {/* Tab: Wishlist Shares (Game Suggestions) */}
+        {activeTab === "suggestions" && (
+          <div className="suggestions-section">
+            <div className="recs-layout">
+              {/* Left: Suggestions feed */}
+              <div className="recs-feed">
+                {(() => {
+                  const activeSugs = suggestions.filter((s) => !s.deleted);
+                  const visible = activeSugs.filter((s) => {
+                    const q = suggestionSearch.trim().toLowerCase();
+                    if (q && !s.gameName.toLowerCase().includes(q)) return false;
+                    if (suggestionFilter === "by_me")
+                      return s.suggestedBy === profile.name;
+                    if (suggestionFilter === "to_me")
+                      return s.suggestedTo === profile.name || s.suggestedTo === "All Friends";
+                    if (suggestionFilter === "added") return !!s.addedToWishlist;
+                    if (suggestionFilter === "unadded") return !s.addedToWishlist;
+                    return true;
+                  });
+
+                  const sorted = [...visible].sort((a, b) => {
+                    switch (suggestionSort) {
+                      case "oldest":
+                        return a.createdAt - b.createdAt;
+                      case "reactions": {
+                        const ca = Object.keys(a.reactions || {}).length;
+                        const cb = Object.keys(b.reactions || {}).length;
+                        return cb - ca;
+                      }
+                      case "comments":
+                        return b.comments.length - a.comments.length;
+                      case "newest":
+                      default:
+                        return b.createdAt - a.createdAt;
+                    }
+                  });
+
+                  return (
+                    <>
+                      <h3 className="friends-list-title">Shared From Wishlists ({activeSugs.length})</h3>
+
+                      {activeSugs.length > 0 && (
+                        <div className="compare-filter-chips rec-filter-chips">
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${suggestionFilter === "all" ? " active" : ""}`}
+                            onClick={() => setSuggestionFilter("all")}
+                          >
+                            All ({activeSugs.length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${suggestionFilter === "by_me" ? " active" : ""}`}
+                            onClick={() => setSuggestionFilter("by_me")}
+                          >
+                            Shared by me ({activeSugs.filter((s) => s.suggestedBy === profile.name).length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${suggestionFilter === "to_me" ? " active" : ""}`}
+                            onClick={() => setSuggestionFilter("to_me")}
+                          >
+                            For me ({activeSugs.filter((s) => s.suggestedTo === profile.name || s.suggestedTo === "All Friends").length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${suggestionFilter === "added" ? " active" : ""}`}
+                            onClick={() => setSuggestionFilter("added")}
+                          >
+                            Added to WL ({activeSugs.filter((s) => s.addedToWishlist).length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${suggestionFilter === "unadded" ? " active" : ""}`}
+                            onClick={() => setSuggestionFilter("unadded")}
+                          >
+                            Not added ({activeSugs.filter((s) => !s.addedToWishlist).length})
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="suggestions-toolbar">
+                        <input
+                          type="text"
+                          className="comment-input"
+                          placeholder="Search shared games…"
+                          value={suggestionSearch}
+                          onChange={(e) => setSuggestionSearch(e.target.value)}
+                        />
+                        <select
+                          className="profile-input suggestion-sort"
+                          value={suggestionSort}
+                          onChange={(e) => setSuggestionSort(e.target.value as any)}
+                          aria-label="Sort shared games"
+                        >
+                          <option value="newest">Newest</option>
+                          <option value="oldest">Oldest</option>
+                          <option value="reactions">Most reactions</option>
+                          <option value="comments">Most comments</option>
+                        </select>
+                      </div>
+
+                      {activeSugs.length === 0 ? (
+                        <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                          <h3 className="friends-empty-title">No Shared Games Yet</h3>
+                          <p className="friends-empty-desc">
+                            Share a game from your Wishlist tab on the right. Friends can react and comment — everything syncs automatically!
+                          </p>
+                        </div>
+                      ) : sorted.length === 0 ? (
+                        <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                          <p className="friends-empty-desc">No shared games match your filters.</p>
+                        </div>
+                      ) : (
+                        sorted.map((sug) => {
+                          const myReaction = sug.reactions?.[profile.name];
+                          const reactionCounts: Record<string, number> = {};
+                          if (sug.reactions) {
+                            Object.values(sug.reactions).forEach((k) => {
+                              reactionCounts[k] = (reactionCounts[k] || 0) + 1;
+                            });
+                          }
+                          const alreadyWishlisted = wishlist.some((w) => w.slug === sug.gameId);
+                          return (
+                            <div key={sug.id} className="sug-card">
+                              <div className="sug-header">
+                                {sug.coverUrl ? (
+                                  <img src={sug.coverUrl} alt={sug.gameName} className="sug-cover" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                                ) : (
+                                  <div className="sug-cover sug-cover-fallback">{sug.gameName.slice(0, 2).toUpperCase()}</div>
+                                )}
+                                <div className="sug-meta">
+                                  <span className="sug-game">{sug.gameName}</span>
+                                  <span className="sug-author">
+                                    Shared by <strong>{sug.suggestedBy}</strong> {sug.suggestedTo === "All Friends" ? "with everyone" : `to ${sug.suggestedTo}`}
+                                  </span>
+                                </div>
+                                <div className="sug-header-actions">
+                                  <button
+                                    type="button"
+                                    className="friend-delete-btn"
+                                    style={{ opacity: 1, position: "static" }}
+                                    onClick={() => navigate(`/store/${sug.gameId}`)}
+                                    title="View on Store"
+                                  >
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                      <polyline points="15 3 21 3 21 9" />
+                                      <line x1="10" y1="14" x2="21" y2="3" />
+                                    </svg>
+                                  </button>
+                                  {sug.suggestedBy === profile.name && (
+                                    <button
+                                      type="button"
+                                      className="friend-delete-btn"
+                                      style={{ opacity: 1, position: "static" }}
+                                      onClick={() => handleDeleteSuggestion(sug.id)}
+                                      title="Remove share"
+                                    >
+                                      <TrashIcon />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {sug.note && <p className="sug-note">"{sug.note}"</p>}
+
+                              <div className="rec-reactions-row">
+                                {(["like", "love", "interest", "played"] as SuggestionReactionKind[]).map((kind) => {
+                                  const label =
+                                    kind === "like" ? "👍" : kind === "love" ? "❤️" : kind === "interest" ? "🔥" : "✅";
+                                  return (
+                                    <button
+                                      key={kind}
+                                      type="button"
+                                      className={`rec-reaction-btn${myReaction === kind ? " active" : ""}`}
+                                      onClick={() => handleToggleSuggestionReaction(sug.id, kind)}
+                                      title={`React: ${kind}`}
+                                    >
+                                      <span>{label}</span>
+                                      {reactionCounts[kind] ? <span className="rec-reaction-count">{reactionCounts[kind]}</span> : null}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  className={`rec-want-btn${sug.addedToWishlist || alreadyWishlisted ? " active" : ""}`}
+                                  onClick={() => handleAddSuggestionToWishlist(sug)}
+                                  disabled={alreadyWishlisted}
+                                  title={alreadyWishlisted ? "Already in your wishlist" : "Add to my wishlist"}
+                                >
+                                  {alreadyWishlisted ? "✓ In Wishlist" : "+ Wishlist"}
+                                </button>
+                              </div>
+
+                              <div className="rec-comments-section">
+                                <h4 className="rec-comments-title">Comments ({sug.comments.length})</h4>
+                                {sug.comments.length > 0 && (
+                                  <div className="rec-comments-list">
+                                    {sug.comments.map((comment) => (
+                                      <div key={comment.id} className="comment-item">
+                                        <span className="comment-author">{comment.authorName}</span>
+                                        <span className="comment-text">{comment.text}</span>
+                                        <span className="comment-time">{formatDateTime(new Date(comment.timestamp).toISOString())}</span>
+                                        {comment.authorName === profile.name && (
+                                          <button
+                                            type="button"
+                                            className="comment-delete-btn"
+                                            onClick={() => handleDeleteSuggestionComment(sug.id, comment.id, comment.authorName)}
+                                            title="Delete your comment"
+                                          >
+                                            ×
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <form
+                                  className="comment-form"
+                                  onSubmit={(e) => handleAddSuggestionComment(e, sug.id)}
+                                >
+                                  <input
+                                    type="text"
+                                    className="comment-input"
+                                    placeholder="Write a comment…"
+                                    value={suggestionCommentInputs[sug.id] || ""}
+                                    onChange={(e) =>
+                                      setSuggestionCommentInputs((prev) => ({ ...prev, [sug.id]: e.target.value }))
+                                    }
+                                    required
+                                  />
+                                  <button type="submit" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                                    Post
+                                  </button>
+                                </form>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Right: Share from wishlist */}
+              <div className="profile-edit-section">
+                <h3 className="profile-edit-title">Share a Game From Your Wishlist</h3>
+                {wishlist.length === 0 ? (
+                  <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                    <p className="friends-empty-desc">
+                      Your wishlist is empty. Add games via the heart on any Store card, then share them here with friends.
+                    </p>
+                  </div>
+                ) : (
+                  <form className="profile-form" onSubmit={handleCreateSuggestion}>
+                    <div className="friends-input-group">
+                      <label>Game from Wishlist</label>
+                      <select
+                        className="profile-input"
+                        value={suggestionGameId}
+                        onChange={(e) => setSuggestionGameId(e.target.value)}
+                        required
+                      >
+                        <option value="">Select a wishlisted game…</option>
+                        {wishlist.map((w) => (
+                          <option key={w.slug} value={w.slug}>
+                            {w.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="friends-input-group">
+                      <label htmlFor="sugTo">Share With</label>
+                      <select
+                        id="sugTo"
+                        className="profile-input"
+                        value={suggestionToFriend}
+                        onChange={(e) => setSuggestionToFriend(e.target.value)}
+                      >
+                        <option value="All Friends">All Friends</option>
+                        {friends.map((f) => (
+                          <option key={f.id} value={displayName(f)}>
+                            {displayName(f)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="friends-input-group">
+                      <label htmlFor="sugNote">Why are you sharing it? (optional)</label>
+                      <textarea
+                        id="sugNote"
+                        className="profile-input"
+                        style={{ height: "80px", resize: "none" }}
+                        value={suggestionNote}
+                        onChange={(e) => setSuggestionNote(e.target.value)}
+                        placeholder="e.g. Co-op roguelike, great for our next session…"
+                      />
+                    </div>
+
+                    <button type="submit" className="btn btn-primary" style={{ alignSelf: "flex-start" }}>
+                      Share to Friends
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tab 4: Compare Libraries */}
         {activeTab === "compare" && (
           <div className="compare-section">
@@ -4451,7 +4958,7 @@ export default function FriendsPage() {
                           const updated = { ...profile, avatar: "procedural" };
                           setProfile(updated);
                           saveUserProfile(updated);
-                          await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames);
+                          await pushMyOutbox(updated, selfStats, sessions, recommendations, selfSharedGames, suggestions);
                         }}
                         style={{ fontSize: "11px", padding: "4px 10px" }}
                       >
@@ -4682,3 +5189,5 @@ export default function FriendsPage() {
     </div>
   );
 }
+
+

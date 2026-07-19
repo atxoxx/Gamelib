@@ -293,6 +293,8 @@
 .wishlist-card-meta {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
   padding: 0 2px;
 }
 
@@ -302,6 +304,33 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wishlist-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  background: var(--color-bg-input, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.wishlist-share-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wishlist-share-btn:hover {
+  border-color: var(--color-accent, #6366f1);
+  background-color: rgba(99, 102, 241, 0.18);
+  color: var(--color-text);
 }
 
 /* Release date + live countdown pill, sits between the meta row and the

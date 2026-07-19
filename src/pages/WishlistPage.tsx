@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StoreGameCard from "../components/store/StoreGameCard";
 import { useWishlistContext } from "../context/WishlistContext";
+import { requestShareToFriends } from "./friendSuggestionSignal";
 import type { StoreGameSummary, WishlistEntry } from "../types/game";
 
 type WishlistSort = "date_added" | "name" | "rating" | "release_date";
@@ -518,6 +519,16 @@ function WishlistCard({
   onToggle: () => void;
   onNoteChange: (note: string) => void;
 }) {
+  const navigate = useNavigate();
+
+  const shareToFriends = () => {
+    requestShareToFriends({
+      gameId: entry.slug,
+      gameName: entry.name,
+      coverUrl: entry.coverUrl,
+    });
+    navigate("/friends");
+  };
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.note ?? "");
   const [expanded, setExpanded] = useState(false);
@@ -599,6 +610,27 @@ function WishlistCard({
         <span className="wishlist-added-date" title={`Added ${addedLabel}`}>
           Added {addedLabel}
         </span>
+        <button
+          type="button"
+          className="wishlist-share-btn"
+          onClick={shareToFriends}
+          title="Share this game with friends"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+            <polyline points="16 6 12 2 8 6" />
+            <line x1="12" y1="2" x2="12" y2="15" />
+          </svg>
+          Share to Friends
+        </button>
       </div>
 
       {release && (

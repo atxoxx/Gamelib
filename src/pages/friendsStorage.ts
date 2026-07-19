@@ -221,11 +221,50 @@ export interface SharedGameStat {
   genres: string[];
 }
 
+/**
+ * A "Game Suggestion" — a game the user shares from their personal Wishlist
+ * tab with friends, optionally with a note about why it's worth playing.
+ * Friends can react (emoji-style) and leave threaded comments, mirroring the
+ * Recommendation feed but rooted in the user's own wishlist.
+ */
+export interface SuggestionComment {
+  id: string;
+  authorName: string;
+  text: string;
+  timestamp: number;
+}
+
+export type SuggestionReactionKind = "like" | "love" | "interest" | "played";
+
+export interface GameSuggestion {
+  id: string;
+  /** Wishlist entry slug/IGDB id used as the source of truth. */
+  gameId: string;
+  gameName: string;
+  /** Optional cover art url pulled from the wishlist entry, for richer cards. */
+  coverUrl?: string;
+  /** Free-text note explaining why the game was shared. */
+  note: string;
+  /** Person who shared it from their wishlist. */
+  suggestedBy: string;
+  /** Target friend name, or "All Friends" for a broadcast. */
+  suggestedTo: string;
+  comments: SuggestionComment[];
+  /** Per-author reaction map (authorName -> reaction kind). */
+  reactions?: Record<string, SuggestionReactionKind>;
+  /** True when the current viewer has added this game to their own wishlist. */
+  addedToWishlist?: boolean;
+  createdAt: number;
+  updatedAt: number; // Unix timestamp for merging
+  deleted?: boolean; // Tombstone for sync deletion
+}
+
 // Keys namespaced per active profile name (A, B, C)
 const LS_PROFILE_PREFIX = "gamelib.friends.profile.";
 const LS_FRIENDS_PREFIX = "gamelib.friends.list.";
 const LS_SESSIONS_PREFIX = "gamelib.friends.sessions.";
 const LS_RECOMMENDATIONS_PREFIX = "gamelib.friends.recommendations.";
+const LS_SUGGESTIONS_PREFIX = "gamelib.friends.suggestions.";
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -324,6 +363,7 @@ export interface FriendsDatabase {
   friends: Friend[];
   sessions: GameSession[];
   recommendations: GameRecommendation[];
+  suggestions: GameSuggestion[];
 }
 
 export async function loadFriendsDb(): Promise<FriendsDatabase> {
@@ -332,7 +372,7 @@ export async function loadFriendsDb(): Promise<FriendsDatabase> {
     return JSON.parse(raw);
   } catch (err) {
     console.error("Failed to load friends database:", err);
-    return { profile: null, friends: [], sessions: [], recommendations: [] };
+    return { profile: null, friends: [], sessions: [], recommendations: [], suggestions: [] };
   }
 }
 
@@ -349,7 +389,8 @@ export async function persistLocalStorageToDisk(): Promise<void> {
   const friends = loadFriends();
   const sessions = loadSessions();
   const recommendations = loadRecommendations();
-  await saveFriendsDb({ profile, friends, sessions, recommendations });
+  const suggestions = loadSuggestions();
+  await saveFriendsDb({ profile, friends, sessions, recommendations, suggestions });
 }
 
 export async function loadFriendsDbToLocalStorage(): Promise<boolean> {
@@ -367,6 +408,9 @@ export async function loadFriendsDbToLocalStorage(): Promise<boolean> {
     }
     if (db.recommendations) {
       writeJson(`${LS_RECOMMENDATIONS_PREFIX}${profileName}`, db.recommendations);
+    }
+    if (db.suggestions) {
+      writeJson(`${LS_SUGGESTIONS_PREFIX}${profileName}`, db.suggestions);
     }
     return true;
   } catch (err) {
@@ -411,6 +455,17 @@ export function loadRecommendations(): GameRecommendation[] {
 export function saveRecommendations(recs: GameRecommendation[]): void {
   const profileName = getActiveProfileName();
   writeJson(`${LS_RECOMMENDATIONS_PREFIX}${profileName}`, recs);
+  persistLocalStorageToDisk();
+}
+
+export function loadSuggestions(): GameSuggestion[] {
+  const profileName = getActiveProfileName();
+  return readJson<GameSuggestion[]>(`${LS_SUGGESTIONS_PREFIX}${profileName}`, []);
+}
+
+export function saveSuggestions(suggestions: GameSuggestion[]): void {
+  const profileName = getActiveProfileName();
+  writeJson(`${LS_SUGGESTIONS_PREFIX}${profileName}`, suggestions);
   persistLocalStorageToDisk();
 }
 
@@ -655,7 +710,70 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
   return Array.from(mergedMap.values());
 }
 
-// ── Local Storage-Based Outbox Sync Helpers ──────────────────────────
+/**
+ * Merge local wishlist-derived game suggestions with a friend's. Follows the
+ * same "freshest update wins" + tombstone + union-of-reactions/comments rules
+ * as `mergeRecommendations`.
+ */
+export function mergeSuggestions(local: GameSuggestion[], remote: GameSuggestion[]): GameSuggestion[] {
+  const mergedMap = new Map<string, GameSuggestion>();
+
+  local.forEach((s) => mergedMap.set(s.id, s));
+
+  remote.forEach((remoteSug) => {
+    const localSug = mergedMap.get(remoteSug.id);
+    if (!localSug) {
+      mergedMap.set(remoteSug.id, remoteSug);
+      return;
+    }
+
+    const keepRemote = remoteSug.updatedAt > localSug.updatedAt;
+
+    const gameId = keepRemote ? remoteSug.gameId : localSug.gameId;
+    const gameName = keepRemote ? remoteSug.gameName : localSug.gameName;
+    const coverUrl = keepRemote ? remoteSug.coverUrl ?? localSug.coverUrl : localSug.coverUrl ?? remoteSug.coverUrl;
+    const note = keepRemote ? remoteSug.note : localSug.note;
+    const suggestedBy = keepRemote ? remoteSug.suggestedBy : localSug.suggestedBy;
+    const suggestedTo = keepRemote ? remoteSug.suggestedTo : localSug.suggestedTo;
+    const deleted = localSug.deleted || remoteSug.deleted || false;
+    const createdAt = Math.min(localSug.createdAt, remoteSug.createdAt);
+    const updatedAt = Math.max(localSug.updatedAt, remoteSug.updatedAt);
+
+    const reactionMap: Record<string, SuggestionReactionKind> = { ...(localSug.reactions || {}) };
+    if (remoteSug.reactions) {
+      for (const [author, kind] of Object.entries(remoteSug.reactions)) {
+        if (keepRemote || reactionMap[author] === undefined) {
+          reactionMap[author] = kind;
+        }
+      }
+    }
+
+    const commentMap = new Map<string, SuggestionComment>();
+    localSug.comments.forEach((c) => commentMap.set(c.id, c));
+    remoteSug.comments.forEach((c) => commentMap.set(c.id, c));
+
+    const comments = Array.from(commentMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+    mergedMap.set(remoteSug.id, {
+      id: localSug.id,
+      gameId,
+      gameName,
+      coverUrl,
+      note,
+      suggestedBy,
+      suggestedTo,
+      reactions: reactionMap,
+      addedToWishlist: keepRemote ? remoteSug.addedToWishlist ?? localSug.addedToWishlist : localSug.addedToWishlist ?? remoteSug.addedToWishlist,
+      comments,
+      createdAt,
+      updatedAt,
+      deleted,
+    });
+  });
+
+  return Array.from(mergedMap.values());
+}
+
 //
 // Each client publishes its outbox into `<appData>/sync/<myDeviceId>/`
 // and reads a friend's outbox from `<appData>/sync/<friendDeviceId>/`.
@@ -677,7 +795,8 @@ export async function pushMyOutbox(
   stats: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
   sessions: GameSession[],
   recs: GameRecommendation[],
-  sharedGames?: SharedGameStat[]
+  sharedGames?: SharedGameStat[],
+  suggestions?: GameSuggestion[]
 ): Promise<SyncResult> {
   const localFriends = loadFriends();
   const payload = {
@@ -696,6 +815,7 @@ export async function pushMyOutbox(
     games: sharedGames || [],
     sessions,
     recommendations: recs,
+    suggestions: suggestions || [],
     updatedAt: Date.now(),
   };
 
@@ -735,6 +855,7 @@ export async function fetchFriendOutbox(friendSyncId: string): Promise<{
   games?: SharedGameStat[];
   sessions: GameSession[];
   recommendations: GameRecommendation[];
+  suggestions: GameSuggestion[];
 } | null> {
   if (!friendSyncId) return null;
 
@@ -835,11 +956,13 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
   const mergedFriends = Array.from(mergedFriendsMap.values());
   const mergedSessions = mergeSessions(local.sessions || [], remote.sessions || []);
   const mergedRecommendations = mergeRecommendations(local.recommendations || [], remote.recommendations || []);
+  const mergedSuggestions = mergeSuggestions(local.suggestions || [], remote.suggestions || []);
 
   return {
     profile: local.profile,
     friends: mergedFriends,
     sessions: mergedSessions,
     recommendations: mergedRecommendations,
+    suggestions: mergedSuggestions,
   };
 }

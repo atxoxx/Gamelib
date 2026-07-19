@@ -3773,3 +3773,62 @@
   min-width: 70px;
   color: var(--color-text);
 }
+/* ── Wishlist Shares (Game Suggestions) Tab ───────────────────────── */
+.suggestions-section .recs-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--space-lg);
+  align-items: start;
+}
+.suggestions-toolbar {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  align-items: center;
+}
+.suggestions-toolbar .comment-input { flex: 1; }
+.suggestion-sort { width: auto; flex-shrink: 0; }
+.sug-card {
+  background: var(--color-bg-card, rgba(30, 30, 40, 0.4));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  backdrop-filter: blur(10px);
+}
+.sug-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-sm);
+}
+.sug-cover {
+  width: 56px; height: 76px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--color-bg-inset, #0d0d12);
+}
+.sug-cover-fallback {
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #4f9dff, #7bc96f);
+}
+.sug-meta { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.sug-game { font-weight: var(--font-weight-bold); font-size: var(--font-size-md); color: var(--color-text-primary); }
+.sug-author { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.sug-note {
+  font-size: var(--font-size-sm); color: var(--color-text-primary); line-height: 1.5;
+  background: rgba(0,0,0,0.15); padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md); border-left: 3px solid var(--color-accent); margin: 0;
+}
+.rec-want-btn:disabled { cursor: default; opacity: 0.8; }
+.sug-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
