@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useGamepad } from "../hooks/GamepadProvider";
 import { useFocusable } from "../hooks/useFocusable";
@@ -62,6 +62,88 @@ function SearchIcon() {
   );
 }
 
+function WishlistIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
+
+function DealsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M20 7h-3a2 2 0 0 1-2-2V3" />
+      <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3" />
+      <path d="M9 7H4a2 2 0 0 0-2 2v1" />
+      <path d="M14 14l-3 3-3-3" />
+      <path d="M11 17V7" />
+    </svg>
+  );
+}
+
+function AchievementsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <circle cx="12" cy="8" r="6" />
+      <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function StorageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <line x1="22" y1="12" x2="2" y2="12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z" />
+      <line x1="6" y1="16" x2="6.01" y2="16" />
+      <line x1="10" y1="16" x2="10.01" y2="16" />
+    </svg>
+  );
+}
+
+function NewsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M4 11a9 9 0 0 1 9 9" />
+      <path d="M4 4a16 16 0 0 1 16 16" />
+      <circle cx="5" cy="19" r="1" />
+    </svg>
+  );
+}
+
+function CommunityIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function FriendsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <line x1="19" y1="8" x2="19" y2="14" />
+      <line x1="22" y1="11" x2="16" y2="11" />
+    </svg>
+  );
+}
+
 // ── Tabs Definition ──────────────────────────────────────────────
 
 interface HeaderTab {
@@ -74,27 +156,34 @@ const tabs: HeaderTab[] = [
   { path: "/activity", label: "Home", icon: <HomeIcon /> },
   { path: "/library", label: "Library", icon: <LibraryIcon /> },
   { path: "/store", label: "Store", icon: <StoreIcon /> },
+  { path: "/wishlist", label: "Wishlist", icon: <WishlistIcon /> },
+  { path: "/deals", label: "Deals", icon: <DealsIcon /> },
+  { path: "/achievements", label: "Achievements", icon: <AchievementsIcon /> },
+  { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
+  { path: "/storage", label: "Storage", icon: <StorageIcon /> },
+  { path: "/news", label: "News", icon: <NewsIcon /> },
+  { path: "/community", label: "Stats", icon: <CommunityIcon /> },
+  { path: "/friends", label: "Community", icon: <FriendsIcon /> },
   { path: "/settings", label: "System", icon: <SettingsIcon /> },
 ];
 
+// Home (path "/activity") plus the section tabs above give a complete
+// Big Screen navigation. The header tab cycler falls back to the first
+// matching tab when the active path isn't in the list.
+
 export function getActiveTabPath(pathname: string): string {
   if (pathname.startsWith("/library")) return "/library";
-  if (
-    pathname.startsWith("/store") ||
-    pathname.startsWith("/deals") ||
-    pathname.startsWith("/wishlist")
-  ) {
-    return "/store";
-  }
-  if (
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/storage") ||
-    pathname.startsWith("/downloads") ||
-    pathname.startsWith("/achievements") ||
-    pathname.startsWith("/friends")
-  ) {
-    return "/settings";
-  }
+  if (pathname.startsWith("/wishlist")) return "/wishlist";
+  if (pathname.startsWith("/deals")) return "/deals";
+  if (pathname.startsWith("/store")) return "/store";
+  if (pathname.startsWith("/achievements")) return "/achievements";
+  if (pathname.startsWith("/downloads")) return "/downloads";
+  if (pathname.startsWith("/storage")) return "/storage";
+  if (pathname.startsWith("/news")) return "/news";
+  if (pathname.startsWith("/community")) return "/community";
+  if (pathname.startsWith("/friends")) return "/friends";
+  if (pathname.startsWith("/settings")) return "/settings";
+  if (pathname.startsWith("/activity")) return "/activity";
   return "/activity"; // Default to Home
 }
 
@@ -133,6 +222,7 @@ export default function BigScreenHeader({
   const { setBigScreen } = useBigScreen();
 
   const [timeString, setTimeString] = useState("");
+  const tabsNavRef = useRef<HTMLElement>(null);
 
   // Live clock
   useEffect(() => {
@@ -150,6 +240,15 @@ export default function BigScreenHeader({
     const interval = setInterval(updateTime, 1000 * 30);
     return () => clearInterval(interval);
   }, []);
+
+  // Keep the active tab scrolled into view as the user cycles tabs
+  // (or navigates between sections). Scrolls the tabs container so
+  // the highlighted item stays visible without shifting the header.
+  useEffect(() => {
+    const nav = tabsNavRef.current;
+    const active = nav?.querySelector<HTMLElement>(".bigscreen-header-tab.active");
+    active?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [location.pathname]);
 
   // LB / RB: Cycle main tabs
   useEffect(() => {
@@ -184,7 +283,7 @@ export default function BigScreenHeader({
         </div>
 
         {/* Primary Tabs */}
-        <nav className="bigscreen-header-tabs" role="navigation" aria-label="Main sections">
+        <nav className="bigscreen-header-tabs" role="navigation" aria-label="Main sections" ref={tabsNavRef}>
           {tabs.map((tab) => {
             const activePath = getActiveTabPath(location.pathname);
             const isActive = activePath === tab.path;

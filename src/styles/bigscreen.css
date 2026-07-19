@@ -105,13 +105,24 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+
+.bigscreen-header-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .bigscreen-header-tab {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 20px;
+  padding: 8px 18px;
   border-radius: 30px;
   border: 1px solid transparent;
   background: rgba(255, 255, 255, 0.03);
@@ -121,6 +132,7 @@
   text-decoration: none;
   cursor: pointer;
   outline: none;
+  white-space: nowrap;
   transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
