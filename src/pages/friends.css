@@ -250,6 +250,34 @@
   text-overflow: ellipsis;
 }
 
+.friend-now-playing {
+  font-size: var(--font-size-xs);
+  color: var(--color-success, #22c55e);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.now-playing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-success, #22c55e);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  animation: nowPlayingPulse 1.6s infinite;
+}
+
+@keyframes nowPlayingPulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
+  70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
 .friend-stats {
   font-size: var(--font-size-xs);
   color: var(--color-accent);
@@ -661,6 +689,13 @@
   gap: var(--space-sm);
 }
 
+.session-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .session-game-title {
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
@@ -759,6 +794,14 @@
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--space-sm);
+  gap: var(--space-sm);
+}
+
+.rec-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
 }
 
 .rec-meta {
@@ -1018,33 +1061,34 @@
   color: var(--color-text-primary);
 }
 
-.compare-stats-card {
+.compare-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-md);
+}
+
+@media (max-width: 800px) {
+  .compare-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.compare-stat-card {
   background: var(--color-bg-card, rgba(30, 30, 40, 0.4));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-lg);
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
-}
-
-.compare-stats-row {
-  display: grid;
-  grid-template-columns: 1fr 180px 1fr;
   align-items: center;
+  gap: 2px;
   text-align: center;
-  font-size: var(--font-size-sm);
-  padding: var(--space-sm) 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-}
-
-.compare-stats-row:last-child {
-  border-bottom: none;
 }
 
 .compare-stat-val {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
+  line-height: 1.4;
 }
 
 .compare-stat-val.left {
@@ -1055,11 +1099,180 @@
   color: var(--color-info, #3b82f6);
 }
 
-.compare-stat-title {
+.compare-stat-label {
   color: var(--color-text-muted);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-xs);
   text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 4px 0;
+}
+
+.compare-controls-row {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+.compare-sort-group {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.compare-sort-group select {
+  width: 150px;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.compare-now-playing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-success, #22c55e);
+  font-weight: var(--font-weight-semibold);
+  margin-top: 2px;
+}
+
+.compare-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.compare-games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-md);
+}
+
+.compare-game-card {
+  background: var(--color-bg-card, rgba(30, 30, 40, 0.4));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  backdrop-filter: blur(10px);
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.compare-game-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-accent);
+}
+
+.compare-game-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.compare-game-name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-own-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 3px 7px;
+  border-radius: var(--radius-full, 20px);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.compare-own-badge.both {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: var(--color-success, #22c55e);
+  color: var(--color-success, #22c55e);
+}
+
+.compare-own-badge.me {
+  background: rgba(138, 75, 246, 0.15);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.compare-own-badge.friend {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--color-info, #3b82f6);
+  color: var(--color-info, #3b82f6);
+}
+
+.compare-game-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.compare-player-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.compare-player-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+.compare-player-label .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.compare-player-label .dot.left {
+  background: var(--color-accent);
+}
+
+.compare-player-label .dot.right {
+  background: var(--color-info, #3b82f6);
+}
+
+.compare-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.compare-bar-value {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  min-width: 38px;
+}
+
+.compare-bar-row .compare-playtime-bar {
+  flex: 1;
+}
+
+.compare-ach {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-left: 14px;
+}
+
+.compare-not-owned {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 .compare-library-title-row {
@@ -1307,6 +1520,23 @@
   font-size: var(--font-size-sm);
   outline: none;
   transition: border-color var(--transition-fast);
+  color-scheme: dark;
+}
+
+/* Make native datetime/number control icons visible on the dark field */
+.profile-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+
+.profile-input::-webkit-inner-spin-button,
+.profile-input::-webkit-outer-spin-button {
+  filter: invert(0.8);
+}
+
+.profile-input::-webkit-datetime-edit,
+.profile-input::-webkit-datetime-edit-fields-wrapper {
+  color: var(--color-text-primary);
 }
 
 .profile-input:focus {

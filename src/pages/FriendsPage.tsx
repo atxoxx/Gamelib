@@ -262,7 +262,7 @@ function SearchableGameSelector({
 
 export default function FriendsPage() {
   const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "compare" | "profile">("friends");
-  const { games } = useGames();
+  const { games, runningGameIds } = useGames();
   const { cache } = useAchievements();
   const { showToast } = useToast();
 
@@ -412,6 +412,24 @@ export default function FriendsPage() {
   const generatedFriendCode = useMemo(() => {
     return encodeFriendCode(profile, selfStats, profile.favoriteGameName);
   }, [profile, selfStats]);
+
+  // Derive the game we're currently playing from the live watcher state.
+  const currentlyPlaying = useMemo(() => {
+    if (!runningGameIds || runningGameIds.length === 0) return undefined;
+    const game = games.find((g) => g.id === runningGameIds[0]);
+    return game ? game.name : undefined;
+  }, [runningGameIds, games]);
+
+  // Keep the profile's "currentlyPlaying" field in sync with the watcher so
+  // it is included in the outbox and visible to friends.
+  useEffect(() => {
+    setProfile((prev) => {
+      if (prev.currentlyPlaying === currentlyPlaying) return prev;
+      const updated = { ...prev, currentlyPlaying };
+      saveUserProfile(updated);
+      return updated;
+    });
+  }, [currentlyPlaying]);
 
   // Handle friend code paste parsing
   useEffect(() => {
@@ -565,6 +583,7 @@ export default function FriendsPage() {
               friend.avatar !== remoteOutbox.profile.avatar ||
               friend.status !== remoteOutbox.profile.status ||
               friend.favoriteGame !== remoteOutbox.profile.favoriteGame ||
+              friend.currentlyPlaying !== remoteOutbox.profile.currentlyPlaying ||
               JSON.stringify(friend.libStats) !== JSON.stringify(remoteOutbox.profile.libStats);
 
             if (hasDiff) {
@@ -575,6 +594,7 @@ export default function FriendsPage() {
                 avatar: remoteOutbox.profile.avatar,
                 status: remoteOutbox.profile.status,
                 favoriteGame: remoteOutbox.profile.favoriteGame || undefined,
+                currentlyPlaying: remoteOutbox.profile.currentlyPlaying || undefined,
                 libStats: remoteOutbox.profile.libStats,
               });
               continue;
@@ -818,17 +838,13 @@ export default function FriendsPage() {
     await pushMyOutbox(profile, selfStats, updated, recommendations);
   };
 
-  const handleCancelSession = async (sessionId: string) => {
-    const updated = sessions.map((s) => {
-      if (s.id === sessionId) {
-        return { ...s, deleted: true, updatedAt: Date.now() };
-      }
-      return s;
-    });
+  // Remove a session entirely (hard delete from local list)
+  const handleDeleteSession = async (sessionId: string) => {
+    const updated = sessions.filter((s) => s.id !== sessionId);
     setSessions(updated);
     saveSessions(updated);
     await pushMyOutbox(profile, selfStats, updated, recommendations);
-    showToast("Session cancelled.", "info");
+    showToast("Session removed.", "info");
   };
 
   // ── Recommendations Logic ────────────────────────────────────────
@@ -895,6 +911,15 @@ export default function FriendsPage() {
     await pushMyOutbox(profile, selfStats, sessions, updated);
     setCommentInputs((prev) => ({ ...prev, [recId]: "" }));
     showToast("Comment posted.", "success");
+  };
+
+  // Remove a recommendation entirely (hard delete from local list)
+  const handleDeleteRecommendation = async (recId: string) => {
+    const updated = recommendations.filter((r) => r.id !== recId);
+    setRecommendations(updated);
+    saveRecommendations(updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated);
+    showToast("Recommendation removed.", "info");
   };
 
   // ── Game Comparison Logic ────────────────────────────────────────
@@ -1173,9 +1198,16 @@ export default function FriendsPage() {
                     {renderAvatar(friend.avatar, friend.name)}
                     <div className="friend-info">
                       <div className="friend-name">{friend.name}</div>
-                      <div className="friend-status-text" title={friend.status}>
-                        {friend.status}
-                      </div>
+                      {friend.currentlyPlaying ? (
+                        <div className="friend-now-playing" title={`Playing ${friend.currentlyPlaying}`}>
+                          <span className="now-playing-dot" />
+                          {friend.currentlyPlaying}
+                        </div>
+                      ) : (
+                        <div className="friend-status-text" title={friend.status}>
+                          {friend.status}
+                        </div>
+                      )}
                       {friend.libStats && (
                         <div className="friend-stats">
                           <span>{friend.libStats.gamesCount} games</span>
@@ -1296,17 +1328,30 @@ export default function FriendsPage() {
                               <div className="session-game-title">{session.gameName}</div>
                               <div className="session-date">{formatDateTime(session.scheduledAt)}</div>
                             </div>
+                            <div className="session-card-actions">
                             {isCreator && (
                               <button
                                 type="button"
                                 className="friend-delete-btn"
                                 style={{ opacity: 1, position: "static" }}
-                                onClick={() => handleCancelSession(session.id)}
-                                title="Cancel Session"
+                                onClick={() => handleDeleteSession(session.id)}
+                                title="Remove Session"
                               >
                                 <TrashIcon />
                               </button>
                             )}
+                            {!isCreator && (
+                              <button
+                                type="button"
+                                className="friend-delete-btn"
+                                style={{ opacity: 1, position: "static" }}
+                                onClick={() => handleDeleteSession(session.id)}
+                                title="Remove from my list"
+                              >
+                                <TrashIcon />
+                              </button>
+                            )}
+                          </div>
                           </div>
                           
                           {session.description && (
@@ -1371,21 +1416,32 @@ export default function FriendsPage() {
                 ) : (
                   recommendations.map((rec) => (
                     <div key={rec.id} className="rec-card">
-                      <div className="rec-header">
-                        <div className="rec-meta">
-                          <span className="rec-game">{rec.gameName}</span>
-                          <span className="rec-author">
-                            Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
-                          </span>
-                        </div>
-                        <div className="rating-stars">
-                          {Array.from({ length: 5 }).map((_, idx) => (
-                            <span key={idx} className={idx < rec.rating ? "active" : ""}>
-                              ★
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                       <div className="rec-header">
+                         <div className="rec-meta">
+                           <span className="rec-game">{rec.gameName}</span>
+                           <span className="rec-author">
+                             Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
+                           </span>
+                         </div>
+                         <div className="rec-header-actions">
+                           <div className="rating-stars">
+                             {Array.from({ length: 5 }).map((_, idx) => (
+                               <span key={idx} className={idx < rec.rating ? "active" : ""}>
+                                 ★
+                               </span>
+                             ))}
+                           </div>
+                           <button
+                             type="button"
+                             className="friend-delete-btn"
+                             style={{ opacity: 1, position: "static" }}
+                             onClick={() => handleDeleteRecommendation(rec.id)}
+                             title="Remove Recommendation"
+                           >
+                             <TrashIcon />
+                           </button>
+                         </div>
+                       </div>
 
                       <p className="rec-reason">"{rec.reason}"</p>
 
@@ -1540,45 +1596,57 @@ export default function FriendsPage() {
                   <div className="compare-user-profile">
                     {renderAvatar(profile.avatar, profile.name, "compare-user-avatar")}
                     <span className="compare-user-name">{profile.name} (You)</span>
+                    {profile.currentlyPlaying && (
+                      <span className="compare-now-playing">
+                        <span className="now-playing-dot" />
+                        {profile.currentlyPlaying}
+                      </span>
+                    )}
                   </div>
                   <div className="compare-vs-badge">VS</div>
                   <div className="compare-user-profile right">
                     {renderAvatar(compareFriend.avatar, compareFriend.name, "compare-user-avatar friend")}
                     <span className="compare-user-name">{compareFriend.name}</span>
+                    {compareFriend.currentlyPlaying && (
+                      <span className="compare-now-playing">
+                        <span className="now-playing-dot" />
+                        {compareFriend.currentlyPlaying}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* KPI stats */}
                 {comparisonSummary && (
-                  <div className="compare-stats-card">
-                    <div className="compare-stats-row">
+                  <div className="compare-stats-grid">
+                    <div className="compare-stat-card">
                       <span className="compare-stat-val left">{selfStats.gamesCount}</span>
-                      <span className="compare-stat-title">Games Owned</span>
+                      <span className="compare-stat-label">Games Owned</span>
                       <span className="compare-stat-val right">{compareFriend.libStats?.gamesCount || 0}</span>
                     </div>
 
-                    <div className="compare-stats-row">
+                    <div className="compare-stat-card">
                       <span className="compare-stat-val left">{comparisonSummary.sharedCount}</span>
-                      <span className="compare-stat-title">Shared Games</span>
+                      <span className="compare-stat-label">Shared Games</span>
                       <span className="compare-stat-val right">{comparisonSummary.sharedCount}</span>
                     </div>
 
-                    <div className="compare-stats-row">
+                    <div className="compare-stat-card">
                       <span className="compare-stat-val left">{formatHours(selfStats.playtimeMinutes)}</span>
-                      <span className="compare-stat-title">Total Playtime</span>
+                      <span className="compare-stat-label">Total Playtime</span>
                       <span className="compare-stat-val right">{formatHours(compareFriend.libStats?.playtimeMinutes || 0)}</span>
                     </div>
 
-                    <div className="compare-stats-row">
+                    <div className="compare-stat-card">
                       <span className="compare-stat-val left">{comparisonSummary.averageMyAchievements}%</span>
-                      <span className="compare-stat-title">Avg Achievements</span>
+                      <span className="compare-stat-label">Avg Achievements</span>
                       <span className="compare-stat-val right">{comparisonSummary.averageFriendAchievements}%</span>
                     </div>
                   </div>
                 )}
 
                 {/* Filter and Sort Chips Row */}
-                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "var(--space-md)", alignItems: "center" }}>
+                <div className="compare-controls-row">
                   <div className="compare-filter-chips">
                     <button
                       type="button"
@@ -1610,11 +1678,10 @@ export default function FriendsPage() {
                     </button>
                   </div>
 
-                  <div className="compare-selector-group" style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>
+                  <div className="compare-selector-group compare-sort-group">
                     <span>Sort:</span>
                     <select
                       className="profile-input"
-                      style={{ width: "130px", fontSize: "11px", padding: "2px 6px" }}
                       value={compareSort}
                       onChange={(e) => setCompareSort(e.target.value as any)}
                     >
@@ -1625,82 +1692,87 @@ export default function FriendsPage() {
                   </div>
                 </div>
 
-                {/* Grid breakdown */}
+                {/* Game comparison grid */}
                 <div>
                   <div className="compare-library-title-row">
                     <h3 className="compare-library-title">Comparison List</h3>
+                    <span className="compare-count">{sortedCompareData.length} games</span>
                   </div>
-                  <div className="compare-library-table">
-                    <div className="compare-table-row header">
-                      <span>Game Name</span>
-                      <span>My Stats (Completion)</span>
-                      <span>{compareFriend.name}'s Stats</span>
+
+                  {sortedCompareData.length === 0 ? (
+                    <div className="game-search-no-results" style={{ padding: "40px" }}>
+                      No games match this filter criteria.
                     </div>
-                    {sortedCompareData.length === 0 ? (
-                      <div className="game-search-no-results" style={{ padding: "40px" }}>
-                        No games match this filter criteria.
-                      </div>
-                    ) : (
-                      sortedCompareData.map((game, i) => {
+                  ) : (
+                    <div className="compare-games-grid">
+                      {sortedCompareData.map((game) => {
                         const maxPlayTime = Math.max(game.playTimeMe, game.playTimeFriend, 1);
                         const myPlayPercent = (game.playTimeMe / maxPlayTime) * 100;
                         const friendPlayPercent = (game.playTimeFriend / maxPlayTime) * 100;
 
                         return (
-                          <div key={i} className="compare-table-row">
-                            <div className="compare-game-name">
-                              {game.name}
-                              <div style={{ fontSize: "10px", color: "var(--color-text-muted)", marginTop: "2px" }}>
-                                {game.ownedByMe && game.ownedByFriend ? (
-                                  <span style={{ color: "var(--color-success)" }}>✓ Both Own</span>
-                                ) : game.ownedByMe ? (
-                                  <span>Only you own</span>
+                          <div key={game.id} className="compare-game-card">
+                            <div className="compare-game-card-head">
+                              <span className="compare-game-name" title={game.name}>{game.name}</span>
+                              <span className={`compare-own-badge ${
+                                game.ownedByMe && game.ownedByFriend
+                                  ? "both"
+                                  : game.ownedByMe
+                                  ? "me"
+                                  : "friend"
+                              }`}>
+                                {game.ownedByMe && game.ownedByFriend
+                                  ? "Both Own"
+                                  : game.ownedByMe
+                                  ? "You Own"
+                                  : "They Own"}
+                              </span>
+                            </div>
+
+                            <div className="compare-game-stats">
+                              <div className="compare-player-stat">
+                                <div className="compare-player-label">
+                                  <span className="dot left" /> You
+                                </div>
+                                {game.ownedByMe ? (
+                                  <>
+                                    <div className="compare-bar-row">
+                                      <span className="compare-bar-value">{formatHours(game.playTimeMe)}</span>
+                                      <div className="compare-playtime-bar">
+                                        <div className="compare-playtime-fill left" style={{ width: `${myPlayPercent}%` }} />
+                                      </div>
+                                    </div>
+                                    <span className="compare-ach">{game.achievementMe}% achievements</span>
+                                  </>
                                 ) : (
-                                  <span>Only friend owns</span>
+                                  <span className="compare-not-owned">Not in your library</span>
+                                )}
+                              </div>
+
+                              <div className="compare-player-stat">
+                                <div className="compare-player-label">
+                                  <span className="dot right" /> {compareFriend.name}
+                                </div>
+                                {game.ownedByFriend ? (
+                                  <>
+                                    <div className="compare-bar-row">
+                                      <span className="compare-bar-value">{formatHours(game.playTimeFriend)}</span>
+                                      <div className="compare-playtime-bar">
+                                        <div className="compare-playtime-fill right" style={{ width: `${friendPlayPercent}%` }} />
+                                      </div>
+                                    </div>
+                                    <span className="compare-ach">{game.achievementFriend}% achievements</span>
+                                  </>
+                                ) : (
+                                  <span className="compare-not-owned">Not in their library</span>
                                 )}
                               </div>
                             </div>
-
-                            <div className="compare-playtime-bar-container">
-                              {game.ownedByMe ? (
-                                <>
-                                  <span style={{ fontSize: "11px", color: "var(--color-text-primary)" }}>
-                                    {formatHours(game.playTimeMe)} ({game.achievementMe}%)
-                                  </span>
-                                  <div className="compare-playtime-bar">
-                                    <div
-                                      className="compare-playtime-fill left"
-                                      style={{ width: `${myPlayPercent}%` }}
-                                    />
-                                  </div>
-                                </>
-                              ) : (
-                                <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>— Not owned</span>
-                              )}
-                            </div>
-
-                            <div className="compare-playtime-bar-container">
-                              {game.ownedByFriend ? (
-                                <>
-                                  <span style={{ fontSize: "11px", color: "var(--color-text-primary)" }}>
-                                    {formatHours(game.playTimeFriend)} ({game.achievementFriend}%)
-                                  </span>
-                                  <div className="compare-playtime-bar">
-                                    <div
-                                      className="compare-playtime-fill right"
-                                      style={{ width: `${friendPlayPercent}%` }}
-                                    />
-                                  </div>
-                                </>
-                              ) : (
-                                <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>— Not owned</span>
-                              )}
-                            </div>
                           </div>
                         );
-                      })
-                    )}
-                  </div>
+                      })}
+                    </div>
+                  )}
                 </div>
               </>
             )}

@@ -7,6 +7,8 @@ export interface UserProfile {
   favoriteGameId?: string;
   favoriteGameName?: string;
   syncId: string; // Stable device id used as the outbox subfolder name
+  /** Name of the game the user is currently playing, or undefined when idle. */
+  currentlyPlaying?: string;
 }
 
 export interface Friend {
@@ -15,6 +17,7 @@ export interface Friend {
   avatar: string;
   status: string;
   favoriteGame?: string;
+  currentlyPlaying?: string;
   libStats?: {
     gamesCount: number;
     playtimeMinutes: number;
@@ -108,6 +111,7 @@ export function loadUserProfile(): UserProfile {
   const status = profile.status || "Ready to Play!";
   const favoriteGameId = profile.favoriteGameId || "";
   const favoriteGameName = profile.favoriteGameName || "";
+  const currentlyPlaying = profile.currentlyPlaying || undefined;
 
   // Stable device id: prefer what the backend generated (persisted across
   // runs), then a cached localStorage copy, then generate-and-cache once.
@@ -118,7 +122,7 @@ export function loadUserProfile(): UserProfile {
   }
 
   // Write key if newly generated
-  const updated = { name, avatar, status, favoriteGameId, favoriteGameName, syncId };
+  const updated = { name, avatar, status, favoriteGameId, favoriteGameName, syncId, currentlyPlaying };
   if (!profile.syncId || profile.syncId !== syncId) {
     writeJson(`${LS_PROFILE_PREFIX}${profileName}`, updated);
   }
@@ -296,6 +300,7 @@ export function encodeFriendCode(
     a: profile.avatar,
     s: profile.status,
     f: favoriteGameName || profile.favoriteGameName || "",
+    cp: profile.currentlyPlaying || "",
     g: stats.gamesCount,
     p: stats.playtimeMinutes,
     ac: stats.achievementsCount,
@@ -339,6 +344,7 @@ export function decodeFriendCode(code: string): Friend | null {
       avatar: data.a || "procedural",
       status: data.s || "Offline",
       favoriteGame: data.f || undefined,
+      currentlyPlaying: data.cp || undefined,
       libStats: {
         gamesCount: Number(data.g) || 0,
         playtimeMinutes: Number(data.p) || 0,
@@ -477,6 +483,7 @@ export async function pushMyOutbox(
       avatar: profile.avatar,
       status: profile.status,
       favoriteGame: profile.favoriteGameName || "",
+      currentlyPlaying: profile.currentlyPlaying || "",
       libStats: stats,
     },
     sessions,
@@ -507,6 +514,7 @@ export async function fetchFriendOutbox(friendSyncId: string): Promise<{
     avatar: string;
     status: string;
     favoriteGame: string;
+    currentlyPlaying?: string;
     libStats: {
       gamesCount: number;
       playtimeMinutes: number;
@@ -576,6 +584,7 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
           avatar: remoteFriend.avatar || localFriend.avatar,
           status: remoteFriend.status || localFriend.status,
           favoriteGame: remoteFriend.favoriteGame || localFriend.favoriteGame,
+          currentlyPlaying: remoteFriend.currentlyPlaying ?? localFriend.currentlyPlaying,
           libStats: remoteFriend.libStats || localFriend.libStats,
         });
       }
@@ -592,6 +601,7 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
         avatar: remote.profile.avatar || "procedural",
         status: remote.profile.status || "Offline",
         favoriteGame: remote.profile.favoriteGameName || undefined,
+        currentlyPlaying: remote.profile.currentlyPlaying || undefined,
         addedAt: Date.now(),
         syncId: remoteProfileSyncId,
       });
@@ -603,6 +613,7 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
         avatar: remote.profile.avatar || existing.avatar,
         status: remote.profile.status || existing.status,
         favoriteGame: remote.profile.favoriteGameName || existing.favoriteGame,
+        currentlyPlaying: remote.profile.currentlyPlaying || existing.currentlyPlaying,
       });
     }
   }
