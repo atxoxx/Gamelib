@@ -45,6 +45,43 @@ export interface DownloadModalProps {
 
 type Step = "checking" | "results" | "starting" | "error" | "fetching_metadata" | "file_selection";
 
+/**
+ * Single source of truth for "which URI does the user actually want to
+ * download". The Rust match can carry explicit `uris` (mirrors) and an
+ * optional convenience `magnet`. The user's selected mirror index wins
+ * when it points at a real URI; otherwise we fall back to the magnet,
+ * then to the first URI. Returning `null` is a hard signal that this
+ * match has nothing downloadable (shouldn't happen for results the Rust
+ * side vetted, but we guard anyway).
+ */
+function resolveSourceUri(
+  match: MatchedDownload | undefined,
+  mirrorIdx: number,
+): string | null {
+  if (!match) return null;
+  if (mirrorIdx >= 0 && mirrorIdx < match.uris.length) {
+    return match.uris[mirrorIdx];
+  }
+  return match.magnet ?? match.uris[0] ?? null;
+}
+
+/** Classify a resolved URI into the three engine paths we support. */
+function classifyUri(uri: string | null): {
+  isMagnet: boolean;
+  isTorrentFile: boolean;
+  isDirect: boolean;
+} {
+  const isMagnet = !!uri && uri.startsWith("magnet:");
+  const isTorrentFile =
+    !!uri && (uri.endsWith(".torrent") || uri.includes(".torrent?"));
+  const isDirect =
+    !!uri &&
+    !isMagnet &&
+    !isTorrentFile &&
+    (uri.startsWith("http://") || uri.startsWith("https://"));
+  return { isMagnet, isTorrentFile, isDirect };
+}
+
 export default function DownloadModal({
   gameName,
   gameId,
@@ -80,25 +117,56 @@ export default function DownloadModal({
   });
   const [error, setError] = useState<string | null>(null);
 
-  // Reset selected mirror when selected index changes
+  // Reset selected mirror when the selected result changes, and keep it
+  // inside the bounds of that result's `uris` so we never hand
+  // `resolveSourceUri` an out-of-range index (e.g. when moving from a
+  // 4-mirror result to a 1-mirror one).
   useEffect(() => {
-    setSelectedMirrorIdx(0);
-  }, [selectedIndex]);
+    if (selectedIndex == null) {
+      setSelectedMirrorIdx(0);
+      return;
+    }
+    const match = matches[selectedIndex];
+    const maxIdx = Math.max(0, (match?.uris.length ?? 1) - 1);
+    setSelectedMirrorIdx((prev) => (prev > maxIdx ? 0 : prev));
+  }, [selectedIndex, matches]);
 
   const [chooseFiles, setChooseFiles] = useState(false);
   const [autoExtract, setAutoExtract] = useState(false);
   const [tempTorrentId, setTempTorrentId] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
 
-  // Wait for metadata loaded to show file checklist
+  // Wait for metadata loaded to show file checklist. The engine emits a
+  // `download-progress` event once peers return the file list; when that
+  // happens we flip to `file_selection`. If the swarm is dead / the
+  // source is unreachable the event may never come, so we also arm a
+  // timeout that bails back to `results` with a clear error instead of
+  // hanging on the spinner forever.
   useEffect(() => {
-    if (step === "fetching_metadata" && tempTorrentId) {
+    if (step !== "fetching_metadata" || !tempTorrentId) return;
+    const onFilesReady = () => {
       const dl = activeDownloads.find((d) => d.id === tempTorrentId);
       if (dl && dl.files && dl.files.length > 0) {
         setSelectedFiles(new Set(dl.files.map((_, i) => i)));
         setStep("file_selection");
+        return true;
       }
-    }
+      return false;
+    };
+    if (onFilesReady()) return;
+    const timeout = window.setTimeout(() => {
+      if (cancelledRef.current) return;
+      // Clean up the orphaned list-only torrent.
+      invoke("torrent_remove", { id: tempTorrentId, deleteFiles: true }).catch((e) =>
+        console.error("Failed to clean up timed-out temporary torrent:", e),
+      );
+      setTempTorrentId(null);
+      setError(
+        "Timed out fetching the torrent's file list. The source may be unreachable — try another mirror or download the full torrent.",
+      );
+      setStep("results");
+    }, 30_000);
+    return () => window.clearTimeout(timeout);
   }, [activeDownloads, step, tempTorrentId]);
   // Suppress the "user has not picked a save path" inline error
   // until they've tried to start at least once.
@@ -196,6 +264,9 @@ export default function DownloadModal({
   }, [selectSavePath, showToast]);
 
   const handleStart = useCallback(async () => {
+    // Guard against double-firing (rapid clicks / Enter key) while a
+    // download or metadata fetch is already in flight.
+    if (step === "starting" || step === "fetching_metadata") return;
     cancelledRef.current = false;
     startAttemptedRef.current = true;
     if (selectedIndex == null) {
@@ -206,26 +277,23 @@ export default function DownloadModal({
       setError("Choose where to save the downloaded files.");
       return;
     }
+    const match = matches[selectedIndex];
+    // Single source of truth for which URI the user wants. Respects the
+    // mirror dropdown; falls back to magnet then first URI.
+    const sourceUri = resolveSourceUri(match, selectedMirrorIdx);
+    if (!sourceUri) {
+      setError("Selected source has no downloadable link.");
+      return;
+    }
     setError(null);
     try {
-      const match = matches[selectedIndex];
-      // Respect the user's explicit mirror pick — the dropdown is the
-      // affordance the modal uses for "this CDN is faster" /
-      // "the .torrent URL has embedded trackers" overrides.
-      const sourceUri = match.uris[selectedMirrorIdx] || match.magnet || match.uris[0];
-      if (!sourceUri) {
-        throw new Error("Selected source has no downloadable URI");
-      }
-
       const safeGameFolder = gameName.replace(/[:*?"<>|\\/]/g, "").trim();
       const normalizedSave = savePath.replace(/\\/g, "/");
       const finalSavePath = normalizedSave.endsWith(safeGameFolder)
         ? savePath
         : `${savePath}/${safeGameFolder}`.replace(/\\/g, "/");
 
-      const isMagnet = sourceUri.startsWith("magnet:");
-      const isTorrentFile = sourceUri.endsWith(".torrent") || sourceUri.includes(".torrent?");
-      const isDirect = !isMagnet && !isTorrentFile && (sourceUri.startsWith("http://") || sourceUri.startsWith("https://"));
+      const { isDirect } = classifyUri(sourceUri);
 
       if (isDirect) {
         setStep("starting");
@@ -277,7 +345,16 @@ export default function DownloadModal({
       // to behave.
       if (chooseFiles) {
         setStep("fetching_metadata");
-        const newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
+        let newDl;
+        try {
+          newDl = await addDownload(sourceUri, finalSavePath, gameId ?? null, match.sourceName, autoExtract, true);
+        } catch (addErr) {
+          if (cancelledRef.current) return;
+          console.error("[DownloadModal] list-only add failed:", addErr);
+          setError(`Couldn't start the download: ${addErr}`);
+          setStep("results");
+          return;
+        }
         if (cancelledRef.current) {
           invoke("torrent_remove", { id: newDl.id, deleteFiles: true }).catch((e) =>
             console.error("Failed to clean up cancelled temporary torrent:", e)
@@ -528,10 +605,8 @@ export default function DownloadModal({
 
           {(step === "results" || step === "starting") && selectedIndex != null && (() => {
             const match = matches[selectedIndex];
-            const sourceUri = match.uris[selectedMirrorIdx] || match.magnet || match.uris[0];
-            const isMagnet = sourceUri?.startsWith("magnet:");
-            const isTorrentFile = sourceUri?.endsWith(".torrent") || sourceUri?.includes(".torrent?");
-            const isDirect = !isMagnet && !isTorrentFile;
+            const sourceUri = resolveSourceUri(match, selectedMirrorIdx);
+            const { isDirect } = classifyUri(sourceUri);
 
             return (
               <div className="dl-options-section" style={{ marginTop: "var(--space-md)", display: "flex", flexDirection: "column", gap: "var(--space-xs)" }}>
@@ -629,6 +704,7 @@ export default function DownloadModal({
             <StartingStatus
               matches={matches}
               selectedIndex={selectedIndex}
+              selectedMirrorIdx={selectedMirrorIdx}
               elapsedSec={elapsedSec}
             />
           )}
@@ -708,7 +784,18 @@ export default function DownloadModal({
                   ) : undefined
                 }
               >
-                {chooseFiles ? "Fetch Files List" : "Start Download"}
+                {(() => {
+                  const selMatch =
+                    selectedIndex != null ? matches[selectedIndex] : null;
+                  const { isDirect } = classifyUri(
+                    resolveSourceUri(selMatch ?? undefined, selectedMirrorIdx),
+                  );
+                  // The "Choose files" prompt only applies to torrents;
+                  // direct links can't pre-list files, so they always
+                  // start immediately.
+                  if (chooseFiles && !isDirect) return "Fetch Files List";
+                  return "Start Download";
+                })()}
               </Button>
             )}
           </div>
@@ -837,14 +924,16 @@ function SavePathSection({
 function StartingStatus({
   matches,
   selectedIndex,
+  selectedMirrorIdx,
   elapsedSec,
 }: {
   matches: MatchedDownload[];
   selectedIndex: number | null;
+  selectedMirrorIdx: number;
   elapsedSec: number;
 }) {
   const m = selectedIndex != null ? matches[selectedIndex] : null;
-  const uri = m ? m.magnet || m.uris[0] : null;
+  const uri = resolveSourceUri(m ?? undefined, selectedMirrorIdx);
   const isHttpFetch = !!uri && /^https?:/i.test(uri);
   const slow = elapsedSec >= 10;
   const label = isHttpFetch
