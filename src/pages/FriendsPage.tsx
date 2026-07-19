@@ -2433,10 +2433,19 @@ export default function FriendsPage() {
       showToast(`"${sug.gameName}" is already in your wishlist.`, "info");
     } else {
       const asSummary: StoreGameSummary = {
+        id: 0,
         slug: sug.gameId,
         name: sug.gameName,
+        summary: null,
+        rating: null,
+        aggregatedRating: null,
         coverUrl: sug.coverUrl || null,
-      } as StoreGameSummary;
+        genres: [],
+        platforms: [],
+        firstReleaseDate: null,
+        totalRatingCount: 0,
+        hypes: 0,
+      };
       toggle(asSummary);
       showToast(`Added "${sug.gameName}" to your wishlist!`, "success");
     }

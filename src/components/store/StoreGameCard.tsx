@@ -194,7 +194,7 @@ export default function StoreGameCard({
             {game.name}
           </h3>
 
-          {game.genres.length > 0 && (
+          {(game.genres?.length ?? 0) > 0 && (
             <div className="store-card-genres">
               {game.genres.slice(0, genresToShow).map((g) => (
                 <span key={g} className="store-card-genre">
@@ -205,7 +205,7 @@ export default function StoreGameCard({
           )}
 
           <div className="store-card-platforms">
-            {game.platforms.length > 0
+            {(game.platforms?.length ?? 0) > 0
               ? game.platforms.slice(0, 3).join(" · ")
               : game.firstReleaseDate
                 ? new Date(game.firstReleaseDate).getFullYear()

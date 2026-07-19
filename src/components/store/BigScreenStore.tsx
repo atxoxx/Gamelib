@@ -347,7 +347,7 @@ export default function BigScreenStore() {
                     });
                     return (
                       <div
-                        key={item.id}
+                        key={item.slug}
                         className="bigscreen-game-card store-wishlist-card"
                         {...wishProps}
                       >
