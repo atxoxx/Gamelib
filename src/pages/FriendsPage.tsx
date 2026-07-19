@@ -2723,9 +2723,9 @@ export default function FriendsPage() {
         isYou: true,
         status: profile.status,
         currentlyPlaying: profile.currentlyPlaying,
-        gamesCount: profile.libStats?.gamesCount || 0,
-        playtimeMinutes: profile.libStats?.playtimeMinutes || 0,
-        achievementsCount: profile.libStats?.achievementsCount || 0,
+        gamesCount: selfStats.gamesCount,
+        playtimeMinutes: selfStats.playtimeMinutes,
+        achievementsCount: selfStats.achievementsCount,
       },
       ...friends
         .filter((f) => !f.blocked)
@@ -2752,7 +2752,7 @@ export default function FriendsPage() {
     const ranked = [...players].sort((a, b) => scoreOf(b) - scoreOf(a));
     const top = scoreOf(ranked[0] || ({} as (typeof players)[number])) || 1;
     return ranked.map((p, i) => ({ ...p, rank: i + 1, value: scoreOf(p), max: top }));
-  }, [friends, profile, leaderboardMetric]);
+  }, [friends, profile, selfStats, leaderboardMetric]);
 
   const leaderboardTab = (
     <div className="leaderboard-section">
