@@ -15,6 +15,11 @@ export interface UserProfile {
   region?: string;
   /** Unix seconds of the last time we published our outbox. */
   lastPublished?: number;
+  libStats?: {
+    gamesCount: number;
+    playtimeMinutes: number;
+    achievementsCount: number;
+  };
 }
 
 /** Quick-pick status presets for the profile editor. */
@@ -103,6 +108,7 @@ export interface GameRecommendation {
   wantToPlay?: boolean;
   createdAt: number;
   updatedAt: number; // Unix timestamp for merging
+  deleted?: boolean; // Tombstone for sync deletion
 }
 
 /** Lightweight per-game stat shared in the outbox so friends can compare libraries truthfully. */
@@ -112,19 +118,6 @@ export interface SharedGameStat {
   playTimeMin: number;
   achievementPercent: number;
   genres: string[];
-}
-
-export interface GameRecommendation {
-  id: string;
-  gameId: string;
-  gameName: string;
-  recommendedBy: string; // Name of recommender
-  recommendedTo: string; // Name of friend, or "All Friends"
-  reason: string;
-  rating: number; // 1 to 5 stars
-  comments: RecommendationComment[];
-  createdAt: number;
-  updatedAt: number; // Unix timestamp for merging
 }
 
 // Keys namespaced per active profile name (A, B, C)
@@ -361,30 +354,10 @@ export function getInitials(name: string): string {
  */
 export function encodeFriendCode(
   profile: UserProfile,
-  stats: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
-  favoriteGameName?: string
+  _stats?: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
+  _favoriteGameName?: string
 ): string {
-  const payload = {
-    n: profile.name,
-    a: profile.avatar,
-    s: profile.status,
-    f: favoriteGameName || profile.favoriteGameName || "",
-    cp: profile.currentlyPlaying || "",
-    g: stats.gamesCount,
-    p: stats.playtimeMinutes,
-    ac: stats.achievementsCount,
-    sy: profile.syncId, // Share outbox sync channel ID
-  };
-  
-  try {
-    const jsonStr = JSON.stringify(payload);
-    const encoded = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (_, p1) => {
-      return String.fromCharCode(parseInt(p1, 16));
-    }));
-    return `GMLF-${encoded}`;
-  } catch {
-    return "";
-  }
+  return profile.syncId;
 }
 
 /**
@@ -393,34 +366,43 @@ export function encodeFriendCode(
 export function decodeFriendCode(code: string): Friend | null {
   try {
     const trimmed = code.trim();
-    if (!trimmed.startsWith("GMLF-")) return null;
+    if (!trimmed) return null;
     
-    const base64 = trimmed.substring(5);
-    const binary = atob(base64);
-    const jsonStr = decodeURIComponent(
-      Array.prototype.map
-        .call(binary, (c: string) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
+    let syncId = trimmed;
+    if (trimmed.startsWith("GMLF-")) {
+      const remaining = trimmed.substring(5);
+      if (remaining.startsWith("device_")) {
+        syncId = remaining;
+      } else {
+        // Decode old Base64 format for backward compatibility
+        try {
+          const binary = atob(remaining);
+          const jsonStr = decodeURIComponent(
+            Array.prototype.map
+              .call(binary, (c: string) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+              .join("")
+          );
+          const data = JSON.parse(jsonStr);
+          if (data.sy) {
+            syncId = data.sy;
+          }
+        } catch {
+          syncId = remaining;
+        }
+      }
+    }
     
-    const data = JSON.parse(jsonStr);
-    
-    if (typeof data.n !== "string" || !data.n.trim() || !data.sy) return null;
+    if (!syncId.startsWith("device_")) {
+      return null;
+    }
     
     return {
       id: `friend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: data.n,
-      avatar: data.a || "procedural",
-      status: data.s || "Offline",
-      favoriteGame: data.f || undefined,
-      currentlyPlaying: data.cp || undefined,
-      libStats: {
-        gamesCount: Number(data.g) || 0,
-        playtimeMinutes: Number(data.p) || 0,
-        achievementsCount: Number(data.ac) || 0,
-      },
+      name: "Gamer Syncing...",
+      avatar: "procedural",
+      status: "Offline",
       addedAt: Date.now(),
-      syncId: data.sy,
+      syncId: syncId,
     };
   } catch {
     return null;
@@ -488,9 +470,6 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
   return Array.from(mergedMap.values()).filter((s) => !s.deleted);
 }
 
-/**
- * Merge local recommendations with remote reviews and comments.
- */
 export function mergeRecommendations(local: GameRecommendation[], remote: GameRecommendation[]): GameRecommendation[] {
   const mergedMap = new Map<string, GameRecommendation>();
   
@@ -509,9 +488,10 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
       const recommendedTo = keepRemote ? remoteRec.recommendedTo : localRec.recommendedTo;
       const reason = keepRemote ? remoteRec.reason : localRec.reason;
       const rating = keepRemote ? remoteRec.rating : localRec.rating;
+      const deleted = localRec.deleted || remoteRec.deleted || false;
       const createdAt = Math.min(localRec.createdAt, remoteRec.createdAt);
       const updatedAt = Math.max(localRec.updatedAt, remoteRec.updatedAt);
-
+ 
       // Merge reactions key-by-key: union of author keys, remote wins per key
       // when its rec is newer (and thus more likely authoritative).
       const reactionMap: Record<string, ReactionKind> = { ...(localRec.reactions || {}) };
@@ -522,13 +502,13 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
           }
         }
       }
-
+ 
       const commentMap = new Map<string, any>();
       localRec.comments.forEach((c) => commentMap.set(c.id, c));
       remoteRec.comments.forEach((c) => commentMap.set(c.id, c));
-
+ 
       const comments = Array.from(commentMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-
+ 
       mergedMap.set(remoteRec.id, {
         id: localRec.id,
         gameId,
@@ -542,11 +522,12 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
         comments,
         createdAt,
         updatedAt,
+        deleted,
       });
     }
   });
-
-  return Array.from(mergedMap.values());
+ 
+  return Array.from(mergedMap.values()).filter((r) => !r.deleted);
 }
 
 // ── Local Storage-Based Outbox Sync Helpers ──────────────────────────
@@ -573,6 +554,7 @@ export async function pushMyOutbox(
   recs: GameRecommendation[],
   sharedGames?: SharedGameStat[]
 ): Promise<SyncResult> {
+  const localFriends = loadFriends();
   const payload = {
     syncId: profile.syncId,
     profile: {
@@ -585,6 +567,7 @@ export async function pushMyOutbox(
       region: profile.region || "",
       libStats: stats,
     },
+    friends: localFriends.map((f) => f.syncId),
     games: sharedGames || [],
     sessions,
     recommendations: recs,
@@ -623,6 +606,7 @@ export async function fetchFriendOutbox(friendSyncId: string): Promise<{
       achievementsCount: number;
     };
   };
+  friends?: string[];
   games?: SharedGameStat[];
   sessions: GameSession[];
   recommendations: GameRecommendation[];
@@ -677,10 +661,14 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
   
   if (remote.friends) {
     remote.friends.forEach((remoteFriend) => {
+      // Do not process if it matches the local user's own profile syncId (to prevent own-profile addition)
+      if (local.profile && remoteFriend.syncId === local.profile.syncId) {
+        return;
+      }
+
       const localFriend = mergedFriendsMap.get(remoteFriend.syncId);
-      if (!localFriend) {
-        mergedFriendsMap.set(remoteFriend.syncId, remoteFriend);
-      } else {
+      if (localFriend) {
+        // Only update existing friends in our list
         mergedFriendsMap.set(remoteFriend.syncId, {
           ...localFriend,
           name: remoteFriend.name || localFriend.name,
@@ -688,16 +676,17 @@ export function mergeDatabases(local: FriendsDatabase, remote: FriendsDatabase):
           status: remoteFriend.status || localFriend.status,
           favoriteGame: remoteFriend.favoriteGame || localFriend.favoriteGame,
           currentlyPlaying: remoteFriend.currentlyPlaying ?? localFriend.currentlyPlaying,
+          bio: remoteFriend.bio || localFriend.bio,
+          region: remoteFriend.region || localFriend.region,
           libStats: remoteFriend.libStats || localFriend.libStats,
+          games: remoteFriend.games || localFriend.games,
         });
       }
     });
   }
 
-  // NOTE: We intentionally do NOT auto-add the remote profile as a friend.
-  // Friends are added manually via friend codes only, so a peer's data sync
-  // (sessions/recommendations) never silently injects them into the list —
-  // which also prevents the local player's own outbox appearing as a "friend".
+  // NOTE: Friends are added manually or approved mutually via invitations.
+  // We intentionally do NOT auto-add remote friends we haven't accepted.
 
   const mergedFriends = Array.from(mergedFriendsMap.values());
   const mergedSessions = mergeSessions(local.sessions || [], remote.sessions || []);

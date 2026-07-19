@@ -16,8 +16,6 @@ import {
   SharedGameStat,
   ReactionKind,
   RsvpStatus,
-  getActiveProfileName,
-  setActiveProfileName,
   loadUserProfile,
   saveUserProfile,
   loadFriends,
@@ -39,6 +37,7 @@ import {
   loadFriendsDbToLocalStorage,
   FriendsDatabase,
   mergeDatabases,
+  listPeerOutboxes,
 } from "./friendsStorage";
 import "./friends.css";
 
@@ -178,15 +177,17 @@ function renderSessionCard(
           <div className="session-date">{formatDateTime(session.scheduledAt)}</div>
         </div>
         <div className="session-card-actions">
-          <button
-            type="button"
-            className="friend-delete-btn"
-            style={{ opacity: 1, position: "static" }}
-            onClick={() => onDelete(session.id)}
-            title={isCreator ? "Remove Session" : "Remove from my list"}
-          >
-            <TrashIcon />
-          </button>
+          {isCreator && (
+            <button
+              type="button"
+              className="friend-delete-btn"
+              style={{ opacity: 1, position: "static" }}
+              onClick={() => onDelete(session.id)}
+              title="Remove Session"
+            >
+              <TrashIcon />
+            </button>
+          )}
         </div>
       </div>
 
@@ -404,6 +405,19 @@ function SearchableGameSelector({
   );
 }
 
+interface FriendInvitation {
+  syncId: string;
+  name: string;
+  avatar: string;
+  status: string;
+  favoriteGame?: string;
+  libStats?: {
+    gamesCount: number;
+    playtimeMinutes: number;
+    achievementsCount: number;
+  };
+}
+
 // ── Main Page Component ─────────────────────────────────────────────
 
 export default function FriendsPage() {
@@ -412,27 +426,24 @@ export default function FriendsPage() {
   const { cache } = useAchievements();
   const { showToast } = useToast();
 
-  // Multi-profile support — the storage layer namespaces all data by profile
-  // name (A/B/C...). Switching reloads the scoped state from localStorage.
-  const [profileName, setProfileName] = useState<string>(() => getActiveProfileName());
-  const PROFILE_KEYS = ["A", "B", "C"];
-
-  const switchProfile = (name: string) => {
-    if (name === profileName) return;
-    setActiveProfileName(name);
-    setProfileName(name);
-    setProfile(loadUserProfile());
-    setFriends(loadFriends());
-    setSessions(loadSessions());
-    setRecommendations(loadRecommendations());
-    showToast(`Switched to profile ${name}.`, "info");
-  };
+  // Single profile support — hardcoded active profile name to "A"
+  const profileName = "A";
 
   // Load state (scoped by active profile)
   const [profile, setProfile] = useState<UserProfile>(() => loadUserProfile());
   const [friends, setFriends] = useState<Friend[]>(() => loadFriends());
   const [sessions, setSessions] = useState<GameSession[]>(() => loadSessions());
   const [recommendations, setRecommendations] = useState<GameRecommendation[]>(() => loadRecommendations());
+
+  // Pending Friend Invitations state
+  const [invitations, setInvitations] = useState<FriendInvitation[]>([]);
+  const [deniedIds, setDeniedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("gamelib.friends.denied") || "[]");
+    } catch {
+      return [];
+    }
+  });
 
   // Network Sync States
   const [isSyncing, setIsSyncing] = useState(false);
@@ -463,9 +474,48 @@ export default function FriendsPage() {
         try {
           const remoteDb = JSON.parse(event.payload) as FriendsDatabase;
           
-          // Merge local and remote
           const localProfile = loadUserProfile();
           const localFriends = loadFriends();
+          
+          // Check if this peer is not a friend, is not self, and is not denied
+          const remoteProfile = remoteDb.profile;
+          if (remoteProfile && remoteProfile.syncId) {
+            const isFriend = localFriends.some((f) => f.syncId === remoteProfile.syncId);
+            const isSelf = remoteProfile.syncId === localProfile.syncId;
+            const isDenied = deniedIds.includes(remoteProfile.syncId);
+            
+            if (!isFriend && !isSelf && !isDenied) {
+              const theyAddedUs = remoteDb.friends?.some((f) => f.syncId === localProfile.syncId);
+              if (theyAddedUs) {
+                const newInvite: FriendInvitation = {
+                  syncId: remoteProfile.syncId,
+                  name: remoteProfile.name,
+                  avatar: remoteProfile.avatar,
+                  status: remoteProfile.status,
+                  favoriteGame: remoteProfile.favoriteGameName || undefined,
+                  libStats: remoteProfile.libStats ? {
+                    gamesCount: (remoteProfile.libStats as any).gamesCount || 0,
+                    playtimeMinutes: (remoteProfile.libStats as any).playtimeMinutes || 0,
+                    achievementsCount: (remoteProfile.libStats as any).achievementsCount || 0,
+                  } : undefined
+                };
+                
+                setInvitations((prev) => {
+                  if (prev.some((i) => i.syncId === newInvite.syncId)) return prev;
+                  return [...prev, newInvite];
+                });
+                showToast(`New friend invitation from ${remoteProfile.name}!`, "info");
+                return; // Do not merge databases for non-friends
+              }
+            }
+            
+            // If they are not a friend and didn't add us, ignore
+            if (!isFriend) {
+              return;
+            }
+          }
+          
+          // Merge local and remote
           const localSessions = loadSessions();
           const localRecommendations = loadRecommendations();
           
@@ -628,6 +678,39 @@ export default function FriendsPage() {
     const decoded = decodeFriendCode(friendCodeInput);
     setDecodedFriend(decoded);
   }, [friendCodeInput]);
+
+  // Asynchronously fetch real profile details for the friend code preview
+  useEffect(() => {
+    if (!decodedFriend || !decodedFriend.syncId) return;
+    let cancelled = false;
+
+    const fetchPreview = async () => {
+      try {
+        const remoteOutbox = await fetchFriendOutbox(decodedFriend.syncId);
+        if (remoteOutbox && remoteOutbox.profile && !cancelled) {
+          setDecodedFriend((prev) => {
+            if (!prev || prev.syncId !== decodedFriend.syncId) return prev;
+            return {
+              ...prev,
+              name: remoteOutbox.profile.name,
+              avatar: remoteOutbox.profile.avatar,
+              status: remoteOutbox.profile.status,
+              favoriteGame: remoteOutbox.profile.favoriteGame || undefined,
+              currentlyPlaying: remoteOutbox.profile.currentlyPlaying || undefined,
+              libStats: remoteOutbox.profile.libStats,
+            };
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch friend preview outbox:", err);
+      }
+    };
+
+    fetchPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [decodedFriend?.syncId]);
 
   // Load local JSON database from disk, and resolve stable device ID on mount
   useEffect(() => {
@@ -843,7 +926,7 @@ export default function FriendsPage() {
     }
 
     // Always push our own updated outbox so friends can see us
-    const pushed = await pushMyOutbox(profile, selfStats, mergedSessions, mergedRecs);
+    const pushed = await pushMyOutbox(profile, selfStats, mergedSessions, mergedRecs, selfSharedGames);
 
     const syncedAt = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
     setLastSyncedTime(syncedAt);
@@ -883,12 +966,52 @@ export default function FriendsPage() {
         showToast("Sync successful — already up to date.", "success");
       }
     }
+    
+    await checkFolderInvitations(profile.syncId, localFriends);
     setIsSyncing(false);
 
     // Honor a manual sync that was requested while this one was running.
     if (pendingManualSync.current) {
       pendingManualSync.current = false;
       performSync(true);
+    }
+  };
+
+  const checkFolderInvitations = async (mySyncId: string, currentFriends: Friend[]) => {
+    if (!mySyncId) return;
+    try {
+      const peers = await listPeerOutboxes();
+      const newInvites: FriendInvitation[] = [];
+      
+      for (const peerId of peers) {
+        if (currentFriends.some((f) => f.syncId === peerId)) continue;
+        if (peerId === mySyncId) continue;
+        if (deniedIds.includes(peerId)) continue;
+        
+        const remoteOutbox = await fetchFriendOutbox(peerId);
+        if (remoteOutbox && remoteOutbox.friends && remoteOutbox.friends.includes(mySyncId)) {
+          newInvites.push({
+            syncId: peerId,
+            name: remoteOutbox.profile.name,
+            avatar: remoteOutbox.profile.avatar,
+            status: remoteOutbox.profile.status,
+            favoriteGame: remoteOutbox.profile.favoriteGame || undefined,
+            libStats: remoteOutbox.profile.libStats,
+          });
+        }
+      }
+      
+      setInvitations((prev) => {
+        const merged = [...prev];
+        newInvites.forEach((invite) => {
+          if (!merged.some((i) => i.syncId === invite.syncId)) {
+            merged.push(invite);
+          }
+        });
+        return merged;
+      });
+    } catch (e) {
+      console.error("Failed to check folder invitations:", e);
     }
   };
 
@@ -1043,6 +1166,46 @@ export default function FriendsPage() {
     }, 100);
   };
 
+  // Accept a friend invitation
+  const handleAcceptInvitation = (invite: FriendInvitation) => {
+    const exists = friends.some((f) => f.syncId === invite.syncId);
+    if (exists) {
+      setInvitations((prev) => prev.filter((i) => i.syncId !== invite.syncId));
+      return;
+    }
+
+    const newFriend: Friend = {
+      id: `friend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: invite.name,
+      avatar: invite.avatar,
+      status: invite.status,
+      favoriteGame: invite.favoriteGame,
+      libStats: invite.libStats,
+      addedAt: Date.now(),
+      syncId: invite.syncId,
+    };
+
+    const updatedFriends = [...friends, newFriend];
+    setFriends(updatedFriends);
+    saveFriends(updatedFriends);
+    setInvitations((prev) => prev.filter((i) => i.syncId !== invite.syncId));
+    showToast(`Accepted friend invitation from ${invite.name}!`, "success");
+
+    // Trigger instant synchronization to exchange data
+    setTimeout(() => {
+      performSync(true);
+    }, 100);
+  };
+
+  // Deny a friend invitation
+  const handleDenyInvitation = (syncId: string) => {
+    const nextDenied = [...deniedIds, syncId];
+    setDeniedIds(nextDenied);
+    localStorage.setItem("gamelib.friends.denied", JSON.stringify(nextDenied));
+    setInvitations((prev) => prev.filter((i) => i.syncId !== syncId));
+    showToast("Invitation denied.", "info");
+  };
+
   // Delete a friend
   const handleDeleteFriend = (friendId: string, friendName: string) => {
     const updated = friends.filter((f) => f.id !== friendId);
@@ -1123,7 +1286,10 @@ export default function FriendsPage() {
     }
 
     const game = games.find((g) => g.id === sessionGameId);
-    if (!game) return;
+    if (!game) {
+      showToast("Please select a game from the autocomplete dropdown list.", "error");
+      return;
+    }
 
     const newSession: GameSession = {
       id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1180,7 +1346,9 @@ export default function FriendsPage() {
 
   // Remove a session entirely (hard delete from local list)
   const handleDeleteSession = async (sessionId: string) => {
-    const updated = sessions.filter((s) => s.id !== sessionId);
+    const updated = sessions.map((s) =>
+      s.id === sessionId ? { ...s, deleted: true, updatedAt: Date.now() } : s
+    );
     setSessions(updated);
     saveSessions(updated);
     await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
@@ -1215,7 +1383,7 @@ export default function FriendsPage() {
     const updated = [newRec, ...recommendations];
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
     showToast("Game recommended!", "success");
 
     setRecGameId("");
@@ -1248,17 +1416,19 @@ export default function FriendsPage() {
 
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
     setCommentInputs((prev) => ({ ...prev, [recId]: "" }));
     showToast("Comment posted.", "success");
   };
 
-  // Remove a recommendation entirely (hard delete from local list)
+  // Remove a recommendation entirely (hard delete from local list replaced with tombstone)
   const handleDeleteRecommendation = async (recId: string) => {
-    const updated = recommendations.filter((r) => r.id !== recId);
+    const updated = recommendations.map((r) =>
+      r.id === recId ? { ...r, deleted: true, updatedAt: Date.now() } : r
+    );
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
     showToast("Recommendation removed.", "info");
   };
 
@@ -1277,7 +1447,7 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
   };
 
   // Toggle this user's personal "want to play" backlog flag.
@@ -1288,7 +1458,7 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
     const rec = updated.find((r) => r.id === recId);
     showToast(rec?.wantToPlay ? "Added to your Want to Play list." : "Removed from Want to Play.", "info");
   };
@@ -1309,7 +1479,7 @@ export default function FriendsPage() {
     });
     setRecommendations(updated);
     saveRecommendations(updated);
-    await pushMyOutbox(profile, selfStats, sessions, updated);
+    await pushMyOutbox(profile, selfStats, sessions, updated, selfSharedGames);
   };
 
   // ── Game Comparison Logic ────────────────────────────────────────
@@ -1557,20 +1727,6 @@ export default function FriendsPage() {
           </button>
         </div>
 
-        <div className="profile-switcher" role="group" aria-label="Active profile">
-          {PROFILE_KEYS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              className={`profile-switch-btn${profileName === key ? " active" : ""}`}
-              onClick={() => switchProfile(key)}
-              title={`Switch to profile ${key}`}
-            >
-              {key}
-            </button>
-          ))}
-        </div>
-
         <div className="sync-status-container">
           <span className="sync-status-text">
             {isSyncing ? "Syncing..." : `Synced: ${lastSyncedTime}`}
@@ -1580,7 +1736,7 @@ export default function FriendsPage() {
             className="btn-sync"
             onClick={() => performSync(true)}
             disabled={isSyncing}
-            title="Force synchronization"
+            title="Sync Now"
           >
             <RefreshIcon className={isSyncing ? "sync-spinner" : ""} />
           </button>
@@ -1603,6 +1759,43 @@ export default function FriendsPage() {
         {/* Tab 1: Friends List */}
         {activeTab === "friends" && (
           <div className="friends-list-section">
+            {invitations.length > 0 && (
+              <div className="friend-invitations-section">
+                <h3 className="friend-invitations-title">
+                  <span>✉️ Pending Friend Invitations ({invitations.length})</span>
+                </h3>
+                <div className="friend-invitations-list">
+                  {invitations.map((invite) => (
+                    <div key={invite.syncId} className="friend-invitation-card">
+                      {renderAvatar(invite.avatar, invite.name)}
+                      <div className="friend-invitation-info">
+                        <div className="friend-invitation-name">{invite.name}</div>
+                        <div className="friend-invitation-status">{invite.status || "wants to connect"}</div>
+                      </div>
+                      <div className="friend-invitation-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: "4px 8px", fontSize: "11px", marginRight: "4px" }}
+                          onClick={() => handleAcceptInvitation(invite)}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: "4px 8px", fontSize: "11px" }}
+                          onClick={() => handleDenyInvitation(invite.syncId)}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="friends-list-header">
               <h2 className="friends-list-title">My Friends ({friends.length})</h2>
               <button
@@ -1887,9 +2080,10 @@ export default function FriendsPage() {
 
                 {(() => {
                   const now = Date.now();
+                  const bufferMs = 6 * 60 * 60 * 1000; // 6-hour grace period
                   const active = sessions.filter((s) => !s.deleted);
-                  const upcoming = active.filter((s) => new Date(s.scheduledAt).getTime() >= now).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-                  const past = active.filter((s) => new Date(s.scheduledAt).getTime() < now).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
+                  const upcoming = active.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs >= now).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+                  const past = active.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs < now).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
 
                   const visible = sessionView === "past" ? past : sessionView === "agenda" ? upcoming : upcoming;
 
