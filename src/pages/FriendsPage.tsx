@@ -567,6 +567,23 @@ function isOnline(friend: Friend): boolean {
   );
 }
 
+// Rich presence label for display (online / in-game / last seen).
+function presenceLabel(friend: Friend): string {
+  if (friend.currentlyPlaying) return `Playing ${friend.currentlyPlaying}`;
+  if (isOnline(friend)) return "Online";
+  return "";
+}
+
+// Number of games the friend and the viewer both own (from shared stats).
+function sharedGamesCount(friend: Friend, myGameIds: Set<string>): number {
+  if (!friend.games || friend.games.length === 0) return 0;
+  let count = 0;
+  for (const g of friend.games) {
+    if (myGameIds.has(g.id)) count++;
+  }
+  return count;
+}
+
 // ── Searchable Autocomplete Selector Component ──────────────────────
 
 function SearchableGameSelector({
@@ -1123,6 +1140,11 @@ export default function FriendsPage() {
   const [friendSearch, setFriendSearch] = useState("");
   const [friendSort, setFriendSort] = useState<"default" | "name" | "recent" | "online">("default");
   const [friendFilter, setFriendFilter] = useState<"all" | "online" | "pinned">("all");
+  const [friendDensity, setFriendDensity] = useState<"grid" | "list">(
+    () => (localStorage.getItem("gamelib.friends.density") as "grid" | "list") || "grid"
+  );
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
+  const [selectMode, setSelectMode] = useState(false);
 
   // Compare Tab States
   const [selectedCompareFriendId, setSelectedCompareFriendId] = useState<string>("");
@@ -1791,6 +1813,67 @@ export default function FriendsPage() {
     );
   };
 
+  // Bulk actions over selected friends
+  const toggleSelect = (id: string) => {
+    setSelectedFriendIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const applyBulk = (fn: (f: Friend) => Friend) => {
+    const selected = new Set(selectedFriendIds);
+    const updated = friends.map((f) => (selected.has(f.id) ? fn(f) : f));
+    setFriends(updated);
+    saveFriends(updated);
+    setSelectedFriendIds([]);
+    setSelectMode(false);
+  };
+
+  const handleBulkPin = () => {
+    applyBulk((f) => ({ ...f, pinned: true }));
+    showToast("Pinned selected friends.", "info");
+  };
+  const handleBulkUnpin = () => {
+    applyBulk((f) => ({ ...f, pinned: false }));
+    showToast("Unpinned selected friends.", "info");
+  };
+  const handleBulkBlock = () => {
+    applyBulk((f) => ({ ...f, blocked: true }));
+    showToast("Blocked selected friends.", "info");
+  };
+  const handleBulkRemove = () => {
+    const selected = new Set(selectedFriendIds);
+    const updated = friends.filter((f) => !selected.has(f.id));
+    setFriends(updated);
+    saveFriends(updated);
+    if (selected.has(selectedCompareFriendId)) setSelectedCompareFriendId("");
+    setSelectedFriendIds([]);
+    setSelectMode(false);
+    showToast("Removed selected friends.", "info");
+  };
+
+  // Quick actions that cross into other tabs
+  const handleInviteToSession = (friend: Friend) => {
+    if (!sessionInvited.includes(friend.name)) {
+      setSessionInvited((prev) => [...prev, friend.name]);
+    }
+    setActiveTab("sessions");
+    showToast(`Inviting ${displayName(friend)} to a session.`, "info");
+  };
+
+  const handleCompareFromCard = (friend: Friend) => {
+    setSelectedCompareFriendId(friend.id);
+    setActiveTab("compare");
+  };
+
+  const handleMessageFriend = (friend: Friend) => {
+    if (!sessionInvited.includes(friend.name)) {
+      setSessionInvited((prev) => [...prev, friend.name]);
+    }
+    setActiveTab("sessions");
+    showToast(`Open the Sessions tab to chat with ${displayName(friend)}.`, "info");
+  };
+
   // Copy public key
   const handleCopyCode = () => {
     if (!generatedFriendCode) return;
@@ -2313,6 +2396,9 @@ export default function FriendsPage() {
     };
   }, [comparisonData]);
 
+  // Set of the viewer's own game ids, used for "games in common" on cards.
+  const myGameIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
+
   // ── Visible Friends (search / sort / filter) ──────────────────────
 
   const visibleFriends = useMemo(() => {
@@ -2482,14 +2568,52 @@ export default function FriendsPage() {
 
             <div className="friends-list-header">
               <h2 className="friends-list-title">My Friends ({friends.length})</h2>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setShowAddModal(true)}
-              >
-                Add Friend
-              </button>
+              <div className="friends-list-header-actions">
+                <button
+                  type="button"
+                  className={`btn btn-secondary${selectMode ? " active" : ""}`}
+                  onClick={() => {
+                    setSelectMode((v) => !v);
+                    setSelectedFriendIds([]);
+                  }}
+                  disabled={friends.length === 0}
+                  title="Select multiple friends for bulk actions"
+                >
+                  {selectMode ? "Cancel" : "Select"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const next = friendDensity === "grid" ? "list" : "grid";
+                    setFriendDensity(next);
+                    localStorage.setItem("gamelib.friends.density", next);
+                  }}
+                  title="Toggle grid / list view"
+                >
+                  {friendDensity === "grid" ? "List view" : "Grid view"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setShowAddModal(true)}
+                >
+                  Add Friend
+                </button>
+              </div>
             </div>
+
+            {selectMode && (
+              <div className="friends-bulk-bar">
+                <span className="friends-bulk-count">{selectedFriendIds.length} selected</span>
+                <div className="friends-bulk-actions">
+                  <button type="button" className="btn btn-secondary" onClick={handleBulkPin} disabled={selectedFriendIds.length === 0}>Pin</button>
+                  <button type="button" className="btn btn-secondary" onClick={handleBulkUnpin} disabled={selectedFriendIds.length === 0}>Unpin</button>
+                  <button type="button" className="btn btn-secondary" onClick={handleBulkBlock} disabled={selectedFriendIds.length === 0}>Block</button>
+                  <button type="button" className="btn btn-secondary friend-bulk-remove" onClick={handleBulkRemove} disabled={selectedFriendIds.length === 0}>Remove</button>
+                </div>
+              </div>
+            )}
 
             {friends.length === 0 ? (
               <div className="friends-empty-state">
@@ -2578,20 +2702,44 @@ export default function FriendsPage() {
 
                 {visibleFriends.length === 0 ? (
                   <div className="game-search-no-results" style={{ padding: "40px" }}>
-                    No friends match your search or filter.
+                    <div>No friends match your search or filter.</div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ marginTop: "12px" }}
+                      onClick={() => {
+                        setFriendSearch("");
+                        setFriendFilter("all");
+                      }}
+                    >
+                      Clear filters
+                    </button>
                   </div>
                 ) : (
-                  <div className="friends-grid">
+                  <div className={`friends-grid${friendDensity === "list" ? " is-list" : ""}`}>
                     {visibleFriends.map((friend) => {
                       const online = isOnline(friend);
+                      const presence = presenceLabel(friend);
+                      const shared = sharedGamesCount(friend, myGameIds);
+                      const selected = selectedFriendIds.includes(friend.id);
                       return (
                         <div
                           key={friend.id}
                           className={`friend-card hover-lift status-${online ? "online" : "offline"}${
-                            friend.pinned ? " pinned" : ""
-                          }${friend.blocked ? " blocked" : ""}`}
+                            friend.currentlyPlaying ? " playing" : ""
+                          }${friend.pinned ? " pinned" : ""}${
+                            friend.blocked ? " blocked" : ""
+                          }${friendDensity === "list" ? " list-row" : ""}${
+                            selectMode && selected ? " selected" : ""
+                          }${selectMode ? " selectable" : ""}`}
+                          onClick={selectMode ? () => toggleSelect(friend.id) : undefined}
                         >
                           {friend.pinned && <span className="friend-pin-badge" title="Pinned">📌</span>}
+                          {selectMode && (
+                            <span className={`friend-select-check${selected ? " checked" : ""}`} title="Select">
+                              {selected ? "✓" : ""}
+                            </span>
+                          )}
                           {renderAvatar(friend.avatar, friend.name)}
                           <div className="friend-info">
                             <div className="friend-name">
@@ -2609,6 +2757,10 @@ export default function FriendsPage() {
                                 <span className="now-playing-dot" />
                                 {friend.currentlyPlaying}
                               </div>
+                            ) : presence ? (
+                              <div className="friend-status-text" title={friend.status}>
+                                {presence}
+                              </div>
                             ) : (
                               <div className="friend-status-text" title={friend.status}>
                                 {friend.status}
@@ -2617,6 +2769,9 @@ export default function FriendsPage() {
                             <div className="friend-last-seen" title="Last synced">
                               Last seen: {formatLastSeen(friend.lastSeen)}
                             </div>
+                            {friend.region && (
+                              <div className="friend-region" title="Region">🌍 {friend.region}</div>
+                            )}
                             {friend.libStats && (
                               <div className="friend-stats">
                                 <span>{friend.libStats.gamesCount} games</span>
@@ -2635,48 +2790,90 @@ export default function FriendsPage() {
                                 ⭐ {friend.favoriteGame}
                               </div>
                             )}
+                            {shared > 0 && (
+                              <button
+                                type="button"
+                                className="friend-shared-badge"
+                                title="Games in common — compare libraries"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCompareFromCard(friend);
+                                }}
+                              >
+                                🎮 {shared} in common
+                              </button>
+                            )}
+                            {friend.bio && (
+                              <div className="friend-bio" title={friend.bio}>{friend.bio}</div>
+                            )}
                             {formatFriendsSince(friend.addedAt) && (
                               <div className="friend-since">{formatFriendsSince(friend.addedAt)}</div>
                             )}
                           </div>
-                          <div className="friend-card-actions">
-                            <button
-                              type="button"
-                              className={`friend-icon-btn${friend.pinned ? " active" : ""}`}
-                              title={friend.pinned ? "Unpin" : "Pin to top"}
-                              onClick={() => handleTogglePin(friend.id)}
-                            >
-                              📌
-                            </button>
-                            <button
-                              type="button"
-                              className="friend-icon-btn"
-                              title="Set nickname"
-                              onClick={() => {
-                                const current = friend.nickname || friend.name;
-                                const next = window.prompt("Nickname for this friend (blank to reset):", current);
-                                if (next !== null) handleSetNickname(friend.id, next);
-                              }}
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              type="button"
-                              className={`friend-icon-btn${friend.blocked ? " active" : ""}`}
-                              title={friend.blocked ? "Unblock" : "Block (ignore updates)"}
-                              onClick={() => handleToggleBlock(friend.id, displayName(friend))}
-                            >
-                              🚫
-                            </button>
-                            <button
-                              type="button"
-                              className="friend-delete-btn"
-                              title={`Remove ${displayName(friend)}`}
-                              onClick={() => handleDeleteFriend(friend.id, displayName(friend))}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
+                          {!selectMode && (
+                            <div className="friend-card-actions">
+                              <button
+                                type="button"
+                                className="friend-quick-btn"
+                                title={`Compare libraries with ${displayName(friend)}`}
+                                onClick={() => handleCompareFromCard(friend)}
+                              >
+                                Compare
+                              </button>
+                              <button
+                                type="button"
+                                className="friend-quick-btn"
+                                title={`Invite ${displayName(friend)} to a session`}
+                                onClick={() => handleInviteToSession(friend)}
+                              >
+                                Invite
+                              </button>
+                              <button
+                                type="button"
+                                className="friend-quick-btn"
+                                title={`Message ${displayName(friend)}`}
+                                onClick={() => handleMessageFriend(friend)}
+                              >
+                                Message
+                              </button>
+                              <button
+                                type="button"
+                                className={`friend-icon-btn${friend.pinned ? " active" : ""}`}
+                                title={friend.pinned ? "Unpin" : "Pin to top"}
+                                onClick={() => handleTogglePin(friend.id)}
+                              >
+                                📌
+                              </button>
+                              <button
+                                type="button"
+                                className="friend-icon-btn"
+                                title="Set nickname"
+                                onClick={() => {
+                                  const current = friend.nickname || friend.name;
+                                  const next = window.prompt("Nickname for this friend (blank to reset):", current);
+                                  if (next !== null) handleSetNickname(friend.id, next);
+                                }}
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                className={`friend-icon-btn${friend.blocked ? " active" : ""}`}
+                                title={friend.blocked ? "Unblock" : "Block (ignore updates)"}
+                                onClick={() => handleToggleBlock(friend.id, displayName(friend))}
+                              >
+                                🚫
+                              </button>
+                              <button
+                                type="button"
+                                className="friend-delete-btn"
+                                title={`Remove ${displayName(friend)}`}
+                                onClick={() => handleDeleteFriend(friend.id, displayName(friend))}
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
