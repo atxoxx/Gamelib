@@ -1,4 +1,68 @@
 import { invoke } from "@tauri-apps/api/core";
+import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
+import { SimplePool } from "nostr-tools/pool";
+
+const nostrPoolForPreview = new SimplePool();
+const nostrRelaysForPreview = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.snort.social",
+  "wss://relay.primal.net"
+];
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+export interface NostrKeys {
+  privateKey: Uint8Array;
+  privateKeyHex: string;
+  publicKey: string;
+}
+
+let cachedNostrKeys: NostrKeys | null = null;
+
+export function getNostrKeys(): NostrKeys {
+  if (cachedNostrKeys) return cachedNostrKeys;
+  
+  let skHex: string | null = null;
+  try {
+    skHex = localStorage.getItem("gamelib.friends.nostr_privkey");
+  } catch {
+    /* ignore */
+  }
+  
+  let sk: Uint8Array;
+  if (!skHex) {
+    sk = generateSecretKey();
+    skHex = bytesToHex(sk);
+    try {
+      localStorage.setItem("gamelib.friends.nostr_privkey", skHex);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    sk = hexToBytes(skHex);
+  }
+  
+  const pk = getPublicKey(sk);
+  cachedNostrKeys = {
+    privateKey: sk,
+    privateKeyHex: skHex,
+    publicKey: pk,
+  };
+  return cachedNostrKeys;
+}
 
 export interface UserProfile {
   name: string;
@@ -175,13 +239,9 @@ export function loadUserProfile(): UserProfile {
   const bio = profile.bio || "";
   const region = profile.region || "";
 
-  // Stable device id: prefer what the backend generated (persisted across
-  // runs), then a cached localStorage copy, then generate-and-cache once.
-  let syncId = profile.syncId;
-  if (!syncId) {
-    const deviceId = getDeviceId();
-    syncId = deviceId || `device_${profileName}_${Math.random().toString(36).substr(2, 9)}`;
-  }
+  // Nostr public key is our syncId
+  const keys = getNostrKeys();
+  const syncId = keys.publicKey;
 
   // Write key if newly generated
   const updated = { name, avatar, status, favoriteGameId, favoriteGameName, syncId, currentlyPlaying, bio, region };
@@ -392,7 +452,9 @@ export function decodeFriendCode(code: string): Friend | null {
       }
     }
     
-    if (!syncId.startsWith("device_")) {
+    const isNostrPubkey = /^[0-9a-fA-F]{64}$/.test(syncId);
+    const isLegacySyncId = syncId.startsWith("device_");
+    if (!isNostrPubkey && !isLegacySyncId) {
       return null;
     }
     
@@ -467,7 +529,7 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
     }
   });
 
-  return Array.from(mergedMap.values()).filter((s) => !s.deleted);
+  return Array.from(mergedMap.values());
 }
 
 export function mergeRecommendations(local: GameRecommendation[], remote: GameRecommendation[]): GameRecommendation[] {
@@ -527,7 +589,7 @@ export function mergeRecommendations(local: GameRecommendation[], remote: GameRe
     }
   });
  
-  return Array.from(mergedMap.values()).filter((r) => !r.deleted);
+  return Array.from(mergedMap.values());
 }
 
 // ── Local Storage-Based Outbox Sync Helpers ──────────────────────────
@@ -613,16 +675,35 @@ export async function fetchFriendOutbox(friendSyncId: string): Promise<{
 } | null> {
   if (!friendSyncId) return null;
 
+  // 1. Try local file sync first
   try {
     const raw = await invoke<string | null>("read_sync_file", {
       peerId: friendSyncId,
     });
-    if (!raw) return null;
-    return JSON.parse(raw);
+    if (raw) return JSON.parse(raw);
   } catch (err) {
-    console.error(`Failed to read local sync outbox file for ${friendSyncId}:`, err);
-    return null;
+    // Ignore local folder read failure, fallback to Nostr
   }
+
+  // 2. Try Nostr relays
+  if (/^[0-9a-fA-F]{64}$/.test(friendSyncId)) {
+    try {
+      console.log(`Nostr: fetching outbox preview for ${friendSyncId} from relays...`);
+      const event = await nostrPoolForPreview.get(nostrRelaysForPreview, {
+        authors: [friendSyncId],
+        kinds: [30078],
+        "#d": ["gamelib-friends-outbox"],
+      });
+      if (event) {
+        console.log(`Nostr: successfully fetched outbox preview for ${friendSyncId}`);
+        return JSON.parse(event.content);
+      }
+    } catch (err) {
+      console.error(`Nostr: failed to fetch preview event for ${friendSyncId}:`, err);
+    }
+  }
+
+  return null;
 }
 
 /**

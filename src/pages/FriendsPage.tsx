@@ -6,6 +6,8 @@ import { parsePlayTime } from "../types/game";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
+import { SimplePool } from "nostr-tools/pool";
+import { finalizeEvent, verifyEvent } from "nostr-tools/pure";
 import {
   UserProfile,
   Friend,
@@ -33,11 +35,12 @@ import {
   setDeviceId,
   getSyncFolder,
   fetchFriendOutbox,
-  pushMyOutbox,
+  pushMyOutbox as pushMyOutboxStorage,
   loadFriendsDbToLocalStorage,
   FriendsDatabase,
   mergeDatabases,
   listPeerOutboxes,
+  getNostrKeys,
 } from "./friendsStorage";
 import "./friends.css";
 
@@ -445,6 +448,158 @@ export default function FriendsPage() {
     }
   });
 
+  // Nostr variables
+  const nostrPool = useMemo(() => new SimplePool(), []);
+  const nostrRelays = useMemo(() => [
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.snort.social",
+    "wss://relay.primal.net"
+  ], []);
+
+  // Shared function to handle incoming remote database data (invitation vs merge)
+  const handleReceiveRemoteData = (remoteDb: FriendsDatabase) => {
+    try {
+      const localProfile = loadUserProfile();
+      const localFriends = loadFriends();
+      
+      const remoteProfile = remoteDb.profile;
+      if (remoteProfile && remoteProfile.syncId) {
+        const isFriend = localFriends.some((f) => f.syncId === remoteProfile.syncId);
+        const isSelf = remoteProfile.syncId === localProfile.syncId;
+        const isDenied = deniedIds.includes(remoteProfile.syncId);
+        
+        if (!isFriend && !isSelf && !isDenied) {
+          const theyAddedUs = remoteDb.friends?.some((f) => f.syncId === localProfile.syncId);
+          if (theyAddedUs) {
+            const newInvite: FriendInvitation = {
+              syncId: remoteProfile.syncId,
+              name: remoteProfile.name,
+              avatar: remoteProfile.avatar,
+              status: remoteProfile.status,
+              favoriteGame: remoteProfile.favoriteGameName || undefined,
+              libStats: remoteProfile.libStats ? {
+                gamesCount: (remoteProfile.libStats as any).gamesCount || 0,
+                playtimeMinutes: (remoteProfile.libStats as any).playtimeMinutes || 0,
+                achievementsCount: (remoteProfile.libStats as any).achievementsCount || 0,
+              } : undefined
+            };
+            
+            setInvitations((prev) => {
+              if (prev.some((i) => i.syncId === newInvite.syncId)) return prev;
+              return [...prev, newInvite];
+            });
+            showToast(`New friend invitation from ${remoteProfile.name}!`, "info");
+            return; // Do not merge databases for non-friends
+          }
+        }
+        
+        // If they are not a friend and didn't add us, ignore
+        if (!isFriend) {
+          return;
+        }
+      }
+      
+      // Merge local and remote
+      const localSessions = loadSessions();
+      const localRecommendations = loadRecommendations();
+      
+      const localDb: FriendsDatabase = {
+        profile: localProfile,
+        friends: localFriends,
+        sessions: localSessions,
+        recommendations: localRecommendations,
+      };
+      
+      const merged = mergeDatabases(localDb, remoteDb);
+      
+      // Save and update state
+      setFriends(merged.friends);
+      setSessions(merged.sessions);
+      setRecommendations(merged.recommendations);
+      
+      saveFriends(merged.friends);
+      saveSessions(merged.sessions);
+      saveRecommendations(merged.recommendations);
+      
+      console.log(`Synced data automatically with ${remoteDb.profile?.name || "friend"}!`);
+    } catch (err) {
+      console.error("Failed to parse/merge remote sync data:", err);
+    }
+  };
+
+  // Publish our local database to configured Nostr relays
+  const publishToNostr = async (db: FriendsDatabase, sharedGames?: SharedGameStat[]) => {
+    try {
+      const keys = getNostrKeys();
+      const localFriendsList = loadFriends();
+      const stats = selfStats;
+      
+      const payload = {
+        syncId: keys.publicKey,
+        profile: {
+          name: db.profile?.name || "",
+          avatar: db.profile?.avatar || "",
+          status: db.profile?.status || "",
+          favoriteGame: db.profile?.favoriteGameName || "",
+          currentlyPlaying: db.profile?.currentlyPlaying || "",
+          bio: db.profile?.bio || "",
+          region: db.profile?.region || "",
+          libStats: stats,
+        },
+        friends: localFriendsList.map((f) => f.syncId),
+        games: sharedGames || [],
+        sessions: db.sessions,
+        recommendations: db.recommendations,
+        updatedAt: Date.now(),
+      };
+      
+      const eventTemplate = {
+        kind: 30078,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [["d", "gamelib-friends-outbox"]],
+        content: JSON.stringify(payload),
+      };
+      
+      const signedEvent = finalizeEvent(eventTemplate, keys.privateKey);
+      console.log("Nostr: publishing outbox event:", signedEvent.id);
+      
+      await Promise.all(
+        nostrRelays.map(async (relay) => {
+          try {
+            await nostrPool.publish([relay], signedEvent);
+            console.log(`Nostr: successfully published to ${relay}`);
+          } catch (err) {
+            console.error(`Nostr: failed to publish to ${relay}:`, err);
+          }
+        })
+      );
+    } catch (err) {
+      console.error("Nostr: failed to sign/publish event:", err);
+    }
+  };
+
+  // Local wrapper around pushMyOutbox that handles both local files and Nostr relays
+  const pushMyOutbox = async (
+    currProfile: UserProfile,
+    currStats: { gamesCount: number; playtimeMinutes: number; achievementsCount: number },
+    currSessions: GameSession[],
+    currRecs: GameRecommendation[],
+    currSharedGames?: SharedGameStat[]
+  ) => {
+    const res = await pushMyOutboxStorage(currProfile, currStats, currSessions, currRecs, currSharedGames);
+    
+    // Also publish to Nostr
+    const db: FriendsDatabase = {
+      profile: currProfile,
+      friends: friends,
+      sessions: currSessions,
+      recommendations: currRecs,
+    };
+    publishToNostr(db, currSharedGames);
+    return res;
+  };
+
   // Network Sync States
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>("Never");
@@ -453,16 +608,6 @@ export default function FriendsPage() {
 
   // Direct P2P Sync States
   const [showP2pModal, setShowP2pModal] = useState(false);
-
-  // Internet Sync Status State
-  const [internetSyncStatus, setInternetSyncStatus] = useState<{
-    enabled: boolean;
-    boundPort?: number;
-    externalIp?: string;
-    upnpMapped: boolean;
-    lastSyncedTimes: Record<string, number>;
-    errorMessage?: string;
-  } | null>(null);
 
   // listen to automatic internet P2P sync events
   useEffect(() => {
@@ -473,71 +618,7 @@ export default function FriendsPage() {
         console.log("Received internet sync database payload");
         try {
           const remoteDb = JSON.parse(event.payload) as FriendsDatabase;
-          
-          const localProfile = loadUserProfile();
-          const localFriends = loadFriends();
-          
-          // Check if this peer is not a friend, is not self, and is not denied
-          const remoteProfile = remoteDb.profile;
-          if (remoteProfile && remoteProfile.syncId) {
-            const isFriend = localFriends.some((f) => f.syncId === remoteProfile.syncId);
-            const isSelf = remoteProfile.syncId === localProfile.syncId;
-            const isDenied = deniedIds.includes(remoteProfile.syncId);
-            
-            if (!isFriend && !isSelf && !isDenied) {
-              const theyAddedUs = remoteDb.friends?.some((f) => f.syncId === localProfile.syncId);
-              if (theyAddedUs) {
-                const newInvite: FriendInvitation = {
-                  syncId: remoteProfile.syncId,
-                  name: remoteProfile.name,
-                  avatar: remoteProfile.avatar,
-                  status: remoteProfile.status,
-                  favoriteGame: remoteProfile.favoriteGameName || undefined,
-                  libStats: remoteProfile.libStats ? {
-                    gamesCount: (remoteProfile.libStats as any).gamesCount || 0,
-                    playtimeMinutes: (remoteProfile.libStats as any).playtimeMinutes || 0,
-                    achievementsCount: (remoteProfile.libStats as any).achievementsCount || 0,
-                  } : undefined
-                };
-                
-                setInvitations((prev) => {
-                  if (prev.some((i) => i.syncId === newInvite.syncId)) return prev;
-                  return [...prev, newInvite];
-                });
-                showToast(`New friend invitation from ${remoteProfile.name}!`, "info");
-                return; // Do not merge databases for non-friends
-              }
-            }
-            
-            // If they are not a friend and didn't add us, ignore
-            if (!isFriend) {
-              return;
-            }
-          }
-          
-          // Merge local and remote
-          const localSessions = loadSessions();
-          const localRecommendations = loadRecommendations();
-          
-          const localDb: FriendsDatabase = {
-            profile: localProfile,
-            friends: localFriends,
-            sessions: localSessions,
-            recommendations: localRecommendations,
-          };
-          
-          const merged = mergeDatabases(localDb, remoteDb);
-          
-          // Save and update state
-          setFriends(merged.friends);
-          setSessions(merged.sessions);
-          setRecommendations(merged.recommendations);
-          
-          saveFriends(merged.friends);
-          saveSessions(merged.sessions);
-          saveRecommendations(merged.recommendations);
-          
-          showToast(`Synced data automatically with ${remoteDb.profile?.name || "friend"}!`, "success");
+          handleReceiveRemoteData(remoteDb);
         } catch (err) {
           console.error("Failed to parse/merge remote sync data:", err);
         }
@@ -549,27 +630,45 @@ export default function FriendsPage() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [profileName]);
+  }, [deniedIds]);
 
-  // Query internet sync status periodically
+  // Subscribe to all friend pubkeys via Nostr WebSockets
   useEffect(() => {
-    let timer: any;
-    const fetchStatus = async () => {
-      try {
-        const status = await invoke<any>("get_internet_sync_status");
-        setInternetSyncStatus(status);
-      } catch (err) {
-        console.error("Failed to fetch internet sync status:", err);
-      }
-    };
+    if (friends.length === 0) return;
+    
+    const pubkeys = friends.map((f) => f.syncId).filter((id) => /^[0-9a-fA-F]{64}$/.test(id));
+    if (pubkeys.length === 0) return;
 
-    fetchStatus();
-    timer = setInterval(fetchStatus, 5000);
+    console.log("Nostr: subscribing to friends' pubkeys:", pubkeys);
+    
+    const sub = nostrPool.subscribeMany(
+      nostrRelays,
+      {
+        authors: pubkeys,
+        kinds: [30078],
+        "#d": ["gamelib-friends-outbox"],
+      },
+      {
+        onevent(event) {
+          if (!verifyEvent(event)) {
+            console.error("Nostr: invalid signature for event:", event.id);
+            return;
+          }
+          console.log("Nostr: received updated outbox from friend pubkey:", event.pubkey);
+          try {
+            const remoteDb = JSON.parse(event.content) as FriendsDatabase;
+            handleReceiveRemoteData(remoteDb);
+          } catch (err) {
+            console.error("Nostr: failed to parse remote data:", err);
+          }
+        },
+      }
+    );
 
     return () => {
-      clearInterval(timer);
+      sub.close();
     };
-  }, []);
+  }, [friends, nostrPool, nostrRelays]);
 
   // Modal / Form state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -726,16 +825,10 @@ export default function FriendsPage() {
           setRecommendations(loadRecommendations());
         }
 
-        // 2. Resolve device ID and sync profile
+        // 2. Resolve device ID
         const id = await invoke<string>("get_friends_device_id");
         if (!cancelled && id) {
           setDeviceId(id);
-          setProfile((prev) => {
-            if (prev.syncId === id) return prev;
-            const updated = { ...prev, syncId: id };
-            saveUserProfile(updated);
-            return updated;
-          });
         }
       } catch (err) {
         console.error("Failed to initialize database or resolve device ID:", err);
@@ -762,19 +855,12 @@ export default function FriendsPage() {
     }
     setIsSyncing(true);
 
-    // Make sure we always have a stable device id before publishing.
+    // Make sure we always have a stable Nostr public key before publishing.
     if (!profile.syncId) {
-      try {
-        const id = await invoke<string>("get_friends_device_id");
-        if (id) {
-          setDeviceId(id);
-          const updated = { ...profile, syncId: id };
-          saveUserProfile(updated);
-          setProfile(updated);
-        }
-      } catch {
-        /* ignore */
-      }
+      const keys = getNostrKeys();
+      const updated = { ...profile, syncId: keys.publicKey };
+      saveUserProfile(updated);
+      setProfile(updated);
     }
 
     const folder = await getSyncFolder();
@@ -1250,11 +1336,11 @@ export default function FriendsPage() {
     );
   };
 
-  // Copy friend code
+  // Copy public key
   const handleCopyCode = () => {
     if (!generatedFriendCode) return;
     navigator.clipboard.writeText(generatedFriendCode);
-    showToast("Friend Code copied to clipboard!", "success");
+    showToast("Public Key copied to clipboard!", "success");
   };
 
   // Avatar renderer helper
@@ -1819,8 +1905,8 @@ export default function FriendsPage() {
                 </div>
                 <h3 className="friends-empty-title">No Friends Yet</h3>
                 <p className="friends-empty-desc">
-                  Your friends list is currently empty. Go to 'My Profile' to copy your Friend Code,
-                  or ask a friend for their code to get connected!
+                  Your friends list is currently empty. Go to 'My Profile' to copy your Public Key,
+                  or ask a friend for their public key to get connected!
                 </p>
                 <button
                   type="button"
@@ -2141,93 +2227,99 @@ export default function FriendsPage() {
             <div className="recs-layout">
               {/* Left Column: Recommendations Feed */}
               <div className="recs-feed">
-                <h3 className="friends-list-title">Friend Recommendations ({recommendations.length})</h3>
+                {(() => {
+                  const activeRecs = recommendations.filter((r) => !r.deleted);
+                  const visibleRecs = activeRecs.filter((rec) => {
+                    if (recFilter === "to_me")
+                      return rec.recommendedTo === profile.name || rec.recommendedTo === "All Friends";
+                    if (recFilter === "by_me") return rec.recommendedBy === profile.name;
+                    if (recFilter === "want") return !!rec.wantToPlay;
+                    return true;
+                  });
 
-                {recommendations.length > 0 && (
-                  <div className="compare-filter-chips rec-filter-chips">
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${recFilter === "all" ? " active" : ""}`}
-                      onClick={() => setRecFilter("all")}
-                    >
-                      All ({recommendations.length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${recFilter === "to_me" ? " active" : ""}`}
-                      onClick={() => setRecFilter("to_me")}
-                    >
-                      To Me ({recommendations.filter((r) => r.recommendedTo === profile.name || r.recommendedTo === "All Friends").length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${recFilter === "by_me" ? " active" : ""}`}
-                      onClick={() => setRecFilter("by_me")}
-                    >
-                      By Me ({recommendations.filter((r) => r.recommendedBy === profile.name).length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`compare-filter-chip${recFilter === "want" ? " active" : ""}`}
-                      onClick={() => setRecFilter("want")}
-                    >
-                      Want to Play ({recommendations.filter((r) => r.wantToPlay).length})
-                    </button>
-                  </div>
-                )}
+                  return (
+                    <>
+                      <h3 className="friends-list-title">Friend Recommendations ({activeRecs.length})</h3>
 
-                {recommendations.length === 0 ? (
-                  <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
-                    <h3 className="friends-empty-title">No Recommendations Yet</h3>
-                    <p className="friends-empty-desc">
-                      Recommend a game on the right. Your reviews and comments will sync with friends automatically!
-                    </p>
-                  </div>
-                ) : (
-                  recommendations
-                    .filter((rec) => {
-                      if (recFilter === "to_me")
-                        return rec.recommendedTo === profile.name || rec.recommendedTo === "All Friends";
-                      if (recFilter === "by_me") return rec.recommendedBy === profile.name;
-                      if (recFilter === "want") return !!rec.wantToPlay;
-                      return true;
-                    })
-                    .map((rec) => {
-                      const myReaction = rec.reactions?.[profile.name];
-                      const reactionCounts: Record<string, number> = {};
-                      if (rec.reactions) {
-                        Object.values(rec.reactions).forEach((k) => {
-                          reactionCounts[k] = (reactionCounts[k] || 0) + 1;
-                        });
-                      }
-                      return (
-                        <div key={rec.id} className="rec-card">
-                          <div className="rec-header">
-                            <div className="rec-meta">
-                              <span className="rec-game">{rec.gameName}</span>
-                              <span className="rec-author">
-                                Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
-                              </span>
-                            </div>
-                            <div className="rec-header-actions">
-                              <div className="rating-stars">
-                                {Array.from({ length: 5 }).map((_, idx) => (
-                                  <span key={idx} className={idx < rec.rating ? "active" : ""}>
-                                    ★
+                      {activeRecs.length > 0 && (
+                        <div className="compare-filter-chips rec-filter-chips">
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${recFilter === "all" ? " active" : ""}`}
+                            onClick={() => setRecFilter("all")}
+                          >
+                            All ({activeRecs.length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${recFilter === "to_me" ? " active" : ""}`}
+                            onClick={() => setRecFilter("to_me")}
+                          >
+                            To Me ({activeRecs.filter((r) => r.recommendedTo === profile.name || r.recommendedTo === "All Friends").length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${recFilter === "by_me" ? " active" : ""}`}
+                            onClick={() => setRecFilter("by_me")}
+                          >
+                            By Me ({activeRecs.filter((r) => r.recommendedBy === profile.name).length})
+                          </button>
+                          <button
+                            type="button"
+                            className={`compare-filter-chip${recFilter === "want" ? " active" : ""}`}
+                            onClick={() => setRecFilter("want")}
+                          >
+                            Want to Play ({activeRecs.filter((r) => r.wantToPlay).length})
+                          </button>
+                        </div>
+                      )}
+
+                      {activeRecs.length === 0 ? (
+                        <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                          <h3 className="friends-empty-title">No Recommendations Yet</h3>
+                          <p className="friends-empty-desc">
+                            Recommend a game on the right. Your reviews and comments will sync with friends automatically!
+                          </p>
+                        </div>
+                      ) : (
+                        visibleRecs.map((rec) => {
+                          const myReaction = rec.reactions?.[profile.name];
+                          const reactionCounts: Record<string, number> = {};
+                          if (rec.reactions) {
+                            Object.values(rec.reactions).forEach((k) => {
+                              reactionCounts[k] = (reactionCounts[k] || 0) + 1;
+                            });
+                          }
+                          return (
+                            <div key={rec.id} className="rec-card">
+                              <div className="rec-header">
+                                <div className="rec-meta">
+                                  <span className="rec-game">{rec.gameName}</span>
+                                  <span className="rec-author">
+                                    Recommended by <strong>{rec.recommendedBy}</strong> to <em>{rec.recommendedTo}</em>
                                   </span>
-                                ))}
+                                </div>
+                                <div className="rec-header-actions">
+                                  <div className="rating-stars">
+                                    {Array.from({ length: 5 }).map((_, idx) => (
+                                      <span key={idx} className={idx < rec.rating ? "active" : ""}>
+                                        ★
+                                      </span>
+                                    ))}
+                                  </div>
+                                  {rec.recommendedBy === profile.name && (
+                                    <button
+                                      type="button"
+                                      className="friend-delete-btn"
+                                      style={{ opacity: 1, position: "static" }}
+                                      onClick={() => handleDeleteRecommendation(rec.id)}
+                                      title="Remove Recommendation"
+                                    >
+                                      <TrashIcon />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              <button
-                                type="button"
-                                className="friend-delete-btn"
-                                style={{ opacity: 1, position: "static" }}
-                                onClick={() => handleDeleteRecommendation(rec.id)}
-                                title="Remove Recommendation"
-                              >
-                                <TrashIcon />
-                              </button>
-                            </div>
-                          </div>
 
                           <p className="rec-reason">"{rec.reason}"</p>
 
@@ -2300,7 +2392,10 @@ export default function FriendsPage() {
                         </div>
                       );
                     })
-                )}
+                  )}
+                </>
+              );
+            })()}
               </div>
 
               {/* Right Column: Write Form */}
@@ -2670,9 +2765,9 @@ export default function FriendsPage() {
               </div>
 
               <div className="friend-code-card">
-                <h4 className="friend-code-label">My Friend Code</h4>
+                <h4 className="friend-code-label">My Public Key</h4>
                 <p className="friends-modal-desc">
-                  Share this code with your friends so they can add you to their network.
+                  Share this public key with your friends so they can add you to their network.
                 </p>
                 <div className="friend-code-qr">
                   <FriendCodeQR code={generatedFriendCode} />
@@ -2684,7 +2779,7 @@ export default function FriendsPage() {
                   onClick={handleCopyCode}
                   style={{ marginTop: "4px" }}
                 >
-                  Copy Code
+                  Copy Key
                 </button>
               </div>
             </div>
@@ -2836,7 +2931,7 @@ export default function FriendsPage() {
           >
             <h3 className="friends-modal-title">Add a Friend</h3>
             <p className="friends-modal-desc">
-              Paste your friend's Gamelib Friend Code below.
+              Paste your friend's Gamelib Public Key below.
             </p>
             <button
               type="button"
@@ -2851,13 +2946,13 @@ export default function FriendsPage() {
 
             <div className="friends-modal-body">
               <div className="friends-input-group">
-                <label htmlFor="friendCodeInputArea">Friend Code</label>
+                <label htmlFor="friendCodeInputArea">Public Key</label>
                 <textarea
                   id="friendCodeInputArea"
                   className="friends-textarea"
                   value={friendCodeInput}
                   onChange={(e) => setFriendCodeInput(e.target.value)}
-                  placeholder="Paste GMLF-code here..."
+                  placeholder="Paste public key here..."
                 />
               </div>
 
@@ -2890,7 +2985,7 @@ export default function FriendsPage() {
               ) : (
                 friendCodeInput.trim() && (
                   <div className="friend-decode-preview-empty" style={{ color: "var(--color-danger)" }}>
-                    Invalid Friend Code. Ensure you copied the entire GMLF code.
+                    Invalid Public Key. Ensure you copied the entire 64-character hex key.
                   </div>
                 )
               )}
@@ -2925,9 +3020,9 @@ export default function FriendsPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: "480px" }}
           >
-            <h3 className="friends-modal-title">Automatic Internet Sync</h3>
+            <h3 className="friends-modal-title">Nostr Relay Sync</h3>
             <p className="friends-modal-desc">
-              GameLib synchronizes sessions and recommendations with your friends in the background using direct peer-to-peer connections.
+              GameLib synchronizes sessions and recommendations with your friends automatically in the background using secure, public Nostr relays.
             </p>
             <button
               type="button"
@@ -2943,67 +3038,46 @@ export default function FriendsPage() {
             <div className="friends-modal-body p2p-modal-body p2p-modal-flex">
               <div className="p2p-status-card">
                 <div className="p2p-status-row">
-                  <span className="p2p-status-label">Background Sync Status</span>
-                  <span className={`p2p-status-badge${internetSyncStatus?.externalIp ? " online" : " offline"}`}>
-                    {internetSyncStatus?.externalIp ? "ONLINE" : "OFFLINE"}
+                  <span className="p2p-status-label">Nostr Connection</span>
+                  <span className="p2p-status-badge online">
+                    CONNECTED
                   </span>
                 </div>
 
                 <div className="p2p-status-details">
                   <div className="p2p-detail-row">
-                    <span className="p2p-detail-key">External IP:</span>
-                    <span className="p2p-detail-val">{internetSyncStatus?.externalIp || "Resolving..."}</span>
-                  </div>
-                  <div className="p2p-detail-row">
-                    <span className="p2p-detail-key">Bound Port:</span>
-                    <span className="p2p-detail-val">{internetSyncStatus?.boundPort || "Resolving..."}</span>
-                  </div>
-                  <div className="p2p-detail-row">
-                    <span className="p2p-detail-key">UPnP Router Mapping:</span>
-                    <span className={internetSyncStatus?.upnpMapped ? "p2p-mapped-ok" : "p2p-detail-key"}>
-                      {internetSyncStatus?.upnpMapped ? "✅ Configured" : "⚠️ Disabled / Not Routeable"}
+                    <span className="p2p-detail-key">My Public Key:</span>
+                    <span className="p2p-detail-val" style={{ fontFamily: "monospace", fontSize: "11px", wordBreak: "break-all", color: "var(--color-accent)" }}>
+                      {getNostrKeys().publicKey}
                     </span>
                   </div>
-                </div>
-
-                {internetSyncStatus?.errorMessage && (
-                  <div className="p2p-error-box">
-                    {internetSyncStatus.errorMessage}
+                  <div className="p2p-detail-row">
+                    <span className="p2p-detail-key">Active Relays:</span>
+                    <div className="p2p-detail-val" style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "10px", marginTop: "4px" }}>
+                      {nostrRelays.map((r) => (
+                        <span key={r}>🟢 {r}</span>
+                      ))}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
 
               <div className="p2p-friend-sync-block">
-                <h4 className="p2p-section-title">Friend Sync Status</h4>
+                <h4 className="p2p-section-title">Subscribed Friends ({friends.filter((f) => /^[0-9a-fA-F]{64}$/.test(f.syncId)).length})</h4>
                 <div className="p2p-friend-list">
                   {friends.length === 0 ? (
                     <div className="p2p-empty-note">
-                      No friends added yet. Share friend codes to start syncing!
+                      No friends added yet. Share your public key to start syncing!
                     </div>
                   ) : (
-                    friends.map((friend) => {
-                      const lastSyncSecs = internetSyncStatus?.lastSyncedTimes?.[friend.syncId];
-                      let syncText = "Never";
-                      if (lastSyncSecs) {
-                        const diffMins = Math.floor((Date.now() / 1000 - lastSyncSecs) / 60);
-                        if (diffMins < 1) {
-                          syncText = "Just now";
-                        } else if (diffMins < 60) {
-                          syncText = `${diffMins}m ago`;
-                        } else {
-                          const diffHours = Math.floor(diffMins / 60);
-                          syncText = `${diffHours}h ago`;
-                        }
-                      }
-                      return (
-                        <div key={friend.id} className="p2p-friend-row">
-                          <span>{friend.name}</span>
-                          <span className={lastSyncSecs ? "p2p-last-sync-ok" : "p2p-last-sync-muted"}>
-                            Last Sync: {syncText}
-                          </span>
-                        </div>
-                      );
-                    })
+                    friends.map((friend) => (
+                      <div key={friend.id} className="p2p-friend-row">
+                        <span>{friend.name}</span>
+                        <span className="p2p-last-sync-ok" style={{ fontFamily: "monospace", fontSize: "10px" }}>
+                          {friend.syncId.slice(0, 8)}...{friend.syncId.slice(-8)}
+                        </span>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>
@@ -3036,13 +3110,8 @@ export default function FriendsPage() {
               <button
                 type="button"
                 className="btn btn-primary p2p-sync-now-btn"
-                onClick={async () => {
-                  try {
-                    await invoke("trigger_internet_sync");
-                    showToast("Sync triggered! Contacting friends in background...", "success");
-                  } catch (e) {
-                    showToast(`Sync trigger failed: ${e}`, "error");
-                  }
+                onClick={() => {
+                  performSync(true);
                 }}
               >
                 🔄 Sync Now
