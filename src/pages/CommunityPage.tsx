@@ -6,17 +6,38 @@ import { useAchievements } from "../context/AchievementContext";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 import { useSettings } from "../context/SettingsContext";
-import { useNewsFeeds, formatArticleDate } from "../hooks/useNewsFeeds";
-import type { NewsArticle } from "../hooks/useNewsFeeds";
 
 import DonutChart from "../components/charts/DonutChart";
 import BarChart from "../components/charts/BarChart";
 import { Card, KpiTile, Button } from "../components/ui";
+import {
+  buildHeatmap,
+  computeStreaks,
+  computeTimeOfDay,
+  computePeriodCompare,
+  computeMonthToDate,
+} from "./communityProfileStats";
+import {
+  ActivityHeatmap,
+  StreakCard,
+  TimeOfDayCard,
+  GoalCard,
+  PeriodCompareBadge,
+  AchievementsShowcase,
+  collectUnlockedAchievements,
+} from "./communityProfileExtras";
+import {
+  loadFavorites,
+  saveFavorites,
+  loadMonthlyGoal,
+  saveMonthlyGoal,
+} from "./communityStorage";
+import { ScreenshotThumb } from "./communityScreenshotThumb";
 import "./community.css";
 
 // ─── Tab types ─────────────────────────────────────────────────────────────
 
-type CommunityTab = "profile" | "screenshots" | "news";
+type CommunityTab = "profile" | "screenshots";
 
 // ─── Icons (inline SVG, theme-friendly) ────────────────────────────────────
 
@@ -32,14 +53,6 @@ const ImageIcon = (
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
     <circle cx="8.5" cy="8.5" r="1.5" />
     <polyline points="21 15 16 10 5 21" />
-  </svg>
-);
-
-const NewsIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-    <path d="M4 11a9 9 0 0 1 9 9" />
-    <path d="M4 4a16 16 0 0 1 16 16" />
-    <circle cx="5" cy="19" r="1" />
   </svg>
 );
 
@@ -83,14 +96,6 @@ const FolderIcon = (
   </svg>
 );
 
-const ExternalLinkIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-    <polyline points="15 3 21 3 21 9" />
-    <line x1="10" y1="14" x2="21" y2="3" />
-  </svg>
-);
-
 const ChevronLeftIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
     <polyline points="15 18 9 12 15 6" />
@@ -107,19 +112,6 @@ const XIcon = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
     <line x1="18" y1="6" x2="6" y2="18" />
     <line x1="6" y1="6" x2="18" y2="18" />
-  </svg>
-);
-
-const TrendingIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-    <polyline points="17 6 23 6 23 12" />
-  </svg>
-);
-
-const MessageIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 );
 
@@ -184,23 +176,12 @@ export default function CommunityPage() {
           {ImageIcon}
           <span>Screenshots</span>
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "news"}
-          className={`community-tab${activeTab === "news" ? " active" : ""}`}
-          onClick={() => setActiveTab("news")}
-        >
-          {NewsIcon}
-          <span>News &amp; Discussion</span>
-        </button>
       </div>
 
       {/* Tab panels */}
       <div className="community-panel">
         {activeTab === "profile" && <ProfileSection />}
         {activeTab === "screenshots" && <ScreenshotsSection />}
-        {activeTab === "news" && <NewsDiscussionSection />}
       </div>
     </div>
   );
@@ -211,12 +192,33 @@ export default function CommunityPage() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ProfileSection() {
-  const { getAllStats } = useActivity();
+  const { getAllStats, sessions } = useActivity();
   const { cache } = useAchievements();
   const { games } = useGames();
   const { hideAchievementProgress } = useSettings();
 
   const stats = useMemo(() => getAllStats(), [getAllStats]);
+
+  // ── New derived analytics ────────────────────────────────────────
+  const heatmap = useMemo(() => buildHeatmap(sessions), [sessions]);
+  const streak = useMemo(() => computeStreaks(sessions), [sessions]);
+  const timeOfDay = useMemo(() => computeTimeOfDay(sessions), [sessions]);
+  const periodCompare = useMemo(() => computePeriodCompare(sessions), [sessions]);
+  const monthToDate = useMemo(() => computeMonthToDate(sessions), [sessions]);
+  const unlockedAchievements = useMemo(
+    () => collectUnlockedAchievements(cache.games, games),
+    [cache, games]
+  );
+
+  // Monthly goal (persisted)
+  const [goalMin, setGoalMin] = useState<number>(() => loadMonthlyGoal());
+  const onGoalChange = useCallback(
+    (min: number) => {
+      setGoalMin(min);
+      saveMonthlyGoal(min);
+    },
+    []
+  );
 
   // Count total achievements across all cached games
   const achievementCounts = useMemo(() => {
@@ -297,8 +299,51 @@ function ProfileSection() {
   // Distinct genres / platforms played
   const distinctGenres = stats.genreBreakdown.length;
 
+  // Share profile — copy a markdown summary to the clipboard.
+  const { showToast } = useToast();
+  const handleShareProfile = useCallback(async () => {
+    const top = stats.topGames
+      .slice(0, 5)
+      .map((g, i) => `${i + 1}. ${g.gameName} — ${formatHours(g.minutes)}`)
+      .join("\n");
+    const md = [
+      "# My Gamelib Year in Review",
+      "",
+      `- Total Playtime: ${formatHours(stats.totalPlayTimeMin)}`,
+      `- Sessions: ${stats.totalSessions}`,
+      `- Games in Library: ${games.length}`,
+      `- Games Played: ${stats.topGames.length}`,
+      `- Longest Session: ${stats.longestSessionMin > 0 ? formatHours(stats.longestSessionMin) : "—"}`,
+      `- Current Streak: ${streak.current} day${streak.current !== 1 ? "s" : ""}`,
+      `- Monthly Goal: ${goalMin > 0 ? `${formatHours(monthToDate)} / ${formatHours(goalMin)}` : "not set"}`,
+      "",
+      "## Most Played",
+      top || "_(no plays yet)_",
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(md);
+      showToast("Profile summary copied to clipboard", "success");
+    } catch {
+      showToast("Could not copy to clipboard", "error");
+    }
+  }, [stats, games.length, streak.current, goalMin, monthToDate, showToast]);
+
   return (
     <div className="community-profile">
+      {/* ── Profile header / share ─────────────────────────────────── */}
+      <div className="community-profile-header">
+        <h2 className="community-profile-title">Player Profile</h2>
+        <Button variant="ghost" size="sm" onClick={handleShareProfile} leftIcon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+        }>Share Profile</Button>
+      </div>
+
       {/* ── KPI Tile Row ─────────────────────────────────────────────── */}
       <div className="community-kpi-grid">
         <KpiTile
@@ -308,6 +353,7 @@ function ProfileSection() {
           icon={ClockIcon}
           intent="accent"
           size="md"
+          trailing={<PeriodCompareBadge compare={periodCompare} />}
         />
         <KpiTile
           label="Games Owned"
@@ -395,6 +441,21 @@ function ProfileSection() {
             formatValue={(v) => `${v}m`}
           />
         </Card>
+      )}
+
+      {/* ── New: Streak + Heatmap + Time of Day + Goal ─────────────────── */}
+      <div className="community-profile-extra-grid">
+        <StreakCard streak={streak} />
+        <GoalCard currentMin={monthToDate} goalMin={goalMin} onChangeGoal={onGoalChange} />
+        <TimeOfDayCard slices={timeOfDay} />
+      </div>
+
+      {heatmap.cells.length > 0 && (
+        <ActivityHeatmap
+          cells={heatmap.cells}
+          maxMinutes={heatmap.maxMinutes}
+          activeDays={heatmap.activeDays}
+        />
       )}
 
       {/* ── Year in Review Summary Card ───────────────────────────────── */}
@@ -501,6 +562,11 @@ function ProfileSection() {
           </div>
         )}
       </Card>
+
+      {/* ── New: Recently Unlocked Achievements ──────────────────────── */}
+      {!hideAchievementProgress && (
+        <AchievementsShowcase items={unlockedAchievements} />
+      )}
     </div>
   );
 }
@@ -522,6 +588,13 @@ interface ScreenshotGroup {
   source?: string;
 }
 
+/** Video file extensions recognised for the clips feature. */
+const VIDEO_EXTS = ["mp4", "webm", "mov", "mkv"];
+function isVideoPath(p: string): boolean {
+  const ext = p.split(".").pop()?.toLowerCase() ?? "";
+  return VIDEO_EXTS.includes(ext);
+}
+
 function ScreenshotsSection() {
   const { games } = useGames();
   const { showToast } = useToast();
@@ -530,6 +603,26 @@ function ScreenshotsSection() {
   // Follows the same pattern used in ActivityContext and GameContext.
   const gamesRef = useRef(games);
   useEffect(() => { gamesRef.current = games; }, [games]);
+
+  // ── Favorites (persisted) ─────────────────────────────────────────
+  const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
+  const toggleFavorite = useCallback((path: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      saveFavorites(next);
+      return next;
+    });
+  }, []);
+
+  // ── Search + source filter ────────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
+  const [showFavOnly, setShowFavOnly] = useState(false);
+
+  // ── Slideshow ──────────────────────────────────────────────────────
+  const [slideshow, setSlideshow] = useState(false);
 
   // ── Auto-detect Steam state ────────────────────────────────────────
   const [groups, setGroups] = useState<ScreenshotGroup[]>([]);
@@ -544,18 +637,43 @@ function ScreenshotsSection() {
   // ── Lightbox state (unified across ALL screenshots) ───────────────
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
-  // Build a flat array of ALL image paths for lightbox navigation.
+  // Apply search / source / favorites filters to the detected groups.
+  const filteredGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return groups
+      .filter((g) => {
+        if (sourceFilter && g.source !== sourceFilter) return false;
+        if (q && !g.gameName.toLowerCase().includes(q)) return false;
+        if (showFavOnly && !g.screenshots.some((s) => favorites.has(s))) return false;
+        return true;
+      })
+      .map((g) => {
+        if (!showFavOnly && !q) return g;
+        const shots = g.screenshots.filter((s) => {
+          if (showFavOnly && !favorites.has(s)) return false;
+          return true;
+        });
+        return { ...g, screenshots: shots };
+      });
+  }, [groups, search, sourceFilter, showFavOnly, favorites]);
+
+  const filteredManual = useMemo(() => {
+    if (showFavOnly) return manualImages.filter((p) => favorites.has(p));
+    return manualImages;
+  }, [manualImages, showFavOnly, favorites]);
+
+  // Build a flat array of ALL (filtered) image paths for lightbox navigation.
   // Prefer groups (Steam detected) over manual folder, but show whichever has content.
   const allImagePaths = useMemo(() => {
-    if (groups.length > 0) {
+    if (filteredGroups.length > 0) {
       const flat: string[] = [];
-      for (const g of groups) {
+      for (const g of filteredGroups) {
         flat.push(...g.screenshots);
       }
       return flat;
     }
-    return manualImages;
-  }, [groups, manualImages]);
+    return filteredManual;
+  }, [filteredGroups, filteredManual]);
 
   // ── Auto-detect Steam screenshots ─────────────────────────────────
   const handleAutoDetect = useCallback(async () => {
@@ -664,7 +782,7 @@ function ScreenshotsSection() {
       setSelectedFolder(folderPath);
       setIsScanning(true);
 
-      const paths: string[] = await invoke("list_image_files", {
+      const paths: string[] = await invoke("list_media_files", {
         folderPath,
       });
       setManualImages(paths);
@@ -715,6 +833,13 @@ function ScreenshotsSection() {
     });
   }, [allImagePaths.length]);
 
+  // Slideshow auto-advance
+  useEffect(() => {
+    if (!slideshow || lightboxIndex === null) return;
+    const t = setInterval(() => goNext(), 3500);
+    return () => clearInterval(t);
+  }, [slideshow, lightboxIndex, goNext]);
+
   // Keyboard navigation for lightbox
   useEffect(() => {
     if (lightboxIndex === null) return;
@@ -729,26 +854,26 @@ function ScreenshotsSection() {
 
   // ── Build a lookup: screenshot index → group ──────────────────────
   const screenshotGroupIndex = useMemo(() => {
-    if (groups.length === 0) return null;
+    if (filteredGroups.length === 0) return null;
     const map: { groupKey: string; gameName: string }[] = [];
-    for (const g of groups) {
+    for (const g of filteredGroups) {
       for (let i = 0; i < g.screenshots.length; i++) {
         map.push({ groupKey: g.key, gameName: g.gameName });
       }
     }
     return map;
-  }, [groups]);
+  }, [filteredGroups]);
 
   // ── Precompute offset of each group in the flat image array ───────
   const groupOffsets = useMemo(() => {
     const offsets = new Map<string, number>();
     let current = 0;
-    for (const g of groups) {
+    for (const g of filteredGroups) {
       offsets.set(g.key, current);
       current += g.screenshots.length;
     }
     return offsets;
-  }, [groups]);
+  }, [filteredGroups]);
 
   // ── Determine what to show ────────────────────────────────────────
   const hasContent = groups.length > 0 || manualImages.length > 0 || isScanning || isDetecting;
@@ -778,15 +903,82 @@ function ScreenshotsSection() {
         >
           {selectedFolder ? "Change Folder" : "Pick Screenshot Folder"}
         </Button>
+        {hasContent && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              const folder =
+                selectedFolder ||
+                (filteredGroups[0]?.folderPath) ||
+                (groups[0]?.folderPath);
+              if (folder) {
+                invoke("open_folder", { path: folder }).catch(() => {
+                  showToast("Could not open folder", "error");
+                });
+              }
+            }}
+            leftIcon={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5l2 3h6a2 2 0 0 1 2 2v0" />
+                <line x1="15" y1="3" x2="21" y2="3" />
+                <line x1="18" y1="0" x2="18" y2="6" />
+              </svg>
+            }
+          >
+            Open Folder
+          </Button>
+        )}
         {selectedFolder && (
           <span className="community-screenshots-folder" title={selectedFolder}>
             {selectedFolder.split(/[\\/]/).pop() || selectedFolder}
             <span className="community-screenshots-count">
-              {isScanning ? "Scanning…" : `${manualImages.length} images`}
+              {isScanning ? "Scanning…" : `${manualImages.length} media`}
             </span>
           </span>
         )}
       </div>
+
+      {/* Filter / search toolbar (only when there is content) */}
+      {hasContent && !isDetecting && !isScanning && (
+        <div className="community-screenshots-filters">
+          <input
+            type="search"
+            className="community-screenshots-search"
+            placeholder="Search games…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search screenshots by game"
+          />
+          <button
+            type="button"
+            className={`community-filter-pill${showFavOnly ? " active" : ""}`}
+            onClick={() => setShowFavOnly((v) => !v)}
+          >
+            ★ Favorites{showFavOnly ? ` (${favorites.size})` : ""}
+          </button>
+          {["nvidia", "amd", "obs"].map((src) => (
+            <button
+              key={src}
+              type="button"
+              className={`community-filter-pill${sourceFilter === src ? " active" : ""}`}
+              onClick={() => setSourceFilter((prev) => (prev === src ? null : src))}
+            >
+              {src.toUpperCase()}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="community-filter-pill"
+            onClick={() => {
+              setSearch("");
+              setSourceFilter(null);
+              setShowFavOnly(false);
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Empty / tip state */}
       {!hasContent && (
@@ -819,9 +1011,9 @@ function ScreenshotsSection() {
       )}
 
       {/* ── Game-grouped accordion (Steam detected) ────────────────── */}
-      {!isDetecting && groups.length > 0 && (
+      {!isDetecting && filteredGroups.length > 0 && (
         <div className="community-screenshot-groups">
-          {groups.map((group) => {
+          {filteredGroups.map((group) => {
             const isExpanded = expandedKeys.has(group.key);
             const offset = groupOffsets.get(group.key) || 0;
 
@@ -882,45 +1074,15 @@ function ScreenshotsSection() {
                     {group.screenshots.map((p, i) => {
                       const globalIndex = offset + i;
                       return (
-                        <div
+                        <ScreenshotThumb
                           key={p}
-                          className="community-screenshot-thumb"
-                          onClick={() => openLightbox(globalIndex)}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${group.gameName} screenshot ${i + 1}`}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openLightbox(globalIndex);
-                            }
-                          }}
-                        >
-                          <img
-                            src={convertFileSrc(p)}
-                            alt={`${group.gameName} ${i + 1}`}
-                            loading="lazy"
-                            onError={(e) => {
-                              const img = e.currentTarget;
-                              if (img.dataset.fallbackTried === "1") return;
-                              img.dataset.fallbackTried = "1";
-                              invoke<string>("read_cover_image", { filePath: p })
-                                .then((dataUrl) => {
-                                  img.src = dataUrl;
-                                })
-                                .catch(() => {
-                                  img.style.display = "none";
-                                  const placeholder = img.parentElement?.querySelector(
-                                    ".community-screenshot-fallback"
-                                  ) as HTMLElement | null;
-                                  if (placeholder) placeholder.style.display = "flex";
-                                });
-                            }}
-                          />
-                          <div className="community-screenshot-fallback" style={{ display: "none" }}>
-                            {ImageIcon}
-                          </div>
-                        </div>
+                          path={p}
+                          index={globalIndex}
+                          gameName={group.gameName}
+                          isFavorite={favorites.has(p)}
+                          onToggleFavorite={toggleFavorite}
+                          onOpen={openLightbox}
+                        />
                       );
                     })}
                   </div>
@@ -932,56 +1094,26 @@ function ScreenshotsSection() {
       )}
 
       {/* ── Manual folder gallery (flat grid, no grouping) ──────────── */}
-      {!isScanning && !isDetecting && manualImages.length > 0 && groups.length === 0 && (
+      {!isScanning && !isDetecting && filteredManual.length > 0 && filteredGroups.length === 0 && (
         <div className="community-screenshots-grid">
-          {manualImages.map((p, i) => (
-            <div
+          {filteredManual.map((p, i) => (
+            <ScreenshotThumb
               key={p}
-              className="community-screenshot-thumb"
-              onClick={() => openLightbox(i)}
-              role="button"
-              tabIndex={0}
-              aria-label={`Screenshot ${i + 1}`}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  openLightbox(i);
-                }
-              }}
-            >
-              <img
-                src={convertFileSrc(p)}
-                alt={`Screenshot ${i + 1}`}
-                loading="lazy"
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  if (img.dataset.fallbackTried === "1") return;
-                  img.dataset.fallbackTried = "1";
-                  invoke<string>("read_cover_image", { filePath: p })
-                    .then((dataUrl) => {
-                      img.src = dataUrl;
-                    })
-                    .catch(() => {
-                      img.style.display = "none";
-                      const placeholder = img.parentElement?.querySelector(
-                        ".community-screenshot-fallback"
-                      ) as HTMLElement | null;
-                      if (placeholder) placeholder.style.display = "flex";
-                    });
-                }}
-              />
-              <div className="community-screenshot-fallback" style={{ display: "none" }}>
-                {ImageIcon}
-              </div>
-            </div>
+              path={p}
+              index={i}
+              gameName="Screenshot"
+              isFavorite={favorites.has(p)}
+              onToggleFavorite={toggleFavorite}
+              onOpen={openLightbox}
+            />
           ))}
         </div>
       )}
 
       {/* Empty after manual scan */}
-      {!isScanning && !isDetecting && selectedFolder && manualImages.length === 0 && groups.length === 0 && (
+      {!isScanning && !isDetecting && selectedFolder && manualImages.length === 0 && filteredGroups.length === 0 && (
         <div className="community-screenshots-empty">
-          <p>No images found in this folder.</p>
+          <p>No media found in this folder.</p>
         </div>
       )}
 
@@ -1020,277 +1152,43 @@ function ScreenshotsSection() {
             >
               {XIcon}
             </button>
-          </div>
-          <div className="community-lightbox-image-wrapper" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={convertFileSrc(allImagePaths[lightboxIndex])}
-              alt={`Screenshot ${lightboxIndex + 1}`}
-              onError={(e) => {
-                const img = e.currentTarget;
-                if (img.dataset.fallbackTried === "1") return;
-                img.dataset.fallbackTried = "1";
-                invoke<string>("read_cover_image", { filePath: allImagePaths[lightboxIndex] })
-                  .then((dataUrl) => {
-                    img.src = dataUrl;
-                  })
-                  .catch(() => {});
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// News & Discussion Section (#5)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function NewsDiscussionSection() {
-  const {
-    articles,
-    loading: newsLoading,
-    error: newsError,
-    activeSource,
-    sourceNames,
-    setSourceFilter,
-    refresh: newsRefresh,
-  } = useNewsFeeds();
-  const { games } = useGames();
-
-  // Top 8 most recent articles
-  const topArticles = useMemo(() => articles.slice(0, 8), [articles]);
-
-  // Trending games: Steam games with player count potential, sorted by lastPlayed
-  const trendingGames = useMemo(() => {
-    return games
-      .filter((g) => g.steamAppId && g.lastPlayed)
-      .sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))
-      .slice(0, 6);
-  }, [games]);
-
-  // Discussion links for trending games
-  const discussionLinks = useMemo(() => {
-    return trendingGames.map((g) => ({
-      game: g,
-      discussions: `https://steamcommunity.com/app/${g.steamAppId}/discussions/`,
-    }));
-  }, [trendingGames]);
-
-  return (
-    <div className="community-news">
-      {/* ── Trending Games Row ─────────────────────────────────────── */}
-      {trendingGames.length > 0 && (
-        <section className="community-news-section">
-          <div className="community-news-section-header">
-            <h3>
-              <span className="community-news-section-icon">{TrendingIcon}</span>
-              Trending in Your Library
-            </h3>
-          </div>
-          <div className="community-trending-grid">
-            {trendingGames.map((game) => (
-              <div key={game.id} className="community-trending-card">
-                <div className="community-trending-cover">
-                  {game.coverArtUrl ? (
-                    <img src={game.coverArtUrl} alt={game.name} loading="lazy" />
-                  ) : (
-                    <div className="community-trending-cover-fallback">
-                      {SparkleIcon}
-                    </div>
-                  )}
-                </div>
-                <div className="community-trending-body">
-                  <span className="community-trending-name" title={game.name}>
-                    {game.name}
-                  </span>
-                  <span className="community-trending-platform">{game.platform}</span>
-                  <div className="community-trending-links">
-                    {game.steamAppId && (
-                      <>
-                        <a
-                          href={`https://steamcommunity.com/app/${game.steamAppId}/discussions/`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="community-trending-link"
-                          title="Steam Discussions"
-                        >
-                          {MessageIcon}
-                        </a>
-                        <a
-                          href={`https://steamcommunity.com/app/${game.steamAppId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="community-trending-link"
-                          title="Steam Community Hub"
-                        >
-                          {ExternalLinkIcon}
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── News Feed ────────────────────────────────────────────────── */}
-      <section className="community-news-section">
-        <div className="community-news-section-header">
-          <h3>
-            <span className="community-news-section-icon">{NewsIcon}</span>
-            Gaming News
-          </h3>
-          <button
-            type="button"
-            className="community-news-refresh"
-            onClick={newsRefresh}
-            title="Refresh news"
-            disabled={newsLoading}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14" className={newsLoading ? "spinning" : ""}>
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Source filter pills */}
-        {sourceNames.length > 0 && (
-          <div className="community-news-pills">
             <button
               type="button"
-              className={`community-news-pill${activeSource === null ? " active" : ""}`}
-              onClick={() => setSourceFilter(null)}
+              className={`community-lightbox-nav community-slideshow-toggle${slideshow ? " active" : ""}`}
+              onClick={() => setSlideshow((s) => !s)}
+              aria-label={slideshow ? "Stop slideshow" : "Start slideshow"}
+              title={slideshow ? "Stop slideshow" : "Start slideshow"}
             >
-              All
-            </button>
-            {sourceNames.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className={`community-news-pill${activeSource === name ? " active" : ""}`}
-                onClick={() => setSourceFilter(activeSource === name ? null : name)}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* News cards */}
-        {newsLoading ? (
-          <div className="community-news-grid">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="community-news-card skeleton">
-                <div className="skeleton-cover" />
-                <div className="skeleton-body">
-                  <div className="skeleton-line skeleton-title" />
-                  <div className="skeleton-line skeleton-subtitle" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : newsError && articles.length === 0 ? (
-          <div className="community-news-empty">
-            <p>{newsError}</p>
-            <button type="button" className="community-news-retry" onClick={newsRefresh}>
-              Retry
+              {slideshow ? "❚❚" : "▶"}
             </button>
           </div>
-        ) : topArticles.length === 0 ? (
-          <div className="community-news-empty">
-            <p>No news articles yet. Add feeds in the News page settings.</p>
+          <div className="community-lightbox-image-wrapper" onClick={(e) => e.stopPropagation()}>
+            {isVideoPath(allImagePaths[lightboxIndex]) ? (
+              <video
+                src={convertFileSrc(allImagePaths[lightboxIndex])}
+                controls
+                autoPlay
+                style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: "var(--radius-md)" }}
+              />
+            ) : (
+              <img
+                src={convertFileSrc(allImagePaths[lightboxIndex])}
+                alt={`Screenshot ${lightboxIndex + 1}`}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (img.dataset.fallbackTried === "1") return;
+                  img.dataset.fallbackTried = "1";
+                  invoke<string>("read_cover_image", { filePath: allImagePaths[lightboxIndex] })
+                    .then((dataUrl) => {
+                      img.src = dataUrl;
+                    })
+                    .catch(() => {});
+                }}
+              />
+            )}
           </div>
-        ) : (
-          <div className="community-news-grid">
-            {topArticles.map((article, i) => (
-              <CommunityNewsCard key={`${article.link}-${i}`} article={article} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ── Discussion Quick Links ────────────────────────────────────── */}
-      {discussionLinks.length > 0 && (
-        <section className="community-news-section">
-          <div className="community-news-section-header">
-            <h3>
-              <span className="community-news-section-icon">{MessageIcon}</span>
-              Discussion Links
-            </h3>
-            <span className="community-news-section-subtitle">Your recently played games</span>
-          </div>
-          <div className="community-discussion-list">
-            {discussionLinks.map(({ game, discussions }) => (
-              <a
-                key={game.id}
-                href={discussions}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="community-discussion-item"
-              >
-                <div className="community-discussion-cover">
-                  {game.coverArtUrl ? (
-                    <img src={game.coverArtUrl} alt="" loading="lazy" />
-                  ) : (
-                    <div className="community-discussion-cover-fallback">
-                      {GamepadIcon}
-                    </div>
-                  )}
-                </div>
-                <div className="community-discussion-info">
-                  <span className="community-discussion-game">{game.name}</span>
-                  <span className="community-discussion-hint">Steam Discussions →</span>
-                </div>
-              </a>
-            ))}
-          </div>
-        </section>
+        </div>
       )}
-    </div>
-  );
-}
-
-// ─── News Card (compact) ─────────────────────────────────────────────────
-
-function CommunityNewsCard({ article }: { article: NewsArticle }) {
-  const handleClick = useCallback(() => {
-    window.open(article.link, "_blank", "noopener,noreferrer");
-  }, [article.link]);
-
-  return (
-    <div
-      className="community-news-card"
-      onClick={handleClick}
-      role="button"
-      tabIndex={0}
-      aria-label={`Read: ${article.title}`}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          handleClick();
-        }
-      }}
-    >
-      <div className="community-news-card-cover">
-        {article.imageUrl ? (
-          <img src={article.imageUrl} alt="" loading="lazy" onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = "none";
-          }} />
-        ) : null}
-        <span className="community-news-card-source">{article.sourceName}</span>
-      </div>
-      <div className="community-news-card-body">
-        <h4 className="community-news-card-title">{article.title}</h4>
-        <span className="community-news-card-date">
-          {article.pubDate ? formatArticleDate(article.pubDate) : ""}
-        </span>
-      </div>
     </div>
   );
 }
