@@ -3,6 +3,7 @@ import { KpiTile } from "../ui";
 import { type Game, PLAY_STATUS_DETAILS } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
+import { useGameAccent } from "../../hooks/useGameAccent";
 import SteamPlayerCount from "../SteamPlayerCount";
 import GameStatusDropdown from "./GameStatusDropdown";
 import GameLaunchActions from "./GameLaunchActions";
@@ -60,6 +61,11 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
   // loaded the badge is instant.
   const { appId: steamAppId } = useSteamAppId(game);
   const [bannerErrored, setBannerErrored] = useState(false);
+  // Per-game accent: sample the cover art so the hero stripe, KPI
+  // tiles, and status dot pick up the game's palette instead of the
+  // global accent when a cover is available. Exposed as the local
+  // --game-accent custom property; falls back to --color-accent.
+  const gameAccent = useGameAccent(game.coverArtUrl || game.bannerUrl);
 
   const addedDate = new Date(game.addedAt).toLocaleDateString(undefined, {
     year: "numeric",
@@ -67,10 +73,25 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
     day: "numeric",
   });
   const showCoverFallback = !game.bannerUrl && !game.coverArtUrl;
+  // Ambient backdrop: derive a blurred, scaled copy of the hero/cover
+  // art so every game (even banner-less ones) gets a cohesive colored
+  // glow behind the hero. `object-fit: cover` + heavy blur + dark
+  // scrim (see .game-hero__ambient in game-cards.css).
+  const ambientSrc = game.bannerUrl || game.coverArtUrl || null;
 
   return (
-    <div className="game-hero game-hero--compact">
+    <div
+      className="game-hero game-hero--compact"
+      style={gameAccent ? ({ "--game-accent": gameAccent } as React.CSSProperties) : undefined}
+    >
       <div className="game-hero__banner">
+        {ambientSrc && (
+          <div
+            className="game-hero__ambient"
+            style={{ backgroundImage: `url(${ambientSrc})` }}
+            aria-hidden="true"
+          />
+        )}
         {game.bannerUrl && (
           <div
             className="game-banner-bg"
@@ -100,6 +121,14 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
             </svg>
           ) : null}
         </div>
+
+        {/* Floating cover (2:3) overlapping the banner's bottom edge,
+            with the logo/title sitting to its right in the info row. */}
+        {game.coverArtUrl && !bannerErrored && (
+          <div className="game-hero__cover" aria-hidden="true">
+            <img src={game.coverArtUrl} alt="" className="game-hero__cover-img" />
+          </div>
+        )}
 
         {/* KPI overlay: glass tiles that surface the most-glanced
             stats right on the banner. The "Players Now" tile now
@@ -174,7 +203,7 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
 
       {/* Single row below the banner: logo/title (left) + meta
           (middle) + launch actions (right). No stacked blocks. */}
-      <div className="game-hero__info-row">
+      <div className={`game-hero__info-row${game.coverArtUrl && !bannerErrored ? " game-hero__info-row--with-cover" : ""}`}>
         <div className="game-hero__title-block">
           {game.logoUrl ? (
             <img

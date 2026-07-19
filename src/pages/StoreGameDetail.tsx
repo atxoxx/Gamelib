@@ -8,6 +8,7 @@ import BigScreenStoreGamePage from "../components/store/BigScreenStoreGamePage";
 import type { GameMetadataResult, IgdbReview, Game } from "../types/game";
 import { useSizeUnit } from "../hooks/useSizeUnit";
 import { Button } from "../components/ui";
+import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
@@ -37,10 +38,18 @@ import {
 function StoreGameLoading() {
   return (
     <div className="game-page">
-      <div className="game-hero" style={{ background: 'var(--color-bg-tertiary)', height: 240, borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
-      <div style={{ display: 'flex', gap: 'var(--space-xl)', marginTop: 'var(--space-xl)' }}>
-        <div style={{ flex: 2, height: 300, background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
-        <div style={{ flex: 1, height: 300, background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-lg)', opacity: 0.5 }} />
+      <Skeleton shape="rect" height="240px" width="100%" style={{ borderRadius: 'var(--radius-lg)', marginBottom: 'var(--space-xl)' }} />
+      <div style={{ display: 'flex', gap: 'var(--space-xl)' }}>
+        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)' }}>
+          <Skeleton shape="rect" height="160px" width="100%" style={{ borderRadius: 'var(--radius-lg)' }} />
+          <Skeleton shape="rect" height="200px" width="100%" style={{ borderRadius: 'var(--radius-lg)' }} />
+          <SkeletonText lines={4} />
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)' }}>
+          <Skeleton shape="rect" height="120px" width="100%" style={{ borderRadius: 'var(--radius-lg)' }} />
+          <Skeleton shape="rect" height="120px" width="100%" style={{ borderRadius: 'var(--radius-lg)' }} />
+          <Skeleton shape="rect" height="120px" width="100%" style={{ borderRadius: 'var(--radius-lg)' }} />
+        </div>
       </div>
       <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--color-text-muted)' }}>
         <div className="store-spinner" style={{ margin: '0 auto var(--space-md) auto' }} />
@@ -218,6 +227,38 @@ export default function StoreGameDetail() {
     },
     []
   );
+
+  // ── Lightbox keyboard nav ──────────────────────────────────────
+  // Esc closes; ←/→ step through the game's screenshot gallery while
+  // the lightbox is open. The handlers attach only while an image is
+  // shown (effect dependency on lightboxImage) so they don't swallow
+  // keys on the rest of the page.
+  const lightboxIndex = useMemo(() => {
+    if (!lightboxImage || !mockGame?.screenshots) return -1;
+    return mockGame.screenshots.indexOf(lightboxImage);
+  }, [lightboxImage, mockGame]);
+
+  const stepLightbox = useCallback(
+    (dir: 1 | -1) => {
+      if (!mockGame?.screenshots || mockGame.screenshots.length === 0) return;
+      const list = mockGame.screenshots;
+      const current = lightboxIndex < 0 ? 0 : lightboxIndex;
+      const next = (current + dir + list.length) % list.length;
+      setLightboxImage(list[next]);
+    },
+    [lightboxIndex, mockGame]
+  );
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxImage(null);
+      else if (e.key === "ArrowLeft") stepLightbox(-1);
+      else if (e.key === "ArrowRight") stepLightbox(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxImage, stepLightbox]);
 
   const handleAddToLibrary = async () => {
     if (!data || adding) return;
@@ -402,14 +443,20 @@ export default function StoreGameDetail() {
           </div>
 
           <div className="game-side-col">
-            <InfoKpiCard game={mockGame} sizeUnit={sizeUnit} hideStatus />
-            <RatingsKpiCard game={mockGame} />
-            <SpecsCard game={mockGame} />
-            <TimeToBeatCard game={mockGame} />
-            <ReleasesCard game={mockGame} />
-            <CrackWatchCard gameName={data.title} />
-            <ProtonDBCard steamAppId={steamAppId} />
-            <LanguagesSection game={mockGame} />
+            <div className="side-group">
+              <InfoKpiCard game={mockGame} sizeUnit={sizeUnit} hideStatus />
+              <RatingsKpiCard game={mockGame} />
+              <TimeToBeatCard game={mockGame} />
+            </div>
+            <div className="side-group">
+              <SpecsCard game={mockGame} />
+              <ProtonDBCard steamAppId={steamAppId} />
+              <CrackWatchCard gameName={data.title} />
+            </div>
+            <div className="side-group">
+              <ReleasesCard game={mockGame} />
+              <LanguagesSection game={mockGame} />
+            </div>
           </div>
         </div>
       )}
@@ -444,6 +491,29 @@ export default function StoreGameDetail() {
             animation: 'fadeIn var(--transition-fast) ease'
           }}
         >
+          <button
+            className="lightbox-nav lightbox-nav--prev"
+            aria-label="Previous screenshot"
+            onClick={(e) => { e.stopPropagation(); stepLightbox(-1); }}
+            style={{
+              position: 'fixed',
+              left: 'var(--space-xl)',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 44, height: 44,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(0,0,0,0.5)',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background var(--transition-fast)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 20, height: 20 }}>
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
           <div
             className="lightbox-content"
             onClick={(e) => e.stopPropagation()}
@@ -458,6 +528,26 @@ export default function StoreGameDetail() {
             }}
           >
             <img src={lightboxImage} alt="Fullscreen Screenshot" style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }} />
+            {mockGame.screenshots && mockGame.screenshots.length > 1 && (
+              <div
+                className="lightbox-counter"
+                style={{
+                  position: 'absolute',
+                  bottom: 'var(--space-md)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(0,0,0,0.6)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-full)',
+                  letterSpacing: '0.4px',
+                }}
+              >
+                {(lightboxIndex < 0 ? 1 : lightboxIndex + 1)} / {mockGame.screenshots.length}
+              </div>
+            )}
             <button
               className="lightbox-close"
               onClick={() => setLightboxImage(null)}
@@ -484,6 +574,29 @@ export default function StoreGameDetail() {
               </svg>
             </button>
           </div>
+          <button
+            className="lightbox-nav lightbox-nav--next"
+            aria-label="Next screenshot"
+            onClick={(e) => { e.stopPropagation(); stepLightbox(1); }}
+            style={{
+              position: 'fixed',
+              right: 'var(--space-xl)',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 44, height: 44,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(0,0,0,0.5)',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background var(--transition-fast)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 20, height: 20 }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
       )}
     </div>

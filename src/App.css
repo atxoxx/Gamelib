@@ -2831,9 +2831,19 @@
 
 /* Game Page */
 .game-page {
-  max-width: 1200px;
+  max-width: var(--content-max-width, 1440px);
   margin: 0 auto;
   padding: var(--space-2xl);
+}
+
+/* Mid-width: keep the 2-column rhythm but let the side column
+ * breathe instead of snapping to a cramped stack. Below 860px
+ * the grid fully collapses (see media query below) so phones /
+ * narrow windows get the single-column reading flow. */
+@media (max-width: 1100px) {
+  .game-page {
+    padding: var(--space-xl);
+  }
 }
 
 .game-hero {
@@ -2953,13 +2963,128 @@
   height: 18px;
 }
 
-/* Game Tabs */
+/* Game Tabs — sticky, glass "segmented pill" bar.
+ * A contained, rounded glass pill pinned under the topnav. The
+ * active tab is a *soft* accent-tinted pill (accent text + faint
+ * accent fill + a small leading accent dot) rather than a heavy
+ * solid gradient fill — this reads as a refined control in every
+ * theme and never shows a hard sliding edge. The dot is purely
+ * decorative (aria-hidden) so SR users still get the text label. */
 .game-tabs {
   display: flex;
-  gap: var(--space-2xs);
-  border-bottom: 1px solid var(--color-border-light);
-  margin-bottom: var(--space-xl);
-  padding: 0 var(--space-xs);
+  gap: 2px;
+  align-items: center;
+  position: sticky;
+  top: calc(var(--topnav-height) + var(--space-md));
+  z-index: 50;
+  margin: 0 auto var(--space-xl);
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-light);
+  background: color-mix(in srgb, var(--color-surface-raised) 80%, transparent);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: var(--shadow-md);
+}
+
+.game-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  border-radius: var(--radius-full);
+  transition: color var(--transition-fast), background var(--transition-fast),
+              border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+/* Decorative leading dot on every tab; only the active tab
+ * lights it up with the accent color + glow. */
+.game-tab::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast),
+              opacity var(--transition-fast);
+}
+
+.game-tab:not(.active):hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.game-tab:not(.active):hover::before {
+  opacity: 0.8;
+}
+
+.game-tab.active {
+  color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.game-tab.active::before {
+  background: var(--color-accent);
+  opacity: 1;
+  box-shadow: 0 0 8px var(--color-accent-glow);
+}
+
+.game-tab:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.game-tab-placeholder {
+  text-align: center;
+}
+
+.game-tab-placeholder-text {
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+  padding: var(--space-2xl) 0;
+}
+
+@media (max-width: 1100px) {
+  .game-tabs {
+    margin-left: calc(-1 * var(--space-lg));
+    margin-right: calc(-1 * var(--space-lg));
+    padding-left: var(--space-lg);
+    padding-right: var(--space-lg);
+  }
+}
+
+/* Sliding active-indicator: a single pill that animates between
+ * tab positions. The active tab sets --tab-indicator-left /
+ * --tab-indicator-width inline; the underline below reads them and
+ * transitions. Falls back gracefully (no inline vars => hidden). */
+.game-tabs__indicator {
+  position: absolute;
+  bottom: -1px;
+  left: var(--tab-indicator-left, 0);
+  width: var(--tab-indicator-width, 0);
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 10px var(--color-accent-glow), 0 0 20px var(--color-accent-glow);
+  transition: left var(--duration-normal) var(--ease-standard),
+              width var(--duration-normal) var(--ease-standard);
+  pointer-events: none;
 }
 
 .game-tab {
@@ -3005,8 +3130,30 @@
 /* Game Content Grid */
 .game-content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2.4fr) minmax(320px, 1fr);
   gap: var(--space-xl);
+  align-items: start;
+}
+
+/* Mid-width: tighten the side column floor so cards don't get
+ * squeezed into an unreadable width before the full stack kicks
+ * in at 860px. */
+@media (max-width: 1100px) {
+  .game-content-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: var(--space-lg);
+  }
+}
+
+/* Full collapse to a single reading column on phones / narrow
+ * windows. align-items reset isn't needed since it's one column. */
+@media (max-width: 860px) {
+  .game-content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .game-side-col {
+    position: static;
+  }
 }
 
 /* Game Sections */
@@ -3016,6 +3163,9 @@
   border-radius: var(--radius-lg);
   padding: var(--space-xl);
   margin-bottom: var(--space-xl);
+  /* Clear the sticky topnav + sticky tab bar when a section is
+   * scrolled-to (anchor jumps or keyboard focus). */
+  scroll-margin-top: calc(var(--topnav-height) + 64px);
 }
 
 .game-section-title {
@@ -3621,6 +3771,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-xl);
+  /* On wide screens keep the KPI / compatibility stack visible
+   * while the (often taller) main column scrolls. The offset
+   * clears the sticky tab bar + breathing room. Disabled below
+   * 860px where the column stacks and sticky would trap it. */
+  position: sticky;
+  top: calc(var(--topnav-height) + 72px);
+  align-self: start;
 }
 
 /* ==============================
@@ -4184,6 +4341,28 @@
 .toast-close svg {
   width: 14px;
   height: 14px;
+}
+
+/* Fullscreen screenshot viewer nav arrows (shared by the library
+ * GamePage and StoreGameDetail lightboxes). The buttons are
+ * positioned fixed at the viewport edges via inline styles; here we
+ * only add the hover/focus affordance + hide on touch/narrow
+ * where swipe-scroll suffices. */
+.lightbox-nav:hover {
+  background: color-mix(in srgb, var(--color-accent) 35%, rgba(0,0,0,0.6)) !important;
+  border-color: var(--color-accent) !important;
+}
+
+.lightbox-nav:focus-visible {
+  outline: none;
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px var(--color-accent-glow) !important;
+}
+
+@media (max-width: 600px) {
+  .lightbox-nav {
+    display: none;
+  }
 }
 
 /* ==============================

@@ -730,6 +730,13 @@
    * can't leak out and paint above page-level overlays like the
    * Download modal (z-index 9998) or the downloads popover. */
   isolation: isolate;
+  /* Per-game accent: when GameHero samples the cover art it sets
+   * --game-accent inline; otherwise this falls back to the global
+   * accent so every hero visual (stripe, KPI tiles, status dot)
+   * stays consistent. */
+  --game-accent: var(--color-accent);
+  --game-accent-hover: var(--color-accent-hover);
+  --game-accent-glow: var(--color-accent-glow);
 }
 
 .game-hero__banner {
@@ -762,10 +769,18 @@
   background: linear-gradient(
     180deg,
     transparent,
-    color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-secondary))
+    color-mix(in srgb, var(--game-accent) 4%, var(--color-bg-secondary))
   );
   position: relative;
   z-index: 2;
+}
+
+/* Within the hero, route accent-driven visuals (KPI intent +
+ * status dot glow, info-row gradient) through the per-game
+ * --game-accent so each game tints its own hero. */
+.game-hero .kpi-tile--intent-accent .kpi-tile__icon,
+.game-hero .kpi-tile--intent-accent .kpi-tile__value {
+  color: var(--game-accent);
 }
 
 .game-hero__title-block {
@@ -826,6 +841,65 @@
   font-weight: var(--font-weight-bold);
   color: inherit;
   line-height: 1;
+}
+
+/* Immersive ambient backdrop: a heavily blurred, scaled copy of the
+ * hero/cover art that tints the entire banner with the game's own
+ * palette. Sits behind the banner image + KPI overlay; the dark
+ * scrim keeps text/tiles legible. Gives banner-less games the same
+ * colored glow as games with a full hero. */
+.game-hero__ambient {
+  position: absolute;
+  inset: -20%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(48px) saturate(150%) brightness(0.7);
+  transform: scale(1.1);
+  z-index: 0;
+}
+
+.game-hero__ambient::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-bg-primary) 35%, transparent) 0%,
+      color-mix(in srgb, var(--color-bg-primary) 75%, transparent) 100%
+    );
+}
+
+/* Floating cover: a 2:3 thumbnail anchored to the banner's
+ * bottom-left, overlapping the lower edge so it "breaks out" of the
+ * banner into the info row — the canonical Steam/EGS detail look.
+ * Only rendered when a cover exists. The info-row is padded-left to
+ * clear it (see .game-hero__info-row --with-cover below). */
+.game-hero__cover {
+  position: absolute;
+  left: var(--space-xl);
+  bottom: calc(-1 * var(--space-3xl));
+  width: clamp(96px, 11vw, 150px);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-lg);
+  background: var(--color-bg-tertiary);
+  z-index: 4;
+}
+
+.game-hero__cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* When the cover floats out, push the info row's content right so
+ * the title/logo never collides with the cover thumbnail. */
+.game-hero__info-row--with-cover {
+  padding-left: calc(var(--space-xl) + clamp(96px, 11vw, 150px) + var(--space-lg));
 }
 
 .game-hero-meta-item {
@@ -916,6 +990,70 @@
   background: color-mix(in srgb, var(--color-danger) 12%, transparent);
   color: #fff;
   border-color: var(--color-danger);
+}
+
+/* ── Carousel wrapper + scroll arrows ─────────────────────
+ * Wraps the horizontal screenshot / video selectors with prev/next
+ * arrow buttons that smooth-scroll the strip. The arrows sit
+ * outside the scroll container so they stay put, with a soft
+ * gradient mask on the scroll edges so thumbs "fade" under them.
+ * Arrows hide below the breakpoint where the strip is short enough
+ * to need no paging (few items / touch scroll). */
+.carousel-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.carousel-wrap .screenshots-carousel,
+.carousel-wrap .video-selector-list {
+  flex: 1;
+  scroll-padding-inline: var(--space-md);
+}
+
+.carousel-arrow {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.carousel-arrow svg {
+  width: 16px;
+  height: 16px;
+}
+
+.carousel-arrow:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-raised));
+  transform: translateY(-1px);
+}
+
+.carousel-arrow:active {
+  transform: translateY(0) scale(0.94);
+}
+
+.carousel-arrow:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+@media (max-width: 600px) {
+  .carousel-arrow {
+    display: none;
+  }
 }
 
 /* ── VideosSection refinement ──────────────────────────────────── */
@@ -1804,11 +1942,76 @@
   .system-requirements-card__row-value { grid-area: value; padding-top: 0; }
 }
 
-/* Big-screen layout: stretch the card to fill the wider hero and
- * re-flow the header so the segmented toggle sits below the
- * title on a single line (no cramped two-column header). */
-[data-bigscreen="true"] .system-requirements-card__header {
+/* ── Side-column card polish ───────────────────────────────
+ * Subtle grouped clusters + hover-lift so the 8-card side
+ * stack reads as related widgets rather than a flat wall. Each
+ * `.game-section` inside `.game-side-col` gets the shared
+ * hover-lift (border brightens + 2px rise) already used by
+ * `.kpi-tile--clickable`. A faint top divider separates the
+ * logical clusters (At-a-glance / Compatibility / Catalog) once
+ * the page groups them via `.side-group` wrappers. */
+
+.game-side-col .game-section {
+  margin-bottom: 0;
+  animation: kpiTileIn 360ms var(--ease-enter) both;
+}
+
+/* Stagger the side cards so they cascade in on mount. The
+ * --side-stagger var is set per-card inline by the page; falls
+ * back to 0 when absent. */
+.game-side-col .game-section:nth-child(1) { animation-delay: 40ms; }
+.game-side-col .game-section:nth-child(2) { animation-delay: 80ms; }
+.game-side-col .game-section:nth-child(3) { animation-delay: 120ms; }
+.game-side-col .game-section:nth-child(4) { animation-delay: 160ms; }
+.game-side-col .game-section:nth-child(5) { animation-delay: 200ms; }
+.game-side-col .game-section:nth-child(6) { animation-delay: 240ms; }
+.game-side-col .game-section:nth-child(7) { animation-delay: 280ms; }
+.game-side-col .game-section:nth-child(8) { animation-delay: 320ms; }
+.game-side-col .game-section:nth-child(9) { animation-delay: 360ms; }
+
+/* Group wrapper: a labelled band that separates logical clusters
+ * of side cards (e.g. "Compatibility"). The first group has no
+ * top margin; later groups get a divider gap. */
+.side-group {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-sm);
+  gap: var(--space-xl);
+}
+
+.side-group + .side-group {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.side-group__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 0 var(--space-xs);
+}
+
+.side-group__label svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-accent);
+}
+
+/* ── Hero responsive: drop the floating cover on phones so it
+ * doesn't overlap the meta row, and reset the info-row padding. ── */
+@media (max-width: 600px) {
+  .game-hero__cover {
+    display: none;
+  }
+  .game-hero__info-row--with-cover {
+    padding-left: var(--space-xl);
+  }
+  .game-hero__title-block {
+    max-width: none;
+  }
 }

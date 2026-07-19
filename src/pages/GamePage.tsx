@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -237,6 +237,36 @@ function GameDetail({ game }: { game: Game }) {
 
   // Lightbox & Video states
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  // Fullscreen screenshot viewer: Esc closes; ←/→ step through the
+  // game's screenshot gallery while open. Handlers attach only while
+  // an image is shown so they don't swallow keys elsewhere.
+  const lightboxIndex = useMemo(() => {
+    if (!lightboxImage || !game.screenshots) return -1;
+    return game.screenshots.indexOf(lightboxImage);
+  }, [lightboxImage, game.screenshots]);
+
+  const stepLightbox = useCallback(
+    (dir: 1 | -1) => {
+      if (!game.screenshots || game.screenshots.length === 0) return;
+      const list = game.screenshots;
+      const current = lightboxIndex < 0 ? 0 : lightboxIndex;
+      const next = (current + dir + list.length) % list.length;
+      setLightboxImage(list[next]);
+    },
+    [lightboxIndex, game.screenshots]
+  );
+
+  useEffect(() => {
+    if (!lightboxImage) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxImage(null);
+      else if (e.key === "ArrowLeft") stepLightbox(-1);
+      else if (e.key === "ArrowRight") stepLightbox(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxImage, stepLightbox]);
 
   // LaunchBox Image Browser state
   const [showImageBrowser, setShowImageBrowser] = useState(false);
@@ -896,7 +926,10 @@ function GameDetail({ game }: { game: Game }) {
 
       <GameHero game={game} onLaunch={handleLaunch} />
 
-      {/* Tabs */}
+      {/* Tabs — sticky bar with an animated sliding indicator.
+          The indicator span reads --tab-indicator-left / --width
+          set imperatively from the measured active button so it
+          slides between tab positions. Hidden until measured. */}
       <div className="game-tabs">
         {(["overview", "reviews", "activity", "achievements", "weblinks"] as const).map((tab) => (
           <button
@@ -939,18 +972,24 @@ function GameDetail({ game }: { game: Game }) {
           </div>
 
           <div className="game-side-col">
-            <InfoKpiCard
-              game={game}
-              sizeUnit={sizeUnit}
-              onEditSize={() => setEditing(true)}
-            />
-            <RatingsKpiCard game={game} />
-            <SpecsCard game={game} />
-            <TimeToBeatCard game={game} />
-            <ReleasesCard game={game} />
-            <CrackWatchCard gameName={game.name} />
-            <ProtonDBCard steamAppId={game.steamAppId} />
-            <LanguagesSection game={game} />
+            <div className="side-group">
+              <InfoKpiCard
+                game={game}
+                sizeUnit={sizeUnit}
+                onEditSize={() => setEditing(true)}
+              />
+              <RatingsKpiCard game={game} />
+              <TimeToBeatCard game={game} />
+            </div>
+            <div className="side-group">
+              <SpecsCard game={game} />
+              <ProtonDBCard steamAppId={game.steamAppId} />
+              <CrackWatchCard gameName={game.name} />
+            </div>
+            <div className="side-group">
+              <ReleasesCard game={game} />
+              <LanguagesSection game={game} />
+            </div>
           </div>
         </div>
       )}
@@ -1698,6 +1737,29 @@ function GameDetail({ game }: { game: Game }) {
             animation: 'fadeIn var(--transition-fast) ease'
           }}
         >
+          <button
+            className="lightbox-nav lightbox-nav--prev"
+            aria-label="Previous screenshot"
+            onClick={(e) => { e.stopPropagation(); stepLightbox(-1); }}
+            style={{
+              position: 'fixed',
+              left: 'var(--space-xl)',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 44, height: 44,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(0,0,0,0.5)',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background var(--transition-fast)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 20, height: 20 }}>
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
           <div 
             className="lightbox-content" 
             onClick={(e) => e.stopPropagation()}
@@ -1712,6 +1774,26 @@ function GameDetail({ game }: { game: Game }) {
             }}
           >
             <img src={lightboxImage} alt="Fullscreen Screenshot" style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }} />
+            {game.screenshots && game.screenshots.length > 1 && (
+              <div
+                className="lightbox-counter"
+                style={{
+                  position: 'absolute',
+                  bottom: 'var(--space-md)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(0,0,0,0.6)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-full)',
+                  letterSpacing: '0.4px',
+                }}
+              >
+                {(lightboxIndex < 0 ? 1 : lightboxIndex + 1)} / {game.screenshots.length}
+              </div>
+            )}
             <button 
               className="lightbox-close" 
               onClick={() => setLightboxImage(null)}
@@ -1738,6 +1820,29 @@ function GameDetail({ game }: { game: Game }) {
               </svg>
             </button>
           </div>
+          <button
+            className="lightbox-nav lightbox-nav--next"
+            aria-label="Next screenshot"
+            onClick={(e) => { e.stopPropagation(); stepLightbox(1); }}
+            style={{
+              position: 'fixed',
+              right: 'var(--space-xl)',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 44, height: 44,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(0,0,0,0.5)',
+              color: '#fff',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background var(--transition-fast)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 20, height: 20 }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
         </div>
       )}
 
