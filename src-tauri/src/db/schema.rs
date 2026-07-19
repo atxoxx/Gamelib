@@ -27,6 +27,13 @@ pub const V1_SCHEMA: &str = include_str!("schema_v1.sql");
 /// uses `Option<..>` for both.
 pub const V2_SCHEMA: &str = include_str!("schema_v2.sql");
 
+/// DDL for v3 of the schema. Recreates the `downloads_fts` mirror
+/// triggers so they key off the globally-unique `downloads.rowid`
+/// rather than the per-source `row_id` (which collided across
+/// sources and caused "Refresh failed: downloads insert N: constraint
+/// failed" the second time a source was added).
+pub const V3_SCHEMA: &str = include_str!("schema_v3.sql");
+
 /// Bootstrap the schema-meta table on a fresh DB. This table is
 /// itself part of v1, but we need to read `PRAGMA user_version`
 /// *before* applying v1, so bootstrap is logically a separate step.
@@ -50,4 +57,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 /// COLUMN`, never by editing the existing schema file's
 /// `CREATE TABLE` clause (existing installs would never see the
 /// edit because their `schema_version` is already past v1).
-pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA), ("v2", V2_SCHEMA)];
+pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA), ("v2", V2_SCHEMA), ("v3", V3_SCHEMA)];

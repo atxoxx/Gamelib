@@ -68,19 +68,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS downloads_fts USING fts5(
 -- index records the documents' source row_id so we can join.
 CREATE TRIGGER IF NOT EXISTS trg_downloads_ai AFTER INSERT ON downloads BEGIN
   INSERT INTO downloads_fts(rowid, title, source_id, download_uri, file_size, upload_date)
-  VALUES (new.row_id, new.title, new.source_id,
+  VALUES (new.rowid, new.title, new.source_id,
           json_extract(new.uris_json, '$[0]'), new.file_size, new.upload_date);
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_downloads_au AFTER UPDATE ON downloads BEGIN
-  DELETE FROM downloads_fts WHERE rowid = old.row_id;
+  DELETE FROM downloads_fts WHERE rowid = old.rowid;
   INSERT INTO downloads_fts(rowid, title, source_id, download_uri, file_size, upload_date)
-  VALUES (new.row_id, new.title, new.source_id,
+  VALUES (new.rowid, new.title, new.source_id,
           json_extract(new.uris_json, '$[0]'), new.file_size, new.upload_date);
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_downloads_ad AFTER DELETE ON downloads BEGIN
-  DELETE FROM downloads_fts WHERE rowid = old.row_id;
+  DELETE FROM downloads_fts WHERE rowid = old.rowid;
 END;
 
 -- ---- Games (Phase 3) -----------------------------------------------
