@@ -269,8 +269,8 @@ const tabs: Tab[] = [
   { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
   { path: "/news", label: "News", icon: <NewsIcon /> },
-  { path: "/community", label: "Community", icon: <CommunityIcon /> },
-  { path: "/friends", label: "Friends", icon: <FriendsIcon /> },
+  { path: "/community", label: "Stats", icon: <CommunityIcon /> },
+  { path: "/friends", label: "Community", icon: <FriendsIcon /> },
 ];
 
 export default function TopNav() {

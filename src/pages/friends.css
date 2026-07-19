@@ -34,6 +34,10 @@
   border: none;
   margin: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .friends-tab {

@@ -143,7 +143,7 @@ const tabs: BigScreenTab[] = [
   { path: "/downloads", label: "Downloads", icon: <DownloadIcon /> },
   { path: "/storage", label: "Storage", icon: <StorageIcon /> },
   { path: "/news", label: "News", icon: <NewsIcon /> },
-  { path: "/community", label: "Community", icon: <CommunityIcon /> },
+  { path: "/community", label: "Stats", icon: <CommunityIcon /> },
   { path: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 

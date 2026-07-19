@@ -3002,7 +3002,7 @@ export default function SettingsPage() {
                     <option value="downloads">⬇️ Downloads</option>
                     <option value="storage">💾 Storage</option>
                     <option value="news">📰 News</option>
-                    <option value="community">👥 Community</option>
+                    <option value="community">📊 Stats</option>
                   </select>
                 </div>
               </div>
