@@ -3185,3 +3185,131 @@
   gap: var(--space-xs, 6px);
   align-items: center;
 }
+
+/* ── Leaderboard Tab ─────────────────────────────────────────────── */
+
+.leaderboard-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.leaderboard-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.leaderboard-title {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.leaderboard-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 44px 44px 1fr auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface, #1c1f2a);
+  transition: border-color 0.2s ease, transform 0.1s ease;
+}
+
+.leaderboard-row:hover {
+  border-color: var(--color-accent, #4f9dff);
+}
+
+.leaderboard-row.is-you {
+  border-color: var(--color-accent, #4f9dff);
+  box-shadow: 0 0 0 1px var(--color-accent, #4f9dff) inset;
+}
+
+.leaderboard-rank {
+  font-size: 1.25rem;
+  font-weight: 800;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.leaderboard-rank.rank-1 { color: #ffd700; }
+.leaderboard-rank.rank-2 { color: #c0c0c0; }
+.leaderboard-rank.rank-3 { color: #cd7f32; }
+
+.leaderboard-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 0.95rem;
+}
+
+.leaderboard-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.leaderboard-player-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-you-badge {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-accent, #4f9dff);
+  color: #fff;
+}
+
+.leaderboard-now-playing {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.leaderboard-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--color-accent, #4f9dff), #7bc96f);
+  transition: width 0.4s ease;
+}
+
+.leaderboard-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-align: right;
+  min-width: 70px;
+  color: var(--color-text);
+}

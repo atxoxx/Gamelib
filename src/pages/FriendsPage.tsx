@@ -101,6 +101,20 @@ function CompareIcon() {
   );
 }
 
+// Leaderboard / Trophy Icon
+function LeaderboardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+      <path d="M4 22h16" />
+      <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+      <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+    </svg>
+  );
+}
+
 // Trash Icon
 function TrashIcon() {
   return (
@@ -885,7 +899,7 @@ interface FriendInvitation {
 // ── Main Page Component ─────────────────────────────────────────────
 
 export default function FriendsPage() {
-  const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "compare" | "profile">("friends");
+  const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "compare" | "leaderboard" | "profile">("friends");
   const { games, runningGameIds } = useGames();
   const { cache } = useAchievements();
   const { showToast } = useToast();
@@ -2399,6 +2413,128 @@ export default function FriendsPage() {
   // Set of the viewer's own game ids, used for "games in common" on cards.
   const myGameIds = useMemo(() => new Set(games.map((g) => g.id)), [games]);
 
+  // ── Leaderboard Tab ────────────────────────────────────────────────
+  const [leaderboardMetric, setLeaderboardMetric] = useState<"playtime" | "games" | "achievements">("playtime");
+
+  const leaderboardPlayers = useMemo(() => {
+    const players: {
+      key: string;
+      name: string;
+      avatar: string;
+      isYou: boolean;
+      status?: string;
+      currentlyPlaying?: string;
+      gamesCount: number;
+      playtimeMinutes: number;
+      achievementsCount: number;
+    }[] = [
+      {
+        key: `me`,
+        name: profile.name,
+        avatar: profile.avatar,
+        isYou: true,
+        status: profile.status,
+        currentlyPlaying: profile.currentlyPlaying,
+        gamesCount: profile.libStats?.gamesCount || 0,
+        playtimeMinutes: profile.libStats?.playtimeMinutes || 0,
+        achievementsCount: profile.libStats?.achievementsCount || 0,
+      },
+      ...friends
+        .filter((f) => !f.blocked)
+        .map((f) => ({
+          key: f.id,
+          name: displayName(f),
+          avatar: f.avatar,
+          isYou: false,
+          status: f.status,
+          currentlyPlaying: f.currentlyPlaying,
+          gamesCount: f.libStats?.gamesCount || 0,
+          playtimeMinutes: f.libStats?.playtimeMinutes || 0,
+          achievementsCount: f.libStats?.achievementsCount || 0,
+        })),
+    ];
+
+    const scoreOf = (p: (typeof players)[number]) =>
+      leaderboardMetric === "playtime"
+        ? p.playtimeMinutes
+        : leaderboardMetric === "games"
+        ? p.gamesCount
+        : p.achievementsCount;
+
+    const ranked = [...players].sort((a, b) => scoreOf(b) - scoreOf(a));
+    const top = scoreOf(ranked[0] || ({} as (typeof players)[number])) || 1;
+    return ranked.map((p, i) => ({ ...p, rank: i + 1, value: scoreOf(p), max: top }));
+  }, [friends, profile, leaderboardMetric]);
+
+  const leaderboardTab = (
+    <div className="leaderboard-section">
+      <div className="leaderboard-header">
+        <h3 className="leaderboard-title">🏆 Friends Leaderboard</h3>
+        <p className="leaderboard-subtitle">
+          Ranked by shared library stats. Only friends who have synced their stats appear.
+        </p>
+        <div className="compare-filter-chips">
+          <button
+            type="button"
+            className={`compare-filter-chip${leaderboardMetric === "playtime" ? " active" : ""}`}
+            onClick={() => setLeaderboardMetric("playtime")}
+          >
+            Playtime
+          </button>
+          <button
+            type="button"
+            className={`compare-filter-chip${leaderboardMetric === "games" ? " active" : ""}`}
+            onClick={() => setLeaderboardMetric("games")}
+          >
+            Games Owned
+          </button>
+          <button
+            type="button"
+            className={`compare-filter-chip${leaderboardMetric === "achievements" ? " active" : ""}`}
+            onClick={() => setLeaderboardMetric("achievements")}
+          >
+            Achievements
+          </button>
+        </div>
+      </div>
+
+      {leaderboardPlayers.filter((p) => p.value > 0).length === 0 ? (
+        <div className="friends-empty-state">
+          <h3 className="friends-empty-title">No Stats Yet</h3>
+          <p className="friends-empty-desc">
+            Once you and your friends sync library stats, the leaderboard will rank everyone here.
+          </p>
+        </div>
+      ) : (
+        <div className="leaderboard-list">
+          {leaderboardPlayers.map((p) => (
+            <div key={p.key} className={`leaderboard-row${p.isYou ? " is-you" : ""}${p.rank <= 3 ? " top-three" : ""}`}>
+              <div className={`leaderboard-rank rank-${p.rank}`}>{p.rank}</div>
+              {renderAvatar(p.avatar, p.name, "leaderboard-avatar")}
+              <div className="leaderboard-player-info">
+                <div className="leaderboard-player-name">
+                  {p.name}
+                  {p.isYou && <span className="leaderboard-you-badge">YOU</span>}
+                  {p.currentlyPlaying && <span className="leaderboard-now-playing">{p.currentlyPlaying}</span>}
+                </div>
+                <div className="leaderboard-bar-track">
+                  <div className="leaderboard-bar-fill" style={{ width: `${Math.max((p.value / p.max) * 100, 2)}%` }} />
+                </div>
+              </div>
+              <div className="leaderboard-value">
+                {leaderboardMetric === "playtime"
+                  ? formatHours(p.value)
+                  : leaderboardMetric === "games"
+                  ? `${p.value}`
+                  : `${p.value}%`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // ── Visible Friends (search / sort / filter) ──────────────────────
 
   const visibleFriends = useMemo(() => {
@@ -2475,20 +2611,30 @@ export default function FriendsPage() {
             <RecommendIcon />
             <span>Recommendations</span>
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "compare"}
-            className={`friends-tab${activeTab === "compare" ? " active" : ""}`}
-            onClick={() => setActiveTab("compare")}
-          >
-            <CompareIcon />
-            <span>Compare Library</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "profile"}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "compare"}
+              className={`friends-tab${activeTab === "compare" ? " active" : ""}`}
+              onClick={() => setActiveTab("compare")}
+            >
+              <CompareIcon />
+              <span>Compare Library</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "leaderboard"}
+              className={`friends-tab${activeTab === "leaderboard" ? " active" : ""}`}
+              onClick={() => setActiveTab("leaderboard")}
+            >
+              <LeaderboardIcon />
+              <span>Leaderboard</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "profile"}
             className={`friends-tab${activeTab === "profile" ? " active" : ""}`}
             onClick={() => setActiveTab("profile")}
           >
@@ -3760,7 +3906,10 @@ export default function FriendsPage() {
           </div>
         )}
 
-        {/* Tab 5: My Profile */}
+        {/* Tab 5: Leaderboard */}
+        {activeTab === "leaderboard" && (leaderboardTab)}
+
+        {/* Tab 6: My Profile */}
         {activeTab === "profile" && (
           <div className="profile-editor-layout">
             <div className="profile-summary-section">
