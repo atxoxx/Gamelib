@@ -31,6 +31,8 @@ import {
   saveFavorites,
   loadMonthlyGoal,
   saveMonthlyGoal,
+  loadScreenshotCache,
+  saveScreenshotCache,
 } from "./communityStorage";
 import { ScreenshotThumb } from "./communityScreenshotThumb";
 import "./community.css";
@@ -604,6 +606,24 @@ function ScreenshotsSection() {
   const gamesRef = useRef(games);
   useEffect(() => { gamesRef.current = games; }, [games]);
 
+  // Re-hydrate instantly from the last successful detection, then refresh
+  // in the background so the tab isn't empty on every visit. Both branches
+  // are intentionally fire-and-forget: cached data shows immediately, and
+  // any newer captures surface once the scan finishes.
+  useEffect(() => {
+    const cached = loadScreenshotCache();
+    if (cached.length > 0) {
+      setGroups(cached as unknown as ScreenshotGroup[]);
+      const initialExpanded = new Set<string>();
+      for (let i = 0; i < Math.min(cached.length, 3); i++) {
+        initialExpanded.add(cached[i].key);
+      }
+      setExpandedKeys(initialExpanded);
+    }
+    handleAutoDetect(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Favorites (persisted) ─────────────────────────────────────────
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const toggleFavorite = useCallback((path: string) => {
@@ -620,6 +640,7 @@ function ScreenshotsSection() {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [showFavOnly, setShowFavOnly] = useState(false);
+  const [allExpanded, setAllExpanded] = useState(false);
 
   // ── Slideshow ──────────────────────────────────────────────────────
   const [slideshow, setSlideshow] = useState(false);
@@ -658,30 +679,48 @@ function ScreenshotsSection() {
   }, [groups, search, sourceFilter, showFavOnly, favorites]);
 
   const filteredManual = useMemo(() => {
-    if (showFavOnly) return manualImages.filter((p) => favorites.has(p));
-    return manualImages;
-  }, [manualImages, showFavOnly, favorites]);
+    const q = search.trim().toLowerCase();
+    return manualImages
+      .filter((p) => (showFavOnly ? favorites.has(p) : true))
+      .filter((p) => (sourceFilter ? p.toLowerCase().includes(sourceFilter) : true))
+      .filter((p) => (q ? p.toLowerCase().includes(q) : true));
+  }, [manualImages, showFavOnly, sourceFilter, search, favorites]);
+
+  // Count of favorites actually visible under the current filters, so the
+  // Favorites pill reflects what the user would see rather than the global total.
+  const visibleFavCount = useMemo(() => {
+    let n = 0;
+    for (const g of filteredGroups) {
+      for (const s of g.screenshots) if (favorites.has(s)) n++;
+    }
+    for (const s of filteredManual) if (favorites.has(s)) n++;
+    return n;
+  }, [filteredGroups, filteredManual, favorites]);
 
   // Build a flat array of ALL (filtered) image paths for lightbox navigation.
-  // Prefer groups (Steam detected) over manual folder, but show whichever has content.
+  // Groups (Steam detected) and the manual folder are merged into a single
+  // flat list so the lightbox can walk every visible image, regardless of
+  // which detection source produced it.
   const allImagePaths = useMemo(() => {
-    if (filteredGroups.length > 0) {
-      const flat: string[] = [];
-      for (const g of filteredGroups) {
-        flat.push(...g.screenshots);
-      }
-      return flat;
+    const flat: string[] = [];
+    for (const g of filteredGroups) {
+      flat.push(...g.screenshots);
     }
-    return filteredManual;
+    flat.push(...filteredManual);
+    return flat;
   }, [filteredGroups, filteredManual]);
 
   // ── Auto-detect Steam screenshots ─────────────────────────────────
-  const handleAutoDetect = useCallback(async () => {
+  // `silent` runs in the background (on mount / cache re-hydrate) so it
+  // won't wipe already-visible cached data or spam toasts.
+  const handleAutoDetect = useCallback(async (silent = false) => {
     setIsDetecting(true);
-    setGroups([]);
-    setManualImages([]);
-    setSelectedFolder(null);
-    setExpandedKeys(new Set());
+    if (!silent) {
+      setGroups([]);
+      setManualImages([]);
+      setSelectedFolder(null);
+      setExpandedKeys(new Set());
+    }
 
     try {
       // Fan out both detections in parallel
@@ -737,7 +776,7 @@ function ScreenshotsSection() {
       }
 
       if (enriched.length === 0) {
-        showToast("No screenshots found. Take some captures first!", "info");
+        if (!silent) showToast("No screenshots found. Take some captures first!", "info");
         setIsDetecting(false);
         return;
       }
@@ -745,23 +784,36 @@ function ScreenshotsSection() {
       // Sort by game name
       enriched.sort((a, b) => a.gameName.localeCompare(b.gameName));
 
-      // Auto-expand the first few groups
-      const initialExpanded = new Set<string>();
-      for (let i = 0; i < Math.min(enriched.length, 3); i++) {
-        initialExpanded.add(enriched[i].key);
-      }
+      // Auto-expand the first few groups (preserve any cached expansion
+      // state if this is a silent background refresh).
+      setExpandedKeys((prev) => {
+        if (!silent || prev.size === 0) {
+          const initialExpanded = new Set<string>();
+          for (let i = 0; i < Math.min(enriched.length, 3); i++) {
+            initialExpanded.add(enriched[i].key);
+          }
+          return initialExpanded;
+        }
+        // Keep only keys that still exist in the refreshed result.
+        const valid = new Set(enriched.map((g) => g.key));
+        const next = new Set<string>();
+        for (const k of prev) if (valid.has(k)) next.add(k);
+        return next;
+      });
 
       setGroups(enriched);
-      setExpandedKeys(initialExpanded);
+      saveScreenshotCache(enriched);
 
       const totalCount = enriched.reduce((s, g) => s + g.screenshots.length, 0);
       const srcCount = systemFolders.length > 0
         ? ` (${steamFolders.length} Steam, ${systemFolders.length} system)`
         : "";
-      showToast(`Found ${enriched.length} groups with ${totalCount} screenshots${srcCount}`, "success");
+      if (!silent) {
+        showToast(`Found ${enriched.length} groups with ${totalCount} screenshots${srcCount}`, "success");
+      }
     } catch (err) {
       console.error("[Community] Steam screenshot detection failed:", err);
-      showToast("Failed to detect Steam screenshots", "error");
+      if (!silent) showToast("Failed to detect Steam screenshots", "error");
     } finally {
       setIsDetecting(false);
     }
@@ -782,10 +834,18 @@ function ScreenshotsSection() {
       setSelectedFolder(folderPath);
       setIsScanning(true);
 
-      const paths: string[] = await invoke("list_media_files", {
+       const paths: string[] = await invoke("list_media_files", {
         folderPath,
       });
       setManualImages(paths);
+      saveScreenshotCache([
+        {
+          key: `manual-${folderPath.replace(/[^a-zA-Z0-9]/g, "-")}`,
+          gameName: folderPath.split(/[\\/]/).pop() || folderPath,
+          folderPath,
+          screenshots: paths,
+        },
+      ]);
       if (paths.length === 0) {
         showToast("No images found in this folder", "info");
       }
@@ -809,6 +869,19 @@ function ScreenshotsSection() {
       return next;
     });
   }, []);
+
+  // Expand / collapse every visible group at once.
+  const toggleAllGroups = useCallback(() => {
+    setAllExpanded((prev) => {
+      const next = !prev;
+      if (next) {
+        setExpandedKeys(new Set(filteredGroups.map((g) => g.key)));
+      } else {
+        setExpandedKeys(new Set());
+      }
+      return next;
+    });
+  }, [filteredGroups]);
 
   // ── Lightbox ──────────────────────────────────────────────────────
   const openLightbox = useCallback((index: number) => {
@@ -853,16 +926,23 @@ function ScreenshotsSection() {
   }, [lightboxIndex, closeLightbox, goNext, goPrev]);
 
   // ── Build a lookup: screenshot index → group ──────────────────────
+  // Covers both Steam groups and the manual folder so the lightbox can
+  // always label the current image with its source game/folder.
   const screenshotGroupIndex = useMemo(() => {
-    if (filteredGroups.length === 0) return null;
+    const manualName = selectedFolder
+      ? selectedFolder.split(/[\\/]/).pop() || "Screenshot"
+      : "Screenshot";
     const map: { groupKey: string; gameName: string }[] = [];
     for (const g of filteredGroups) {
       for (let i = 0; i < g.screenshots.length; i++) {
         map.push({ groupKey: g.key, gameName: g.gameName });
       }
     }
-    return map;
-  }, [filteredGroups]);
+    for (let i = 0; i < filteredManual.length; i++) {
+      map.push({ groupKey: "manual", gameName: manualName });
+    }
+    return map.length > 0 ? map : null;
+  }, [filteredGroups, filteredManual, selectedFolder]);
 
   // ── Precompute offset of each group in the flat image array ───────
   const groupOffsets = useMemo(() => {
@@ -884,7 +964,7 @@ function ScreenshotsSection() {
       <div className="community-screenshots-toolbar">
         <Button
           variant="primary"
-          onClick={handleAutoDetect}
+          onClick={() => handleAutoDetect()}
           disabled={isDetecting}
           leftIcon={
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
@@ -954,7 +1034,7 @@ function ScreenshotsSection() {
             className={`community-filter-pill${showFavOnly ? " active" : ""}`}
             onClick={() => setShowFavOnly((v) => !v)}
           >
-            ★ Favorites{showFavOnly ? ` (${favorites.size})` : ""}
+            ★ Favorites{showFavOnly ? ` (${visibleFavCount})` : ""}
           </button>
           {["nvidia", "amd", "obs"].map((src) => (
             <button
@@ -977,6 +1057,16 @@ function ScreenshotsSection() {
           >
             Clear
           </button>
+          {filteredGroups.length > 0 && (
+            <button
+              type="button"
+              className="community-filter-pill"
+              onClick={toggleAllGroups}
+              title={allExpanded ? "Collapse all game groups" : "Expand all game groups"}
+            >
+              {allExpanded ? "Collapse all" : "Expand all"}
+            </button>
+          )}
         </div>
       )}
 
@@ -1094,19 +1184,26 @@ function ScreenshotsSection() {
       )}
 
       {/* ── Manual folder gallery (flat grid, no grouping) ──────────── */}
-      {!isScanning && !isDetecting && filteredManual.length > 0 && filteredGroups.length === 0 && (
+      {!isScanning && !isDetecting && filteredManual.length > 0 && (
         <div className="community-screenshots-grid">
-          {filteredManual.map((p, i) => (
-            <ScreenshotThumb
-              key={p}
-              path={p}
-              index={i}
-              gameName="Screenshot"
-              isFavorite={favorites.has(p)}
-              onToggleFavorite={toggleFavorite}
-              onOpen={openLightbox}
-            />
-          ))}
+          {(() => {
+            // Manual images sit after all group images in the unified lightbox list.
+            const manualOffset = filteredGroups.reduce(
+              (sum, g) => sum + g.screenshots.length,
+              0
+            );
+            return filteredManual.map((p, i) => (
+              <ScreenshotThumb
+                key={p}
+                path={p}
+                index={manualOffset + i}
+                gameName={selectedFolder ? selectedFolder.split(/[\\/]/).pop() || "Screenshot" : "Screenshot"}
+                isFavorite={favorites.has(p)}
+                onToggleFavorite={toggleFavorite}
+                onOpen={openLightbox}
+              />
+            ));
+          })()}
         </div>
       )}
 

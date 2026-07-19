@@ -7,6 +7,7 @@
 const LS_FAVORITES = "gamelib.community.favorites";
 const LS_GOAL_MIN = "gamelib.community.monthly_goal_min";
 const LS_SAVED_ARTICLES = "gamelib.community.saved_articles";
+const LS_SCREENSHOT_CACHE = "gamelib.community.screenshot_cache";
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -36,6 +37,31 @@ export function loadFavorites(): Set<string> {
 
 export function saveFavorites(favs: Set<string>): void {
   writeJson(LS_FAVORITES, Array.from(favs));
+}
+
+// ── Cached screenshot detection ──────────────────────────────────────
+// Persists the last successful auto-detect so the tab can re-hydrate
+// instantly on the next visit instead of requiring a manual re-scan.
+// The cache holds the raw detected groups (before any filtering).
+
+export interface CachedScreenshotGroup {
+  key: string;
+  appId?: number;
+  gameName: string;
+  gameId?: string;
+  coverArtUrl?: string;
+  platform?: string;
+  folderPath: string;
+  screenshots: string[];
+  source?: string;
+}
+
+export function loadScreenshotCache(): CachedScreenshotGroup[] {
+  return readJson<CachedScreenshotGroup[]>(LS_SCREENSHOT_CACHE, []);
+}
+
+export function saveScreenshotCache(groups: CachedScreenshotGroup[]): void {
+  writeJson(LS_SCREENSHOT_CACHE, groups);
 }
 
 // ── Monthly playtime goal (minutes) ────────────────────────────────────
