@@ -264,7 +264,7 @@ export default function SettingsPage() {
   const [steamSettings, setSteamSettings] = useState<SteamSettings>({
     autoSyncOnLaunch: true,
     syncPlaytime: true,
-    syncAchievements: true,
+    syncAchievements: false,
   });
   // The user gets their API key from
   // https://steamcommunity.com/dev/apikey and their SteamID64 from
