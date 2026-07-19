@@ -3,6 +3,7 @@ import { useGames } from "../context/GameContext";
 import { useAchievements } from "../context/AchievementContext";
 import { useToast } from "../context/ToastContext";
 import { parsePlayTime } from "../types/game";
+import type { StoreGameSummary } from "../types/game";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import QRCode from "qrcode";
@@ -13,6 +14,8 @@ import {
   Friend,
   GameSession,
   GameRecommendation,
+  SessionRole,
+  SessionMessage,
   displayName,
   STATUS_PRESETS,
   SharedGameStat,
@@ -158,28 +161,128 @@ function FriendCodeQR({ code }: { code: string }) {
   return <img src={dataUrl} alt="Friend code QR" className="friend-qr-img" width={160} height={160} />;
 }
 
-// Render a single session card with RSVP controls.
-function renderSessionCard(
-  session: GameSession,
-  profile: UserProfile,
-  onRsvp: (sessionId: string, status: RsvpStatus) => void,
-  onDelete: (sessionId: string) => void
-) {
+// ── Session Card Component ──────────────────────────────────────────
+// Renders a single session with RSVP controls, attendee roles, timezone
+// aware time, countdown, +1 guests, conflict warning and a chat thread.
+
+const SESSION_ROLE_ORDER: SessionRole[] = ["host", "cohost", "player"];
+
+function SessionCard({
+  session,
+  profile,
+  friends,
+  viewerTimezone,
+  conflicting,
+  onRsvp,
+  onDelete,
+  onSetRole,
+  onAddGuest,
+  onRemoveGuest,
+  onSetRsvpNote,
+  onSendMessage,
+  onTogglePinMessage,
+  gameCover,
+}: {
+  session: GameSession;
+  profile: UserProfile;
+  friends: Friend[];
+  viewerTimezone?: string;
+  conflicting?: GameSession;
+  gameCover?: string;
+  onRsvp: (sessionId: string, status: RsvpStatus) => void;
+  onDelete: (sessionId: string) => void;
+  onSetRole: (sessionId: string, name: string, role: SessionRole) => void;
+  onAddGuest: (sessionId: string, guestName: string) => void;
+  onRemoveGuest: (sessionId: string, guestName: string) => void;
+  onSetRsvpNote: (sessionId: string, note: string) => void;
+  onSendMessage: (sessionId: string, text: string) => void;
+  onTogglePinMessage: (sessionId: string, messageId: string) => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
+  const [guestDraft, setGuestDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState(session.rsvps?.[profile.name] ? session.participants?.find((p) => p.name === profile.name)?.note || "" : "");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Tick the countdown every 30s.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (chatOpen && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatOpen, session.messages?.length]);
+
   const isCreator = session.creatorName === profile.name;
   const myRsvp = session.rsvps?.[profile.name];
+  const canManage = isCreator || session.participants?.some((p) => p.name === profile.name && (p.role === "host" || p.role === "cohost"));
+
   const going = Object.entries(session.rsvps || {}).filter(([, v]) => v === "going").map(([n]) => n);
   const maybe = Object.entries(session.rsvps || {}).filter(([, v]) => v === "maybe").map(([n]) => n);
   const declined = Object.entries(session.rsvps || {}).filter(([, v]) => v === "declined").map(([n]) => n);
   const attendeeNames = going.length > 0 ? going : session.attendees;
 
+  // Build a sorted participant list (host first) for the roster.
+  const roster = [...(session.participants || [])].sort(
+    (a, b) => SESSION_ROLE_ORDER.indexOf(a.role) - SESSION_ROLE_ORDER.indexOf(b.role)
+  );
+
+  const messages = session.messages || [];
+  const pinned = messages.filter((m) => m.pinned);
+  const thread = messages.filter((m) => !m.pinned);
+
+  const showTimeForViewer = viewerTimezone && session.creatorTimezone && viewerTimezone !== session.creatorTimezone;
+
+  const submitNote = () => {
+    onSetRsvpNote(session.id, noteDraft.trim());
+  };
+
+  const submitGuest = () => {
+    const name = guestDraft.trim();
+    if (!name) return;
+    onAddGuest(session.id, name);
+    setGuestDraft("");
+  };
+
+  const submitChat = () => {
+    const text = chatDraft.trim();
+    if (!text) return;
+    onSendMessage(session.id, text);
+    setChatDraft("");
+  };
+
   return (
-    <div key={session.id} className="session-card">
+    <div key={session.id} className={`session-card${conflicting ? " session-conflict" : ""}`}>
       <div className="session-header">
-        <div>
-          <div className="session-game-title">{session.gameName}</div>
-          <div className="session-date">{formatDateTime(session.scheduledAt)}</div>
+        <div className="session-header-main">
+          {gameCover && (
+            <img src={gameCover} alt={session.gameName} className="session-cover" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+          )}
+          <div>
+          <div className="session-game-title">
+            {session.gameName}
+            {session.durationMin ? <span className="session-duration"> · {session.durationMin}m</span> : null}
+          </div>
+          <div className="session-date">
+            {formatDateTime(session.scheduledAt, session.creatorTimezone)}
+            {tzAbbrev(session.scheduledAt, session.creatorTimezone)}
+            {showTimeForViewer && (
+              <span className="session-date-local"> · your time: {formatDateTime(session.scheduledAt, viewerTimezone)}{tzAbbrev(session.scheduledAt, viewerTimezone)}</span>
+            )}
+          </div>
+          {session.creatorTimezone && (
+            <div className="session-tz-note">Scheduled in {session.creatorTimezone.replace(/_/g, " ")}</div>
+          )}
+          </div>
         </div>
         <div className="session-card-actions">
+          <span className={`session-countdown${new Date(session.scheduledAt).getTime() - now <= 0 ? " live" : ""}`} title="Time until start">
+            ⏱ {countdownLabel(session.scheduledAt)}
+          </span>
           {isCreator && (
             <button
               type="button"
@@ -196,23 +299,70 @@ function renderSessionCard(
 
       {session.description && <p className="session-desc">{session.description}</p>}
 
-      <div className="session-attendees">
-        {attendeeNames.map((name, i) => (
-          <span key={i} className={`attendee-badge${name === profile.name ? " self" : ""}`}>
-            {name}
-          </span>
-        ))}
-        {maybe.map((name, i) => (
-          <span key={`maybe-${i}`} className="attendee-badge maybe" title="Maybe">
-            {name}?
-          </span>
-        ))}
-        {declined.map((name, i) => (
-          <span key={`dec-${i}`} className="attendee-badge declined" title="Declined">
-            {name}✕
-          </span>
-        ))}
+      {conflicting && (
+        <div className="session-conflict-banner">
+          ⚠ Overlaps your "{conflicting.gameName}" session at {formatDateTime(conflicting.scheduledAt, conflicting.creatorTimezone)}
+        </div>
+      )}
+
+      {/* Roster with roles + guest tags */}
+      <div className="session-roster">
+        {roster.length > 0 ? (
+          roster.map((p) => {
+            const friend = friends.find((f) => f.name === p.name);
+            const online = friend ? isOnline(friend) : false;
+            return (
+              <div key={p.name} className={`roster-row${p.name === profile.name ? " self" : ""}`}>
+                <span className={`roster-dot${online ? " online" : ""}`} title={online ? "Online now" : "Offline"} />
+                <span className="roster-name">{p.name}{p.guest ? " (guest)" : ""}</span>
+                <span className={`roster-role role-${p.role}`}>{p.role}</span>
+                {p.note && <span className="roster-note" title={p.note}>🎒 {p.note}</span>}
+                {(canManage && p.name !== profile.name) && (
+                  <select
+                    className="roster-role-select"
+                    value={p.role}
+                    onChange={(e) => onSetRole(session.id, p.name, e.target.value as SessionRole)}
+                    title="Change role"
+                  >
+                    <option value="player">Player</option>
+                    <option value="cohost">Co-host</option>
+                    <option value="host">Host</option>
+                  </select>
+                )}
+                {p.guest && canManage && (
+                  <button type="button" className="roster-remove" onClick={() => onRemoveGuest(session.id, p.name)} title="Remove guest">✕</button>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="session-attendees">
+            {attendeeNames.map((name, i) => (
+              <span key={i} className={`attendee-badge${name === profile.name ? " self" : ""}`}>{name}</span>
+            ))}
+            {maybe.map((name, i) => (
+              <span key={`maybe-${i}`} className="attendee-badge maybe" title="Maybe">{name}?</span>
+            ))}
+            {declined.map((name, i) => (
+              <span key={`dec-${i}`} className="attendee-badge declined" title="Declined">{name}✕</span>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* +1 guest invite (open to anyone going) */}
+      {myRsvp === "going" && (
+        <div className="session-guest-row">
+          <input
+            className="profile-input session-guest-input"
+            placeholder="Bring a +1 guest (name)"
+            value={guestDraft}
+            onChange={(e) => setGuestDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitGuest()}
+          />
+          <button type="button" className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }} onClick={submitGuest}>+1</button>
+        </div>
+      )}
 
       <div className="session-footer">
         <span className="session-players-count">
@@ -220,6 +370,20 @@ function renderSessionCard(
         </span>
         <span className="session-creator">By {isCreator ? "me" : session.creatorName}</span>
       </div>
+
+      {/* RSVP note editor */}
+      {myRsvp && (
+        <div className="session-note-row">
+          <input
+            className="profile-input session-note-input"
+            placeholder="What are you bringing?"
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onBlur={submitNote}
+          />
+          <button type="button" className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }} onClick={submitNote}>Save</button>
+        </div>
+      )}
 
       <div className="rsvp-row">
         {(["going", "maybe", "declined"] as RsvpStatus[]).map((status) => (
@@ -232,7 +396,51 @@ function renderSessionCard(
             {status === "going" ? "✓ Going" : status === "maybe" ? "? Maybe" : "✕ Can't"}
           </button>
         ))}
+        <button type="button" className={`session-chat-toggle${chatOpen ? " active" : ""}`} onClick={() => setChatOpen((v) => !v)} title="Session chat">
+          💬 {messages.length > 0 ? messages.length : ""}
+        </button>
       </div>
+
+      {chatOpen && (
+        <div className="session-chat">
+          {pinned.length > 0 && (
+            <div className="session-chat-pinned">
+              {pinned.map((m) => (
+                <div key={m.id} className="chat-msg pinned">
+                  <span className="chat-author">{m.author}</span>
+                  <span className="chat-text">{m.text}</span>
+                  {canManage && (
+                    <button type="button" className="chat-pin-btn" onClick={() => onTogglePinMessage(session.id, m.id)} title="Unpin">📌</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="session-chat-thread">
+            {thread.length === 0 && pinned.length === 0 && <div className="chat-empty">No messages yet.</div>}
+            {thread.map((m) => (
+              <div key={m.id} className={`chat-msg${m.author === profile.name ? " mine" : ""}`}>
+                <span className="chat-author">{m.author}</span>
+                <span className="chat-text">{m.text}</span>
+                {canManage && (
+                  <button type="button" className="chat-pin-btn" onClick={() => onTogglePinMessage(session.id, m.id)} title="Pin">📌</button>
+                )}
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="session-chat-input">
+            <input
+              className="profile-input"
+              placeholder="Message the group..."
+              value={chatDraft}
+              onChange={(e) => setChatDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitChat()}
+            />
+            <button type="button" className="btn btn-primary" style={{ padding: "4px 10px", fontSize: "11px" }} onClick={submitChat}>Send</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -245,19 +453,82 @@ function formatHours(totalMinutes: number): string {
   return `${h}h`;
 }
 
-// Convert date string to user-friendly local date-time string
-function formatDateTime(dateTimeStr: string): string {
+// Convert date string to user-friendly local date-time string.
+// When `tz` (IANA timezone) is supplied the time is rendered in that zone.
+function formatDateTime(dateTimeStr: string, tz?: string): string {
   try {
     const d = new Date(dateTimeStr);
-    return d.toLocaleString(undefined, {
+    const opts: Intl.DateTimeFormatOptions = {
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    });
+    };
+    if (tz) {
+      try {
+        opts.timeZone = tz;
+      } catch {
+        /* invalid tz — fall back to local */
+      }
+    }
+    return d.toLocaleString(undefined, opts);
   } catch {
     return dateTimeStr;
   }
+}
+
+/** Short timezone label like "PDT" for a given IANA zone, or "" if unknown. */
+function tzAbbrev(dateTimeStr: string, tz?: string): string {
+  if (!tz) return "";
+  try {
+    const d = new Date(dateTimeStr);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      timeZoneName: "short",
+    }).formatToParts(d);
+    const name = parts.find((p) => p.type === "timeZoneName")?.value;
+    return name ? ` (${name})` : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Two sessions conflict when their time windows overlap. */
+function sessionsConflict(
+  a: { id?: string; scheduledAt: string; durationMin?: number },
+  b: { id?: string; scheduledAt: string; durationMin?: number }
+): boolean {
+  if (a.id && b.id && a.id === b.id) return false;
+  const startA = new Date(a.scheduledAt).getTime();
+  const startB = new Date(b.scheduledAt).getTime();
+  if (Number.isNaN(startA) || Number.isNaN(startB)) return false;
+  const endA = startA + (a.durationMin || 120) * 60_000;
+  const endB = startB + (b.durationMin || 120) * 60_000;
+  return startA < endB && startB < endA;
+}
+
+/** Detect the viewer's IANA timezone. */
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+/** Compact "in 3h 12m" / "2d 4h" countdown label from now to the target time. */
+function countdownLabel(targetIso: string): string {
+  const diff = new Date(targetIso).getTime() - Date.now();
+  if (Number.isNaN(diff)) return "";
+  if (diff <= 0) return "Now / live";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  if (hours < 24) return `in ${hours}h${remMin ? ` ${remMin}m` : ""}`;
+  const days = Math.floor(hours / 24);
+  const remH = hours % 24;
+  return `in ${days}d${remH ? ` ${remH}h` : ""}`;
 }
 
 // Human-friendly "last seen" relative string from epoch seconds
@@ -399,6 +670,179 @@ function SearchableGameSelector({
                   {game.name.slice(0, 2).toUpperCase()}
                 </div>
                 <span className="game-search-item-name">{game.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Unified Game Picker (library / friend library / store search) ──────
+// Lets the planner pick a game from the user's own library, a specific
+// friend's shared library, or by searching the store catalog online.
+
+function GamePicker({
+  libraryGames,
+  friends,
+  selectedGameId,
+  selectedGameName,
+  onSelect,
+}: {
+  libraryGames: any[];
+  friends: Friend[];
+  selectedGameId: string;
+  selectedGameName: string;
+  onSelect: (game: { id: string; name: string }) => void;
+}) {
+  const [mode, setMode] = useState<"library" | "friend" | "store">("library");
+  const [friendId, setFriendId] = useState("");
+  const [search, setSearch] = useState("");
+  const [storeResults, setStoreResults] = useState<StoreGameSummary[]>([]);
+  const [storeLoading, setStoreLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setIsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Debounced store search.
+  useEffect(() => {
+    if (mode !== "store" || !search.trim()) {
+      setStoreResults([]);
+      return;
+    }
+    const q = search.trim();
+    const t = setTimeout(async () => {
+      setStoreLoading(true);
+      try {
+        const res = await invoke<StoreGameSummary[]>("search_store_games", { query: q, offset: 0, limit: 12 });
+        setStoreResults(res || []);
+      } catch {
+        setStoreResults([]);
+      } finally {
+        setStoreLoading(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [mode, search]);
+
+  const selectedFriend = friends.find((f) => f.id === friendId);
+  const friendLibGames = selectedFriend?.games || [];
+
+  const baseList =
+    mode === "friend"
+      ? friendLibGames.map((g) => ({ id: g.id, name: g.name }))
+      : libraryGames.map((g) => ({ id: g.id, name: g.name }));
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (mode !== "library" && mode !== "friend") return baseList;
+    if (!q) return baseList.slice(0, 12);
+    return baseList.filter((g) => g.name.toLowerCase().includes(q)).slice(0, 12);
+  }, [baseList, search, mode]);
+
+  // Resolve a cover image per game id: library uses coverArtUrl, store uses coverUrl.
+  const libraryCoverById = useMemo(() => {
+    const m = new Map<string, string>();
+    (libraryGames as any[]).forEach((g) => {
+      if (g && g.coverArtUrl) m.set(String(g.id), g.coverArtUrl);
+    });
+    return m;
+  }, [libraryGames]);
+
+  const storeCoverById = useMemo(() => {
+    const m = new Map<string, string>();
+    storeResults.forEach((g) => {
+      if (g && g.coverUrl) m.set(`store_${g.id}`, g.coverUrl);
+    });
+    return m;
+  }, [storeResults]);
+
+  const coverFor = (id: string): string | undefined => libraryCoverById.get(id) || storeCoverById.get(id);
+
+  // Renders a cover image, falling back to the 2-letter initials badge.
+  const GameCover = ({ id, name, className }: { id: string; name: string; className?: string }) => {
+    const cover = coverFor(id);
+    if (cover) {
+      return <img src={cover} alt={name} className={className} loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />;
+    }
+    return <div className={className}>{name.slice(0, 2).toUpperCase()}</div>;
+  };
+
+  if (selectedGameId) {
+    return (
+      <div className="selected-game-display-card">
+        <div className="selected-game-details">
+          <GameCover id={selectedGameId} name={selectedGameName} className="selected-game-thumb" />
+          <span className="selected-game-title">{selectedGameName}</span>
+        </div>
+        <button type="button" className="btn btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }} onClick={() => onSelect({ id: "", name: "" })}>
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="game-picker" ref={containerRef}>
+      <div className="game-picker-modes">
+        <button type="button" className={`picker-mode${mode === "library" ? " active" : ""}`} onClick={() => { setMode("library"); setIsOpen(true); }}>My Library</button>
+        <button type="button" className={`picker-mode${mode === "friend" ? " active" : ""}`} onClick={() => { setMode("friend"); setIsOpen(true); }}>Friend's</button>
+        <button type="button" className={`picker-mode${mode === "store" ? " active" : ""}`} onClick={() => { setMode("store"); setIsOpen(true); }}>Store Search</button>
+      </div>
+
+      {mode === "friend" && (
+        <select className="profile-input" value={friendId} onChange={(e) => setFriendId(e.target.value)}>
+          <option value="">Select a friend…</option>
+          {friends.map((f) => (
+            <option key={f.id} value={f.id}>{displayName(f)}</option>
+          ))}
+        </select>
+      )}
+
+      <div className="game-search-input-wrapper">
+        <input
+          type="text"
+          className="game-search-input"
+          placeholder={mode === "store" ? "Search the store catalog…" : "Search games…"}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setIsOpen(true); }}
+          onFocus={() => setIsOpen(true)}
+        />
+        {search && (
+          <button type="button" className="game-search-clear-btn" onClick={() => setSearch("")} title="Clear">×</button>
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="game-search-results">
+          {mode === "store" ? (
+            storeLoading ? (
+              <div className="game-search-no-results">Searching store…</div>
+            ) : storeResults.length === 0 ? (
+              <div className="game-search-no-results">No store matches{search.trim() ? "" : " — type to search"}</div>
+            ) : (
+              storeResults.map((g) => (
+                <button key={g.id} type="button" className="game-search-item" onClick={() => { onSelect({ id: `store_${g.id}`, name: g.name }); setSearch(""); setIsOpen(false); }}>
+                  <GameCover id={`store_${g.id}`} name={g.name} className="game-search-item-thumb" />
+                  <span className="game-search-item-name">{g.name}</span>
+                </button>
+              ))
+            )
+          ) : filtered.length === 0 ? (
+            <div className="game-search-no-results">{mode === "friend" && !friendId ? "Pick a friend first" : "No matches found"}</div>
+          ) : (
+            filtered.map((g) => (
+              <button key={g.id} type="button" className="game-search-item" onClick={() => { onSelect(g); setSearch(""); setIsOpen(false); }}>
+                <GameCover id={g.id} name={g.name} className="game-search-item-thumb" />
+                <span className="game-search-item-name">{g.name}</span>
               </button>
             ))
           )}
@@ -688,11 +1132,22 @@ export default function FriendsPage() {
 
   // Create Session Form State
   const [sessionGameId, setSessionGameId] = useState("");
+  const [sessionGameName, setSessionGameName] = useState("");
   const [sessionDateTime, setSessionDateTime] = useState("");
   const [sessionMaxPlayers, setSessionMaxPlayers] = useState(4);
   const [sessionDesc, setSessionDesc] = useState("");
+  const [sessionDuration, setSessionDuration] = useState(120);
+  const [sessionInvited, setSessionInvited] = useState<string[]>([]);
+  const viewerTimezone = useMemo(() => detectTimezone(), [profile]);
   // Sessions view: upcoming list, past history, or agenda grouping
   const [sessionView, setSessionView] = useState<"upcoming" | "past" | "agenda">("upcoming");
+  // Agenda sub-mode: month calendar grid vs. chronological list.
+  const [agendaMode, setAgendaMode] = useState<"grid" | "list">("grid");
+  // Expanded day in the calendar grid (date key) to reveal full session cards.
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  // Sessions list filters + search
+  const [sessionFilter, setSessionFilter] = useState<"all" | "mine" | "invited">("all");
+  const [sessionSearch, setSessionSearch] = useState("");
 
   // Create Recommendation Form State
   const [recGameId, setRecGameId] = useState("");
@@ -1371,16 +1826,15 @@ export default function FriendsPage() {
       return;
     }
 
-    const game = games.find((g) => g.id === sessionGameId);
-    if (!game) {
-      showToast("Please select a game from the autocomplete dropdown list.", "error");
-      return;
-    }
+    // auto-decline: if the creator already has an overlapping non-declined session, decline it.
+    const conflict = sessions.find(
+      (s) => !s.deleted && s.creatorName === profile.name && sessionsConflict(s, { scheduledAt: sessionDateTime, durationMin: sessionDuration })
+    );
 
     const newSession: GameSession = {
       id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       gameId: sessionGameId,
-      gameName: game.name,
+      gameName: sessionGameName || games.find((g) => g.id === sessionGameId)?.name || "Unknown Game",
       scheduledAt: sessionDateTime,
       maxPlayers: Number(sessionMaxPlayers) || 4,
       description: sessionDesc,
@@ -1388,19 +1842,38 @@ export default function FriendsPage() {
       attendees: [profile.name],
       rsvps: { [profile.name]: "going" },
       updatedAt: Date.now(),
+      creatorTimezone: viewerTimezone,
+      invited: sessionInvited,
+      durationMin: Number(sessionDuration) || 120,
+      participants: [{ name: profile.name, role: "host", timezone: viewerTimezone }],
+      messages: [],
     };
 
-    const updated = [newSession, ...sessions];
+    let updated = [newSession, ...sessions];
+
+    if (conflict) {
+      updated = updated.map((s) =>
+        s.id === conflict.id
+          ? { ...s, rsvps: { ...(s.rsvps || {}), [profile.name]: "declined" }, attendees: s.attendees.filter((n) => n !== profile.name), updatedAt: Date.now() }
+          : s
+      );
+      showToast(`Scheduled! Auto-declined overlapping "${conflict.gameName}".`, "warning");
+    } else {
+      showToast("Game session scheduled!", "success");
+    }
+
     setSessions(updated);
     saveSessions(updated);
     await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
-    showToast("Game session scheduled!", "success");
 
     // Reset Form
     setSessionGameId("");
+    setSessionGameName("");
     setSessionDateTime("");
     setSessionMaxPlayers(4);
     setSessionDesc("");
+    setSessionDuration(120);
+    setSessionInvited([]);
     // Make sure the freshly created session is visible (it becomes "Upcoming").
     setSessionView("upcoming");
   };
@@ -1420,9 +1893,14 @@ export default function FriendsPage() {
       const attendees = isGoing
         ? Array.from(new Set([...s.attendees, profile.name]))
         : s.attendees.filter((n) => n !== profile.name);
+      // Keep the participant record in sync with the RSVP.
+      const participants = (s.participants || []).filter((p) => p.name !== profile.name);
+      if (isGoing) {
+        participants.unshift({ name: profile.name, role: "player", timezone: viewerTimezone });
+      }
       const label = rsvps[profile.name] ? rsvps[profile.name] : "no response";
       showToast(`RSVP: ${label}.`, "info");
-      return { ...s, rsvps, attendees, updatedAt: Date.now() };
+      return { ...s, rsvps, attendees, participants, updatedAt: Date.now() };
     });
 
     setSessions(updated);
@@ -1440,6 +1918,126 @@ export default function FriendsPage() {
     await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
     showToast("Session removed.", "info");
   };
+
+  // Update a participant's role (host/cohost/player). Only host/cohost may change.
+  const handleSetRole = async (sessionId: string, name: string, role: SessionRole) => {
+    const updated = sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const participants = (s.participants || []).map((p) => (p.name === name ? { ...p, role } : p));
+      if (!participants.some((p) => p.name === name)) participants.push({ name, role });
+      return { ...s, participants, updatedAt: Date.now() };
+    });
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+  };
+
+  // Add a +1 guest (non-friend attendee) to a session.
+  const handleAddGuest = async (sessionId: string, guestName: string) => {
+    const updated = sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const participants = [...(s.participants || [])];
+      if (!participants.some((p) => p.name.toLowerCase() === guestName.toLowerCase())) {
+        participants.push({ name: guestName, role: "player", guest: true, timezone: viewerTimezone });
+      }
+      const rsvps = { ...(s.rsvps || {}) };
+      if (rsvps[guestName] === undefined) rsvps[guestName] = "going";
+      const attendees = Array.from(new Set([...s.attendees, guestName]));
+      return { ...s, participants, rsvps, attendees, updatedAt: Date.now() };
+    });
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+    showToast(`${guestName} added as a +1 guest.`, "success");
+  };
+
+  const handleRemoveGuest = async (sessionId: string, guestName: string) => {
+    const updated = sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const participants = (s.participants || []).filter((p) => !(p.guest && p.name === guestName));
+      const rsvps = { ...(s.rsvps || {}) };
+      delete rsvps[guestName];
+      const attendees = s.attendees.filter((n) => n !== guestName);
+      return { ...s, participants, rsvps, attendees, updatedAt: Date.now() };
+    });
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+  };
+
+  // Save the "what I'm bringing" note on the current user's RSVP.
+  const handleSetRsvpNote = async (sessionId: string, note: string) => {
+    const updated = sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const participants = [...(s.participants || [])];
+      const idx = participants.findIndex((p) => p.name === profile.name);
+      if (idx >= 0) participants[idx] = { ...participants[idx], note: note || undefined };
+      else participants.push({ name: profile.name, role: "player", note: note || undefined, timezone: viewerTimezone });
+      return { ...s, participants, updatedAt: Date.now() };
+    });
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+  };
+
+  // Append a chat message to a session's shared thread.
+  const handleSendMessage = async (sessionId: string, text: string) => {
+    const msg: SessionMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      author: profile.name,
+      text,
+      timestamp: Date.now(),
+    };
+    const updated = sessions.map((s) =>
+      s.id === sessionId ? { ...s, messages: [...(s.messages || []), msg], updatedAt: Date.now() } : s
+    );
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+  };
+
+  // Toggle a message's pinned state (host/cohost only, enforced in UI).
+  const handleTogglePinMessage = async (sessionId: string, messageId: string) => {
+    const updated = sessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const messages = (s.messages || []).map((m) => (m.id === messageId ? { ...m, pinned: !m.pinned } : m));
+      return { ...s, messages, updatedAt: Date.now() };
+    });
+    setSessions(updated);
+    saveSessions(updated);
+    await pushMyOutbox(profile, selfStats, updated, recommendations, selfSharedGames);
+  };
+
+  // Resolve a cover image URL for a session's game (library coverArtUrl, or
+  // store coverUrl for `store_<id>` entries). Used by the session cards.
+  const gameCoverForSession = useMemo(() => {
+    const libMap = new Map<string, string>();
+    (games as any[]).forEach((g) => {
+      if (g && g.coverArtUrl) libMap.set(String(g.id), g.coverArtUrl);
+    });
+    return (session: GameSession): string | undefined => {
+      const id = session.gameId;
+      if (id.startsWith("store_")) {
+        const slug = id.slice("store_".length);
+        // Best-effort store lookup from the persisted store cache (by numeric id).
+        try {
+          const raw = localStorage.getItem("gamelib.store.cache");
+          if (raw) {
+            const cache = JSON.parse(raw);
+            const all = Object.values(cache?.categories || {}) as any[];
+            for (const entry of all) {
+              const found = (entry?.data || []).find((g: any) => String(g.id) === slug);
+              if (found?.coverUrl) return found.coverUrl;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return undefined;
+      }
+      return libMap.get(id);
+    };
+  }, [games]);
 
   // ── Recommendations Logic ────────────────────────────────────────
 
@@ -2099,16 +2697,17 @@ export default function FriendsPage() {
                 <form className="profile-form" onSubmit={handleCreateSession}>
                   <div className="friends-input-group">
                     <label>Select Game</label>
-                    <SearchableGameSelector
-                      games={games}
+                    <GamePicker
+                      libraryGames={games}
+                      friends={friends}
                       selectedGameId={sessionGameId}
-                      onSelect={(id) => setSessionGameId(id)}
-                      placeholder="Search game from library..."
+                      selectedGameName={sessionGameName}
+                      onSelect={(g) => { setSessionGameId(g.id); setSessionGameName(g.name); }}
                     />
                   </div>
 
                   <div className="friends-input-group">
-                    <label htmlFor="sessionDateTime">Scheduled Time</label>
+                    <label htmlFor="sessionDateTime">Scheduled Time ({viewerTimezone || "local"})</label>
                     <input
                       type="datetime-local"
                       id="sessionDateTime"
@@ -2119,18 +2718,61 @@ export default function FriendsPage() {
                     />
                   </div>
 
+                  <div className="sessions-form-row">
+                    <div className="friends-input-group">
+                      <label htmlFor="sessionMaxPlayers">Max Players</label>
+                      <input
+                        type="number"
+                        id="sessionMaxPlayers"
+                        className="profile-input"
+                        min={2}
+                        max={16}
+                        value={sessionMaxPlayers}
+                        onChange={(e) => setSessionMaxPlayers(Number(e.target.value))}
+                        required
+                      />
+                    </div>
+                    <div className="friends-input-group">
+                      <label htmlFor="sessionDuration">Duration (min)</label>
+                      <input
+                        type="number"
+                        id="sessionDuration"
+                        className="profile-input"
+                        min={15}
+                        step={15}
+                        value={sessionDuration}
+                        onChange={(e) => setSessionDuration(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+
                   <div className="friends-input-group">
-                    <label htmlFor="sessionMaxPlayers">Max Players</label>
-                    <input
-                      type="number"
-                      id="sessionMaxPlayers"
-                      className="profile-input"
-                      min={2}
-                      max={16}
-                      value={sessionMaxPlayers}
-                      onChange={(e) => setSessionMaxPlayers(Number(e.target.value))}
-                      required
-                    />
+                    <label>Invite (optional — leave empty to notify all friends)</label>
+                    <div className="session-invite-row">
+                      <select
+                        className="profile-input"
+                        value=""
+                        onChange={(e) => {
+                          const name = e.target.value;
+                          if (name && !sessionInvited.includes(name)) setSessionInvited((prev) => [...prev, name]);
+                        }}
+                      >
+                        <option value="">Add a friend…</option>
+                        {friends.map((f) => (
+                          <option key={f.id} value={f.name} disabled={sessionInvited.includes(f.name)}>
+                            {displayName(f)}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="session-invite-chips">
+                        {sessionInvited.map((name) => (
+                          <span key={name} className="invite-chip">
+                            {name}
+                            <button type="button" className="invite-chip-x" onClick={() => setSessionInvited((prev) => prev.filter((n) => n !== name))}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="friends-input-group">
@@ -2152,73 +2794,268 @@ export default function FriendsPage() {
               </div>
 
               {/* Right Column: Sessions Grid */}
-              <div className="profile-summary-section" style={{ gap: "var(--space-md)" }}>
-                <div className="sessions-view-header">
-                  <h3 className="friends-list-title">
-                    {sessionView === "past" ? "Past Sessions" : sessionView === "agenda" ? "Agenda" : "Upcoming Sessions"}
-                  </h3>
-                  <div className="compare-filter-chips">
-                    <button type="button" className={`compare-filter-chip${sessionView === "upcoming" ? " active" : ""}`} onClick={() => setSessionView("upcoming")}>Upcoming</button>
-                    <button type="button" className={`compare-filter-chip${sessionView === "agenda" ? " active" : ""}`} onClick={() => setSessionView("agenda")}>Agenda</button>
-                    <button type="button" className={`compare-filter-chip${sessionView === "past" ? " active" : ""}`} onClick={() => setSessionView("past")}>Past</button>
+                <div className="profile-summary-section" style={{ gap: "var(--space-md)" }}>
+                  <div className="sessions-view-header">
+                    <h3 className="friends-list-title">
+                      {sessionView === "past" ? "Past Sessions" : sessionView === "agenda" ? "Agenda" : "Upcoming Sessions"}
+                    </h3>
+                    <div className="compare-filter-chips">
+                      <button type="button" className={`compare-filter-chip${sessionView === "upcoming" ? " active" : ""}`} onClick={() => setSessionView("upcoming")}>Upcoming</button>
+                      <button type="button" className={`compare-filter-chip${sessionView === "agenda" ? " active" : ""}`} onClick={() => setSessionView("agenda")}>Agenda</button>
+                      <button type="button" className={`compare-filter-chip${sessionView === "past" ? " active" : ""}`} onClick={() => setSessionView("past")}>Past</button>
+                    </div>
                   </div>
-                </div>
 
-                {(() => {
-                  const now = Date.now();
-                  const bufferMs = 6 * 60 * 60 * 1000; // 6-hour grace period
-                  const active = sessions.filter((s) => !s.deleted);
-                  const upcoming = active.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs >= now).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-                  const past = active.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs < now).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
+                  {sessionView === "agenda" && (
+                    <div className="agenda-mode-toggle">
+                      <button type="button" className={`agenda-mode-btn${agendaMode === "grid" ? " active" : ""}`} onClick={() => setAgendaMode("grid")}>📅 Calendar</button>
+                      <button type="button" className={`agenda-mode-btn${agendaMode === "list" ? " active" : ""}`} onClick={() => setAgendaMode("list")}>☰ List</button>
+                    </div>
+                  )}
 
-                  const visible = sessionView === "past" ? past : sessionView === "agenda" ? upcoming : upcoming;
+                  {/* Filters + search */}
+                  <div className="sessions-toolbar">
+                    <div className="compare-filter-chips">
+                      <button type="button" className={`compare-filter-chip${sessionFilter === "all" ? " active" : ""}`} onClick={() => setSessionFilter("all")}>All</button>
+                      <button type="button" className={`compare-filter-chip${sessionFilter === "mine" ? " active" : ""}`} onClick={() => setSessionFilter("mine")}>My Sessions</button>
+                      <button type="button" className={`compare-filter-chip${sessionFilter === "invited" ? " active" : ""}`} onClick={() => setSessionFilter("invited")}>Invited To</button>
+                    </div>
+                    <input
+                      className="profile-input session-search-input"
+                      placeholder="Search sessions…"
+                      value={sessionSearch}
+                      onChange={(e) => setSessionSearch(e.target.value)}
+                    />
+                  </div>
 
-                  if (visible.length === 0) {
-                    return (
-                      <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
-                        <h3 className="friends-empty-title">
-                          {sessionView === "past" ? "No Past Sessions" : "No Events Scheduled"}
-                        </h3>
-                        <p className="friends-empty-desc">
-                          {sessionView === "past"
-                            ? "Completed sessions you attended will appear here."
-                            : "Create an event on the left to plan game sessions. It will sync automatically to all friends!"}
-                        </p>
-                      </div>
+                  {(() => {
+                    const now = Date.now();
+                    const bufferMs = 6 * 60 * 60 * 1000; // 6-hour grace period
+                    const active = sessions.filter((s) => !s.deleted);
+                    const mySessions = active.filter((s) => s.creatorName === profile.name);
+                    const invitedTo = active.filter(
+                      (s) => s.creatorName !== profile.name && (s.invited || []).includes(profile.name)
                     );
-                  }
 
-                  // Agenda view: group upcoming by date.
-                  if (sessionView === "agenda") {
-                    const groups = new Map<string, GameSession[]>();
+                    let pool = active;
+                    if (sessionFilter === "mine") pool = mySessions;
+                    else if (sessionFilter === "invited") pool = invitedTo;
+
+                    const q = sessionSearch.trim().toLowerCase();
+                    if (q) {
+                      pool = pool.filter(
+                        (s) =>
+                          s.gameName.toLowerCase().includes(q) ||
+                          (s.description || "").toLowerCase().includes(q) ||
+                          (s.participants || []).some((p) => p.name.toLowerCase().includes(q))
+                      );
+                    }
+
+                    const upcoming = pool.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs >= now).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+                    const past = pool.filter((s) => new Date(s.scheduledAt).getTime() + bufferMs < now).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
+
+                    const visible = sessionView === "past" ? past : sessionView === "agenda" ? upcoming : upcoming;
+
+                    if (visible.length === 0) {
+                      return (
+                        <div className="friends-empty-state" style={{ margin: "0", maxWidth: "100%" }}>
+                          <h3 className="friends-empty-title">
+                            {sessionView === "past" ? "No Past Sessions" : "No Events Scheduled"}
+                          </h3>
+                          <p className="friends-empty-desc">
+                            {sessionView === "past"
+                              ? "Completed sessions you attended will appear here."
+                              : "Create an event on the left to plan game sessions. It will sync automatically to all friends!"}
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    // Build a conflict map: for each session, the overlapping session (if any).
+                    const conflicts = new Map<string, GameSession>();
                     visible.forEach((s) => {
-                      const key = new Date(s.scheduledAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-                      if (!groups.has(key)) groups.set(key, []);
-                      groups.get(key)!.push(s);
+                      if (new Date(s.scheduledAt).getTime() - now <= 0) return; // only warn about future
+                      const clash = visible.find(
+                        (o) => o.id !== s.id && o.creatorName === profile.name && sessionsConflict(s, o)
+                      );
+                      if (clash) conflicts.set(s.id, clash);
                     });
-                    return (
-                      <div className="sessions-agenda">
-                        {Array.from(groups.entries()).map(([day, daySessions]) => (
-                          <div key={day} className="agenda-day-group">
-                            <div className="agenda-day-label">{day}</div>
-                            <div className="sessions-grid">
-                              {daySessions.map((session) => renderSessionCard(session, profile, handleSetRsvp, handleDeleteSession))}
-                            </div>
+
+                    // Agenda view: group by month (or day for near-term).
+                    if (sessionView === "agenda") {
+                      const groups = new Map<string, GameSession[]>();
+                      visible.forEach((s) => {
+                        const d = new Date(s.scheduledAt);
+                        const key = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+                        if (!groups.has(key)) groups.set(key, []);
+                        groups.get(key)!.push(s);
+                      });
+                      // Group sessions by calendar day (local date key).
+                      const dayMap = new Map<string, GameSession[]>();
+                      visible.forEach((s) => {
+                        const d = new Date(s.scheduledAt);
+                        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                        if (!dayMap.has(key)) dayMap.set(key, []);
+                        dayMap.get(key)!.push(s);
+                      });
+
+                      // Determine the month range to render in the calendar.
+                      const months = Array.from(
+                        new Set(visible.map((s) => {
+                          const d = new Date(s.scheduledAt);
+                          return `${d.getFullYear()}-${d.getMonth()}`;
+                        }))
+                      ).sort();
+
+                      const todayKey = (() => {
+                        const t = new Date();
+                        return `${t.getFullYear()}-${t.getMonth()}-${t.getDate()}`;
+                      })();
+
+                      const renderCalendarCard = (session: GameSession) => (
+                        <SessionCard
+                          key={session.id}
+                          session={session}
+                          profile={profile}
+                          friends={friends}
+                          viewerTimezone={viewerTimezone}
+                          conflicting={conflicts.get(session.id)}
+                          onRsvp={handleSetRsvp}
+                          onDelete={handleDeleteSession}
+                          onSetRole={handleSetRole}
+                          onAddGuest={handleAddGuest}
+                          onRemoveGuest={handleRemoveGuest}
+                          onSetRsvpNote={handleSetRsvpNote}
+                          onSendMessage={handleSendMessage}
+                          gameCover={gameCoverForSession(session)}
+                          onTogglePinMessage={handleTogglePinMessage}
+                        />
+                      );
+
+                      if (agendaMode === "list") {
+                        return (
+                          <div className="sessions-agenda">
+                            {months.map((m) => {
+                              const [y, mo] = m.split("-").map(Number);
+                              const monthLabel = new Date(y, mo, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+                              const monthSessions = visible.filter((s) => {
+                                const d = new Date(s.scheduledAt);
+                                return d.getFullYear() === y && d.getMonth() === mo;
+                              });
+                              const dayGroups = new Map<string, GameSession[]>();
+                              monthSessions.forEach((s) => {
+                                const dk = new Date(s.scheduledAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+                                if (!dayGroups.has(dk)) dayGroups.set(dk, []);
+                                dayGroups.get(dk)!.push(s);
+                              });
+                              return (
+                                <div key={m} className="agenda-month-group">
+                                  <div className="agenda-month-label">{monthLabel}</div>
+                                  {Array.from(dayGroups.entries()).map(([day, daySessions]) => (
+                                    <div key={day} className="agenda-day-group">
+                                      <div className="agenda-day-label">{day}</div>
+                                      <div className="sessions-grid">
+                                        {daySessions.map(renderCalendarCard)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
                           </div>
+                        );
+                      }
+
+                      // Calendar grid mode.
+                      const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                      return (
+                        <div className="sessions-calendar">
+                          {months.map((m) => {
+                            const [y, mo] = m.split("-").map(Number);
+                            const monthLabel = new Date(y, mo, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+                            const firstDay = new Date(y, mo, 1).getDay();
+                            const daysInMonth = new Date(y, mo + 1, 0).getDate();
+                            const cells: (number | null)[] = [
+                              ...Array(firstDay).fill(null),
+                              ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+                            ];
+                            // Pad to full weeks.
+                            while (cells.length % 7 !== 0) cells.push(null);
+                            return (
+                              <div key={m} className="calendar-month">
+                                <div className="calendar-month-label">{monthLabel}</div>
+                                <div className="calendar-weekdays">
+                                  {weekdays.map((w) => (
+                                    <div key={w} className="calendar-weekday">{w}</div>
+                                  ))}
+                                </div>
+                                <div className="calendar-grid">
+                                  {cells.map((dayNum, idx) => {
+                                    if (dayNum === null) return <div key={`empty-${idx}`} className="calendar-cell empty" />;
+                                    const key = `${y}-${mo}-${dayNum}`;
+                                    const daySessions = dayMap.get(key) || [];
+                                    const isToday = key === todayKey;
+                                    const isExpanded = expandedDay === key;
+                                    return (
+                                      <div
+                                        key={key}
+                                        className={`calendar-cell${isToday ? " today" : ""}${daySessions.length ? " has-events" : ""}${isExpanded ? " expanded" : ""}`}
+                                        onClick={() => daySessions.length && setExpandedDay(isExpanded ? null : key)}
+                                      >
+                                        <div className="calendar-day-num">{dayNum}</div>
+                                        {daySessions.length > 0 && !isExpanded && (
+                                          <div className="calendar-chips">
+                                            {daySessions.slice(0, 3).map((s) => (
+                                              <div key={s.id} className={`calendar-chip${conflicts.get(s.id) ? " conflict" : ""}${s.creatorName === profile.name ? " mine" : ""}`} title={s.gameName}>
+                                                <span className="calendar-chip-time">{new Date(s.scheduledAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                                                <span className="calendar-chip-name">{s.gameName}</span>
+                                              </div>
+                                            ))}
+                                            {daySessions.length > 3 && <div className="calendar-chip-more">+{daySessions.length - 3} more</div>}
+                                          </div>
+                                        )}
+                                        {isExpanded && (
+                                          <div className="calendar-day-detail" onClick={(e) => e.stopPropagation()}>
+                                            {daySessions.map(renderCalendarCard)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="sessions-grid">
+                        {visible.map((session) => (
+                          <SessionCard
+                            key={session.id}
+                            session={session}
+                            profile={profile}
+                            friends={friends}
+                            viewerTimezone={viewerTimezone}
+                            conflicting={conflicts.get(session.id)}
+                            onRsvp={handleSetRsvp}
+                            onDelete={handleDeleteSession}
+                            onSetRole={handleSetRole}
+                            onAddGuest={handleAddGuest}
+                            onRemoveGuest={handleRemoveGuest}
+                            onSetRsvpNote={handleSetRsvpNote}
+                            onSendMessage={handleSendMessage}
+                            onTogglePinMessage={handleTogglePinMessage}
+                          />
                         ))}
                       </div>
                     );
-                  }
-
-                  return (
-                    <div className="sessions-grid">
-                      {visible.map((session) => renderSessionCard(session, profile, handleSetRsvp, handleDeleteSession))}
-                    </div>
-                  );
-                })()}
+                  })()}
+                </div>
+                </div>
               </div>
-            </div>
-          </div>
         )}
 
         {/* Tab 3: Recommendations Feed & Comments */}

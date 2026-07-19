@@ -133,11 +133,37 @@ export function displayName(friend: Friend): string {
 
 export type RsvpStatus = "going" | "maybe" | "declined";
 
+/** Roles a participant can hold in a session. */
+export type SessionRole = "host" | "cohost" | "player";
+
+/** A participant can be a friend (named) or a +1 guest (no friend record). */
+export interface SessionParticipant {
+  /** Display name. For friends this matches their profile name. */
+  name: string;
+  /** Role in the session. */
+  role: SessionRole;
+  /** Free-text "what I'm bringing" note attached to the RSVP. */
+  note?: string;
+  /** IANA timezone used to display this attendee's local time, if known. */
+  timezone?: string;
+  /** True for non-friend +1 guests. */
+  guest?: boolean;
+}
+
+export interface SessionMessage {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: number;
+  /** Pinned messages show at the top of the chat thread. */
+  pinned?: boolean;
+}
+
 export interface GameSession {
   id: string;
   gameId: string;
   gameName: string;
-  scheduledAt: string; // YYYY-MM-DDTHH:mm format
+  scheduledAt: string; // YYYY-MM-DDTHH:mm format (creator's local time)
   maxPlayers: number;
   description: string;
   creatorName: string;
@@ -146,6 +172,17 @@ export interface GameSession {
   rsvps?: Record<string, RsvpStatus>;
   updatedAt: number; // Unix timestamp for merging
   deleted?: boolean; // Tombstone for sync deletion
+
+  /** IANA timezone of the creator when the session was scheduled. */
+  creatorTimezone?: string;
+  /** Explicit invitee list (names). Empty = broadcast to all friends. */
+  invited?: string[];
+  /** Rich participant metadata (roles, notes, guest flag, tz). */
+  participants?: SessionParticipant[];
+  /** Shared session chat / pinned messages. */
+  messages?: SessionMessage[];
+  /** Duration in minutes, for countdown + agenda display. */
+  durationMin?: number;
 }
 
 export interface RecommendationComment {
@@ -513,6 +550,27 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
           ? Array.from(new Set([...remoteSession.attendees, ...Object.keys(rsvpMap).filter((n) => rsvpMap[n] === "going")]))
           : Array.from(new Set([...localSession.attendees, ...Object.keys(rsvpMap).filter((n) => rsvpMap[n] === "going")]));
 
+      // Merge the rich participant metadata (roles, notes, guest flag, tz).
+      const participantsMap = new Map<string, SessionParticipant>();
+      (keepRemote ? remoteSession.participants || [] : localSession.participants || []).forEach((p) =>
+        participantsMap.set(p.name, { ...p })
+      );
+      (keepRemote ? localSession.participants || [] : remoteSession.participants || []).forEach((p) => {
+        if (!participantsMap.has(p.name)) participantsMap.set(p.name, { ...p });
+      });
+
+      // Merge the chat thread; remote message wins on timestamp tie-break.
+      const messagesMap = new Map<string, SessionMessage>();
+      [...(localSession.messages || []), ...(remoteSession.messages || [])].forEach((m) => {
+        const existing = messagesMap.get(m.id);
+        if (!existing || m.timestamp >= existing.timestamp) messagesMap.set(m.id, m);
+      });
+      const messages = Array.from(messagesMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+      const invited = keepRemote
+        ? remoteSession.invited || localSession.invited || []
+        : Array.from(new Set([...(localSession.invited || []), ...(remoteSession.invited || [])]));
+
       mergedMap.set(remoteSession.id, {
         id: localSession.id,
         gameId,
@@ -525,6 +583,11 @@ export function mergeSessions(local: GameSession[], remote: GameSession[]): Game
         rsvps: rsvpMap,
         updatedAt,
         deleted,
+        creatorTimezone: remoteSession.creatorTimezone || localSession.creatorTimezone,
+        invited,
+        participants: Array.from(participantsMap.values()),
+        messages,
+        durationMin: remoteSession.durationMin ?? localSession.durationMin,
       });
     }
   });
