@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, Duration};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 use crate::db::{self, Db};
@@ -639,26 +639,28 @@ impl GameWatcher {
     /// still gets the running indicator cleared, and the frontend can
     /// show a warning toast.
     ///
-    /// Safe-rail enumeration of the three return shapes:
-    ///   - `Ok({ pid: 0, killed: false })`   — pending session (Steam
-    ///     protocol or UAC), no real PID to terminate. Frontend =
-    ///     "Force closed X" success toast (it's not wrong, just an
-    ///     unusual path).
-    ///   - `Ok({ pid: N, killed: true })`    — verified + terminated.
-    ///     Frontend = "Force closed X" success toast.
+    /// Safe-rail enumeration of the return shapes:
+    ///   - `Ok({ pid: 0, killed: true })`    — pending session (Steam
+    ///     protocol / UAC) where the real process was found and
+    ///     terminated via the install-dir scan. Frontend = "Force
+    ///     closed X" success toast.
+    ///   - `Ok({ pid: N, killed: true })`    — tracked PID verified +
+    ///     terminated (and/or a matching process killed). Frontend =
+    ///     "Force closed X" success toast.
     ///   - `Ok({ pid: N, killed: false })`   — session exists but we
-    ///     could not safely kill the process (PID recycled, access
-    ///     denied, exe-path mismatch). Frontend = warning toast "ended
-    ///     session, please close X manually".
+    ///     could not safely terminate any matching process (PID
+    ///     recycled, access denied, no matching process found).
+    ///     Frontend = warning toast "ended session, please close X
+    ///     manually".
     ///   - `Err(...)`                        — session is no longer
     ///     tracked (race between button click and watcher cleanup).
     ///     Frontend = error toast.
     ///
-    /// `non_windows` always returns the pending-session shape: the
+    /// `non_windows` always returns `killed: false`: the
     /// cross-platform process poll in `query_running_processes()`
-    /// returns an empty list on every non-Windows target today, so
-    /// `last_pid` is always 0 and we'd never have anything to `kill`
-    /// even if we pulled in `libc`.
+    /// returns an empty list on every non-Windows target today, so we
+    /// have nothing to `kill` even if we pulled in `libc`. The session
+    /// is still cleaned up via `finish_session`.
     pub fn force_close(
         &mut self,
         app_handle: &AppHandle,
@@ -666,45 +668,117 @@ impl GameWatcher {
     ) -> Result<ForceCloseResult, String> {
         // Copy out the fields we need so we can drop the immutable
         // borrow on `active_sessions` mutating operations below.
-        let (pid, expected_exe_lower) = match self.active_sessions.get(game_id) {
+        let (pid, expected_exe_lower, install_dir_lower) = match self.active_sessions.get(game_id) {
             Some(session) => (
                 session.last_pid,
                 session
                     .matched_exe
                     .to_lowercase()
                     .replace('/', "\\"),
+                session.install_dir.as_ref().map(|d| {
+                    d.to_string_lossy()
+                        .to_lowercase()
+                        .replace('/', "\\")
+                        .trim_end_matches('\\')
+                        .to_string()
+                }),
             ),
             None => return Err(format!("Game is not running: {game_id}")),
         };
 
-        let killed = if pid != 0 {
-            #[cfg(windows)]
-            {
-                kill_pid_if_exe_matches(pid, &expected_exe_lower)
-            }
-            #[cfg(not(windows))]
-            {
-                // See comment above: cross-platform watcher doesn't
-                // resolve processes on non-Windows, so we have nothing
-                // to terminate. The False return signals "session
-                // cleared without an actual kill".
-                false
-            }
-        } else {
-            // No PID (pending / Steam protocol / UAC). Nothing
-            // physical to kill. finished_via_session is still True
-            // below — we report killed=false so the frontend toast
-            // can distinguish "killed an actual process" from
-            // "cleared a pending session", while still routing
-            // through the same cleanup path.
-            false
-        };
+        // Kill every live process that belongs to this game. We don't
+        // rely on `last_pid` alone: a pending session has `last_pid ==
+        // 0`, and a launcher-spawned game may have already re-parented
+        // to a different PID (so the tracked PID is stale). Scanning by
+        // exe path / install dir guarantees the actual game process
+        // (and its tree) is terminated regardless of which PID the
+        // watcher last saw.
+        #[cfg(windows)]
+        let killed = kill_matching_processes(&expected_exe_lower, install_dir_lower.as_deref());
+        #[cfg(not(windows))]
+        let killed = false;
 
         // Same `game-exited` emission path as a normal exit, so the
         // frontend listeners see one consistent event payload.
         self.finish_session(app_handle, game_id);
         Ok(ForceCloseResult { pid, killed })
     }
+}
+
+/// Terminate every currently-running process belonging to a game.
+///
+/// A process is "the game" when its exe path equals the expected
+/// (normalized) exe, OR it lives inside the game's install directory
+/// and is not one of the known non-game binaries (`SKIP_KEYWORDS` —
+/// launchers, crash handlers, redistributables). The install-dir
+/// branch lets us kill the real game even when:
+///
+///   * the launch was a pending session (no tracked PID yet), or
+///   * the tracked PID was a launcher that already exited, or
+///   * the game re-spawned under a new child PID.
+///
+/// Each candidate is killed via `kill_pid_if_exe_matches` (which
+/// verifies the exe and escalates TerminateProcess → taskkill /T so
+/// the whole process tree, including anti-cheat daemons, dies).
+///
+/// Returns `true` if at least one matching process was terminated.
+#[cfg(windows)]
+fn kill_matching_processes(expected_exe_lower: &str, install_dir_lower: Option<&str>) -> bool {
+    let processes = query_running_processes();
+    if processes.is_empty() {
+        return false;
+    }
+
+    let mut killed_any = false;
+
+    // 1. Exact tracked-exe match (fast, no install-dir assumption).
+    if !expected_exe_lower.is_empty() {
+        for proc in &processes {
+            let path_lower = proc.exe_path.to_lowercase().replace('/', "\\");
+            if path_lower == expected_exe_lower {
+                if kill_pid_if_exe_matches(proc.pid, expected_exe_lower) {
+                    killed_any = true;
+                }
+            }
+        }
+    }
+
+    // 2. Install-dir match — covers pending launches and re-parented
+    //    game processes that don't share the tracked exe name exactly.
+    if let Some(dir) = install_dir_lower {
+        if !dir.is_empty() {
+            for proc in &processes {
+                let path_lower = proc.exe_path.to_lowercase().replace('/', "\\");
+                if !path_lower.starts_with(dir) {
+                    continue;
+                }
+                // Ensure it's actually inside the dir, not a sibling
+                // prefix (e.g. "FooBar" when looking for "Foo").
+                let remainder = &path_lower[dir.len()..];
+                if !remainder.is_empty() && !remainder.starts_with('\\') {
+                    continue;
+                }
+                // Skip known non-game binaries (launchers, crash
+                // handlers, redistributables) so we don't nuke a
+                // harmless sibling. The game process won't be in here.
+                if let Some(stem) = std::path::Path::new(&proc.exe_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                {
+                    let lower = stem.to_lowercase();
+                    if SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+                        continue;
+                    }
+                }
+                // Use the candidate's own exact path for the verify step.
+                if kill_pid_if_exe_matches(proc.pid, &path_lower) {
+                    killed_any = true;
+                }
+            }
+        }
+    }
+
+    killed_any
 }
 
 /// Outcome of `GameWatcher::force_close`. Serialised via serde so the
@@ -717,16 +791,15 @@ pub struct ForceCloseResult {
     /// protocol / UAC). Informational; primarily used by debug logs
     /// and the toast copy ("PID N for "X") when killed.
     pub pid: u32,
-    /// `true` only when both:
-    ///   1. `QueryFullProcessImageNameW` confirmed the tracked PID's
-    ///      exe path still matches `session.matched_exe` (no PID
-    ///      recycle), AND
-    ///   2. `OpenProcess(PROCESS_TERMINATE) + TerminateProcess`
-    ///      succeeded (no access denied).
-    /// `false` for pending sessions (pid == 0), PID-recycled, or
-    /// access-denied paths. The session is ALWAYS cleaned up via
-    /// `finish_session` regardless of this flag — only the toast
-    /// copy diverges.
+    /// `true` when at least one matching process (the tracked exe and/or
+    /// a live process inside the game's install dir) was terminated.
+    /// The match is verified via `QueryFullProcessImageNameW` and
+    /// escalates TerminateProcess → taskkill /T, so the whole process
+    /// tree (anti-cheat, crash handler, VR runtime) is killed. `false`
+    /// only when no live game process could be found/terminated (PID
+    /// recycled, access denied, or nothing matched). The session is
+    /// ALWAYS cleaned up via `finish_session` regardless of this flag —
+    /// only the toast copy diverges.
     pub killed: bool,
 }
 
