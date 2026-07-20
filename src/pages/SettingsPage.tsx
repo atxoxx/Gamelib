@@ -1906,6 +1906,44 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          {/* System summary — detected CPU / RAM / all GPUs */}
+          <div className="settings-row settings-row--spaced">
+            <div className="settings-hardware-control-card settings-system-summary">
+              <div className="settings-control">
+                <label className="settings-label">System summary</label>
+                <p className="settings-helper-lead">
+                  Hardware detected on this machine.
+                </p>
+                <div className="settings-system-summary__grid">
+                  <div className="settings-system-summary__item">
+                    <span className="settings-system-summary__label">CPU</span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo?.cpuName ?? "Detecting…"}
+                    </span>
+                  </div>
+                  <div className="settings-system-summary__item">
+                    <span className="settings-system-summary__label">Memory</span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo ? `${systemInfo.ramGb} GB` : "—"}
+                    </span>
+                  </div>
+                  <div className="settings-system-summary__item settings-system-summary__item--wide">
+                    <span className="settings-system-summary__label">
+                      GPUs ({systemInfo?.gpus.length ?? 0})
+                    </span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo && systemInfo.gpus.length > 0
+                        ? systemInfo.gpus
+                            .map((g) => `${g.name} (${g.vramMb} MB)`)
+                            .join(" · ")
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -2994,43 +3032,6 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* System summary — detected CPU / RAM / all GPUs */}
-          <div className="settings-row settings-row--spaced">
-            <div className="settings-hardware-control-card settings-system-summary">
-              <div className="settings-control">
-                <label className="settings-label">System summary</label>
-                <p className="settings-helper-lead">
-                  Hardware detected on this machine.
-                </p>
-                <div className="settings-system-summary__grid">
-                  <div className="settings-system-summary__item">
-                    <span className="settings-system-summary__label">CPU</span>
-                    <span className="settings-system-summary__value">
-                      {systemInfo?.cpuName ?? "Detecting…"}
-                    </span>
-                  </div>
-                  <div className="settings-system-summary__item">
-                    <span className="settings-system-summary__label">Memory</span>
-                    <span className="settings-system-summary__value">
-                      {systemInfo ? `${systemInfo.ramGb} GB` : "—"}
-                    </span>
-                  </div>
-                  <div className="settings-system-summary__item settings-system-summary__item--wide">
-                    <span className="settings-system-summary__label">
-                      GPUs ({systemInfo?.gpus.length ?? 0})
-                    </span>
-                    <span className="settings-system-summary__value">
-                      {systemInfo && systemInfo.gpus.length > 0
-                        ? systemInfo.gpus
-                            .map((g) => `${g.name} (${g.vramMb} MB)`)
-                            .join(" · ")
-                        : "—"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </section>
 
           <section className="settings-section">
