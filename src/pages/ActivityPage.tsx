@@ -363,6 +363,7 @@ export default function ActivityPage() {
             games={games}
             startDate={startDate}
             endDate={endDate}
+            sourceFilter={sourceFilter}
           />
         )}
 

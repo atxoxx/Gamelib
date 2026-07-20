@@ -1110,10 +1110,48 @@
   overflow: hidden;
 }
 
+/* ── Header / actions ── */
+.activity-gantt__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.activity-gantt__head-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.activity-gantt__export-btn {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.activity-gantt__export-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.activity-gantt__caption {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+
 .activity-gantt__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  align-items: center;
+  gap: 8px 12px;
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--color-border);
@@ -1125,12 +1163,33 @@
   gap: 6px;
   font-size: 11px;
   color: var(--color-text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.activity-gantt__legend-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.activity-gantt__legend-item--active {
+  border-color: var(--color-border-light);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+.activity-gantt__legend-item--dim {
+  opacity: 0.4;
 }
 
 .activity-gantt__legend-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .activity-gantt__legend-icon {
@@ -1147,14 +1206,33 @@
   text-overflow: ellipsis;
 }
 
-.activity-gantt__legend-more {
+.activity-gantt__legend-more,
+.activity-gantt__legend-clear {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--color-brand-teal);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px 4px;
+}
+
+.activity-gantt__legend-more:hover,
+.activity-gantt__legend-clear:hover {
+  text-decoration: underline;
+}
+
+.activity-gantt__legend-total {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .activity-gantt__timeline-header {
   display: flex;
   width: 100%;
+  align-items: flex-end;
 }
 
 .activity-gantt__date-col {
@@ -1164,28 +1242,49 @@
 
 .activity-gantt__time-axis {
   flex: 1;
-  display: flex;
-  justify-content: space-between;
   position: relative;
-  padding: 0 4px;
-  margin-bottom: 8px;
+  height: 16px;
+  margin-bottom: 6px;
 }
 
 .activity-gantt__time-label {
+  position: absolute;
+  transform: translateX(-50%);
   font-size: 9px;
   color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.activity-gantt__time-label:first-child {
+  transform: translateX(0);
+}
+
+.activity-gantt__time-label:last-child {
+  transform: translateX(-100%);
+}
+
+.activity-gantt__row-total {
+  width: 56px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-right: 4px;
+  white-space: nowrap;
 }
 
 .activity-gantt__rows {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .activity-gantt__row {
   display: flex;
-  align-items: center;
-  height: 28px;
+  align-items: stretch;
   border-radius: 4px;
   transition: background-color 0.15s ease;
 }
@@ -1207,11 +1306,16 @@
 .activity-gantt__date-label {
   font-size: 11px;
   color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.activity-gantt__date-label--today {
+  color: var(--color-brand-teal);
+  font-weight: 700;
 }
 
 .activity-gantt__bar-area {
   flex: 1;
-  height: 100%;
   position: relative;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 4px;
@@ -1222,23 +1326,59 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   pointer-events: none;
+}
+
+.activity-gantt__now-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-brand-teal);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.activity-gantt__crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  z-index: 4;
 }
 
 .activity-gantt__bar {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
   border-radius: 4px;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+  z-index: 2;
 }
 
 .activity-gantt__bar:hover {
   transform: scaleY(1.15);
   filter: brightness(1.2);
+  z-index: 5;
+}
+
+/* continuation bars are clipped where they cross midnight */
+.activity-gantt__bar--cont-start {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.activity-gantt__bar--cont-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.activity-gantt__bar--dim {
+  opacity: 0.18;
 }
 
 .activity-gantt__empty {
@@ -1250,6 +1390,8 @@
 
 /* ── Gantt Floating Tooltip ── */
 .activity-gantt__tooltip {
+  position: fixed;
+  z-index: 1000;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border-light);
   border-radius: 6px;
@@ -1258,12 +1400,23 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  pointer-events: none;
 }
 
 .activity-gantt__tooltip-game {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--color-text-primary);
   font-size: 11px;
   font-weight: 700;
+}
+
+.activity-gantt__tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .activity-gantt__tooltip-time {
@@ -1275,6 +1428,55 @@
   color: var(--color-brand-teal);
   font-size: 10px;
   font-weight: 600;
+}
+
+/* ── Session detail modal ── */
+.activity-gantt__detail {
+  max-width: 420px;
+}
+
+.activity-gantt__detail-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.activity-gantt__detail-body {
+  padding: var(--spacing-unit, 16px);
+}
+
+.activity-gantt__detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+
+.activity-gantt__detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-gantt__detail-k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.activity-gantt__detail-v {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.activity-gantt__detail-note {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
 }
 
 /* ==========================================================================
