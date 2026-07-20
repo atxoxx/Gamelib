@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Game, RichAboutPayload } from "../../types/game";
 import { IconFileText, IconLink, IconChevronDown, IconPlay } from "./icons";
+import { useBigScreen } from "../../context/BigScreenContext";
+import { useFocusable } from "../../hooks/useFocusable";
 
 /**
  * AboutSection
@@ -135,6 +137,8 @@ export default function AboutSection({
   const [collapsed, setCollapsed] = useState(true);
   const [payload, setPayload] = useState<RichAboutPayload | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { isBigScreen } = useBigScreen();
+  const toggleFocus = useFocusable(() => setCollapsed((c) => !c));
   const fetchCounter = useRef(0);
   // Tracks the identity key we last kicked off a fetch for. If
   // the same key reappears in a re-render, we skip the refetch
@@ -289,7 +293,7 @@ export default function AboutSection({
           <button
             type="button"
             className="about-section__toggle"
-            onClick={() => setCollapsed((c) => !c)}
+            {...(isBigScreen ? toggleFocus : { onClick: () => setCollapsed((c) => !c) })}
             aria-expanded={!effectiveCollapsed}
             aria-controls="about-section-body"
           >

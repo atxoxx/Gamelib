@@ -12,12 +12,12 @@ import "./news/NewsPage.css";
 const ITEMS_PER_PAGE = 20;
 
 import { useBigScreen } from "../context/BigScreenContext";
-import BigScreenHome from "../components/bigscreen/BigScreenHome";
+import BigScreenNews from "../components/bigscreen/BigScreenNews";
 
 export default function NewsPage() {
   const { isBigScreen } = useBigScreen();
   if (isBigScreen) {
-    return <BigScreenHome />;
+    return <BigScreenNews />;
   }
   const {
     articles,

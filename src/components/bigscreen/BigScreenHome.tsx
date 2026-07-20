@@ -53,6 +53,15 @@ export default function BigScreenHome() {
   }, [continuePlaying, recentlyAdded, games]);
 
   const [selectedGame, setSelectedGame] = useState<Game | null>(initialFeatured);
+  const [activeRailId, setActiveRailId] = useState<string>(
+    continuePlaying.length > 0 ? "continue-playing" : "recently-added"
+  );
+
+  useEffect(() => {
+    if (continuePlaying.length === 0 && activeRailId === "continue-playing") {
+      setActiveRailId("recently-added");
+    }
+  }, [continuePlaying, activeRailId]);
 
   useEffect(() => {
     setLogoError(false);
@@ -86,12 +95,21 @@ export default function BigScreenHome() {
     }
     const id = el.getAttribute("data-game-id");
     console.log("BigScreenHome Focus Watcher: Focused element:", el.tagName, "Class:", el.className, "data-game-id:", id);
-    if (!id) return;
-    const game = allGamesById.get(id);
-    console.log("BigScreenHome Focus Watcher: Looked up game:", game?.name);
-    if (game && game.id !== selectedGame?.id) {
-      console.log("BigScreenHome Focus Watcher: Setting selectedGame to:", game.name);
-      setSelectedGame(game);
+    if (id) {
+      const game = allGamesById.get(id);
+      console.log("BigScreenHome Focus Watcher: Looked up game:", game?.name);
+      if (game && game.id !== selectedGame?.id) {
+        console.log("BigScreenHome Focus Watcher: Setting selectedGame to:", game.name);
+        setSelectedGame(game);
+      }
+      
+      const railEl = el.closest("[data-rail-id]");
+      if (railEl) {
+        const rId = railEl.getAttribute("data-rail-id");
+        if (rId) {
+          setActiveRailId(rId);
+        }
+      }
     }
   }, [gamepad.focusedElement, allGamesById, selectedGame]);
 
@@ -133,6 +151,89 @@ export default function BigScreenHome() {
   // Active download overview
   const activeDownload = activeDownloads[0] ?? null;
 
+  const renderDetailsPane = (railId: string) => {
+    if (activeRailId !== railId) return null;
+    return (
+      <div className="bigscreen-dashboard-details-pane animate-fade-in" style={{ padding: "0 64px 24px 64px" }}>
+        <div className="bigscreen-details-pane-content">
+          {featuredGame ? (
+            <>
+              <div className="bigscreen-details-logo-area">
+                {featuredGame.logoUrl && !logoError ? (
+                  <img
+                    src={featuredGame.logoUrl}
+                    alt={featuredGame.name}
+                    className="bigscreen-details-logo"
+                    onError={() => setLogoError(true)}
+                  />
+                ) : (
+                  <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+                )}
+              </div>
+
+              <div className="bigscreen-details-meta">
+                <BigScreenPill tone="accent" size="sm">
+                  {featuredGame.platform}
+                </BigScreenPill>
+                {status && (
+                  <BigScreenPill tone="muted" size="sm" dot customColor={status.color}>
+                    {status.label}
+                  </BigScreenPill>
+                )}
+                {releaseYear && (
+                  <BigScreenPill tone="muted" size="sm">
+                    {releaseYear}
+                  </BigScreenPill>
+                )}
+              </div>
+
+              {featuredGame.description && (
+                <p className="bigscreen-details-description">
+                  {featuredGame.description.length > 200
+                    ? `${featuredGame.description.substring(0, 200)}...`
+                    : featuredGame.description}
+                </p>
+              )}
+
+              <div className="bigscreen-details-actions">
+                <button
+                  type="button"
+                  className="bigscreen-details-btn bigscreen-details-btn--primary"
+                  {...playProps}
+                  disabled={isRunning}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                    <polygon points="6 4 20 12 6 20 6 4" />
+                  </svg>
+                  <span>{isRunning ? "Running" : "Play"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="bigscreen-details-btn bigscreen-details-btn--secondary"
+                  {...detailsProps}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span>Game Hub</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="bigscreen-details-placeholder">
+              <h2 className="bigscreen-details-title">Welcome to GameLib</h2>
+              <p className="bigscreen-details-description">
+                Connect a gamepad controller or use your keyboard arrows to navigate. Import games in desktop mode to build your library.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bigscreen-library-dashboard">
       {/* Backdrop */}
@@ -149,89 +250,9 @@ export default function BigScreenHome() {
       </div>
 
       <div className="bigscreen-dashboard-scrollable-content">
-        {/* Side-by-side Spotlight and Widgets */}
-        <div className="bigscreen-home-split-row">
-          {/* Left Details Pane */}
-          <div className="bigscreen-dashboard-details-pane">
-            <div className="bigscreen-details-pane-content">
-              {featuredGame ? (
-                <>
-                  <div className="bigscreen-details-logo-area">
-                    {featuredGame.logoUrl && !logoError ? (
-                      <img
-                        src={featuredGame.logoUrl}
-                        alt={featuredGame.name}
-                        className="bigscreen-details-logo"
-                        onError={() => setLogoError(true)}
-                      />
-                    ) : (
-                      <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
-                    )}
-                  </div>
-
-                  <div className="bigscreen-details-meta">
-                    <BigScreenPill tone="accent" size="sm">
-                      {featuredGame.platform}
-                    </BigScreenPill>
-                    {status && (
-                      <BigScreenPill tone="muted" size="sm" dot customColor={status.color}>
-                        {status.label}
-                      </BigScreenPill>
-                    )}
-                    {releaseYear && (
-                      <BigScreenPill tone="muted" size="sm">
-                        {releaseYear}
-                      </BigScreenPill>
-                    )}
-                  </div>
-
-                  {featuredGame.description && (
-                    <p className="bigscreen-details-description">
-                      {featuredGame.description.length > 200
-                        ? `${featuredGame.description.substring(0, 200)}...`
-                        : featuredGame.description}
-                    </p>
-                  )}
-
-                  <div className="bigscreen-details-actions">
-                    <button
-                      type="button"
-                      className="bigscreen-details-btn bigscreen-details-btn--primary"
-                      {...playProps}
-                      disabled={isRunning}
-                    >
-                      <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                        <polygon points="6 4 20 12 6 20 6 4" />
-                      </svg>
-                      <span>{isRunning ? "Running" : "Play"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="bigscreen-details-btn bigscreen-details-btn--secondary"
-                      {...detailsProps}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="16" x2="12" y2="12" />
-                        <line x1="12" y1="8" x2="12.01" y2="8" />
-                      </svg>
-                      <span>Game Hub</span>
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="bigscreen-details-placeholder">
-                  <h2 className="bigscreen-details-title">Welcome to GameLib</h2>
-                  <p className="bigscreen-details-description">
-                    Connect a gamepad controller or use your keyboard arrows to navigate. Import games in desktop mode to build your library.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Dashboard Widgets Panel */}
-          <div className="bigscreen-home-widgets-panel">
+        {/* Top Widgets Panel (full width grid layout) */}
+        <div className="bigscreen-home-split-row" style={{ paddingBottom: "24px" }}>
+          <div className="bigscreen-home-widgets-panel" style={{ width: "100%", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px" }}>
             {/* Download Widget */}
             {activeDownload ? (
               <div className="bigscreen-widget-card" {...downloadWidgetProps}>
@@ -304,21 +325,27 @@ export default function BigScreenHome() {
         {/* Shelves / Rails */}
         <div className="bigscreen-dashboard-main-rail">
           {continuePlaying.length > 0 && (
-            <BigScreenRail
-              title="Continue Playing"
-              games={continuePlaying}
-              onCardClick={handleDetails}
-              railId="continue-playing"
-            />
+            <>
+              {renderDetailsPane("continue-playing")}
+              <BigScreenRail
+                title="Continue Playing"
+                games={continuePlaying}
+                onCardClick={handleDetails}
+                railId="continue-playing"
+              />
+            </>
           )}
 
-          <BigScreenRail
-            title="Recently Added"
-            games={recentlyAdded.length > 0 ? recentlyAdded : games.slice(0, 12)}
-            emptyLabel="No games in library. Switch to desktop to import them."
-            onCardClick={handleDetails}
-            railId="recently-added"
-          />
+          <>
+            {renderDetailsPane("recently-added")}
+            <BigScreenRail
+              title="Recently Added"
+              games={recentlyAdded.length > 0 ? recentlyAdded : games.slice(0, 12)}
+              emptyLabel="No games in library. Switch to desktop to import them."
+              onCardClick={handleDetails}
+              railId="recently-added"
+            />
+          </>
         </div>
       </div>
     </div>

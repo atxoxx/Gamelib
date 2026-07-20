@@ -38,7 +38,7 @@
 // cycle resumes on Media/Specs/More where the user is focused on
 // tab content.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
@@ -86,14 +86,7 @@ interface BigScreenGamePageProps {
   onRemove: () => void;
 }
 
-type GamePageTab = "overview" | "media" | "specs" | "more";
-
-const GAME_PAGE_TABS: TabDef<GamePageTab>[] = [
-  { id: "overview", label: "Overview", icon: <OverviewIcon /> },
-  { id: "media", label: "Media", icon: <MediaIcon /> },
-  { id: "specs", label: "Specs", icon: <SpecsIcon /> },
-  { id: "more", label: "More", icon: <MoreIcon /> },
-];
+type GamePageTab = "overview" | "media" | "specs" | "achievements" | "reviews" | "activity" | "more";
 
 export default function BigScreenGamePage({
   game,
@@ -101,7 +94,7 @@ export default function BigScreenGamePage({
   onEdit,
   onRemove,
 }: BigScreenGamePageProps) {
-  const { runningGameIds, launchGame, forceCloseGame } = useGames();
+  const { runningGameIds, launchGame, forceCloseGame, enrichGameMetadata } = useGames();
   const gamepad = useGamepad();
   // Steam appid resolution for the player-count badge. Identical
   // pattern to the desktop hero: falls back to a one-shot Steam
@@ -118,6 +111,48 @@ export default function BigScreenGamePage({
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [logoError, setLogoError] = useState(false);
+
+  const resolvedLogo = useMemo(() => {
+    if (game.logoUrl) return game.logoUrl;
+    if (game.platform === "Steam" && game.steamAppId) {
+      return `https://cdn.akamai.steamstatic.com/steam/apps/${game.steamAppId}/logo.png`;
+    }
+    return undefined;
+  }, [game.logoUrl, game.platform, game.steamAppId]);
+
+  const resolvedBanner = useMemo(() => {
+    if (game.bannerUrl) return game.bannerUrl;
+    if (game.platform === "Steam" && game.steamAppId) {
+      return `https://cdn.akamai.steamstatic.com/steam/apps/${game.steamAppId}/library_hero.jpg`;
+    }
+    return game.coverArtUrl;
+  }, [game.bannerUrl, game.platform, game.steamAppId, game.coverArtUrl]);
+
+  // Lazy metadata enrichment on mount
+  useEffect(() => {
+    setLogoError(false);
+    enrichGameMetadata(game.id, game.name, game.steamAppId).catch((err) =>
+      console.warn("Failed to lazy enrich game metadata on Big Screen:", err)
+    );
+  }, [game.id, game.name, game.steamAppId, enrichGameMetadata]);
+
+  const tabs = useMemo(() => {
+    const list: TabDef<GamePageTab>[] = [
+      { id: "overview", label: "Overview", icon: <OverviewIcon /> },
+      { id: "media", label: "Media", icon: <MediaIcon /> },
+      { id: "specs", label: "Specs", icon: <SpecsIcon /> },
+    ];
+    if (resolvedSteamAppId) {
+      list.push({ id: "achievements", label: "Achievements", icon: <AchievementsIcon /> });
+    }
+    list.push(
+      { id: "reviews", label: "Reviews", icon: <ReviewsIcon /> },
+      { id: "activity", label: "Activity", icon: <ActivityIcon /> },
+      { id: "more", label: "More", icon: <MoreIcon /> }
+    );
+    return list;
+  }, [resolvedSteamAppId]);
 
   // Reset isClosing when game stops running
   useEffect(() => {
@@ -135,15 +170,16 @@ export default function BigScreenGamePage({
     return gamepad.registerTabCycler((direction) => {
       if (lightbox) return;
       setActiveTab((prev) => {
-        const idx = GAME_PAGE_TABS.findIndex((t) => t.id === prev);
+        const idx = tabs.findIndex((t) => t.id === prev);
+        if (idx < 0) return tabs[0].id;
         const nextIdx =
           direction === "forward"
-            ? (idx + 1) % GAME_PAGE_TABS.length
-            : (idx - 1 + GAME_PAGE_TABS.length) % GAME_PAGE_TABS.length;
-        return GAME_PAGE_TABS[nextIdx].id;
+            ? (idx + 1) % tabs.length
+            : (idx - 1 + tabs.length) % tabs.length;
+        return tabs[nextIdx].id;
       });
     });
-  }, [gamepad.registerTabCycler, lightbox]);
+  }, [gamepad.registerTabCycler, lightbox, tabs]);
 
   const handlePlay = () => {
     launchGame(game);
@@ -189,7 +225,7 @@ export default function BigScreenGamePage({
         aria-label={`${game.name} banner`}
       >
         <BigScreenHeroBackground
-          bannerUrl={game.bannerUrl}
+          bannerUrl={resolvedBanner}
           coverArtUrl={game.coverArtUrl}
           screenshots={game.screenshots}
           videos={game.videos}
@@ -210,25 +246,25 @@ export default function BigScreenGamePage({
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden
-              width="22"
-              height="22"
+              width="24"
+              height="24"
             >
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
-            <span>Library</span>
           </button>
 
           <div className="bigscreen-gamepage-hero-info">
-            {game.logoUrl ? (
+            {resolvedLogo && !logoError ? (
               <img
-                src={game.logoUrl}
+                src={resolvedLogo}
                 alt={game.name}
                 className="bigscreen-gamepage-hero-logo"
+                onError={() => setLogoError(true)}
               />
             ) : (
               <h1 className="bigscreen-gamepage-hero-title">{game.name}</h1>
@@ -248,6 +284,103 @@ export default function BigScreenGamePage({
                 </span>
               )}
             </div>
+
+            {/* Metatrip inline */}
+            <BigScreenMetaStrip
+              aria-label="Game metadata"
+              className="bigscreen-gamepage-meta-strip-inline"
+            >
+              <BigScreenPill tone="accent" size="sm">
+                {game.platform}
+              </BigScreenPill>
+              <BigScreenPill
+                tone="muted"
+                size="sm"
+                dot
+                customColor={status.color}
+              >
+                {status.label}
+              </BigScreenPill>
+              <BigScreenPill
+                tone="muted"
+                size="sm"
+                icon={
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                    width="12"
+                    height="12"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                }
+              >
+                {game.playTime || "0h"}
+              </BigScreenPill>
+              {resolvedSteamAppId != null && (
+                <BigScreenPill tone="muted" size="sm">
+                  <SteamPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Steam
+                </BigScreenPill>
+              )}
+              {rating != null && rating > 0 && (
+                <BigScreenPill
+                  tone="muted"
+                  size="sm"
+                  icon={
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      aria-hidden
+                      width="12"
+                      height="12"
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  }
+                >
+                  {Math.round(rating)}%{" "}
+                  {game.igdbRating != null ? "IGDB" : "Critic"}
+                </BigScreenPill>
+              )}
+              {game.installed ? (
+                <BigScreenPill
+                  tone="success"
+                  size="sm"
+                  icon={
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                      width="12"
+                      height="12"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  }
+                >
+                  Ready to play
+                </BigScreenPill>
+              ) : (
+                <BigScreenPill tone="muted" size="sm">
+                  Not installed
+                </BigScreenPill>
+              )}
+              {isRunning && (
+                <BigScreenPill tone="success" size="sm" dot>
+                  Running
+                </BigScreenPill>
+              )}
+            </BigScreenMetaStrip>
           </div>
 
           <div className="bigscreen-gamepage-hero-actions">
@@ -369,106 +502,9 @@ export default function BigScreenGamePage({
         </div>
       </section>
 
-      {/* ── Metadata strip (pills) ───────────────────────────── */}
-      <BigScreenMetaStrip
-        aria-label="Game metadata"
-        className="bigscreen-gamepage-meta-strip"
-      >
-        <BigScreenPill tone="accent" size="md">
-          {game.platform}
-        </BigScreenPill>
-        <BigScreenPill
-          tone="muted"
-          size="md"
-          dot
-          customColor={status.color}
-        >
-          {status.label}
-        </BigScreenPill>
-        <BigScreenPill
-          tone="muted"
-          size="md"
-          icon={
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-              width="14"
-              height="14"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-          }
-        >
-          {game.playTime || "0h"}
-        </BigScreenPill>
-        {resolvedSteamAppId != null && (
-          <BigScreenPill tone="muted" size="md">
-            <SteamPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Steam
-          </BigScreenPill>
-        )}
-        {rating != null && rating > 0 && (
-          <BigScreenPill
-            tone="muted"
-            size="md"
-            icon={
-              <svg
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden
-                width="14"
-                height="14"
-              >
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-              </svg>
-            }
-          >
-            {Math.round(rating)}%{" "}
-            {game.igdbRating != null ? "IGDB" : "Critic"}
-          </BigScreenPill>
-        )}
-        {game.installed ? (
-          <BigScreenPill
-            tone="success"
-            size="md"
-            icon={
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                width="14"
-                height="14"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            }
-          >
-            Ready to play
-          </BigScreenPill>
-        ) : (
-          <BigScreenPill tone="muted" size="md">
-            Not installed
-          </BigScreenPill>
-        )}
-        {isRunning && (
-          <BigScreenPill tone="success" size="md" dot>
-            Running
-          </BigScreenPill>
-        )}
-      </BigScreenMetaStrip>
-
       {/* ── Tab bar (LB / [tabs] / RB) ───────────────────────── */}
       <BigScreenTabBar
-        tabs={GAME_PAGE_TABS}
+        tabs={tabs}
         activeTab={activeTab}
         onActivate={setActiveTab}
         ariaLabel="Game page sections"
@@ -477,7 +513,7 @@ export default function BigScreenGamePage({
       {/* ── Per-tab scroll region ───────────────────────────── */}
       <div className="bigscreen-gamepage-tab-scroll-region">
         <BigScreenTabPanel tabId="overview" activeTab={activeTab}>
-        <BigScreenGamePageOverview game={game} />
+          <BigScreenGamePageOverview game={game} />
         </BigScreenTabPanel>
         <BigScreenTabPanel tabId="media" activeTab={activeTab}>
           <BigScreenGamePageMedia
@@ -487,6 +523,23 @@ export default function BigScreenGamePage({
         </BigScreenTabPanel>
         <BigScreenTabPanel tabId="specs" activeTab={activeTab}>
           <BigScreenGamePageSpecs game={game} />
+        </BigScreenTabPanel>
+        {resolvedSteamAppId != null && (
+          <BigScreenTabPanel tabId="achievements" activeTab={activeTab}>
+            <div className="bigscreen-gamepage-more">
+              <AchievementsTab game={game} />
+            </div>
+          </BigScreenTabPanel>
+        )}
+        <BigScreenTabPanel tabId="reviews" activeTab={activeTab}>
+          <div className="bigscreen-gamepage-more">
+            <ReviewsTab game={game} />
+          </div>
+        </BigScreenTabPanel>
+        <BigScreenTabPanel tabId="activity" activeTab={activeTab}>
+          <div className="bigscreen-gamepage-more">
+            <GameActivityTab game={game} />
+          </div>
         </BigScreenTabPanel>
         <BigScreenTabPanel tabId="more" activeTab={activeTab}>
           <BigScreenGamePageMore game={game} />
@@ -507,6 +560,15 @@ export default function BigScreenGamePage({
 // the canonical Overview landing content. PR 3b will rearrange
 // some of these into Media (screenshots) and Specs (cards).
 
+function BigScreenFocusableCard({ children }: { children: ReactNode }) {
+  const focusProps = useFocusable(() => {});
+  return (
+    <div {...focusProps} className="bigscreen-focusable-card-wrapper" style={{ outline: "none", width: "100%" }}>
+      {children}
+    </div>
+  );
+}
+
 function BigScreenGamePageOverview({
   game,
 }: {
@@ -518,7 +580,9 @@ function BigScreenGamePageOverview({
        *  Screenshots and data cards moved to Media / Specs tabs in
        *  PR 3b; SystemRequirementsCard moved to Specs (where power
        *  users look first). */}
-      <StorylineSection game={game} />
+      <BigScreenFocusableCard>
+        <StorylineSection game={game} />
+      </BigScreenFocusableCard>
       <AboutSection game={game} />
     </div>
   );
@@ -539,10 +603,39 @@ function BigScreenGamePageMedia({
   game: Game;
   onOpenLightbox: (src: string) => void;
 }) {
+  const hasScreenshots = game.screenshots && game.screenshots.length > 0;
+  const hasVideos = game.videos && game.videos.length > 0;
+
+  if (!hasScreenshots && !hasVideos) {
+    return (
+      <div className="bigscreen-details-placeholder" style={{ padding: "60px 20px", textAlign: "center", width: "100%" }}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          width="64"
+          height="64"
+          style={{ opacity: 0.3, marginBottom: 16 }}
+        >
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+        <h3 style={{ margin: "0 0 8px 0", fontSize: 20, color: "#fff", fontWeight: 800 }}>No Media Items Available</h3>
+        <p style={{ margin: 0, fontSize: 14, color: "rgba(255, 255, 255, 0.5)", maxWidth: 460, marginLeft: "auto", marginRight: "auto" }}>
+          We couldn't find any screenshots or video trailers for this title. GameLib automatically checks for Steam screenshots and trailers on mount.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="bigscreen-gamepage-media">
-      <ScreenshotsSection game={game} onOpen={onOpenLightbox} />
-      <VideosSection game={game} />
+      {hasScreenshots && <ScreenshotsSection game={game} onOpen={onOpenLightbox} />}
+      {hasVideos && <VideosSection game={game} />}
     </div>
   );
 }
@@ -560,29 +653,43 @@ function BigScreenGamePageSpecs({ game }: { game: Game }) {
     <div className="bigscreen-gamepage-specs">
       {/* Two-column: SpecsCard + ReleasesCard. */}
       <div className="bigscreen-gamepage-2col" data-cols="2">
-        <SpecsCard game={game} />
-        <ReleasesCard game={game} />
+        <BigScreenFocusableCard>
+          <SpecsCard game={game} />
+        </BigScreenFocusableCard>
+        <BigScreenFocusableCard>
+          <ReleasesCard game={game} />
+        </BigScreenFocusableCard>
       </div>
 
       {/* Two-column: TimeToBeatCard + RatingsKpiCard. */}
       <div className="bigscreen-gamepage-2col" data-cols="2">
-        <TimeToBeatCard game={game} />
-        <RatingsKpiCard game={game} />
+        <BigScreenFocusableCard>
+          <TimeToBeatCard game={game} />
+        </BigScreenFocusableCard>
+        <BigScreenFocusableCard>
+          <RatingsKpiCard game={game} />
+        </BigScreenFocusableCard>
       </div>
 
       {/* Languages (full-width table). */}
-      <LanguagesSection game={game} />
+      <BigScreenFocusableCard>
+        <LanguagesSection game={game} />
+      </BigScreenFocusableCard>
 
       {/* System Requirements (Steam pc_requirements). Auto-hides
        *  when Steam has no appid for the title. */}
-      <SystemRequirementsCard
-        steamAppId={
-          typeof game.steamAppId === "number" ? game.steamAppId : null
-        }
-      />
+      <BigScreenFocusableCard>
+        <SystemRequirementsCard
+          steamAppId={
+            typeof game.steamAppId === "number" ? game.steamAppId : null
+          }
+        />
+      </BigScreenFocusableCard>
 
       {/* CrackWatch status (cracked / uncracked / denuvo). */}
-      <CrackWatchCard gameName={game.name} appId={game.steamAppId} />
+      <BigScreenFocusableCard>
+        <CrackWatchCard gameName={game.name} appId={game.steamAppId} />
+      </BigScreenFocusableCard>
     </div>
   );
 }
@@ -619,15 +726,6 @@ function BigScreenGamePageMore({ game }: { game: Game }) {
         collectionId={game.collectionId}
         collectionName={game.collection}
       />
-
-      {/* Reviews aggregator (Steam / Metacritic / OpenCritic / RAWG). */}
-      <ReviewsTab game={game} />
-
-      {/* Steam achievements with rarity distribution. */}
-      <AchievementsTab game={game} />
-
-      {/* Activity dashboard (sessions, playtime charts). */}
-      <GameActivityTab game={game} />
 
       {/* External links (store, ProtonDB, PCGamingWiki, etc.).
        *  visible={true} — no Big Screen modal masking. */}
@@ -720,6 +818,64 @@ function MoreIcon(): ReactNode {
       <circle cx="12" cy="12" r="1" />
       <circle cx="19" cy="12" r="1" />
       <circle cx="5" cy="12" r="1" />
+    </svg>
+  );
+}
+
+function AchievementsIcon(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      width="18"
+      height="18"
+    >
+      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+      <path d="M4 22h16" />
+      <path d="M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34" />
+      <path d="M12 2a5 5 0 0 0-5 5v3c0 2.76 2.24 5 5 5s5-2.24 5-5V7a5 5 0 0 0-5-5z" />
+    </svg>
+  );
+}
+
+function ReviewsIcon(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      width="18"
+      height="18"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function ActivityIcon(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      width="18"
+      height="18"
+    >
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
   );
 }

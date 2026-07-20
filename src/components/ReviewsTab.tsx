@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useBigScreen } from "../context/BigScreenContext";
+import { useFocusable } from "../hooks/useFocusable";
 import {
   type Game,
   type IgdbReview,
@@ -861,6 +863,8 @@ function CommentsLink({
 }
 
 function ReviewCard({ review, appId }: { review: ReviewItem; appId: number | null }) {
+  const { isBigScreen } = useBigScreen();
+  const focusProps = useFocusable(() => {});
   const isYou = review.source === "you";
   const isSteam = review.source === "steam";
   const username = isYou ? "You" : review.username;
@@ -868,7 +872,10 @@ function ReviewCard({ review, appId }: { review: ReviewItem; appId: number | nul
   const sentimentEmoji =
     review.sentiment === "positive" ? "👍" : review.sentiment === "negative" ? "👎" : isYou ? "⭐" : "💬";
   return (
-    <article className={`rv-card rv-source-${review.source}`}>
+    <article
+      className={`rv-card rv-source-${review.source}`}
+      {...(isBigScreen ? focusProps : {})}
+    >
       <div className="rv-card-header-new">
         <RecommendationIndicator
           source={review.source}
@@ -1082,6 +1089,7 @@ interface ReviewsTabProps {
 }
 
 export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) {
+  const { isBigScreen } = useBigScreen();
   const { showToast } = useToast();
   const { updateGame } = useGames();
 
@@ -1942,31 +1950,48 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
         <div className="rv-external-grid">
           {externalSources.map((src) => (
-            <button
+            <ExternalReviewButton
               key={src.id}
-              type="button"
-              className="rv-external-card"
-              onClick={() => openExternal(src.url)}
-              style={{ "--accent": src.accent } as React.CSSProperties}
-            >
-              <div className="rv-external-card-icon" style={{ color: src.accent }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </div>
-              <div className="rv-external-card-body">
-                <div className="rv-external-card-name">{src.name}</div>
-                <div className="rv-external-card-desc">{src.description}</div>
-              </div>
-              <svg className="rv-external-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
+              src={src}
+              openExternal={openExternal}
+              isBigScreen={isBigScreen}
+            />
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+interface ExternalReviewButtonProps {
+  src: { id: string; name: string; url: string; description: string; accent: string };
+  openExternal: (url: string) => void;
+  isBigScreen?: boolean;
+}
+
+function ExternalReviewButton({ src, openExternal, isBigScreen }: ExternalReviewButtonProps) {
+  const focusProps = useFocusable(() => openExternal(src.url));
+  return (
+    <button
+      type="button"
+      className="rv-external-card"
+      {...(isBigScreen ? focusProps : { onClick: () => openExternal(src.url) })}
+      style={{ "--accent": src.accent } as React.CSSProperties}
+    >
+      <div className="rv-external-card-icon" style={{ color: src.accent }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </div>
+      <div className="rv-external-card-body">
+        <div className="rv-external-card-name">{src.name}</div>
+        <div className="rv-external-card-desc">{src.description}</div>
+      </div>
+      <svg className="rv-external-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
   );
 }

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
 import { useGames } from "../context/GameContext";
 import { useProgressiveImage } from "../hooks/useProgressiveImages";
+import { useBigScreen } from "../context/BigScreenContext";
+import { useFocusable } from "../hooks/useFocusable";
 import { slugify } from "../types/game";
 import type {
   Game,
@@ -812,14 +814,16 @@ function RelationRowCard({
   game: RelatedGame;
   onClick: () => void;
 }) {
+  const { isBigScreen } = useBigScreen();
+  const focusProps = useFocusable(onClick);
   const [coverUrl, imgRef] = useProgressiveImage(game.coverUrl || null);
   return (
     <div
       className="game-relation-card"
-      onClick={onClick}
+      {...(isBigScreen ? focusProps : { onClick })}
       role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
+      tabIndex={isBigScreen ? -1 : 0}
+      onKeyDown={isBigScreen ? undefined : (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onClick();

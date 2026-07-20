@@ -4,6 +4,8 @@ import { useGames } from "../context/GameContext";
 import { useAchievements } from "../context/AchievementContext";
 import { useToast } from "../context/ToastContext";
 import { useWishlistContext } from "../context/WishlistContext";
+import { useBigScreen } from "../context/BigScreenContext";
+import BigScreenFriends from "../components/bigscreen/BigScreenFriends";
 import { consumePendingSuggestion } from "./friendSuggestionSignal";
 import { parsePlayTime } from "../types/game";
 import type { StoreGameSummary } from "../types/game";
@@ -919,6 +921,7 @@ interface FriendInvitation {
 // ── Main Page Component ─────────────────────────────────────────────
 
 export default function FriendsPage() {
+  const { isBigScreen } = useBigScreen();
   const [activeTab, setActiveTab] = useState<"friends" | "sessions" | "recs" | "suggestions" | "compare" | "leaderboard" | "profile">("friends");
   const { games, runningGameIds } = useGames();
   const { wishlist, toggle } = useWishlistContext();
@@ -2872,6 +2875,31 @@ export default function FriendsPage() {
 
     return list;
   }, [friends, friendSearch, friendFilter, friendSort]);
+
+  if (isBigScreen) {
+    return (
+      <BigScreenFriends
+        profile={profile}
+        friends={friends}
+        sessions={sessions}
+        generatedFriendCode={generatedFriendCode}
+        selfStats={selfStats}
+        performSync={performSync}
+        handleSetRsvp={handleSetRsvp}
+        handleDeleteSession={handleDeleteSession}
+        handleSendMessage={handleSendMessage}
+        handleSaveProfile={handleSaveProfile}
+        handleAddFriend={handleAddFriend}
+        friendCodeInput={friendCodeInput}
+        setFriendCodeInput={setFriendCodeInput}
+        decodedFriend={decodedFriend}
+        handleTogglePin={handleTogglePin}
+        handleToggleBlock={handleToggleBlock}
+        handleDeleteFriend={handleDeleteFriend}
+        setProfile={setProfile}
+      />
+    );
+  }
 
   return (
     <div className="friends-page">

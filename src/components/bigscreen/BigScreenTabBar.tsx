@@ -31,6 +31,7 @@
 //   handling is via `useGamepad().registerTabCycler` in the parent.
 //   (PR 2's nav-tab scroller chevron precedent lives next door.)
 
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { useFocusable } from "../../hooks/useFocusable";
 
@@ -61,8 +62,25 @@ export default function BigScreenTabBar<T extends string>({
   ariaLabel = "Tabs",
   className,
 }: BigScreenTabBarProps<T>) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const activeEl = containerRef.current.querySelector(
+      `#bigscreen-tab-${activeTab}`
+    ) as HTMLElement | null;
+    if (activeEl) {
+      activeEl.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, [activeTab]);
+
   return (
     <div
+      ref={containerRef}
       className={["bigscreen-tab-bar", className ?? ""]
         .filter(Boolean)
         .join(" ")}

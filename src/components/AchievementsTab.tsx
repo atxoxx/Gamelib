@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import { useAchievements } from "../context/AchievementContext";
+import { useBigScreen } from "../context/BigScreenContext";
+import { useFocusable } from "../hooks/useFocusable";
 import {
   type Game,
   type Achievement,
@@ -13,6 +15,7 @@ type SortKey = "default" | "name" | "rarity" | "unlockDate";
 type FilterKey = "all" | "unlocked" | "locked";
 
 export default function AchievementsTab({ game }: { game: Game }) {
+  const { isBigScreen } = useBigScreen();
   const { getGameAchievements, syncGameAchievements, isSyncing } = useAchievements();
   const { showToast } = useToast();
 
@@ -67,6 +70,9 @@ export default function AchievementsTab({ game }: { game: Game }) {
     }
   }
 
+  const emptySyncFocus = useFocusable(handleSync);
+  const toolbarSyncFocus = useFocusable(handleSync);
+
   const formatDate = (ts: number) => {
     if (ts === 0) return "";
     return new Date(ts * 1000).toLocaleDateString(undefined, {
@@ -114,7 +120,7 @@ export default function AchievementsTab({ game }: { game: Game }) {
         <p>Click "Sync" to fetch achievements from Steam.</p>
         <button
           className="achievements-sync-btn"
-          onClick={handleSync}
+          {...(isBigScreen ? emptySyncFocus : { onClick: handleSync })}
           disabled={syncing || isSyncing}
         >
           {syncing ? (
@@ -222,13 +228,15 @@ export default function AchievementsTab({ game }: { game: Game }) {
       <div className="achievements-toolbar">
         <div className="achievements-filters">
           {(["all", "unlocked", "locked"] as const).map((f) => (
-            <button
+            <AchievementFilterButton
               key={f}
-              className={`achievements-filter-btn ${filter === f ? "active" : ""}`}
-              onClick={() => setFilter(f)}
-            >
-              {f === "all" ? `All (${total})` : f === "unlocked" ? `Unlocked (${unlocked})` : `Locked (${total - unlocked})`}
-            </button>
+              f={f}
+              active={filter === f}
+              total={total}
+              unlocked={unlocked}
+              setFilter={setFilter}
+              isBigScreen={isBigScreen}
+            />
           ))}
         </div>
         <div className="achievements-sort">
@@ -246,7 +254,7 @@ export default function AchievementsTab({ game }: { game: Game }) {
         </div>
         <button
           className="achievements-sync-btn achievements-sync-btn-sm"
-          onClick={handleSync}
+          {...(isBigScreen ? toolbarSyncFocus : { onClick: handleSync })}
           disabled={syncing || isSyncing}
           title="Sync achievements from Steam"
         >
@@ -265,7 +273,7 @@ export default function AchievementsTab({ game }: { game: Game }) {
       {/* ── Achievement Grid ─────────────────────────────────────── */}
       <div className="achievements-grid">
         {displayAchievements.map((a) => (
-          <AchievementCard key={a.apiName} achievement={a} formatDate={formatDate} />
+          <AchievementCard key={a.apiName} achievement={a} formatDate={formatDate} isBigScreen={isBigScreen} />
         ))}
       </div>
 
@@ -290,13 +298,19 @@ export default function AchievementsTab({ game }: { game: Game }) {
 function AchievementCard({
   achievement: a,
   formatDate,
+  isBigScreen,
 }: {
   achievement: Achievement;
   formatDate: (ts: number) => string;
+  isBigScreen?: boolean;
 }) {
+  const focusProps = useFocusable(() => {});
   const rarity = getAchievementRarity(a.percent);
   return (
-    <div className={`achievement-card ${a.achieved ? "unlocked" : "locked"}`}>
+    <div
+      className={`achievement-card ${a.achieved ? "unlocked" : "locked"}`}
+      {...(isBigScreen ? focusProps : {})}
+    >
       <div className="achievement-card-icon">
         <img
           src={a.achieved ? a.icon : a.iconGray}
@@ -329,5 +343,33 @@ function AchievementCard({
         )}
       </div>
     </div>
+  );
+}
+
+interface AchievementFilterButtonProps {
+  f: FilterKey;
+  active: boolean;
+  total: number;
+  unlocked: number;
+  setFilter: (f: FilterKey) => void;
+  isBigScreen?: boolean;
+}
+
+function AchievementFilterButton({
+  f,
+  active,
+  total,
+  unlocked,
+  setFilter,
+  isBigScreen,
+}: AchievementFilterButtonProps) {
+  const focusProps = useFocusable(() => setFilter(f));
+  return (
+    <button
+      className={`achievements-filter-btn ${active ? "active" : ""}`}
+      {...(isBigScreen ? focusProps : { onClick: () => setFilter(f) })}
+    >
+      {f === "all" ? `All (${total})` : f === "unlocked" ? `Unlocked (${unlocked})` : `Locked (${total - unlocked})`}
+    </button>
   );
 }

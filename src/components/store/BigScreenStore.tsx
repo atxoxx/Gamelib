@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useWishlistContext } from "../../context/WishlistContext";
 import { useFocusable } from "../../hooks/useFocusable";
@@ -21,9 +21,43 @@ const STORE_TABS: TabDef<StoreTab>[] = [
 export default function BigScreenStore() {
   const gamepad = useGamepad();
   const navigate = useNavigate();
+  const location = useLocation();
   const { wishlist } = useWishlistContext();
 
-  const [activeTab, setActiveTab] = useState<StoreTab>("trending");
+  const initialTab = useMemo<StoreTab>(() => {
+    const path = location.pathname;
+    if (path.startsWith("/wishlist")) return "wishlist";
+    if (path.startsWith("/deals")) return "deals";
+    return "trending";
+  }, [location.pathname]);
+
+  const [activeTab, setActiveTab] = useState<StoreTab>(initialTab);
+
+  // Sync activeTab when URL pathname changes
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.startsWith("/wishlist")) {
+      setActiveTab("wishlist");
+    } else if (path.startsWith("/deals")) {
+      setActiveTab("deals");
+    } else if (path.startsWith("/store")) {
+      setActiveTab("trending");
+    }
+  }, [location.pathname]);
+
+  const handleSelectTab = useCallback(
+    (tabId: StoreTab) => {
+      setActiveTab(tabId);
+      if (tabId === "wishlist") {
+        navigate("/wishlist");
+      } else if (tabId === "deals") {
+        navigate("/deals");
+      } else {
+        navigate("/store");
+      }
+    },
+    [navigate]
+  );
 
   // Trending state
   const [trending, setTrending] = useState<StoreGameSummary[]>([]);
@@ -37,6 +71,7 @@ export default function BigScreenStore() {
   const [loadingDeals, setLoadingDeals] = useState(false);
 
   const [selectedGame, setSelectedGame] = useState<StoreGameSummary | null>(null);
+  const [activeRailId, setActiveRailId] = useState<string>("trending");
 
   // Fetch Trending categories
   useEffect(() => {
@@ -85,11 +120,11 @@ export default function BigScreenStore() {
       setLoadingDeals(true);
       try {
         const data = await invoke<DealItem[]>("fetch_isthereanydeal_deals", {
-          offset: 0,
-          limit: 20,
-          platform: "all",
-          minDiscount: 0,
-          store: "all",
+          filters: {
+            platform: null,
+            minDiscount: null,
+            store: null,
+          },
         });
         if (active) {
           setDeals(data);
@@ -133,10 +168,19 @@ export default function BigScreenStore() {
     const el = gamepad.focusedElement;
     if (!el) return;
     const id = el.getAttribute("data-game-id");
-    if (!id) return;
-    const game = trendingGamesMap.get(id);
-    if (game && game.id !== selectedGame?.id) {
-      setSelectedGame(game);
+    if (id) {
+      const game = trendingGamesMap.get(id);
+      if (game && game.id !== selectedGame?.id) {
+        setSelectedGame(game);
+      }
+      
+      const railEl = el.closest("[data-rail-id]");
+      if (railEl) {
+        const rId = railEl.getAttribute("data-rail-id");
+        if (rId) {
+          setActiveRailId(rId);
+        }
+      }
     }
   }, [gamepad.focusedElement, trendingGamesMap, selectedGame, activeTab]);
 
@@ -149,9 +193,9 @@ export default function BigScreenStore() {
         direction === "forward"
           ? (baseIndex + 1) % STORE_TABS.length
           : (baseIndex - 1 + STORE_TABS.length) % STORE_TABS.length;
-      setActiveTab(STORE_TABS[nextIndex].id);
+      handleSelectTab(STORE_TABS[nextIndex].id);
     }, 1);
-  }, [gamepad, activeTab]);
+  }, [gamepad, activeTab, handleSelectTab]);
 
   const handleCardClick = useCallback(
     (game: StoreGameSummary) => {
@@ -167,6 +211,66 @@ export default function BigScreenStore() {
   }, [featuredGame, handleCardClick]);
 
   const detailsFocusable = useFocusable(handleDetails);
+
+  const renderDetailsPane = (railId: string) => {
+    if (activeRailId !== railId) return null;
+    return (
+      <section className="bigscreen-dashboard-details-pane animate-fade-in" aria-label="Game info" style={{ padding: "0 64px 24px 64px" }}>
+        <div className="bigscreen-details-pane-content">
+          {featuredGame ? (
+            <>
+              <div className="bigscreen-details-logo-area">
+                <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+              </div>
+
+              <div className="bigscreen-details-meta">
+                {featuredGame.rating && (
+                  <BigScreenPill tone="accent" size="sm">
+                    Score: {Math.round(featuredGame.rating)}
+                  </BigScreenPill>
+                )}
+                {featuredGame.genres && featuredGame.genres.slice(0, 2).map((g: string) => (
+                  <BigScreenPill key={g} tone="muted" size="sm">
+                    {g}
+                  </BigScreenPill>
+                ))}
+              </div>
+
+              {featuredGame.summary && (
+                <p className="bigscreen-details-description">
+                  {featuredGame.summary.length > 200
+                    ? `${featuredGame.summary.substring(0, 200)}...`
+                    : featuredGame.summary}
+                </p>
+              )}
+
+              <div className="bigscreen-details-actions">
+                <button
+                  type="button"
+                  className="bigscreen-details-btn bigscreen-details-btn--primary"
+                  {...detailsFocusable}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span>Store Details</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="bigscreen-details-placeholder">
+              <h2 className="bigscreen-details-title">Welcome to GameLib Store</h2>
+              <p className="bigscreen-details-description">
+                Browse trending, popular, and coming soon games.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
 
   return (
     <div className="bigscreen-store-dashboard">
@@ -193,7 +297,7 @@ export default function BigScreenStore() {
           <BigScreenTabBar
             tabs={STORE_TABS}
             activeTab={activeTab}
-            onActivate={setActiveTab}
+            onActivate={handleSelectTab}
           />
         </div>
 
@@ -208,75 +312,44 @@ export default function BigScreenStore() {
                 </div>
               ) : (
                 <>
-                  {/* Spotlight Pane */}
-                  {featuredGame && (
-                    <section className="bigscreen-dashboard-details-pane" aria-label="Game info">
-                      <div className="bigscreen-details-pane-content">
-                        <div className="bigscreen-details-logo-area">
-                          <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
-                        </div>
-
-                        <div className="bigscreen-details-meta">
-                          {featuredGame.rating && (
-                            <BigScreenPill tone="accent" size="sm">
-                              Score: {Math.round(featuredGame.rating)}
-                            </BigScreenPill>
-                          )}
-                          {featuredGame.genres && featuredGame.genres.slice(0, 2).map((g) => (
-                            <BigScreenPill key={g} tone="muted" size="sm">
-                              {g}
-                            </BigScreenPill>
-                          ))}
-                        </div>
-
-                        {featuredGame.summary && (
-                          <p className="bigscreen-details-description">
-                            {featuredGame.summary.length > 200
-                              ? `${featuredGame.summary.substring(0, 200)}...`
-                              : featuredGame.summary}
-                          </p>
-                        )}
-
-                        <div className="bigscreen-details-actions">
-                          <button
-                            type="button"
-                            className="bigscreen-details-btn bigscreen-details-btn--primary"
-                            {...detailsFocusable}
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-                              <circle cx="12" cy="12" r="10" />
-                              <line x1="12" y1="16" x2="12" y2="12" />
-                              <line x1="12" y1="8" x2="12.01" y2="8" />
-                            </svg>
-                            <span>Store Details</span>
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  )}
-
                   {/* Rails */}
                   <div className="store-rails-group">
-                    <BigScreenStoreRail
-                      title="Trending"
-                      games={trending}
-                      onCardClick={handleCardClick}
-                    />
-                    <BigScreenStoreRail
-                      title="Popular Now"
-                      games={popular}
-                      onCardClick={handleCardClick}
-                    />
-                    <BigScreenStoreRail
-                      title="Top Critic Scores"
-                      games={top}
-                      onCardClick={handleCardClick}
-                    />
-                    <BigScreenStoreRail
-                      title="Coming Soon"
-                      games={comingSoon}
-                      onCardClick={handleCardClick}
-                    />
+                    <>
+                      {renderDetailsPane("trending")}
+                      <BigScreenStoreRail
+                        railId="trending"
+                        title="Trending"
+                        games={trending}
+                        onCardClick={handleCardClick}
+                      />
+                    </>
+                    <>
+                      {renderDetailsPane("popular")}
+                      <BigScreenStoreRail
+                        railId="popular"
+                        title="Popular Now"
+                        games={popular}
+                        onCardClick={handleCardClick}
+                      />
+                    </>
+                    <>
+                      {renderDetailsPane("top")}
+                      <BigScreenStoreRail
+                        railId="top"
+                        title="Top Critic Scores"
+                        games={top}
+                        onCardClick={handleCardClick}
+                      />
+                    </>
+                    <>
+                      {renderDetailsPane("coming-soon")}
+                      <BigScreenStoreRail
+                        railId="coming-soon"
+                        title="Coming Soon"
+                        games={comingSoon}
+                        onCardClick={handleCardClick}
+                      />
+                    </>
                   </div>
                 </>
               )}
@@ -292,7 +365,7 @@ export default function BigScreenStore() {
                 </div>
               ) : (
                 <div className="store-deals-grid">
-                  {deals.map((deal) => {
+                  {deals.map((deal: DealItem) => {
                     const dealProps = useFocusable(() => {
                       if (deal.storeUrl) {
                         invoke("open_folder", { path: deal.storeUrl }).catch((err) =>

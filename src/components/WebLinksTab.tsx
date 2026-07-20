@@ -5,6 +5,8 @@ import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import type { Game } from "../types/game";
+import { useBigScreen } from "../context/BigScreenContext";
+import { useFocusable } from "../hooks/useFocusable";
 
 interface WebLinksTabProps {
   game: Game;
@@ -400,6 +402,95 @@ export default function WebLinksTab({ game, visible = true }: WebLinksTabProps) 
   // Steam sub-sections that REQUIRE an AppID (no useful search URL exists).
   const steamSubDisabled = isSteamActive && steamSection !== "store" && !appId;
 
+  const { isBigScreen } = useBigScreen();
+
+  const bigScreenLinks = useMemo(() => {
+    const list: { label: string; url: string; icon: ReactNode; accent: string; iconBg: string; disabled?: boolean }[] = [];
+    
+    // Steam links
+    const steamStoreUrl = appId ? `https://store.steampowered.com/app/${appId}` : `https://store.steampowered.com/search/?term=${encodeURIComponent(game.name)}`;
+    list.push({ label: "Steam Store", url: steamStoreUrl, icon: SteamIcon, accent: "#66c0f4", iconBg: "#1b2838" });
+    
+    list.push({
+      label: "Steam Discussions",
+      url: appId ? `https://steamcommunity.com/app/${appId}/discussions/` : "",
+      icon: SteamChatIcon,
+      accent: "#66c0f4",
+      iconBg: "#1b2838",
+      disabled: !appId
+    });
+    list.push({
+      label: "Steam News",
+      url: appId ? `https://store.steampowered.com/news/app/${appId}` : "",
+      icon: SteamNewsIcon,
+      accent: "#66c0f4",
+      iconBg: "#1b2838",
+      disabled: !appId
+    });
+    list.push({
+      label: "Steam Workshop",
+      url: appId ? `https://steamcommunity.com/app/${appId}/workshop/` : "",
+      icon: SteamWorkshopIcon,
+      accent: "#66c0f4",
+      iconBg: "#1b2838",
+      disabled: !appId
+    });
+    list.push({
+      label: "Steam Guides",
+      url: appId ? `https://steamcommunity.com/app/${appId}/guides/` : "",
+      icon: SteamGuidesIcon,
+      accent: "#66c0f4",
+      iconBg: "#1b2838",
+      disabled: !appId
+    });
+
+    // ProtonDB
+    const protonUrl = appId ? `https://www.protondb.com/app/${appId}` : `https://www.protondb.com/search?q=${encodeURIComponent(game.name)}`;
+    list.push({ label: "ProtonDB", url: protonUrl, icon: ProtonDBIcon, accent: "#7c5cff", iconBg: "#3a2d8a" });
+
+    // PCGamingWiki
+    const pcgwUrl = appId ? `https://www.pcgamingwiki.com/api/appid.php?appid=${appId}` : `https://www.pcgamingwiki.com/w/index.php?search=${encodeURIComponent(game.name)}`;
+    list.push({ label: "PCGamingWiki", url: pcgwUrl, icon: PCGamingWikiIcon, accent: "#d83b3b", iconBg: "#3a1c1c" });
+
+    // IGN
+    list.push({ label: "IGN Search", url: `https://www.ign.com/search?q=${encodeURIComponent(game.name)}`, icon: IGNIcon, accent: "#ff3333", iconBg: "#2a0606" });
+
+    // NexusMods
+    const nexusDomain = getNexusModsDomain(game.name);
+    list.push({ label: "NexusMods", url: `https://www.nexusmods.com/games/${nexusDomain}`, icon: NexusModsIcon, accent: "#d88e2b", iconBg: "#3a2810" });
+
+    // ModDB
+    const moddbSlug = getModdbSlug(game.name);
+    list.push({ label: "ModDB", url: `https://www.moddb.com/games/${moddbSlug}`, icon: ModDBIcon, accent: "#5ec469", iconBg: "#15351b" });
+
+    // Custom links
+    customLinks.forEach((cUrl) => {
+      const meta = deriveCustomLink(cUrl);
+      list.push({
+        label: meta.label,
+        url: cUrl,
+        icon: <CustomLinkIcon />,
+        accent: "var(--color-accent)",
+        iconBg: "var(--color-bg-tertiary)"
+      });
+    });
+
+    return list;
+  }, [game, appId, customLinks]);
+
+  if (isBigScreen) {
+    return (
+      <div className="wl-tab-bigscreen" style={{ padding: "10px 0" }}>
+        <h3 style={{ margin: "0 0 20px 0" }}>External Game Web Resources</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "16px" }}>
+          {bigScreenLinks.map((link, idx) => (
+            <BigScreenLinkCard key={idx} link={link} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   async function handleOpenExternal() {
     try {
       await openUrl(url);
@@ -739,5 +830,68 @@ export default function WebLinksTab({ game, visible = true }: WebLinksTabProps) 
         </span>
       </div>
     </div>
+  );
+}
+
+function BigScreenLinkCard({
+  link,
+}: {
+  link: { label: string; url: string; icon: ReactNode; accent: string; iconBg: string; disabled?: boolean };
+}) {
+  const handleOpen = async () => {
+    if (link.disabled) return;
+    try {
+      await openUrl(link.url);
+    } catch {
+      window.open(link.url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const focusProps = useFocusable(handleOpen);
+
+  return (
+    <button
+      type="button"
+      className={`bigscreen-system-menu-item${link.disabled ? " disabled" : ""}`}
+      {...(link.disabled ? {} : focusProps)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "14px",
+        padding: "14px 18px",
+        border: "1px solid transparent",
+        borderRadius: "8px",
+        background: link.disabled ? "rgba(255,255,255,0.01)" : "rgba(255, 255, 255, 0.02)",
+        opacity: link.disabled ? 0.3 : 1,
+        textAlign: "left",
+        width: "100%",
+        cursor: link.disabled ? "default" : "pointer"
+      }}
+      disabled={link.disabled}
+    >
+      <div
+        className="wl-source-tab-icon"
+        style={{
+          background: link.iconBg,
+          color: link.accent,
+          width: "32px",
+          height: "32px",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          borderRadius: "6px"
+        }}
+      >
+        <span style={{ width: "16px", height: "16px", display: "block" }}>{link.icon}</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: "14px", fontWeight: "600", color: "white", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{link.label}</div>
+        {!link.disabled && (
+          <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: "3px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+            {link.url.replace(/^https?:\/\//, "").replace(/^www\./, "")}
+          </div>
+        )}
+      </div>
+    </button>
   );
 }
