@@ -95,7 +95,19 @@ export function SourceProvider({ children }: { children: ReactNode }) {
   const addSource = useCallback(
     async (url: string, name: string): Promise<SourceLink> => {
       const created = await invoke<SourceLink>("sources_add", { url, name });
-      setSources((prev) => [...prev, created]);
+      // Re-pull the full list so the freshly-added row reflects the
+      // authoritative persisted state (name, last_fetched, and the
+      // correct game_count — which may come from Hydra's tally when the
+      // raw source JSON was unreachable). Appending `created` alone can
+      // leave the UI displaying a stale or mismatched count.
+      try {
+        const list = await invoke<SourceLink[]>("sources_list");
+        if (Array.isArray(list)) setSources(list);
+      } catch {
+        // Fall back to appending the returned record if the list can't
+        // be re-read right now.
+        setSources((prev) => [...prev, created]);
+      }
       showToast(`Added source "${created.name}"`, "success");
       return created;
     },
@@ -119,7 +131,15 @@ export function SourceProvider({ children }: { children: ReactNode }) {
         { urls, names: [] },
       );
       if (Array.isArray(result.added) && result.added.length > 0) {
-        setSources((prev) => [...prev, ...result.added]);
+        // Re-pull the full list so every newly-added row reflects the
+        // authoritative persisted state (correct game_count, etc.),
+        // matching what `addSource` does for a single add.
+        try {
+          const list = await invoke<SourceLink[]>("sources_list");
+          if (Array.isArray(list)) setSources(list);
+        } catch {
+          setSources((prev) => [...prev, ...result.added]);
+        }
       }
       return result;
     },

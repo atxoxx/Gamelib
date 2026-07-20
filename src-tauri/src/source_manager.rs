@@ -362,6 +362,16 @@ impl SourceManager {
         // Prefer the parsed count when downloads were available;
         // otherwise the Hydra-supplied effective_count is correct.
         let final_count = if game_count > 0 { game_count } else { effective_count };
+        // `commit_cached_source` persisted `game_count = game_count`,
+        // which is 0 whenever the raw source JSON was unreachable and
+        // we fell back to Hydra's tally. In that case the persisted row
+        // would disagree with the value we return (and with what the UI
+        // shows), so the count would look wrong after a restart or a
+        // later `sources_list` re-hydration. Write the authoritative
+        // tally back to the DB so the persisted record matches.
+        if game_count == 0 && effective_count > 0 {
+            db::sources::update_game_count(&self.db, &local_id, final_count)?;
+        }
 
         Ok(SourceLink {
             id: local_id,
