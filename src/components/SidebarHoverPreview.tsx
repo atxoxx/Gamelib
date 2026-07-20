@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -164,8 +164,18 @@ export function SidebarHoverPreview({
       }
       const rect = anchor.getBoundingClientRect();
       const vw = window.innerWidth;
-      const targetTop = rect.top + rect.height / 2 - 60;
-      const PREVIEW_WIDTH = 260;
+      const vh = window.innerHeight;
+
+      // Measure the actually-rendered preview so we clamp against its
+      // real dimensions instead of a stale estimate. The card is taller
+      // than the old 180px guess (cover + body + actions), so without
+      // this the lower portion was clipped when a row sat near the
+      // bottom of the list and the preview ran past the app's edge.
+      const previewEl = previewRef.current;
+      const PREVIEW_WIDTH = previewEl ? previewEl.offsetWidth : 260;
+      const previewHeight = previewEl ? previewEl.offsetHeight : 0;
+      const estimatedHeight = previewHeight || 200;
+
       const GAP = 8;
       let left: number;
       let placement: "right" | "left";
@@ -186,10 +196,14 @@ export function SidebarHoverPreview({
           placement = "left";
         }
       }
-      const estimatedHeight = 180;
+
+      // Vertically center on the row, then clamp so the whole card
+      // stays within the viewport (8px gutter). Using the measured
+      // height keeps the bottom edge on-screen when the row is low.
+      const targetTop = rect.top + rect.height / 2 - estimatedHeight / 2;
       const top = Math.min(
         Math.max(8, targetTop),
-        Math.max(8, window.innerHeight - estimatedHeight - 8)
+        Math.max(8, vh - estimatedHeight - 8)
       );
       setPos({ top, left, placement });
     }
@@ -215,6 +229,28 @@ export function SidebarHoverPreview({
       if (rafHandle != null) cancelAnimationFrame(rafHandle);
     };
   }, [visible, anchorSelector, renderGame?.id]);
+
+  // Re-clamp after the preview actually mounts. The first `recompute`
+  // runs before the card exists (pos is still null), so it positions
+  // against an estimated height. Once the real element is measured we
+  // correct top/left so the card can't be clipped past the viewport
+  // edge on its very first appearance. Converges in a single pass
+  // because the corrected values are stable once measured.
+  useLayoutEffect(() => {
+    if (!visible || !pos) return;
+    const el = previewRef.current;
+    if (!el) return;
+    const h = el.offsetHeight;
+    const w = el.offsetWidth;
+    if (!h || !w) return;
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    const top = Math.min(Math.max(8, pos.top), Math.max(8, vh - h - 8));
+    const left = Math.min(Math.max(8, pos.left), Math.max(8, vw - w - 8));
+    if (top !== pos.top || left !== pos.left) {
+      setPos({ top, left, placement: pos.placement });
+    }
+  }, [visible, pos]);
 
   // Escape dismisses.
   useEffect(() => {
