@@ -29,7 +29,7 @@
 .store-hero {
   position: relative;
   width: 100%;
-  height: clamp(300px, 34vw, 460px);
+  height: clamp(320px, 36vw, 480px);
   border-radius: var(--radius-xl);
   overflow: hidden;
   isolation: isolate;
@@ -59,44 +59,192 @@
   background-size: cover;
   background-position: center;
   z-index: 0;
-  filter: blur(22px) saturate(140%);
-  transform: scale(1.15);
+  filter: blur(26px) saturate(150%) brightness(0.78);
+  transform: scale(1.18);
   transition: background-image 600ms ease;
+  animation: store-hero-kenburns 14s ease-in-out infinite alternate;
+  will-change: transform;
 }
 
-.store-hero-cover {
+@keyframes store-hero-kenburns {
+  from { transform: scale(1.16) translate3d(-1.2%, -1%, 0); }
+  to   { transform: scale(1.24) translate3d(1.2%, 1%, 0); }
+}
+
+/* Framed feature poster (right) — the hero's focal artwork */
+.store-hero-poster {
   position: absolute;
-  right: var(--space-xl);
-  bottom: var(--space-xl);
-  width: clamp(120px, 18vw, 220px);
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.55),
-    0 4px 12px rgba(0, 0, 0, 0.45);
+  right: var(--space-2xl);
+  bottom: calc(var(--space-2xl) - 6px);
   z-index: 2;
-  animation: store-hero-cover-in 500ms ease both;
+  width: clamp(140px, 19vw, 240px);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-lg);
+  /* Soft accent bloom behind the poster */
+  filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.6))
+          drop-shadow(0 0 30px color-mix(in srgb, var(--color-accent) 30%, transparent));
+  animation: store-hero-cover-in 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform var(--transition-base);
 }
 
 @keyframes store-hero-cover-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(16px) scale(0.96) rotate(-0.4deg); }
+  to   { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+}
+
+.store-hero-poster::after {
+  /* Diagonal sheen that sweeps once on entrance for a premium feel */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    color-mix(in srgb, #fff 22%, transparent) 48%,
+    transparent 60%
+  );
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+  opacity: 0;
+  animation: store-hero-poster-sheen 1.1s ease 250ms both;
+}
+
+@keyframes store-hero-poster-sheen {
+  0%   { opacity: 0; transform: translateX(-30%); }
+  35%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(30%); }
+}
+
+.store-hero-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, #fff 16%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent),
+    inset 0 0 40px rgba(0, 0, 0, 0.35);
+  display: block;
+  transition: transform var(--transition-base);
+}
+
+/* Gentle lift + parallax tilt while the user explores the hero */
+.store-hero:hover .store-hero-poster {
+  transform: translateY(-6px) scale(1.015);
+}
+.store-hero:hover .store-hero-cover {
+  transform: scale(1.04);
 }
 
 @media (max-width: 640px) {
-  .store-hero-cover { display: none; }
+  .store-hero-poster { display: none; }
 }
 
 .store-hero-veil {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(120% 80% at 0% 100%, color-mix(in srgb, var(--color-bg-primary) 60%, transparent), transparent 60%),
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--color-bg-primary) 25%, transparent) 0%,
-      color-mix(in srgb, var(--color-bg-primary) 75%, transparent) 100%);
   z-index: 1;
+  background:
+    /* readable left-edge scrim for text */
+    linear-gradient(100deg,
+      color-mix(in srgb, var(--color-bg-primary) 82%, transparent) 0%,
+      color-mix(in srgb, var(--color-bg-primary) 55%, transparent) 32%,
+      transparent 62%),
+    /* bottom scrim so content never collides with the page */
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--color-bg-primary) 35%, transparent) 0%,
+      transparent 24%,
+      transparent 58%,
+      color-mix(in srgb, var(--color-bg-primary) 80%, transparent) 100%),
+    /* right vignette so the poster separates from the backdrop */
+    radial-gradient(80% 120% at 100% 50%,
+      color-mix(in srgb, var(--color-bg-primary) 38%, transparent) 0%,
+      transparent 55%);
+}
+
+/* Broad diagonal light wash that lifts the whole composition */
+.store-hero-shine {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 90% at 12% 8%,
+      color-mix(in srgb, var(--color-accent) 16%, transparent) 0%,
+      transparent 55%);
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+
+/* Thin gradient hairline + travelling shimmer at the bottom edge */
+.store-hero-accent-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  z-index: 4;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-accent) 70%, transparent) 30%,
+    var(--color-accent) 50%,
+    color-mix(in srgb, var(--color-accent) 70%, transparent) 70%,
+    transparent 100%
+  );
+  overflow: hidden;
+}
+.store-hero-accent-line::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #fff, transparent);
+  opacity: 0.55;
+  filter: blur(1px);
+  animation: store-hero-shimmer-travel 3.6s ease-in-out infinite;
+}
+@keyframes store-hero-shimmer-travel {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(350%); }
+}
+
+/* Slide index "01 / 05" top-left */
+.store-hero-index {
+  position: absolute;
+  top: var(--space-lg);
+  left: var(--space-2xl);
+  z-index: 4;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-bg-primary) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 16%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+.store-hero-index-current {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+.store-hero-index-sep {
+  width: 14px;
+  height: 1px;
+  background: color-mix(in srgb, var(--color-text-primary) 40%, transparent);
+}
+.store-hero-index-total {
+  color: color-mix(in srgb, var(--color-text-primary) 55%, transparent);
 }
 
 .store-hero-content {
@@ -110,6 +258,13 @@
   gap: var(--space-md);
 }
 
+/* Reserve room for the feature poster on the right (desktop only) */
+@media (min-width: 641px) {
+  .store-hero-content {
+    padding-right: clamp(170px, 22vw, 300px);
+  }
+}
+
 .store-hero-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -118,29 +273,56 @@
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
   color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
-  padding: 4px 10px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 38%, transparent);
+  padding: 5px 12px;
   border-radius: var(--radius-full);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
-.store-hero-eyebrow svg { width: 12px; height: 12px; }
+.store-hero-eyebrow svg {
+  width: 12px;
+  height: 12px;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-accent) 60%, transparent));
+}
 
 .store-hero-title {
   margin: 0;
-  font-size: clamp(28px, 4.4vw, 56px);
+  font-size: clamp(30px, 4.6vw, 60px);
   font-weight: var(--font-weight-bold);
-  line-height: 1.05;
-  letter-spacing: -0.5px;
+  line-height: 1.02;
+  letter-spacing: -1px;
   color: var(--color-text-primary);
-  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55), 0 12px 40px rgba(0, 0, 0, 0.4);
   max-width: 720px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Genre / tag chips under the title */
+.store-hero-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: 2px;
+}
+.store-hero-tag {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.3px;
+  color: var(--color-text-secondary);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 16%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .store-hero-meta {
@@ -184,10 +366,12 @@
 }
 
 .store-hero-cta {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: 10px 20px;
+  padding: 11px 22px;
   background: var(--color-accent);
   color: #fff;
   border: 1px solid var(--color-accent);
@@ -201,6 +385,26 @@
     box-shadow var(--transition-fast);
   box-shadow: 0 0 24px color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
+
+.store-hero-cta > * { position: relative; z-index: 1; }
+
+/* Premium light sweep on hover */
+.store-hero-cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  transition: transform 600ms ease;
+  pointer-events: none;
+  z-index: 0;
+}
+.store-hero-cta:hover::before { transform: translateX(120%); }
 
 .store-hero-cta:hover {
   background: var(--color-accent-hover);
@@ -262,30 +466,35 @@
   .store-hero-nav { display: none; }
 }
 
-/* Autoplay progress bar */
+/* Autoplay progress bar — floats just above the bottom accent hairline */
 .store-hero-progress {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+  left: var(--space-2xl);
+  right: var(--space-2xl);
+  bottom: 4px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-text-primary) 14%, transparent);
   z-index: 3;
 }
 
 .store-hero-progress-bar {
   display: block;
   height: 100%;
-  background: var(--color-accent);
+  border-radius: inherit;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--color-accent) 60%, transparent),
+    var(--color-accent));
   box-shadow: 0 0 10px var(--color-accent-glow);
   transition: width 120ms linear;
 }
 
-/* Dot indicators */
+/* Dot indicators — centered along the bottom edge */
 .store-hero-dots {
   position: absolute;
   bottom: var(--space-lg);
-  right: var(--space-2xl);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 3;
   display: flex;
   gap: var(--space-xs);
@@ -810,4 +1019,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .store-hero::after { animation: none; opacity: 0.4; }
+  .store-hero-bg { animation: none; transform: scale(1.18); }
+  .store-hero-poster::after { animation: none; opacity: 0; }
+  .store-hero-accent-line::after { animation: none; }
 }

@@ -902,6 +902,57 @@
   padding-left: calc(var(--space-xl) + clamp(96px, 11vw, 150px) + var(--space-lg));
 }
 
+/* ── Store detail hero refinements ────────────────────────────────
+ * Layered on top of the shared GameHero look: a cinematic bottom
+ * scrim on the banner, an accent hairline, and a more prominent
+ * floating cover with a soft accent glow + hover lift. */
+.game-hero--store .game-banner {
+  position: relative;
+}
+.game-hero--store .game-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg,
+      rgba(0, 0, 0, 0.28) 0%,
+      transparent 22%,
+      transparent 52%,
+      rgba(0, 0, 0, 0.6) 100%);
+}
+
+.game-hero--store .game-hero__banner::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-accent) 60%, transparent) 22%,
+    var(--color-accent) 50%,
+    color-mix(in srgb, var(--color-accent) 60%, transparent) 78%,
+    transparent 100%);
+}
+
+.game-hero--store .game-hero__cover {
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 26px color-mix(in srgb, var(--color-accent) 28%, transparent);
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+.game-hero--store:hover .game-hero__cover {
+  transform: translateY(-4px);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 36px color-mix(in srgb, var(--color-accent) 44%, transparent);
+}
+
 .game-hero-meta-item {
   display: inline-flex;
   align-items: center;

@@ -111,6 +111,7 @@ export default function StoreGameDetail() {
   const [adding, setAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [logoFailed, setLogoFailed] = useState(false);
+  const [coverErrored, setCoverErrored] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -308,9 +309,18 @@ export default function StoreGameDetail() {
         </button>
       </div>
 
-      {/* ── Hero — same structure as GameHero but store-specific actions ── */}
-      <div className="game-hero game-hero--compact">
+      {/* ── Hero — refined Steam-style banner with floating cover ── */}
+      <div className="game-hero game-hero--compact game-hero--store">
         <div className="game-hero__banner">
+          {/* Immersive ambient backdrop tinted by the game art */}
+          {(data.images.hero || data.images.banner || data.images.cover) && (
+            <div
+              className="game-hero__ambient"
+              style={{ backgroundImage: `url(${data.images.hero ?? data.images.banner ?? data.images.cover})` }}
+              aria-hidden="true"
+            />
+          )}
+          {/* Full-bleed hero/banner image */}
           {(data.images.hero || data.images.banner) && (
             <div
               className="game-banner-bg"
@@ -323,6 +333,7 @@ export default function StoreGameDetail() {
             <SteamPlayerCount appId={steamAppId} />
           </div>
 
+          {/* Banner art (crisp crop of the hero/cover image) */}
           <div className="game-banner">
             {(data.images.hero ?? data.images.banner ?? data.images.cover) ? (
               <img
@@ -337,10 +348,22 @@ export default function StoreGameDetail() {
               </svg>
             )}
           </div>
+
+          {/* Floating 2:3 cover breaking out of the banner's bottom edge */}
+          {data.images.cover && !coverErrored && (
+            <div className="game-hero__cover" aria-hidden="true">
+              <img
+                src={data.images.cover}
+                alt=""
+                className="game-hero__cover-img"
+                onError={() => setCoverErrored(true)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Info row below banner: logo/title + meta + actions */}
-        <div className="game-hero__info-row">
+        <div className={`game-hero__info-row${data.images.cover && !coverErrored ? " game-hero__info-row--with-cover" : ""}`}>
           <div className="game-hero__title-block">
             {data.images.logo && !logoFailed ? (
               <img

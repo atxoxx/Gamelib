@@ -99,6 +99,8 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
 
   const active = pool[activeIdx];
 
+  const pad2 = useCallback((n: number) => String(n).padStart(2, "0"), []);
+
   const steamAppId = useMemo(() => {
     if (!active?.websites) return undefined;
     for (const url of active.websites) {
@@ -183,19 +185,31 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
         aria-hidden="true"
       />
       <div className="store-hero-veil" aria-hidden="true" />
+      <div className="store-hero-shine" aria-hidden="true" />
+
+      {/* Slide index — elegant "01 / 05" counter top-left */}
+      {pool.length > 1 && (
+        <div className="store-hero-index" aria-hidden="true">
+          <span className="store-hero-index-current">{pad2(activeIdx + 1)}</span>
+          <span className="store-hero-index-sep" />
+          <span className="store-hero-index-total">{pad2(pool.length)}</span>
+        </div>
+      )}
 
       <div className="store-hero-player-count">
         <SteamPlayerCount appId={steamAppId} />
       </div>
 
       {active.coverUrl && (
-        <img
-          key={active.id}
-          className="store-hero-cover"
-          src={active.coverUrl}
-          alt={active.name}
-          loading="lazy"
-        />
+        <div className="store-hero-poster" aria-hidden="true">
+          <img
+            key={active.id}
+            className="store-hero-cover"
+            src={active.coverUrl}
+            alt={active.name}
+            loading="lazy"
+          />
+        </div>
       )}
 
       <div className="store-hero-content">
@@ -208,14 +222,16 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
 
         <h1 className="store-hero-title">{active.name}</h1>
 
+        {active.genres.length > 0 && (
+          <div className="store-hero-tags">
+            {active.genres.slice(0, 3).map((g) => (
+              <span key={g} className="store-hero-tag">{g}</span>
+            ))}
+          </div>
+        )}
+
         <div className="store-hero-meta">
           {year && <span>{year}</span>}
-          {active.genres.length > 0 && (
-            <>
-              <span className="store-hero-meta-dot" />
-              <span>{active.genres.slice(0, 3).join(" · ")}</span>
-            </>
-          )}
           {active.platforms.length > 0 && (
             <>
               <span className="store-hero-meta-dot" />
@@ -283,6 +299,9 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
           </button>
         </>
       )}
+
+      {/* Thin accent hairline at the very bottom edge */}
+      <div className="store-hero-accent-line" aria-hidden="true" />
 
       {/* Autoplay progress bar */}
       {pool.length > 1 && !reduceMotion && (
