@@ -9,13 +9,21 @@ import { formatArticleDate } from "../../hooks/useNewsFeeds";
 interface NewsArticlePreviewProps {
   article: NewsArticle | null;
   onClose: () => void;
+  saved?: boolean;
+  onToggleSave?: (article: NewsArticle) => void;
 }
 
-export default function NewsArticlePreview({ article, onClose }: NewsArticlePreviewProps) {
+export default function NewsArticlePreview({
+  article,
+  onClose,
+  saved = false,
+  onToggleSave,
+}: NewsArticlePreviewProps) {
   const placeholderRef = useRef<HTMLDivElement>(null);
   const [webviewReady, setWebviewReady] = useState(false);
   const [webviewError, setWebviewError] = useState(false);
   const webviewInstRef = useRef<Webview | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -24,7 +32,31 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
     [onClose]
   );
 
+  // Share via the OS share sheet when available, otherwise copy the link (#28)
+  const handleShare = useCallback(async () => {
+    if (!article) return;
+    const shareData = { title: article.title, text: article.title, url: article.link };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(article.link);
+        setWebviewError(false);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2000);
+      }
+    } catch {
+      /* user cancelled share — ignore */
+    }
+  }, [article]);
+
   // ── Webview lifecycle ──────────────────────────────────────────────
+  // The native child webview is a progressive enhancement layered over the
+  // already-rendered sanitized article body. Any failure (missing Tauri, ACL
+  // rejection, unsupported renderer) must degrade gracefully WITHOUT throwing,
+  // since an uncaught rejection here surfaces as a React "failing component".
 
   useEffect(() => {
     if (!article) return;
@@ -36,53 +68,60 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
     document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
 
-    // Wait for the modal layout to paint, then create the webview
-    const raf = requestAnimationFrame(async () => {
-      if (!active || !placeholderRef.current) return;
+    // Wait for the modal layout to paint, then attempt the webview.
+    const raf = requestAnimationFrame(() => {
+      void (async () => {
+        if (!active || !placeholderRef.current) return;
 
-      // Close any existing preview webviews first
-      try {
-        const allWebviews = await Webview.getAll();
-        for (const wv of allWebviews) {
-          if (wv.label.startsWith("news-preview-")) {
-            await wv.close();
+        // Close any existing preview webviews first
+        try {
+          const allWebviews = await Webview.getAll();
+          for (const wv of allWebviews) {
+            if (wv.label.startsWith("news-preview-")) {
+              await wv.close();
+            }
           }
-        }
-      } catch { /* ignore */ }
+        } catch { /* ignore */ }
 
-      if (!active || !placeholderRef.current) return;
+        if (!active || !placeholderRef.current) return;
 
-      const rect = placeholderRef.current.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+        const rect = placeholderRef.current.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
 
-      const uniqueLabel = "news-preview-" + Math.random().toString(36).substring(2, 9);
+        const uniqueLabel = "news-preview-" + Math.random().toString(36).substring(2, 9);
 
-      try {
-        const appWindow = getCurrentWindow();
-        const webview = new Webview(appWindow, uniqueLabel, {
-          url: article.link,
-          x: rect.left,
-          y: rect.top,
-          width: rect.width,
-          height: rect.height,
-        });
+        try {
+          const appWindow = getCurrentWindow();
+          const webview = new Webview(appWindow, uniqueLabel, {
+            url: article.link,
+            x: rect.left,
+            y: rect.top,
+            width: rect.width,
+            height: rect.height,
+          });
 
-        if (!active) {
-          webview.close().catch(() => {});
-          return;
-        }
+          if (!active) {
+            webview.close().catch(() => {});
+            return;
+          }
 
-        webviewInstRef.current = webview;
-        setWebviewReady(true);
+          webviewInstRef.current = webview;
+          setWebviewReady(true);
 
-        webview.once("tauri://error", (e) => {
-          console.error("[News] Webview error:", e);
+          webview.once("tauri://error", (e) => {
+            console.error("[News] Webview error:", e);
+            if (active) setWebviewError(true);
+          });
+        } catch (err) {
+          // Non-fatal: the sanitized article body is already shown above.
+          console.warn("[News] Native webview unavailable, using inline reader:", err);
           if (active) setWebviewError(true);
-        });
-      } catch (err) {
-        console.error("[News] Failed to create webview:", err);
+        }
+      })().catch((err) => {
+        // Failsafe: never let the async lifecycle crash the component.
+        console.warn("[News] Webview lifecycle failed gracefully:", err);
         if (active) setWebviewError(true);
-      }
+      });
     });
 
     return () => {
@@ -222,11 +261,42 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
           >
             Close
           </button>
-          <button
-            type="button"
-            className="news-preview-open-btn"
-            onClick={handleOpenInBrowser}
-          >
+          <div className="news-preview-footer-actions">
+            {onToggleSave && (
+              <button
+                type="button"
+                className={`news-preview-action-btn${saved ? " is-saved" : ""}`}
+                onClick={() => onToggleSave(article)}
+                title={saved ? "Remove bookmark" : "Save for later"}
+                aria-label={saved ? "Remove bookmark" : "Save for later"}
+              >
+                <svg viewBox="0 0 24 24" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+                {saved ? "Saved" : "Save"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="news-preview-action-btn"
+              onClick={handleShare}
+              title="Share article"
+              aria-label="Share article"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+              {shareCopied ? "Copied!" : "Share"}
+            </button>
+            <button
+              type="button"
+              className="news-preview-open-btn"
+              onClick={handleOpenInBrowser}
+            >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
               <polyline points="15 3 21 3 21 9" />
@@ -234,6 +304,7 @@ export default function NewsArticlePreview({ article, onClose }: NewsArticlePrev
             </svg>
             Open in Browser
           </button>
+          </div>
         </div>
       </div>
     </div>

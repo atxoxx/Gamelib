@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "source-fetcher-*",
-    "gog-login"
+    "gog-login",
+    "news-preview-*"
   ],
   "permissions": [
     "core:default",

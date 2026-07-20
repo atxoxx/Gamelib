@@ -94,3 +94,33 @@ export function loadSavedArticles(): SavedArticle[] {
 export function saveSavedArticles(articles: SavedArticle[]): void {
   writeJson(LS_SAVED_ARTICLES, articles);
 }
+
+/** True when an article (keyed by link) is bookmarked. */
+export function isArticleSaved(link: string): boolean {
+  return loadSavedArticles().some((a) => a.link === link);
+}
+
+/**
+ * Toggle a saved article. When `article` is provided and not yet saved it is
+ * appended (most-recent first); when already saved it is removed. Returns the
+ * resulting list of saved articles.
+ */
+export function toggleSavedArticle(article: SavedArticle): SavedArticle[] {
+  const current = loadSavedArticles();
+  const idx = current.findIndex((a) => a.link === article.link);
+  let next: SavedArticle[];
+  if (idx >= 0) {
+    next = current.filter((a) => a.link !== article.link);
+  } else {
+    next = [article, ...current];
+  }
+  saveSavedArticles(next);
+  return next;
+}
+
+/** Remove a saved article by link. Returns the resulting list. */
+export function removeSavedArticle(link: string): SavedArticle[] {
+  const next = loadSavedArticles().filter((a) => a.link !== link);
+  saveSavedArticles(next);
+  return next;
+}

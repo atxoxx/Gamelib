@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import type { NewsFeed } from "../../hooks/useNewsFeeds";
-import { DEFAULT_FEEDS } from "../../hooks/useNewsFeeds";
+import { DEFAULT_FEEDS, discoverFeedUrl } from "../../hooks/useNewsFeeds";
 
 interface NewsFeedSettingsProps {
   allFeeds: NewsFeed[];
@@ -24,6 +24,7 @@ export default function NewsFeedSettings({
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState(false);
 
   // Close on Escape
   const handleKeyDown = useCallback(
@@ -79,6 +80,37 @@ export default function NewsFeedSettings({
     onAddFeed(trimmedName, trimmedUrl);
     setName("");
     setUrl("");
+  };
+
+  // Auto-discover a feed URL from a homepage (#9)
+  const handleDiscover = async () => {
+    let homepage = url.trim();
+    if (!homepage) {
+      setAddError("Paste a website URL to discover its feed.");
+      return;
+    }
+    if (!/^https?:\/\//i.test(homepage)) homepage = "https://" + homepage;
+    setDiscovering(true);
+    setAddError(null);
+    try {
+      const feedUrl = await discoverFeedUrl(homepage);
+      if (feedUrl) {
+        setUrl(feedUrl);
+        if (!name.trim()) {
+          try {
+            setName(new URL(homepage).hostname.replace(/^www\./, ""));
+          } catch {
+            /* keep empty name */
+          }
+        }
+      } else {
+        setAddError("No RSS/Atom feed found on that page.");
+      }
+    } catch {
+      setAddError("Could not reach that page.");
+    } finally {
+      setDiscovering(false);
+    }
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
@@ -215,18 +247,29 @@ export default function NewsFeedSettings({
                 />
               </div>
               {addError && <p className="news-feed-error">{addError}</p>}
-              <button
-                type="button"
-                className="news-feed-add-btn"
-                onClick={handleAdd}
-                disabled={!name.trim() || !url.trim()}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Add Feed
-              </button>
+              <div className="news-feed-add-actions">
+                <button
+                  type="button"
+                  className="news-feed-add-btn"
+                  onClick={handleAdd}
+                  disabled={!name.trim() || !url.trim()}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  Add Feed
+                </button>
+                <button
+                  type="button"
+                  className="news-feed-discover-btn"
+                  onClick={handleDiscover}
+                  disabled={discovering}
+                  title="Find the RSS/Atom feed for a website URL"
+                >
+                  {discovering ? "Discovering…" : "Discover from URL"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

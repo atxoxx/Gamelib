@@ -6,15 +6,17 @@ interface NewsArticleCardProps {
   article: NewsArticle;
   onClick: (article: NewsArticle) => void;
   density?: ViewDensity;
+  read?: boolean;
+  saved?: boolean;
 }
 
-export default function NewsArticleCard({ article, onClick, density = "cozy" }: NewsArticleCardProps) {
+export default function NewsArticleCard({ article, onClick, density = "cozy", read = false, saved = false }: NewsArticleCardProps) {
   const isList = density === "list";
   const showBody = density !== "compact";
 
   return (
     <div
-      className={`news-article-card density-${density} hover-lift${isList ? " news-article-card-list" : ""}`}
+      className={`news-article-card density-${density} hover-lift${isList ? " news-article-card-list" : ""}${read ? " is-read" : ""}`}
       onClick={() => onClick(article)}
       role="button"
       tabIndex={0}
@@ -51,6 +53,13 @@ export default function NewsArticleCard({ article, onClick, density = "cozy" }: 
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
           </svg>
         </div>
+        {saved && (
+          <span className="news-card-saved-badge" title="Saved" aria-label="Saved">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+            </svg>
+          </span>
+        )}
         <span className="news-card-source-badge">{article.sourceName}</span>
       </div>
 

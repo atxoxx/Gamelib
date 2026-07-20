@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useNewsFeeds } from "../hooks/useNewsFeeds";
+import { useNewsFeeds, buildOpml, parseOpml } from "../hooks/useNewsFeeds";
 import type { NewsArticle } from "../hooks/useNewsFeeds";
 import { useDensityContext } from "../context/DensityContext";
 import DensityToggle from "../components/DensityToggle";
@@ -7,6 +7,10 @@ import NewsSourcePills from "../components/news/NewsSourcePills";
 import NewsArticleCard, { NewsArticleCardSkeleton } from "../components/news/NewsArticleCard";
 import NewsArticlePreview from "../components/news/NewsArticlePreview";
 import NewsFeedSettings from "../components/news/NewsFeedSettings";
+import {
+  loadSavedArticles,
+  toggleSavedArticle,
+} from "../pages/communityStorage";
 import "./news/NewsPage.css";
 
 const ITEMS_PER_PAGE = 20;
@@ -29,6 +33,9 @@ export default function NewsPage() {
     customFeeds,
     allFeeds,
     enabledFeedUrls,
+    readLinks,
+    markRead,
+    markAllRead,
     setSourceFilter,
     toggleFeed,
     addCustomFeed,
@@ -41,6 +48,9 @@ export default function NewsPage() {
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [page, setPage] = useState(1);
+  const [savedArticles, setSavedArticles] = useState(() => loadSavedArticles());
+  const [opmlInput, setOpmlInput] = useState<HTMLInputElement | null>(null);
+  const [opmlMessage, setOpmlMessage] = useState<string | null>(null);
 
   // Reset to page 1 when source filter changes
   useEffect(() => {
@@ -55,13 +65,62 @@ export default function NewsPage() {
   );
   const hasMore = page < totalPages;
 
+  const unreadCount = useMemo(
+    () => articles.filter((a) => !readLinks.has(a.link)).length,
+    [articles, readLinks]
+  );
+
   const handleCardClick = useCallback((article: NewsArticle) => {
     setSelectedArticle(article);
   }, []);
 
-  const handleClosePreview = useCallback(() => {
-    setSelectedArticle(null);
+  // Toggle bookmark for the currently-open article (#5)
+  const handleToggleSave = useCallback((article: NewsArticle) => {
+    setSavedArticles(toggleSavedArticle(article));
   }, []);
+
+  // OPML export (#10)
+  const handleExportOpml = useCallback(() => {
+    const feeds = allFeeds.filter((f) => f.enabled);
+    const blob = new Blob([buildOpml(feeds)], { type: "text/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gamelib-news-feeds.opml";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [allFeeds]);
+
+  // OPML import (#10)
+  const handleImportOpml = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const feeds = parseOpml(text);
+        if (feeds.length === 0) {
+          setOpmlMessage("No feeds found in that OPML file.");
+          return;
+        }
+        let added = 0;
+        for (const f of feeds) {
+          // Reuse the hook's add logic; duplicates are rejected silently.
+          addCustomFeed(f.name, f.url);
+          added++;
+        }
+        setOpmlMessage(`Imported ${added} feed${added === 1 ? "" : "s"}.`);
+        refresh();
+      } catch {
+        setOpmlMessage("Failed to read OPML file.");
+      }
+    },
+    [addCustomFeed, refresh]
+  );
+
+  const handleClosePreview = useCallback(() => {
+    // Mark the article as read when the preview is dismissed.
+    if (selectedArticle) markRead(selectedArticle.link);
+    setSelectedArticle(null);
+  }, [selectedArticle, markRead]);
 
   const handleOpenSettings = useCallback(() => {
     setShowSettings(true);
@@ -88,6 +147,59 @@ export default function NewsPage() {
 
         <div className="news-header-right">
           <DensityToggle density={density} onChange={setDensity} />
+          {unreadCount < articles.length && articles.length > 0 && (
+            <button
+              type="button"
+              className="news-settings-btn"
+              onClick={markAllRead}
+              title="Mark all as read"
+              aria-label="Mark all as read"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Mark read
+            </button>
+          )}
+          <button
+            type="button"
+            className="news-settings-btn"
+            onClick={handleExportOpml}
+            title="Export feeds as OPML"
+            aria-label="Export feeds as OPML"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export
+          </button>
+          <button
+            type="button"
+            className="news-settings-btn"
+            onClick={() => opmlInput?.click()}
+            title="Import feeds from OPML"
+            aria-label="Import feeds from OPML"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Import
+          </button>
+          <input
+            ref={(el) => setOpmlInput(el)}
+            type="file"
+            accept=".opml,application/xml,text/xml"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleImportOpml(file);
+              e.target.value = "";
+            }}
+          />
           <button
             type="button"
             className="news-settings-btn"
@@ -165,6 +277,8 @@ export default function NewsPage() {
                 key={`${article.link}-${i}`}
                 article={article}
                 density={density}
+                read={readLinks.has(article.link)}
+                saved={savedArticles.some((s) => s.link === article.link)}
                 onClick={handleCardClick}
               />
             ))}
@@ -194,7 +308,12 @@ export default function NewsPage() {
       )}
 
       {/* Article preview modal */}
-      <NewsArticlePreview article={selectedArticle} onClose={handleClosePreview} />
+      <NewsArticlePreview
+        article={selectedArticle}
+        saved={selectedArticle ? savedArticles.some((s) => s.link === selectedArticle.link) : false}
+        onClose={handleClosePreview}
+        onToggleSave={handleToggleSave}
+      />
 
       {/* Feed settings modal */}
       {showSettings && (
@@ -207,6 +326,12 @@ export default function NewsPage() {
           onRemoveFeed={removeCustomFeed}
           onClose={handleCloseSettings}
         />
+      )}
+
+      {opmlMessage && (
+        <div className="news-opml-toast" role="status" onClick={() => setOpmlMessage(null)}>
+          {opmlMessage}
+        </div>
       )}
     </div>
   );

@@ -70,6 +70,7 @@ export const DEFAULT_FEEDS: NewsFeed[] = [
 
 const STORAGE_KEY = "gamelib-news-feeds";
 const CACHE_KEY = "gamelib-news-cache";
+const READ_KEY = "gamelib-news-read";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -88,6 +89,122 @@ function loadCustomFeeds(): NewsFeed[] {
 /** Save custom feeds to localStorage. */
 function saveCustomFeeds(feeds: NewsFeed[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(feeds));
+}
+
+/** Load the set of read article links from localStorage. */
+function loadReadLinks(): Set<string> {
+  try {
+    const raw = localStorage.getItem(READ_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Persist the set of read article links to localStorage. */
+function saveReadLinks(links: Set<string>): void {
+  try {
+    localStorage.setItem(READ_KEY, JSON.stringify(Array.from(links)));
+  } catch { /* ignore */ }
+}
+
+/**
+ * Auto-discover a feed URL from a site homepage by looking for
+ * <link rel="alternate" type="application/rss+xml|atom+xml"> tags.
+ * Returns the first discovered feed href, or null if none found.
+ */
+export async function discoverFeedUrl(homepage: string): Promise<string | null> {
+  const hasTauri = typeof window !== "undefined" && "__TAURI__" in window;
+  let html: string;
+  try {
+    if (hasTauri) {
+      html = await invoke<string>("fetch_url", { url: homepage });
+    } else {
+      const res = await fetch(homepage, {
+        headers: { Accept: "text/html, */*" },
+      });
+      if (!res.ok) return null;
+      html = await res.text();
+    }
+  } catch {
+    return null;
+  }
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const links = Array.from(
+    doc.querySelectorAll('link[type="application/rss+xml"], link[type="application/atom+xml"], link[rel="alternate"]')
+  );
+  for (const link of links) {
+    const type = link.getAttribute("type") ?? "";
+    const rel = link.getAttribute("rel") ?? "";
+    if (/rss\+xml|atom\+xml/i.test(type) || rel === "alternate") {
+      const href = link.getAttribute("href");
+      if (href) {
+        try {
+          return new URL(href, homepage).toString();
+        } catch {
+          return href;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export interface DiscoveredFeed {
+  name: string;
+  url: string;
+}
+
+/** Parse an OPML document string into a list of feed sources. */
+export function parseOpml(opmlText: string): DiscoveredFeed[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(opmlText, "text/xml");
+  if (doc.querySelector("parsererror")) return [];
+
+  const feeds: DiscoveredFeed[] = [];
+  const seen = new Set<string>();
+  const outlines = doc.querySelectorAll("outline");
+  for (const outline of Array.from(outlines)) {
+    const type = outline.getAttribute("type");
+    const xmlUrl =
+      outline.getAttribute("xmlUrl") ??
+      outline.getAttribute("xmlurl") ??
+      outline.getAttribute("url");
+    if ((!type || /^rss|atom$/i.test(type)) && xmlUrl) {
+      const normalized = xmlUrl.trim();
+      if (seen.has(normalized.toLowerCase())) continue;
+      seen.add(normalized.toLowerCase());
+      feeds.push({
+        name: (outline.getAttribute("title") || outline.getAttribute("text") || normalized).trim(),
+        url: normalized,
+      });
+    }
+  }
+  return feeds;
+}
+
+/** Serialize a list of feeds into an OPML document string. */
+export function buildOpml(feeds: NewsFeed[]): string {
+  const now = new Date().toUTCString();
+  const body = feeds
+    .map((f) => {
+      const name = f.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const url = f.url.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `    <outline type="rss" text="${name}" title="${name}" xmlUrl="${url}"/>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Gamelib News Feeds</title>
+    <dateCreated>${now}</dateCreated>
+  </head>
+  <body>
+${body}
+  </body>
+</opml>`;
 }
 
 /** Get all enabled feed URLs. */
@@ -299,6 +416,7 @@ export function useNewsFeeds() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<string | null>(null); // null = all
+  const [readLinks, setReadLinks] = useState<Set<string>>(loadReadLinks);
   // All feeds (defaults + custom, respecting enabled state)
   const allFeeds = useMemo(() => {
     const defaults = DEFAULT_FEEDS.map((d) => {
@@ -353,30 +471,43 @@ export function useNewsFeeds() {
     setError(null);
 
     const enabledFeeds = getEnabledUrls(customFeeds);
-    const allArticles: NewsArticle[] = [];
 
-    for (const feed of enabledFeeds) {
-      try {
-        let xmlText: string;
-        if (hasTauri) {
-          // Use the Rust backend's reqwest client — no CORS restrictions.
-          xmlText = await invoke<string>("fetch_url", { url: feed.url });
-        } else {
-          // Browser fetch() — only works if CORS is relaxed (e.g. via Vite proxy).
-          const response = await fetch(feed.url, {
-            headers: { Accept: "application/rss+xml, application/xml, text/xml, */*" },
-          });
-          if (!response.ok) {
-            console.warn(`[News] Failed to fetch ${feed.name} (${feed.url}): ${response.status}`);
-            continue;
+    // Fetch all feeds in parallel (#17). Failures are isolated per-feed
+    // so a single broken source doesn't blank the whole page.
+    const results = await Promise.all(
+      enabledFeeds.map(async (feed) => {
+        try {
+          let xmlText: string;
+          if (hasTauri) {
+            // Use the Rust backend's reqwest client — no CORS restrictions.
+            xmlText = await invoke<string>("fetch_url", { url: feed.url });
+          } else {
+            // Browser fetch() — only works if CORS is relaxed (e.g. via Vite proxy).
+            const response = await fetch(feed.url, {
+              headers: { Accept: "application/rss+xml, application/xml, text/xml, */*" },
+            });
+            if (!response.ok) {
+              return { feed, ok: false as const, error: `HTTP ${response.status}` };
+            }
+            xmlText = await response.text();
           }
-          xmlText = await response.text();
+          const parsed = parseRSS(xmlText, feed.name, feed.url);
+          return { feed, ok: true as const, articles: parsed };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { feed, ok: false as const, error: msg };
         }
-        const parsed = parseRSS(xmlText, feed.name, feed.url);
-        allArticles.push(...parsed);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[News] Error fetching ${feed.name}: ${msg}`);
+      })
+    );
+
+    const allArticles: NewsArticle[] = [];
+    const failedFeeds: string[] = [];
+    for (const r of results) {
+      if (r.ok) {
+        allArticles.push(...r.articles);
+      } else {
+        failedFeeds.push(`${r.feed.name} (${r.feed.url})`);
+        console.warn(`[News] Error fetching ${r.feed.name}: ${r.error}`);
       }
     }
 
@@ -403,6 +534,9 @@ export function useNewsFeeds() {
 
     if (allArticles.length === 0 && enabledFeeds.length > 0) {
       setError("No articles found. RSS feeds may be unavailable right now.");
+    } else if (failedFeeds.length > 0) {
+      // Surface which feeds failed without hiding the working ones.
+      console.warn(`[News] ${failedFeeds.length} feed(s) failed: ${failedFeeds.join(", ")}`);
     }
 
     if (mountedRef.current) setLoading(false);
@@ -452,6 +586,27 @@ export function useNewsFeeds() {
     []
   );
 
+  // Mark an article as read (#4)
+  const markRead = useCallback((articleLink: string) => {
+    setReadLinks((prev) => {
+      if (prev.has(articleLink)) return prev;
+      const updated = new Set(prev);
+      updated.add(articleLink);
+      saveReadLinks(updated);
+      return updated;
+    });
+  }, []);
+
+  // Mark all currently-loaded articles as read (#4)
+  const markAllRead = useCallback(() => {
+    setReadLinks((prev) => {
+      const updated = new Set(prev);
+      for (const a of articles) updated.add(a.link);
+      saveReadLinks(updated);
+      return updated;
+    });
+  }, [articles]);
+
   // Initial fetch
   useEffect(() => {
     mountedRef.current = true;
@@ -473,6 +628,10 @@ export function useNewsFeeds() {
       addCustomFeed,
       removeCustomFeed,
       refresh: () => fetchFeeds(true),
+      // Read-tracking (#4)
+      readLinks,
+      markRead,
+      markAllRead,
       // Expose enabled feeds for display in settings
       enabledFeedUrls: new Set(allFeeds.filter((f) => f.enabled).map((f) => f.url)),
     };
