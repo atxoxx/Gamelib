@@ -93,33 +93,43 @@ export default function StoreFilterSidebar({
   return (
     <aside className="store-filter-sidebar">
       <div className="store-filter-section">
-        <h4 className="store-filter-heading">Genres</h4>
-        <div className="store-filter-list">
+        <h4 className="store-filter-heading">
+          Genres
+          {selectedGenres.length > 0 && (
+            <span className="store-filter-count-badge">{selectedGenres.length}</span>
+          )}
+        </h4>
+        <div className="store-filter-pills">
           {GENRES.map((genre) => (
-            <label key={genre} className="store-filter-checkbox">
-              <input
-                type="checkbox"
-                checked={selectedGenres.includes(genre)}
-                onChange={() => handleGenreToggle(genre)}
-              />
-              <span>{genre}</span>
-            </label>
+            <button
+              key={genre}
+              type="button"
+              className={`store-filter-pill${selectedGenres.includes(genre) ? " active" : ""}`}
+              onClick={() => handleGenreToggle(genre)}
+            >
+              {genre}
+            </button>
           ))}
         </div>
       </div>
 
       <div className="store-filter-section">
-        <h4 className="store-filter-heading">Platforms</h4>
-        <div className="store-filter-list">
+        <h4 className="store-filter-heading">
+          Platforms
+          {selectedPlatforms.length > 0 && (
+            <span className="store-filter-count-badge">{selectedPlatforms.length}</span>
+          )}
+        </h4>
+        <div className="store-filter-pills">
           {PLATFORMS.map((platform) => (
-            <label key={platform} className="store-filter-checkbox">
-              <input
-                type="checkbox"
-                checked={selectedPlatforms.includes(platform)}
-                onChange={() => handlePlatformToggle(platform)}
-              />
-              <span>{platform}</span>
-            </label>
+            <button
+              key={platform}
+              type="button"
+              className={`store-filter-pill${selectedPlatforms.includes(platform) ? " active" : ""}`}
+              onClick={() => handlePlatformToggle(platform)}
+            >
+              {platform}
+            </button>
           ))}
         </div>
       </div>
@@ -160,9 +170,10 @@ export default function StoreFilterSidebar({
       </div>
 
       <div className="store-filter-section">
-        <h4 className="store-filter-heading">
-          Minimum Rating: {ratingMin ?? 0}
-        </h4>
+        <div className="store-filter-rating-head">
+          <h4 className="store-filter-heading">Minimum Rating</h4>
+          <span className="store-filter-rating-value">{ratingMin ?? 0}+</span>
+        </div>
         <input
           type="range"
           className="store-filter-slider"
@@ -179,7 +190,12 @@ export default function StoreFilterSidebar({
       </div>
 
       <div className="store-filter-section">
-        <h4 className="store-filter-heading">Download Sources</h4>
+        <h4 className="store-filter-heading">
+          Download Sources
+          {selectedSourceIds.length > 0 && (
+            <span className="store-filter-count-badge">{selectedSourceIds.length}</span>
+          )}
+        </h4>
         {enabledSources.length === 0 ? (
           <p className="store-filter-empty-text">
             No sources added yet — open Settings → Sources to add one. The
@@ -187,28 +203,24 @@ export default function StoreFilterSidebar({
             every selected source.
           </p>
         ) : (
-          <div className="store-filter-list">
+          <div className="store-filter-pills store-filter-pills-sources">
             {enabledSources.map((source) => (
-              <label key={source.id} className="store-filter-source-row">
-                <input
-                  type="checkbox"
-                  checked={selectedSourceIds.includes(source.id)}
-                  onChange={() => handleSourceToggle(source.id)}
-                />
-                <span className="store-filter-source-name" title={source.url}>
-                  {source.name}
-                </span>
+              <button
+                key={source.id}
+                type="button"
+                className={`store-filter-pill store-filter-source-pill${selectedSourceIds.includes(source.id) ? " active" : ""}`}
+                onClick={() => handleSourceToggle(source.id)}
+                title={source.url}
+              >
+                {source.name}
                 {source.gameCount > 0 && (
-                  <span
-                    className="store-filter-source-count"
-                    title={`${source.gameCount.toLocaleString()} entries in source`}
-                  >
+                  <span className="store-filter-source-count">
                     {source.gameCount >= 1000
                       ? `${(source.gameCount / 1000).toFixed(1)}k`
                       : source.gameCount}
                   </span>
                 )}
-              </label>
+              </button>
             ))}
           </div>
         )}

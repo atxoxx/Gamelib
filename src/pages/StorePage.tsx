@@ -127,6 +127,11 @@ export default function StorePage() {
   // keeps its full width until the user actually wants to filter.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Collapse state for the inline filter rail on wide viewports — mirrors
+  // the library's `lib-rail-toggle-btn` so the filter panel can be hidden
+  // or shown with a single tap without leaving the page.
+  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+
   const activeFilterCount = useMemo(
     () =>
       selectedGenres.length +
@@ -667,11 +672,36 @@ export default function StorePage() {
             />
           )}
 
-          {/* Inline sidebar on wide viewports. The slide-over drawer
-              (below) handles compact widths so the grid keeps its full
-              width until filters are explicitly requested. */}
+          {/* Inline filter rail on wide viewports, with a collapse toggle
+              (mirrors the library's `lib-rail-toggle-btn`). The slide-over
+              drawer (below) handles compact widths. */}
           <div className="store-layout">
-            <div className="store-layout-inline-sidebar">{renderFilterSidebar()}</div>
+            <div className={`store-filter-rail${filtersCollapsed ? " collapsed" : ""}`}>
+              <button
+                type="button"
+                className={`store-filter-rail-toggle${activeFilterCount > 0 ? " active" : ""}`}
+                onClick={() => setFiltersCollapsed((c) => !c)}
+                aria-label={filtersCollapsed ? "Show filters" : "Hide filters"}
+                aria-expanded={!filtersCollapsed}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="4" y1="6" x2="20" y2="6" />
+                  <line x1="7" y1="12" x2="17" y2="12" />
+                  <line x1="10" y1="18" x2="14" y2="18" />
+                </svg>
+              </button>
+              {!filtersCollapsed && (
+                <div className="store-layout-inline-sidebar">{renderFilterSidebar()}</div>
+              )}
+            </div>
 
             <div className="store-main">
               {isSearching && searchQuery && !loading && (

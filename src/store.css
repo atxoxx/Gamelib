@@ -288,8 +288,69 @@
   min-height: 0;
 }
 
-/* Inline sidebar is shown only on wide viewports; compact widths use the
-   slide-over drawer instead (see `.store-filter-drawer` below). */
+/* Inline filter rail (wide viewports) with collapse toggle — mirrors the
+   library's `lib-rail-wrap` / `lib-rail-toggle-btn`. Hidden on compact
+   widths, where the slide-over drawer is used instead. */
+.store-filter-rail {
+  display: none;
+  position: relative;
+  flex-shrink: 0;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  transition: width var(--transition-normal);
+}
+
+.store-filter-rail.collapsed {
+  width: 36px;
+}
+
+/* Collapse toggle sits flush-left as a vertical rail button. */
+.store-filter-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.store-filter-rail-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--transition-normal);
+}
+
+.store-filter-rail.collapsed .store-filter-rail-toggle svg {
+  transform: rotate(180deg);
+}
+
+.store-filter-rail-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-hover);
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+.store-filter-rail-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.store-filter-rail-toggle.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* Inline sidebar is shown only on wide viewports inside the rail. */
 .store-layout-inline-sidebar {
   display: none;
 }
@@ -327,7 +388,7 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: var(--space-md);
   padding: var(--space-lg);
   background: var(--color-surface-glass);
   backdrop-filter: blur(16px);
@@ -336,68 +397,128 @@
   border-radius: var(--radius-lg);
   height: fit-content;
   position: sticky;
-  top: 64px;
+  top: calc(var(--space-md) + 64px);
   align-self: flex-start;
-  max-height: calc(100vh - 88px);
+  max-height: calc(100vh - 96px);
   overflow-y: auto;
   scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+  box-shadow: var(--shadow-md);
 }
 
 .store-filter-sidebar::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 .store-filter-sidebar::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .store-filter-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.store-filter-section:last-of-type {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .store-filter-heading {
-  font-size: var(--font-size-xs);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
   font-weight: var(--font-weight-bold);
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin: 0 0 var(--space-xs) 0;
+  letter-spacing: 0.1em;
+  margin: 0;
 }
 
-.store-filter-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.store-filter-checkbox {
-  display: flex;
+.store-filter-count-badge {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: 3px var(--space-xs);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  transition: all var(--transition-fast);
-  user-select: none;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: var(--radius-full);
 }
 
-.store-filter-checkbox:hover {
+/* Pill toggles for genres / platforms / sources (mirrors .lib-pills) */
+.store-filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 1px;
+}
+
+.store-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.store-filter-pill:hover {
   color: var(--color-text-primary);
+  border-color: var(--color-accent);
   background: var(--color-bg-hover);
 }
 
-.store-filter-checkbox input[type="checkbox"] {
-  width: 14px;
+.store-filter-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.store-filter-pill.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-accent-glow);
+}
+
+.store-filter-source-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
   height: 14px;
-  accent-color: var(--color-accent);
-  cursor: pointer;
-  flex-shrink: 0;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-full);
+}
+
+.store-filter-pill.active .store-filter-source-count {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .store-filter-year-row {
@@ -421,6 +542,7 @@
 
 .store-filter-year-input:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
 
 .store-filter-year-sep {
@@ -428,10 +550,58 @@
   font-size: var(--font-size-xs);
 }
 
+/* Rating slider (mirrors .lib-rating-slider) */
+.store-filter-rating-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.store-filter-rating-value {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .store-filter-slider {
   width: 100%;
-  accent-color: var(--color-accent);
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  outline: none;
+  margin: var(--space-xs) 0 0 0;
   cursor: pointer;
+  accent-color: var(--color-accent);
+}
+
+.store-filter-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  transition: transform var(--transition-fast);
+}
+
+.store-filter-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.store-filter-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface-raised);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--color-accent-glow);
 }
 
 .store-filter-actions {
@@ -469,7 +639,8 @@
 
 .store-filter-btn.reset:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-hover);
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
 /* ── Store Filter Chips ────────────────────────────────────────────────── */
@@ -941,7 +1112,9 @@
   width: min(360px, 88vw);
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-secondary);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-left: 1px solid var(--color-border);
   box-shadow: -24px 0 60px rgba(0, 0, 0, 0.5);
   transform: translateX(100%);
@@ -958,6 +1131,7 @@
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--color-border);
+  background: transparent;
 }
 
 .store-filter-drawer-header h3 {
@@ -1009,14 +1183,19 @@
   border: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  box-shadow: none;
   padding: 0;
-  gap: var(--space-lg);
+  gap: var(--space-md);
 }
 
 /* ── Responsive ────────────────────────────────────────────────────────── */
 
-/* Wide screens: show the inline sidebar, hide the drawer trigger/drawer. */
+/* Wide screens: show the inline filter rail, hide the drawer trigger/drawer. */
 @media (min-width: 1024px) {
+  .store-filter-rail {
+    display: flex;
+  }
+
   .store-layout-inline-sidebar {
     display: block;
   }
