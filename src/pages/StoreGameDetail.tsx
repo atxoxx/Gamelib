@@ -451,7 +451,7 @@ export default function StoreGameDetail() {
             <div className="side-group">
               <SpecsCard game={mockGame} />
               <ProtonDBCard steamAppId={steamAppId} />
-              <CrackWatchCard gameName={data.title} />
+              <CrackWatchCard gameName={data.title} appId={steamAppId} />
             </div>
             <div className="side-group">
               <ReleasesCard game={mockGame} />

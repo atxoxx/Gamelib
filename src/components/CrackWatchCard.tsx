@@ -2,53 +2,31 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { CrackWatchStatus } from "../types/game";
 
-interface CrackWatchCardProps {
-  gameName: string;
+/** Skeleton shimmer used while the status is loading. */
+function Skeleton({ height = 16, width = "100%" }: { height?: number; width?: number | string }) {
+  return (
+    <span
+      className="cw-skeleton"
+      style={{ height, width, display: "block", borderRadius: 6 }}
+    />
+  );
 }
 
-/** Status badge colors — green for cracked, red for uncracked. */
-function statusColor(status: string | null): string {
-  if (status === "cracked") return "#10b981";
-  if (status === "uncracked") return "#ef4444";
-  return "var(--color-text-muted)";
-}
-
-export default function CrackWatchCard({ gameName }: CrackWatchCardProps) {
-  const [data, setData] = useState<CrackWatchStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!gameName) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    invoke<CrackWatchStatus>("fetch_crackwatch_status", { gameName })
-      .then((result) => {
-        if (cancelled) return;
-        // Only render if the page was found (status is non-null)
-        if (result.status) {
-          setData(result);
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [gameName]);
-
-  // Don't render anything while loading, on error, or when no data
-  if (loading || error || !data || !data.status) return null;
-
-  const color = statusColor(data.status);
+/** Pure presentational card, mirroring Hydra's `CrackWatchSection`.
+ *
+ *  Receives the already-fetched `data` and an `isLoading` flag. While
+ *  `isLoading` (and no data yet) it renders a skeleton; when `data` is
+ *  present it renders the CRACKED/UNCRACKED badge plus the crack info
+ *  rows (protection, group, date). Renders nothing when there is no
+ *  data and loading is complete (title couldn't be resolved). */
+export function CrackWatchSection({
+  data,
+  isLoading,
+}: {
+  data: CrackWatchStatus | null;
+  isLoading: boolean;
+}) {
+  if (!isLoading && !data) return null;
 
   return (
     <section className="game-section cw-card">
@@ -59,69 +37,92 @@ export default function CrackWatchCard({ gameName }: CrackWatchCardProps) {
         CrackWatch Status
       </h2>
 
-      {/* Status header */}
-      <div className="cw-card-header">
-        <div
-          className="cw-status-pill"
-          style={{ background: color }}
-        >
-          {data.statusLabel || "CRACKED"}
-        </div>
-      </div>
+      <div className="cw-card-body">
+        {data ? (
+          <>
+            <div className="cw-card-header">
+              <span
+                className={`cw-status-pill${data.isCracked ? " cw-cracked" : " cw-uncracked"}`}
+              >
+                {data.isCracked ? "CRACKED" : "UNCRACKED"}
+              </span>
+            </div>
 
-      {/* Meta grid */}
-      <div className="cw-meta-grid-inner">
-        {data.releaseDate && (
-          <div className="cw-meta-row">
-            <span className="cw-meta-label">Release Date</span>
-            <span className="cw-meta-val">{data.releaseDate}</span>
-          </div>
-        )}
-        {data.crackDate && (
-          <div className="cw-meta-row">
-            <span className="cw-meta-label">Crack Date</span>
-            <span
-              className={`cw-meta-val${data.crackDate === "TBD" ? " cw-meta-val-tbd" : ""}`}
-            >
-              {data.crackDate}
-            </span>
-          </div>
-        )}
-        {data.drmProtection && (
-          <div className="cw-meta-row">
-            <span className="cw-meta-label">DRM</span>
-            <span className="cw-meta-val">{data.drmProtection}</span>
-          </div>
-        )}
-        {data.sceneGroup && (
-          <div className="cw-meta-row">
-            <span className="cw-meta-label">Scene Group</span>
-            <span
-              className={`cw-meta-val${data.sceneGroup === "TBD" ? " cw-meta-val-tbd" : ""}`}
-            >
-              {data.sceneGroup}
-            </span>
-          </div>
+            <div className="cw-meta-grid-inner">
+              {data.protection && (
+                <div className="cw-meta-row">
+                  <span className="cw-meta-label">Protection</span>
+                  <span className="cw-meta-val">{data.protection}</span>
+                </div>
+              )}
+              {data.crackGroup && (
+                <div className="cw-meta-row">
+                  <span className="cw-meta-label">Group</span>
+                  <span className="cw-meta-val">{data.crackGroup}</span>
+                </div>
+              )}
+              {data.crackDate && (
+                <div className="cw-meta-row">
+                  <span className="cw-meta-label">Crack Date</span>
+                  <span className="cw-meta-val">{data.crackDate}</span>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="cw-card-header">
+              <Skeleton height={28} width={120} />
+            </div>
+            <div className="cw-meta-grid-inner">
+              <Skeleton />
+              <Skeleton />
+              <Skeleton />
+            </div>
+          </>
         )}
       </div>
-
-      {/* Link to crackrelease page */}
-      {data.pageUrl && (
-        <a
-          href={data.pageUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="cw-source-link"
-          title="View on GameStatus.info"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-          View on GameStatus
-        </a>
-      )}
     </section>
   );
+}
+
+/** Convenience wrapper that fetches the status for a game by name and
+ *  renders the `CrackWatchSection`. This is what the game page sidebar
+ *  and store cards mount. */
+export default function CrackWatchCard({
+  gameName,
+  appId,
+}: {
+  gameName: string;
+  appId?: number | null;
+}) {
+  const [data, setData] = useState<CrackWatchStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!gameName) return;
+    let cancelled = false;
+    setIsLoading(true);
+    setData(null);
+
+    invoke<CrackWatchStatus | null>("fetch_crackwatch_status", {
+      gameName,
+      appId: appId != null ? String(appId) : null,
+    })
+      .then((result) => {
+        if (!cancelled) setData(result ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gameName, appId]);
+
+  return <CrackWatchSection data={data} isLoading={isLoading} />;
 }

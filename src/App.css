@@ -10492,17 +10492,48 @@
   border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
-  color: #fff;
   letter-spacing: 0.6px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   box-shadow: 0 2px 12px color-mix(in srgb, currentColor 35%, transparent);
 }
 
-.cw-counter {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.4px;
+/* CRACKED / UNCRACKED badges, mirroring Hydra's green/red treatment. */
+.cw-status-pill.cw-cracked {
+  background: color-mix(in srgb, #2ea043 18%, transparent);
+  color: #3fb950;
+  border: 1px solid color-mix(in srgb, #2ea043 45%, transparent);
+}
+
+.cw-status-pill.cw-uncracked {
+  background: color-mix(in srgb, #f85149 18%, transparent);
+  color: #f85149;
+  border: 1px solid color-mix(in srgb, #f85149 45%, transparent);
+}
+
+.cw-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.cw-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-border) 25%,
+    color-mix(in srgb, var(--color-border) 60%, var(--color-surface)) 50%,
+    var(--color-border) 75%
+  );
+  background-size: 200% 100%;
+  animation: cw-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes cw-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* ── Meta grid rows ────────────────────────────────────────────────── */
@@ -10543,37 +10574,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
-}
-
-.cw-meta-val-tbd {
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-/* ── Source link ────────────────────────────────────────────────────── */
-
-.cw-source-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--font-size-xs);
-  color: var(--color-accent);
-  text-decoration: none;
-  font-weight: var(--font-weight-medium);
-  transition: all var(--transition-fast);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--color-border);
-  width: 100%;
-  justify-content: center;
-}
-
-.cw-source-link:hover {
-  color: var(--color-accent-hover);
-}
-
-.cw-source-link svg {
-  width: 13px;
-  height: 13px;
 }
 
 /* ── ProtonDB Card ───────────────────────────────────────────────────── */

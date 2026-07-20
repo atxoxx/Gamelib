@@ -70,16 +70,17 @@ export default function StoreGameCard({
       : undefined);
 
   // ── CrackWatch self-fetch ─────────────────────────────────────────────
-  const [crackStatus, setCrackStatus] = useState<"cracked" | "uncracked" | null>(null);
+  const [crackStatus, setCrackStatus] = useState<CrackWatchStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    invoke<CrackWatchStatus>("fetch_crackwatch_status", { gameName: game.name })
+    invoke<CrackWatchStatus | null>("fetch_crackwatch_status", {
+      gameName: game.name,
+      appId: null,
+    })
       .then((result) => {
         if (cancelled) return;
-        if (result.status) {
-          setCrackStatus((result.status === "cracked" || result.status === "uncracked") ? result.status : null);
-        }
+        setCrackStatus(result ?? null);
       })
       .catch(() => {
         // Silently ignore — the badge simply won't render
@@ -140,8 +141,8 @@ export default function StoreGameCard({
 
         {crackStatus && (
           <span
-            className={`store-card-cw-badge${crackStatus === "cracked" ? " cw-cracked" : " cw-uncracked"}`}
-            title={crackStatus === "cracked" ? "Cracked" : "Uncracked"}
+            className={`store-card-cw-badge${crackStatus.isCracked ? " cw-cracked" : " cw-uncracked"}`}
+            title={crackStatus.isCracked ? "Cracked" : "Uncracked"}
           >
             <svg
               viewBox="0 0 24 24"
@@ -153,7 +154,7 @@ export default function StoreGameCard({
             >
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
-            {crackStatus === "cracked" ? "CRACKED" : "UNCRACKED"}
+            {crackStatus.isCracked ? "CRACKED" : "UNCRACKED"}
           </span>
         )}
 

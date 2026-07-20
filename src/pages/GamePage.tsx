@@ -984,7 +984,7 @@ function GameDetail({ game }: { game: Game }) {
             <div className="side-group">
               <SpecsCard game={game} />
               <ProtonDBCard steamAppId={game.steamAppId} />
-              <CrackWatchCard gameName={game.name} />
+              <CrackWatchCard gameName={game.name} appId={game.steamAppId} />
             </div>
             <div className="side-group">
               <ReleasesCard game={game} />

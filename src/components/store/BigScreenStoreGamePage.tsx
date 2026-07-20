@@ -268,7 +268,7 @@ export default function BigScreenStoreGamePage({
             </div>
             <LanguagesSection game={game} />
             <SystemRequirementsCard steamAppId={resolvedSteamAppId} />
-            <CrackWatchCard gameName={game.name} />
+            <CrackWatchCard gameName={game.name} appId={resolvedSteamAppId} />
           </div>
         </BigScreenTabPanel>
 

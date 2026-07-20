@@ -316,7 +316,7 @@ export default function BigScreenGameHub({ gameId, onBack }: BigScreenGameHubPro
               <SystemRequirementsCard
                 steamAppId={typeof game.steamAppId === "number" ? game.steamAppId : null}
               />
-              <CrackWatchCard gameName={game.name} />
+              <CrackWatchCard gameName={game.name} appId={typeof game.steamAppId === "number" ? game.steamAppId : null} />
             </div>
           </BigScreenTabPanel>
 

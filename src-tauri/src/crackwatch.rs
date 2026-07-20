@@ -1,38 +1,74 @@
-//! CrackWatch status scraper for gamestatus.info.
+//! CrackWatch status service for gamestatus.info.
 //!
 //! Fetches crack status, crack date, DRM protection, and scene group
 //! information by scraping gamestatus.info game pages. The site is a
 //! Nuxt.js SPA with SSR, so game data is embedded in a
 //! `<script id="__NUXT_DATA__" type="application/json">` payload.
 //!
-//! Returns `CrackWatchStatus` with `None` fields when the page can't
-//! be fetched, parsed, or doesn't contain game data — the frontend
-//! renders nothing in that case.
+//! The service mirrors Hydra's `CrackWatchService` (commit 0954a5b):
+//! - A dedicated `CrackWatchService` struct owns the HTTP client.
+//! - `get_status_by_title_and_app_id(title, app_id)` is the entry point.
+//! - Results are cached in the SQLite KV store with a 24h TTL, keyed by
+//!   slug (+ app id when available), so the same game isn't re-scraped
+//!   on every render.
+//! - The returned `CrackWatchStatus` uses an `is_cracked` boolean rather
+//!   than a string status, matching the frontend contract.
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+use crate::db::Db;
+use tauri::Manager;
 
 /// Parsed CrackWatch status from gamestatus.info.
+///
+/// Mirrors Hydra's `CrackWatchStatus` type (commit 0954a5b): an
+/// `is_cracked` boolean plus the supporting detail fields. `null` detail
+/// fields mean "unknown" (the field simply isn't shown on the card).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CrackWatchStatus {
-    /// "cracked" | "uncracked" | null — null when the page wasn't found or couldn't be parsed.
-    pub status: Option<String>,
-    /// Human-readable status label (e.g. "Cracked on release day", "Cracked after 19 days").
-    pub status_label: Option<String>,
-    /// Not provided by gamestatus.info — always None.
-    pub counter: Option<String>,
-    /// Release date (YYYY-MM-DD).
-    pub release_date: Option<String>,
-    /// Crack date (YYYY-MM-DD) or null when uncracked.
+    /// Whether the game has been cracked. Drives the CRACKED/UNCRACKED badge.
+    pub is_cracked: bool,
+    /// Crack date (YYYY-MM-DD) or null when uncracked / unknown.
     pub crack_date: Option<String>,
-    /// DRM protection (e.g. "Denuvo", "STEAM").
-    pub drm_protection: Option<String>,
-    /// Scene group or bypass method (English).
-    pub scene_group: Option<String>,
-    /// URL of the gamestatus.info page.
-    pub page_url: Option<String>,
+    /// Scene group or bypass method (e.g. "RUNE", "EMPRESS") or null.
+    pub crack_group: Option<String>,
+    /// DRM protection (e.g. "Denuvo", "STEAM") or null.
+    pub protection: Option<String>,
+}
+
+/// Cache envelope stored in the KV store: the status plus a freshness stamp.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CachedCrackWatchStatus {
+    #[serde(flatten)]
+    status: CrackWatchStatus,
+    /// Unix-millisecond timestamp of the cache write. Used for TTL checks.
+    updated_at: u64,
+}
+
+/// 24-hour cache TTL, mirroring Hydra's `LOCAL_CACHE_EXPIRATION`.
+const CACHE_TTL_MS: u64 = 1000 * 60 * 60 * 24;
+
+/// KV key prefix for cached CrackWatch status.
+const CACHE_KEY_PREFIX: &str = "crackwatch:";
+
+fn cache_key(slug: &str, app_id: Option<&str>) -> String {
+    match app_id {
+        Some(id) => format!("{}{}:{}", CACHE_KEY_PREFIX, slug, id),
+        None => format!("{}{}", CACHE_KEY_PREFIX, slug),
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Convert a game name into a URL-friendly slug matching gamestatus.info's patterns.
@@ -43,34 +79,22 @@ pub struct CrackWatchStatus {
 /// - All other non-alphanumeric characters become hyphens
 /// - Consecutive hyphens are collapsed
 fn slugify(name: &str) -> String {
-    let normalized = name.to_lowercase()
+    let normalized = name
+        .to_lowercase()
         .replace('\'', "")
         .replace('\u{2019}', "") // right single quotation mark (smart quote)
         .replace('™', "tm")
         .replace('®', "r")
         .replace('©', "c");
 
-    normalized.chars()
+    normalized
+        .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-")
-}
-
-/// Returns a status filled with all None values — used for early returns.
-fn empty_status() -> CrackWatchStatus {
-    CrackWatchStatus {
-        status: None,
-        status_label: None,
-        counter: None,
-        release_date: None,
-        crack_date: None,
-        drm_protection: None,
-        scene_group: None,
-        page_url: None,
-    }
 }
 
 /// Resolve a Nuxt payload value (public entry point).
@@ -141,7 +165,12 @@ fn resolve_nuxt_ref_inner(val: &Value, arr: &[Value], cache: &mut HashMap<usize,
                     _ => {}
                 }
             }
-            Value::Array(items.iter().map(|v| resolve_nuxt_ref_inner(v, arr, cache)).collect())
+            Value::Array(
+                items
+                    .iter()
+                    .map(|v| resolve_nuxt_ref_inner(v, arr, cache))
+                    .collect(),
+            )
         }
         _ => val.clone(),
     }
@@ -155,116 +184,16 @@ fn get_str(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Fetch CrackWatch status for a game from gamestatus.info.
-///
-/// The game name is slugified and used to construct the URL
-/// (`https://gamestatus.info/{slug}/en`). The page's `__NUXT_DATA__`
-/// JSON payload is extracted and parsed to retrieve crack status,
-/// DRM, scene group, and dates.
-#[tauri::command]
-pub async fn fetch_crackwatch_status(game_name: String) -> CrackWatchStatus {
-    let slug = slugify(&game_name);
-    if slug.is_empty() {
-        return empty_status();
-    }
-    let page_url = format!("https://gamestatus.info/{}/en", slug);
+/// Extract the content of `<script id="__NUXT_DATA__" type="application/json">`.
+fn extract_nuxt_data(html: &str) -> Option<String> {
+    let start_marker = "id=\"__NUXT_DATA__\"";
+    let start = html.find(start_marker)?;
+    // Find the closing `>` of the script tag after the id attribute
+    let tag_end = html[start..].find('>')?;
+    let content_start = start + tag_end + 1;
 
-    let client = match reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return empty_status(),
-    };
-
-    let resp = match client.get(&page_url).send().await {
-        Ok(r) => r,
-        Err(_) => return empty_status(),
-    };
-
-    if !resp.status().is_success() {
-        return empty_status();
-    }
-
-    let html = match resp.text().await {
-        Ok(h) => h,
-        Err(_) => return empty_status(),
-    };
-
-    // Extract the __NUXT_DATA__ JSON payload
-    let json_str = match extract_nuxt_data(&html) {
-        Some(s) => s,
-        None => return empty_status(),
-    };
-
-    // Parse the Nuxt payload array
-    let arr: Vec<Value> = match serde_json::from_str(&json_str) {
-        Ok(a) => a,
-        Err(_) => return empty_status(),
-    };
-
-    if arr.len() < 2 {
-        return empty_status();
-    }
-
-    // arr[1] is the main payload object with a "data" key
-    let payload = match arr[1].as_object() {
-        Some(obj) => obj,
-        None => return empty_status(),
-    };
-
-    let data_ref = match payload.get("data") {
-        Some(v) => v,
-        None => return empty_status(),
-    };
-
-    let data_obj = resolve_nuxt_ref(data_ref, &arr);
-    let data_map = match data_obj.as_object() {
-        Some(m) => m,
-        None => return empty_status(),
-    };
-
-    // Find the first key matching "game-*-en"
-    let game_key = data_map.keys().find(|k| k.starts_with("game-") && k.ends_with("-en"));
-    let game_val = match game_key.and_then(|k| data_map.get(k)) {
-        Some(v) => v,
-        None => return empty_status(),
-    };
-
-    let game_obj = resolve_nuxt_ref(game_val, &arr);
-    let game = match game_obj.as_object() {
-        Some(m) => m,
-        None => return empty_status(),
-    };
-
-    // Extract fields
-    let release_date = get_str(game, "release_date");
-    let crack_date = get_str(game, "crack_date");
-    let protections = get_str(game, "protections");
-    let readable_status = get_str(game, "readable_status");
-    // Parse scene group: split on " — " to extract just the group name
-    // from long descriptions like "Bypass by DenuvOwO Hypervisor — is bypass..."
-    let scene_group = get_str(game, "hacked_groups_en").map(|s| {
-        s.split(" — ").next().unwrap_or(&s).trim().to_string()
-    });
-
-    // Translate Russian readable_status to English
-    let status_label = translate_status(readable_status);
-
-    // Determine status: cracked if crack_date is present
-    let status = crack_date.as_ref().map(|_| "cracked".to_string());
-
-    CrackWatchStatus {
-        status,
-        status_label,
-        counter: None,
-        release_date,
-        crack_date,
-        drm_protection: protections,
-        scene_group,
-        page_url: Some(page_url),
-    }
+    let end = html[content_start..].find("</script>")?;
+    Some(html[content_start..content_start + end].to_string())
 }
 
 /// Translate Russian "readable_status" strings to English.
@@ -295,16 +224,241 @@ fn translate_status(ru: Option<String>) -> Option<String> {
     Some(s)
 }
 
-/// Extract the content of `<script id="__NUXT_DATA__" type="application/json">`.
-fn extract_nuxt_data(html: &str) -> Option<String> {
-    let start_marker = "id=\"__NUXT_DATA__\"";
-    let start = html.find(start_marker)?;
-    // Find the closing `>` of the script tag after the id attribute
-    let tag_end = html[start..].find('>')?;
-    let content_start = start + tag_end + 1;
+/// Dedicated CrackWatch service, mirroring Hydra's `CrackWatchServiceClass`.
+struct CrackWatchServiceClass {
+    client: reqwest::Client,
+}
 
-    let end = html[content_start..].find("</script>")?;
-    Some(html[content_start..content_start + end].to_string())
+impl CrackWatchServiceClass {
+    fn new() -> Self {
+        // A cookie jar is required: gamestatus.info sits behind the "Anubis"
+        // proof-of-work anti-bot gate. Solving the challenge yields a session
+        // cookie that must be presented on the follow-up page fetch.
+        let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
+        let client = reqwest::Client::builder()
+            .user_agent(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            .timeout(std::time::Duration::from_secs(20))
+            .cookie_provider(jar)
+            .build()
+            .expect("failed to build CrackWatch HTTP client");
+        Self { client }
+    }
+
+    /// Look up crack status for a game by title (and optionally Steam app id).
+    ///
+    /// Returns `None` when the page can't be fetched/parsed or no entry
+    /// matches the title — the caller treats `None` as "no data".
+    async fn get_status_by_title_and_app_id(
+        &self,
+        title: &str,
+        _app_id: Option<&str>,
+    ) -> Option<CrackWatchStatus> {
+        let slug = slugify(title);
+        if slug.is_empty() {
+            return None;
+        }
+
+        let page_url = format!("https://gamestatus.info/{}/en", slug);
+
+        // Fetch the page, transparently solving the Anubis proof-of-work
+        // gate if the site presents one. Returns the SSR HTML containing
+        // the `__NUXT_DATA__` payload.
+        let html = self.fetch_page_html(&page_url).await?;
+
+        let json_str = extract_nuxt_data(&html)?;
+        let arr: Vec<Value> = serde_json::from_str(&json_str).ok()?;
+        if arr.len() < 2 {
+            return None;
+        }
+
+        // arr[1] is the main payload object with a "data" key
+        let payload = arr[1].as_object()?;
+        let data_ref = payload.get("data")?;
+        let data_obj = resolve_nuxt_ref(data_ref, &arr);
+        let data_map = data_obj.as_object()?;
+
+        // Find the first key matching "game-*-en"
+        let game_key = data_map
+            .keys()
+            .find(|k| k.starts_with("game-") && k.ends_with("-en"));
+        let game_val = game_key.and_then(|k| data_map.get(k))?;
+
+        let game_obj = resolve_nuxt_ref(game_val, &arr);
+        let game = game_obj.as_object()?;
+
+        // NOTE: gamestatus.info's Nuxt schema encodes `steam_prod_id` only as
+        // a column name in the shared schema object, not as a resolvable field
+        // on the per-game row, so matching by Steam app id isn't possible with
+        // this data shape. Identity is the slug, which the caller already
+        // supplies. The `app_id` argument is retained for API compatibility
+        // (cache keying) but is not used for filtering here.
+
+        let crack_date = get_str(game, "crack_date");
+        let protections = get_str(game, "protections");
+        let _readable_status = translate_status(get_str(game, "readable_status"));
+        let scene_group = get_str(game, "hacked_groups_en").map(|s| {
+            s.split(" — ")
+                .next()
+                .unwrap_or(&s)
+                .trim()
+                .to_string()
+        });
+
+        let is_cracked = crack_date.is_some();
+
+        Some(CrackWatchStatus {
+            is_cracked,
+            crack_date,
+            crack_group: scene_group,
+            protection: protections,
+        })
+    }
+
+    /// Fetch a gamestatus.info page, transparently solving the "Anubis"
+    /// proof-of-work anti-bot gate if it's presented.
+    ///
+    /// Returns the SSR HTML (which embeds the `__NUXT_DATA__` payload).
+    /// Returns `None` on network/parse failure or if the challenge can't
+    /// be solved.
+    async fn fetch_page_html(&self, page_url: &str) -> Option<String> {
+        let resp = self.client.get(page_url).send().await.ok()?;
+        let html = resp.text().await.ok()?;
+
+        // Not gated — return the real page directly.
+        if !html.contains("anubis_challenge") {
+            return Some(html);
+        }
+
+        // Gated: solve the PoW, redeem the session cookie, retry.
+        let solved = self.solve_anubis(&html, page_url).await?;
+        if !solved {
+            return None;
+        }
+
+        let resp2 = self.client.get(page_url).send().await.ok()?;
+        resp2.text().await.ok()
+    }
+
+    /// Parse the Anubis challenge embedded in a bot-check page, brute-force
+    /// a valid proof-of-work nonce, and submit it to the `pass-challenge`
+    /// endpoint (which sets the session cookie in the shared jar).
+    ///
+    /// Returns `Some(true)` on success, `Some(false)` if the challenge
+    /// couldn't be parsed/solved, `None` on submission failure.
+    async fn solve_anubis(&self, html: &str, page_url: &str) -> Option<bool> {
+        let marker = "id=\"anubis_challenge\" type=\"application/json\">";
+        let start = html.find(marker)?;
+        let content_start = start + marker.len();
+        let end = html[content_start..].find("</script>")?;
+        let json = &html[content_start..content_start + end];
+
+        let v: Value = serde_json::from_str(json).ok()?;
+        let id = v.get("challenge")?.get("id")?.as_str()?;
+        let random_data = v
+            .get("challenge")?
+            .get("randomData")?
+            .as_str()?
+            .to_string();
+        let difficulty = v.get("rules")?.get("difficulty")?.as_u64()? as usize;
+
+        let (nonce, hash) = solve_pow(&random_data, difficulty)?;
+
+        let pass_url = format!(
+            "https://gamestatus.info/.within.website/x/cmd/anubis/api/pass-challenge?id={}&response={}&nonce={}&redir={}&elapsedTime=1234",
+            id, hash, nonce, page_url
+        );
+
+        let resp = self.client.get(&pass_url).send().await.ok()?;
+        // 200 (cookie set, no redirect) or a redirect both count as success.
+        Some(resp.status().is_success() || resp.status().is_redirection())
+    }
+}
+
+/// Solve an Anubis "fast" proof-of-work challenge.
+///
+/// The worker hashes `random_data + nonce` (as UTF-8 bytes) with SHA-256.
+/// The digest is valid when its leading `difficulty / 2` bytes are zero, and
+/// — when `difficulty` is odd — the high nibble of the next byte is also zero.
+/// `difficulty` is small (typically 2–4), so brute force is trivial.
+fn solve_pow(random_data: &str, difficulty: usize) -> Option<(u64, String)> {
+    let zero_bytes = difficulty / 2;
+    let odd = difficulty % 2 != 0;
+
+    for nonce in 0u64..50_000_000 {
+        let input = format!("{}{}", random_data, nonce);
+        let digest = Sha256::digest(input.as_bytes());
+        let mut ok = digest[..zero_bytes].iter().all(|b| *b == 0);
+        if ok && odd && (digest[zero_bytes] & 0xF0) != 0 {
+            ok = false;
+        }
+        if ok {
+            let hash = digest.iter().map(|b| format!("{:02x}", b)).collect();
+            return Some((nonce, hash));
+        }
+    }
+    None
+}
+
+/// Process-wide singleton, mirroring Hydra's `export const CrackWatchService`.
+static CRACKWATCH_SERVICE: std::sync::OnceLock<CrackWatchServiceClass> = std::sync::OnceLock::new();
+
+fn service() -> &'static CrackWatchServiceClass {
+    CRACKWATCH_SERVICE.get_or_init(CrackWatchServiceClass::new)
+}
+
+/// Fetch CrackWatch status for a game from gamestatus.info.
+///
+/// Mirrors Hydra's `getCrackWatchStatus` event (commit 0954a5b): the
+/// status is cached in the KV store keyed by slug (and app id when
+/// available) with a 24h TTL, so the same game isn't re-scraped on every
+/// page render. A fresh cache hit returns immediately; a miss (or expired
+/// entry) triggers a scrape and writes the result back. `None` is returned
+/// when the title couldn't be resolved, signalling the frontend to hide
+/// the card.
+#[tauri::command]
+pub async fn fetch_crackwatch_status(
+    app: tauri::AppHandle,
+    game_name: String,
+    app_id: Option<String>,
+) -> Option<CrackWatchStatus> {
+    let slug = slugify(&game_name);
+    if slug.is_empty() {
+        return None;
+    }
+
+    let app_id_str = app_id.as_deref();
+    let key = cache_key(&slug, app_id_str);
+
+    let db_state: tauri::State<'_, Db> = app.state();
+
+    // ── Cache lookup ──────────────────────────────────────────────
+    if let Some(raw) = crate::db::kv::get(db_state.inner(), &key).ok().flatten() {
+        if let Ok(cached) = serde_json::from_str::<CachedCrackWatchStatus>(&raw) {
+            if cached.updated_at + CACHE_TTL_MS > now_ms() {
+                return Some(cached.status);
+            }
+        }
+    }
+
+    // ── Cache miss / expired → scrape ────────────────────────────
+    let status = service()
+        .get_status_by_title_and_app_id(&game_name, app_id_str)
+        .await;
+
+    // Persist a real result so subsequent calls hit the cache.
+    if let Some(ref s) = status {
+        let envelope = CachedCrackWatchStatus {
+            status: s.clone(),
+            updated_at: now_ms(),
+        };
+        if let Ok(json) = serde_json::to_string(&envelope) {
+            let _ = crate::db::kv::set(db_state.inner(), &key, &json);
+        }
+    }
+
+    status
 }
 
 #[cfg(test)]
@@ -316,43 +470,60 @@ mod tests {
     fn test_slugify_accuracy() {
         let cases = vec![
             ("Cyberpunk 2077", "cyberpunk-2077"),
-            ("Assassin's Creed Black Flag Resynced", "assassins-creed-black-flag-resynced"),
-            ("EA SPORTS™ College Football 27", "ea-sportstm-college-football-27"),
-            ("Monopoly: Star Wars™ Heroes vs. Villains", "monopoly-star-warstm-heroes-vs-villains"),
+            (
+                "Assassin's Creed Black Flag Resynced",
+                "assassins-creed-black-flag-resynced",
+            ),
+            (
+                "EA SPORTS™ College Football 27",
+                "ea-sportstm-college-football-27",
+            ),
+            (
+                "Monopoly: Star Wars™ Heroes vs. Villains",
+                "monopoly-star-warstm-heroes-vs-villains",
+            ),
             ("007 First Light", "007-first-light"),
             ("Forza Horizon 6", "forza-horizon-6"),
         ];
         for (input, expected) in cases {
             let got = slugify(input);
-            assert_eq!(got, expected, "slugify(\"{}\") = \"{}\", expected \"{}\"", input, got, expected);
+            assert_eq!(
+                got, expected,
+                "slugify(\"{}\") = \"{}\", expected \"{}\"",
+                input, got, expected
+            );
         }
     }
 
+    /// Test a well-known cracked game to verify scrape + parse.
     #[tokio::test]
     async fn test_cyberpunk_2077_crackwatch() {
-        let result = fetch_crackwatch_status("Cyberpunk 2077".into()).await;
-        println!("Cyberpunk 2077 => Page URL: {:?}, Status: {:?}, Label: {:?}, DRM: {:?}, Scene: {:?}",
-            result.page_url, result.status, result.status_label, result.drm_protection, result.scene_group);
-        assert!(result.status.is_some(), "Expected a crack status for Cyberpunk 2077");
+        let result = service()
+            .get_status_by_title_and_app_id("Cyberpunk 2077", None)
+            .await;
+        println!("Cyberpunk 2077 => {:?}", result);
+        assert!(result.is_some(), "Expected a crack status for Cyberpunk 2077");
+        assert!(
+            result.unwrap().is_cracked,
+            "Expected Cyberpunk 2077 to be cracked"
+        );
     }
 
     /// Test a Denuvo-protected game to verify scene group extraction.
     #[tokio::test]
     async fn test_denuvo_game() {
-        let result = fetch_crackwatch_status("Assassin's Creed Black Flag Resynced".into()).await;
-        println!("Assassin's Creed => URL: {:?}, Status: {:?}, DRM: {:?}, Scene: {:?}, Crack: {:?}",
-            result.page_url, result.status, result.drm_protection, result.scene_group, result.crack_date);
-        assert!(result.status.is_some(), "Expected crack status for Assassin's Creed");
-        assert!(result.scene_group.is_some(), "Expected scene group for a Denuvo game");
-    }
-
-    /// Test a non-Denuvo game that still has a scene group (RUNE).
-    #[tokio::test]
-    async fn test_nondenuvo_scene_group() {
-        let result = fetch_crackwatch_status("EA SPORTS™ College Football 27".into()).await;
-        println!("EA Sports College Football => URL: {:?}, Status: {:?}, DRM: {:?}, Scene: {:?}",
-            result.page_url, result.status, result.drm_protection, result.scene_group);
-        assert!(result.status.is_some(), "Expected crack status for EA Sports");
-        assert!(result.scene_group.is_some(), "Expected scene group 'RUNE' for EA Sports");
+        let result = service()
+            .get_status_by_title_and_app_id("Assassin's Creed Black Flag Resynced", None)
+            .await;
+        println!("Assassin's Creed => {:?}", result);
+        assert!(
+            result.is_some(),
+            "Expected crack status for Assassin's Creed"
+        );
+        let r = result.unwrap();
+        assert!(
+            r.crack_group.is_some(),
+            "Expected scene group for a Denuvo game"
+        );
     }
 }

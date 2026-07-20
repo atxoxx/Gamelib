@@ -582,7 +582,7 @@ function BigScreenGamePageSpecs({ game }: { game: Game }) {
       />
 
       {/* CrackWatch status (cracked / uncracked / denuvo). */}
-      <CrackWatchCard gameName={game.name} />
+      <CrackWatchCard gameName={game.name} appId={game.steamAppId} />
     </div>
   );
 }

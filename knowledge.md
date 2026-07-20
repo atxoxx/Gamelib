@@ -74,7 +74,7 @@ Phase 1–4 of a migration that moved every JSON file under `<app_data_dir>` plu
 - **Achievements** — `achievements.rs` pulls Steam achievement lists via the Web API (string-typed `percent` from the API is parsed defensively). Cached in the `achievements` table.
 - **News** — RSS reader. `fetch_url` IPC lets the frontend bypass browser CORS; `news.rs` DAO persists the most recent read per feed.
 - **Deals** — `deals.rs` exposes `fetch_gamepass_catalog`, `fetch_isthereanydeal_deals`, `fetch_giveaways`, `open_deal_url` (opens external via opener plugin).
-- **Crackwatch** — `crackwatch::fetch_crackwatch_status` Scrapes Crackwatch for "cracked" / "uncracked" / "denuvo" status.
+- **Crackwatch** — `crackwatch::fetch_crackwatch_status(game_name, app_id?)` scrapes gamestatus.info for crack status (Hydra-style: `CrackWatchService` + 24h KV cache keyed by slug+appid, returns `CrackWatchStatus { isCracked, crackDate, crackGroup, protection }` or `null`). Rendered by `CrackWatchCard` (`CrackWatchSection` presentational + skeleton).
 - **Torrents** — `torrent_engine.rs` wraps `librqbit` (see Cargo.toml — `librqbit 8`, `default-tls`, **no** `http-api`). Upload disabled via runtime `SessionOptions`. Cleanup hook (`cleanup_extractions`) registered on the Tauri `RunEvent::Exit`.
 
 ## Style & UI conventions

@@ -898,25 +898,22 @@ export type ProtonDBTier =
 
 // ─── CrackWatch Status ──────────────────────────────────────────────────────
 
-/** CrackWatch status parsed from crackrelease.com.
- *  Fetched on-demand via the `fetch_crackwatch_status` Tauri command. */
+/** CrackWatch status scraped from gamestatus.info.
+ *
+ *  Mirrors Hydra's `CrackWatchStatus` (commit 0954a5b): an `isCracked`
+ *  boolean plus the supporting detail fields. `null` detail fields mean
+ *  "unknown" — the card simply omits that row. Fetched on-demand via the
+ *  `fetch_crackwatch_status` Tauri command, which returns `null` when the
+ *  title couldn't be resolved. */
 export interface CrackWatchStatus {
-  /** "cracked" | "uncracked" | null — null when the page wasn't found or couldn't be parsed. */
-  status: "cracked" | "uncracked" | null;
-  /** Human-readable status label (e.g. "CRACKED", "UNCRACKED"). */
-  statusLabel: string | null;
-  /** e.g. "0 DAYS AND COUNTING" or "X DAYS AFTER RELEASE". */
-  counter: string | null;
-  /** Human-readable release date. */
-  releaseDate: string | null;
-  /** Crack date (e.g. "Jul 9, 2026" or "TBD"). "TBD" when not yet cracked. */
+  /** Whether the game has been cracked. Drives the CRACKED/UNCRACKED badge. */
+  isCracked: boolean;
+  /** Crack date (e.g. "2026-07-09") or null when uncracked / unknown. */
   crackDate: string | null;
-  /** DRM protection (e.g. "Denuvo", "Steam", "Arxan"). */
-  drmProtection: string | null;
-  /** Scene group name (e.g. "CODEX", "CPY", "EMPRESS" or "TBD"). */
-  sceneGroup: string | null;
-  /** URL of the crackrelease page. */
-  pageUrl: string | null;
+  /** Scene group / bypass method (e.g. "RUNE", "EMPRESS") or null. */
+  crackGroup: string | null;
+  /** DRM protection (e.g. "Denuvo", "Steam") or null. */
+  protection: string | null;
 }
 
 /** Extract a human-readable game name from an executable file path. */
