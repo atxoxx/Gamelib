@@ -205,6 +205,25 @@ pub struct CachedSource {
     pub fetched_at: u64,
 }
 
+/// A single failed URL from a bulk add, with the error message.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkAddError {
+    pub url: String,
+    pub error: String,
+}
+
+/// Aggregated result of a bulk source add. Lets the frontend show a
+/// summary ("added N, skipped M, failed K") instead of failing the
+/// whole batch on a single bad link.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkAddResult {
+    pub added: Vec<SourceLink>,
+    pub skipped: Vec<String>,
+    pub failed: Vec<BulkAddError>,
+}
+
 /// A matched download for the DownloadModal. The frontend renders
 /// these directly; `match_score` is a 0–1 value the UI uses to
 /// sort / dim sub-matches.
@@ -344,6 +363,45 @@ impl SourceManager {
             enabled: true,
             last_fetched: Some(now_secs),
             game_count: final_count,
+        })
+    }
+
+    /// Add multiple sources at once via the Hydra API. Each URL is
+    /// processed independently; failures are reported per-URL so a
+    /// single bad link doesn't abort the whole batch. Already-added
+    /// URLs (duplicate) are reported as skipped rather than errored.
+    pub async fn add_sources_bulk(
+        &self,
+        urls: Vec<String>,
+        names: Vec<String>,
+    ) -> Result<BulkAddResult, String> {
+        let mut added: Vec<SourceLink> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+        let mut failed: Vec<BulkAddError> = Vec::new();
+
+        for (i, raw_url) in urls.into_iter().enumerate() {
+            let url = raw_url.trim().to_string();
+            if url.is_empty() {
+                continue;
+            }
+            let name = names.get(i).cloned().unwrap_or_default();
+            let url_clone = url.clone();
+            match self.add_source(url, name).await {
+                Ok(source) => added.push(source),
+                Err(e) => {
+                    if e.contains("already been added") {
+                        skipped.push(url_clone);
+                    } else {
+                        failed.push(BulkAddError { url: url_clone, error: e });
+                    }
+                }
+            }
+        }
+
+        Ok(BulkAddResult {
+            added,
+            skipped,
+            failed,
         })
     }
 
@@ -1262,6 +1320,15 @@ pub async fn sources_add(
     name: String,
 ) -> Result<SourceLink, String> {
     state.add_source(url, name).await
+}
+
+#[tauri::command]
+pub async fn sources_add_bulk(
+    state: tauri::State<'_, Arc<SourceManager>>,
+    urls: Vec<String>,
+    names: Vec<String>,
+) -> Result<BulkAddResult, String> {
+    state.add_sources_bulk(urls, names).await
 }
 
 #[tauri::command]

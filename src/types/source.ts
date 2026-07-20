@@ -89,3 +89,22 @@ export interface MatchedDownload {
   uploadDate: string | null;
   matchScore: number;
 }
+
+/**
+ * One URL that failed during a bulk add, with the reason.
+ */
+export interface BulkAddError {
+  url: string;
+  error: string;
+}
+
+/**
+ * Aggregated result of `sources_add_bulk`. The frontend shows a
+ * summary ("added N, skipped M, failed K") and lists any failures so
+ * a single bad link doesn't abort the whole batch.
+ */
+export interface BulkAddResult {
+  added: SourceLink[];
+  skipped: string[];
+  failed: BulkAddError[];
+}

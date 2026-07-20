@@ -32,6 +32,7 @@ export default function SourceManager() {
   const {
     sources,
     addSource,
+    addSourceBulk,
     removeSource,
     toggleSource,
     refreshSource,
@@ -40,8 +41,12 @@ export default function SourceManager() {
   const { showToast } = useToast();
 
   const [showAddForm, setShowAddForm] = useState(false);
+  // `addMode` switches between the single-URL form and the bulk
+  // textarea ("one URL per line"). `bulk` is the raw textarea value.
+  const [addMode, setAddMode] = useState<"single" | "bulk">("single");
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
+  const [bulkText, setBulkText] = useState("");
   // `adding` is true while the Hydra API call is in flight.
   const [adding, setAdding] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -50,6 +55,15 @@ export default function SourceManager() {
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(
     () => new Set(),
   );
+
+  // Reset the form fields and hide the panel.
+  const resetAddForm = useCallback(() => {
+    setShowAddForm(false);
+    setAddMode("single");
+    setNewUrl("");
+    setNewName("");
+    setBulkText("");
+  }, []);
 
   const handleAdd = useCallback(async () => {
     const url = newUrl.trim();
@@ -68,16 +82,70 @@ export default function SourceManager() {
     setAdding(true);
     try {
       await addSource(url, newName);
-      setNewUrl("");
-      setNewName("");
-      setShowAddForm(false);
+      resetAddForm();
     } catch (err) {
       const msg = String(err);
       showToast(`Add source failed: ${msg}`, "error");
     } finally {
       setAdding(false);
     }
-  }, [newUrl, newName, addSource, showToast]);
+  }, [newUrl, newName, addSource, showToast, resetAddForm]);
+
+  // Parse the bulk textarea into a de-duplicated list of valid URLs.
+  const parseBulkUrls = useCallback((text: string): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of text.split(/\r?\n/)) {
+      const url = raw.trim();
+      if (!url) continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+    }
+    return out;
+  }, []);
+
+  const handleBulkAdd = useCallback(async () => {
+    const urls = parseBulkUrls(bulkText);
+    if (urls.length === 0) {
+      showToast("Paste at least one source URL", "error");
+      return;
+    }
+    const bad = urls.filter(
+      (u) => !u.startsWith("http://") && !u.startsWith("https://"),
+    );
+    if (bad.length > 0) {
+      showToast(
+        `Every URL must start with http:// or https:// (${bad.length} invalid)`,
+        "error",
+      );
+      return;
+    }
+    setAdding(true);
+    try {
+      const result = await addSourceBulk(urls);
+      const { added, skipped, failed } = result;
+      if (added.length > 0) {
+        showToast(`Added ${added.length} source${added.length === 1 ? "" : "s"}`, "success");
+      }
+      if (skipped.length > 0) {
+        showToast(`Skipped ${skipped.length} duplicate URL${skipped.length === 1 ? "" : "s"}`, "info");
+      }
+      if (failed.length > 0) {
+        showToast(
+          `${failed.length} source${failed.length === 1 ? "" : "s"} failed to add`,
+          "error",
+        );
+      }
+      if (added.length > 0 || skipped.length > 0) {
+        resetAddForm();
+      }
+    } catch (err) {
+      showToast(`Bulk add failed: ${String(err)}`, "error");
+    } finally {
+      setAdding(false);
+    }
+  }, [bulkText, parseBulkUrls, addSourceBulk, showToast, resetAddForm]);
 
   const handleRefreshOne = useCallback(
     async (id: string) => {
@@ -194,7 +262,7 @@ export default function SourceManager() {
               )
             }
           >
-            {showAddForm ? "Cancel" : "Add Source"}
+            {showAddForm ? "Close" : "Add Source"}
           </Button>
         </div>
       </div>
@@ -205,30 +273,68 @@ export default function SourceManager() {
           className="src-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void handleAdd();
+            if (addMode === "bulk") void handleBulkAdd();
+            else void handleAdd();
           }}
         >
-          <div className="src-form-row">
-            <input
-              className="src-form-input"
-              type="url"
-              placeholder="https://example.com/sources/my-source.json"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              autoFocus
-              required
-              aria-label="Source URL"
-            />
-            <input
-              className="src-form-input"
-              type="text"
-              placeholder="Display name (optional)"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              style={{ maxWidth: "200px" }}
-              aria-label="Source name"
-            />
+          {/* Mode toggle: single URL vs. bulk paste. */}
+          <div className="src-form-modes" role="tablist" aria-label="Add source mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={addMode === "single"}
+              className={`src-mode-btn${addMode === "single" ? " active" : ""}`}
+              onClick={() => setAddMode("single")}
+            >
+              Single link
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={addMode === "bulk"}
+              className={`src-mode-btn${addMode === "bulk" ? " active" : ""}`}
+              onClick={() => setAddMode("bulk")}
+            >
+              Bulk add
+            </button>
           </div>
+
+          {addMode === "single" ? (
+            <div className="src-form-row">
+              <input
+                className="src-form-input"
+                type="url"
+                placeholder="https://example.com/sources/my-source.json"
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                autoFocus
+                required
+                aria-label="Source URL"
+              />
+              <input
+                className="src-form-input"
+                type="text"
+                placeholder="Display name (optional)"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                style={{ maxWidth: "200px" }}
+                aria-label="Source name"
+              />
+            </div>
+          ) : (
+            <textarea
+              className="src-form-textarea"
+              rows={6}
+              placeholder={"https://example.com/sources/source-1.json\nhttps://example.com/sources/source-2.json\nhttps://example.com/sources/source-3.json"}
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              autoFocus
+              spellCheck={false}
+              aria-label="Bulk source URLs"
+              style={{ width: "100%", resize: "vertical", minHeight: "120px", fontFamily: "SFMono-Regular, Consolas, monospace" }}
+            />
+          )}
+
           <p className="src-form-hint">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="12" cy="12" r="10" />
@@ -236,33 +342,52 @@ export default function SourceManager() {
               <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
             <span>
-              Clicking <strong>Add Source</strong> registers the URL
-              with the Hydra API, which fetches and parses the source
-              JSON. The downloads list is cached locally for offline use.
+              {addMode === "bulk" ? (
+                <>
+                  Paste one source URL per line. Each valid link is
+                  registered with the Hydra API independently — duplicates
+                  are skipped and a single bad link won&apos;t stop the
+                  rest. All sources are cached locally for offline use.
+                </>
+              ) : (
+                <>
+                  Clicking <strong>Add Source</strong> registers the URL
+                  with the Hydra API, which fetches and parses the source
+                  JSON. The downloads list is cached locally for offline use.
+                </>
+              )}
             </span>
           </p>
           <div className="src-form-actions">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
-                setShowAddForm(false);
-                setNewUrl("");
-                setNewName("");
-              }}
+              onClick={resetAddForm}
               disabled={adding}
             >
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              type="submit"
-              disabled={!newUrl.trim() || adding}
-              isLoading={adding}
-            >
-              Add Source
-            </Button>
+            {addMode === "bulk" ? (
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                disabled={!bulkText.trim() || adding}
+                isLoading={adding}
+              >
+                {adding ? "Adding…" : "Add All"}
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                disabled={!newUrl.trim() || adding}
+                isLoading={adding}
+              >
+                Add Source
+              </Button>
+            )}
           </div>
         </form>
       )}

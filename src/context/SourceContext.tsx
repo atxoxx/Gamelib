@@ -28,7 +28,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "./ToastContext";
-import type { MatchedDownload, SourceLink } from "../types/source";
+import type { BulkAddResult, MatchedDownload, SourceLink } from "../types/source";
 
 interface SourceContextValue {
   /** Current list of sources, in user-added order. */
@@ -39,6 +39,9 @@ interface SourceContextValue {
    *  `/download-sources` endpoint, which fetches + parses the source
    *  JSON and returns the full download data. */
   addSource: (url: string, name: string) => Promise<SourceLink>;
+  /** Add many sources at once (one URL per line). Returns a summary
+   *  of which links were added, skipped (duplicates), or failed. */
+  addSourceBulk: (urls: string[]) => Promise<BulkAddResult>;
   removeSource: (id: string) => Promise<void>;
   toggleSource: (id: string) => Promise<void>;
   refreshSource: (id: string) => Promise<void>;
@@ -105,6 +108,20 @@ export function SourceProvider({ children }: { children: ReactNode }) {
       setSources((prev) => prev.filter((s) => s.id !== id));
       // Don't toast — the SourceManager UI is the only caller and it
       // renders its own success indication (the row disappears).
+    },
+    [],
+  );
+
+  const addSourceBulk = useCallback(
+    async (urls: string[]): Promise<BulkAddResult> => {
+      const result = await invoke<BulkAddResult>(
+        "sources_add_bulk",
+        { urls, names: [] },
+      );
+      if (Array.isArray(result.added) && result.added.length > 0) {
+        setSources((prev) => [...prev, ...result.added]);
+      }
+      return result;
     },
     [],
   );
@@ -179,6 +196,7 @@ export function SourceProvider({ children }: { children: ReactNode }) {
       sources,
       loading,
       addSource,
+      addSourceBulk,
       removeSource,
       toggleSource,
       refreshSource,
@@ -189,6 +207,7 @@ export function SourceProvider({ children }: { children: ReactNode }) {
       sources,
       loading,
       addSource,
+      addSourceBulk,
       removeSource,
       toggleSource,
       refreshSource,
