@@ -30,6 +30,7 @@ use super::pool::Db;
 pub fn insert(
     db: &Db,
     game_id: &str,
+    game_name: &str,
     started_at_ms: u64,
     ended_at_ms: u64,
     elapsed_seconds: u64,
@@ -42,11 +43,12 @@ pub fn insert(
     let conn = db.conn().map_err(|e| format!("sessions conn: {e}"))?;
     conn.execute(
         "INSERT INTO sessions(
-            game_id, started_at, ended_at, elapsed_seconds,
+            game_id, game_name, started_at, ended_at, elapsed_seconds,
             avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
             game_id,
+            game_name,
             started_at_ms as i64,
             ended_at_ms as i64,
             elapsed_seconds as i64,
@@ -68,10 +70,10 @@ pub fn list_recent(db: &Db, limit: u32) -> Result<Vec<SessionRecord>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, game_id, started_at, ended_at, elapsed_seconds,
-                    avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json
-               FROM sessions
-              ORDER BY started_at DESC
-              LIMIT ?1",
+                    avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json, game_name
+                FROM sessions
+               ORDER BY started_at DESC
+               LIMIT ?1",
         )
         .map_err(|e| format!("sessions list prepare: {e}"))?;
     let rows = stmt
@@ -87,6 +89,7 @@ pub fn list_recent(db: &Db, limit: u32) -> Result<Vec<SessionRecord>, String> {
                 avg_gpu: r.get::<_, Option<f64>>(7)?.map(|f| f as f32),
                 avg_ram: r.get::<_, Option<f64>>(8)?.map(|f| f as f32),
                 metrics_json: r.get(9)?,
+                game_name: r.get(10)?,
             })
         })
         .map_err(|e| format!("sessions list query: {e}"))?;
@@ -103,10 +106,10 @@ pub fn list_for_game(db: &Db, game_id: &str) -> Result<Vec<SessionRecord>, Strin
     let mut stmt = conn
         .prepare(
             "SELECT id, game_id, started_at, ended_at, elapsed_seconds,
-                    avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json
-               FROM sessions
-              WHERE game_id = ?1
-              ORDER BY started_at DESC",
+                    avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json, game_name
+                FROM sessions
+               WHERE game_id = ?1
+               ORDER BY started_at DESC",
         )
         .map_err(|e| format!("sessions list_for_game prepare: {e}"))?;
     let rows = stmt
@@ -122,6 +125,7 @@ pub fn list_for_game(db: &Db, game_id: &str) -> Result<Vec<SessionRecord>, Strin
                 avg_gpu: r.get::<_, Option<f64>>(7)?.map(|f| f as f32),
                 avg_ram: r.get::<_, Option<f64>>(8)?.map(|f| f as f32),
                 metrics_json: r.get(9)?,
+                game_name: r.get(10)?,
             })
         })
         .map_err(|e| format!("sessions list_for_game query: {e}"))?;
@@ -141,10 +145,61 @@ pub fn count_all(db: &Db) -> Result<u64, String> {
     Ok(n.max(0) as u64)
 }
 
+/// Return every session across all games (newest first). Used by the
+/// frontend Activity dashboard, which keeps the full history in memory
+/// for aggregation. Pagination is unnecessary here — the dataset is
+/// bounded by real playtime and SQLite returns it in well under a ms.
+pub fn list_all(db: &Db) -> Result<Vec<SessionRecord>, String> {
+    let conn = db.conn().map_err(|e| format!("sessions conn: {e}"))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, game_id, started_at, ended_at, elapsed_seconds,
+                    avg_fps, avg_cpu, avg_gpu, avg_ram, metrics_json, game_name
+                FROM sessions
+               ORDER BY started_at DESC",
+        )
+        .map_err(|e| format!("sessions list_all prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(SessionRecord {
+                id: r.get::<_, i64>(0)?,
+                game_id: r.get(1)?,
+                started_at_ms: r.get::<_, i64>(2)? as u64,
+                ended_at_ms: r.get::<_, Option<i64>>(3)?.map(|n| n as u64),
+                elapsed_seconds: r.get::<_, Option<i64>>(4)?.map(|n| n as u64),
+                avg_fps: r.get::<_, Option<f64>>(5)?.map(|f| f as f32),
+                avg_cpu: r.get::<_, Option<f64>>(6)?.map(|f| f as f32),
+                avg_gpu: r.get::<_, Option<f64>>(7)?.map(|f| f as f32),
+                avg_ram: r.get::<_, Option<f64>>(8)?.map(|f| f as f32),
+                metrics_json: r.get(9)?,
+                game_name: r.get(10)?,
+            })
+        })
+        .map_err(|e| format!("sessions list_all query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("sessions row: {e}"))?);
+    }
+    Ok(out)
+}
+
+/// Delete a single session row by its primary key. Returns the number
+/// of rows removed (0 if the id didn't exist).
+pub fn delete(db: &Db, id: i64) -> Result<u64, String> {
+    let conn = db.conn().map_err(|e| format!("sessions conn: {e}"))?;
+    let n = conn
+        .execute("DELETE FROM sessions WHERE id = ?1", params![id])
+        .map_err(|e| format!("sessions delete: {e}"))?;
+    Ok(n as u64)
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionRecord {
     pub id: i64,
+    #[serde(rename = "gameId")]
     pub game_id: String,
+    #[serde(rename = "gameName", skip_serializing_if = "Option::is_none")]
+    pub game_name: Option<String>,
     #[serde(rename = "startedAt")]
     pub started_at_ms: u64,
     #[serde(rename = "endedAt", skip_serializing_if = "Option::is_none")]

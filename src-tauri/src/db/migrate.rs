@@ -115,11 +115,11 @@ mod tests {
     fn fresh_db_runs_v1_and_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(dir.path()).unwrap();
-        // After the v2 migration was added (GOG Galaxy integration),
-        // a fresh DB ends up at "v2" rather than "v1" — the assertion
-        // reflects the current head. Re-running `run_migrations` is
-        // still a no-op (the loop early-returns when
-        // `current == target`), so the test stays idempotent.
+        // After the v4 migration was added (sessions.game_name), a fresh
+        // DB ends up at "v4" — the assertion reflects the current head.
+        // Re-running `run_migrations` is still a no-op (the loop
+        // early-returns when `current == target`), so the test stays
+        // idempotent.
         run_migrations(&db).unwrap();
         run_migrations(&db).unwrap(); // idempotent
 
@@ -131,6 +131,6 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "v2");
+        assert_eq!(v, "v4");
     }
 }

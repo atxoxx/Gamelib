@@ -34,6 +34,11 @@ pub const V2_SCHEMA: &str = include_str!("schema_v2.sql");
 /// failed" the second time a source was added).
 pub const V3_SCHEMA: &str = include_str!("schema_v3.sql");
 
+/// DDL for v4 of the schema. Adds a `game_name` column to `sessions`
+/// so the Activity dashboard can group / rank sessions by name without
+/// a JOIN back to `games` (see `schema_v4.sql`).
+pub const V4_SCHEMA: &str = include_str!("schema_v4.sql");
+
 /// Bootstrap the schema-meta table on a fresh DB. This table is
 /// itself part of v1, but we need to read `PRAGMA user_version`
 /// *before* applying v1, so bootstrap is logically a separate step.
@@ -57,4 +62,9 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 /// COLUMN`, never by editing the existing schema file's
 /// `CREATE TABLE` clause (existing installs would never see the
 /// edit because their `schema_version` is already past v1).
-pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[("v1", V1_SCHEMA), ("v2", V2_SCHEMA), ("v3", V3_SCHEMA)];
+pub const SCHEMA_VERSIONS: &[(&str, &str)] = &[
+    ("v1", V1_SCHEMA),
+    ("v2", V2_SCHEMA),
+    ("v3", V3_SCHEMA),
+    ("v4", V4_SCHEMA),
+];

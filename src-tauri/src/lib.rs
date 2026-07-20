@@ -1414,12 +1414,11 @@ fn save_text_file(file_path: String, contents: String) -> Result<(), String> {
          .map_err(|e| format!("Failed to write file: {}", e))
 }
 
-/// Load the session-history blob from `<app_data_dir>/sessions.json`.
-///
-/// Replaces the frontend's previous `localStorage["gamelib-sessions"]`
-/// store so the canonical session history lives in the app data directory
-/// right beside `gamelib.db`. Returns an empty JSON array when no file
-/// exists yet (fresh install / first launch).
+/// Migration helper: read the legacy `<app_data_dir>/sessions.json`
+/// blob (the pre-SQLite session store). Returns "[]" when the file does
+/// not exist. The frontend imports any rows found here into the
+/// `sessions` table on first launch after the migration, then stops
+/// touching the file.
 #[tauri::command]
 fn load_sessions(app: tauri::AppHandle) -> Result<String, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1430,14 +1429,53 @@ fn load_sessions(app: tauri::AppHandle) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("load_sessions: {e}"))
 }
 
-/// Persist the session-history blob to `<app_data_dir>/sessions.json`.
+/// Return every finished session from the SQLite `sessions` table
+/// (newest first). This is the canonical session history the Activity
+/// dashboard reads — no JSON file, crash-safe, append-only.
 #[tauri::command]
-fn save_sessions(app: tauri::AppHandle, json: String) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("save_sessions mkdir: {e}"))?;
-    let path = dir.join("sessions.json");
-    std::fs::write(&path, json).map_err(|e| format!("save_sessions write: {e}"))?;
-    Ok(())
+fn get_sessions(app: tauri::AppHandle) -> Result<Vec<db::sessions::SessionRecord>, String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::sessions::list_all(db_state.inner())
+}
+
+/// Delete a single session row by id (Activity dashboard "remove").
+#[tauri::command]
+fn delete_session(app: tauri::AppHandle, id: i64) -> Result<u64, String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    db::sessions::delete(db_state.inner(), id)
+}
+
+/// Insert one session row. Used by the one-time migration that imports
+/// the legacy `sessions.json` history into SQLite; not called during
+/// normal play (the watcher's `finish_session` is the live writer).
+#[tauri::command]
+fn insert_session(
+    app: tauri::AppHandle,
+    game_id: String,
+    game_name: String,
+    started_at_ms: u64,
+    elapsed_seconds: u64,
+    avg_fps: Option<f32>,
+    avg_cpu: Option<f32>,
+    avg_gpu: Option<f32>,
+    avg_ram: Option<f32>,
+    metrics_json: Option<String>,
+) -> Result<i64, String> {
+    let db_state: tauri::State<'_, db::Db> = app.state();
+    let ended_at_ms = started_at_ms.saturating_add(elapsed_seconds.saturating_mul(1000));
+    db::sessions::insert(
+        db_state.inner(),
+        &game_id,
+        &game_name,
+        started_at_ms,
+        ended_at_ms,
+        elapsed_seconds,
+        avg_fps,
+        avg_cpu,
+        avg_gpu,
+        avg_ram,
+        metrics_json.as_deref(),
+    )
 }
 
 fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
@@ -2461,7 +2499,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, load_sessions, save_sessions, debug_mahm_entries, get_system_ram_gb, get_system_info, get_metrics_config, set_metrics_config, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, load_sessions, get_sessions, delete_session, insert_session, debug_mahm_entries, get_system_ram_gb, get_system_info, get_metrics_config, set_metrics_config, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,

@@ -39,11 +39,92 @@ interface ActivityContextType {
   getGameSessions: (gameId: string) => GameSession[];
   getAllStats: () => ActivityStats;
   getGameStats: (gameId: string) => ActivityStats;
-  recordSession: (gameId: string, gameName: string, durationMin: number, metrics?: SessionMetrics) => void;
+  recordSession: () => void;
   deleteSession: (sessionId: string) => void;
 }
 
 const ActivityContext = createContext<ActivityContextType | null>(null);
+
+// Shape of a `sessions` table row as returned by the backend. Mirrors
+// the Rust `db::sessions::SessionRecord` serde mapping.
+interface DbSessionRecord {
+  id: number;
+  gameId: string;
+  gameName?: string | null;
+  startedAt: number;
+  endedAt?: number | null;
+  elapsedSeconds?: number | null;
+  avgFps?: number | null;
+  avgCpu?: number | null;
+  avgGpu?: number | null;
+  avgRam?: number | null;
+  metricsJson?: string | null;
+}
+
+// Map a SQLite session row to the frontend GameSession shape. Returns
+// null for sub-minute sessions, which the old JSON store also excluded
+// (recordSession dropped anything under 1 minute).
+function mapDbSession(r: DbSessionRecord): GameSession | null {
+  const elapsed = r.elapsedSeconds ?? 0;
+  if (elapsed < 60) return null;
+  const date = r.endedAt
+    ? new Date(r.endedAt).toISOString()
+    : new Date(r.startedAt).toISOString();
+  const durationMin = Math.round(elapsed / 60);
+  let metrics: SessionMetrics | undefined;
+  if (r.metricsJson) {
+    try {
+      metrics = sanitizeSessionMetrics(JSON.parse(r.metricsJson) as SessionMetrics);
+    } catch {
+      // Fall through to reconstructing from the average columns.
+    }
+  }
+  if (!metrics && r.avgFps != null) {
+    metrics = {
+      avgFps: r.avgFps,
+      avgCpuUsage: r.avgCpu ?? 0,
+      avgGpuUsage: r.avgGpu ?? 0,
+      avgRamUsage: r.avgRam ?? 0,
+      avgCpuTemp: 0,
+      avgGpuTemp: 0,
+      minFps: 0,
+      maxFps: 0,
+      resolution: "",
+      samples: [],
+    };
+  }
+  return {
+    id: String(r.id),
+    gameId: r.gameId,
+    gameName: r.gameName ?? "",
+    date,
+    durationMin,
+    metrics,
+  };
+}
+
+// Import one legacy GameSession (from the old sessions.json / localStorage
+// store) into the SQLite sessions table. Best-effort: a failure is logged
+// and skipped so one bad row doesn't abort the whole migration.
+async function importLegacySession(s: GameSession): Promise<void> {
+  const startedAtMs = Date.parse(s.date) - s.durationMin * 60_000;
+  const m = s.metrics;
+  try {
+    await invoke("insert_session", {
+      gameId: s.gameId,
+      gameName: s.gameName,
+      startedAtMs: startedAtMs > 0 ? startedAtMs : Date.parse(s.date),
+      elapsedSeconds: s.durationMin * 60,
+      avgFps: m?.avgFps ?? null,
+      avgCpu: m?.avgCpuUsage ?? null,
+      avgGpu: m?.avgGpuUsage ?? null,
+      avgRam: m?.avgRamUsage ?? null,
+      metricsJson: m ? JSON.stringify(m) : null,
+    });
+  } catch (e) {
+    console.error("Failed to import legacy session:", e);
+  }
+}
 
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const { games } = useGames();
@@ -56,48 +137,69 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   // Keep a ref to selectedGpu so the event listener always sees the latest value
   const selectedGpuRef = useRef<GpuInfo | null>(null);
 
-  // Initialize sessions from localStorage and detect GPUs on mount
+  // Initialize sessions from SQLite and detect GPUs on mount
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    // Load persisted sessions from the app data directory
-    // (<app_data_dir>/sessions.json) instead of localStorage, so the
-    // canonical session history lives on disk beside gamelib.db. Each
-    // session's metrics are sanitized on read so legacy data with poisoned
-    // FPS fields (maxFps = u32::MAX from older RTSS builds) doesn't drive
-    // downstream consumers into the 0x33/…/0xFF banding. A one-time
-    // migration pulls any existing localStorage history into the file so
-    // users don't lose their old sessions.
+    // Load the canonical session history from the SQLite `sessions` table
+    // (written atomically by the backend's `finish_session` on every game
+    // exit). Each session's metrics are sanitized on read so legacy data
+    // with poisoned FPS fields (maxFps = u32::MAX from older RTSS builds)
+    // doesn't drive the charts into the 0x33/…/0xFF banding.
+    //
+    // One-time migration: if the DB is empty (fresh install or an upgrade
+    // from the old `sessions.json` store), import any legacy history from
+    // that file and the old `localStorage["gamelib-sessions"]` copy, then
+    // stop touching them. We only import when the DB is empty to avoid
+    // duplicating sessions the backend already recorded in parallel.
     const loadSessions = async () => {
       try {
-        const raw = (await invoke<string>("load_sessions")) || "[]";
-        const parsed: GameSession[] = JSON.parse(raw);
-        const cleaned = parsed.map((s) =>
-          s.metrics ? { ...s, metrics: sanitizeSessionMetrics(s.metrics) } : s
-        );
-        if (cleaned.length > 0) {
-          setSessions(cleaned);
+        const records: DbSessionRecord[] = await invoke("get_sessions");
+        const mapped = records
+          .map(mapDbSession)
+          .filter((s): s is GameSession => s !== null);
+        if (mapped.length > 0) {
+          setSessions(mapped);
           return;
         }
       } catch {
-        // Corrupt app-data file — fall through to migration / fresh start.
+        // DB read failed — fall through to migration / fresh start.
       }
-      const legacy = localStorage.getItem("gamelib-sessions");
-      if (legacy) {
-        try {
-          const parsed: GameSession[] = JSON.parse(legacy);
-          const cleaned = parsed.map((s) =>
-            s.metrics ? { ...s, metrics: sanitizeSessionMetrics(s.metrics) } : s
-          );
-          setSessions(cleaned);
-          // Persist the migrated history to the app folder and drop the
-          // localStorage copy so we never read from two sources.
-          persistSessions(cleaned);
-        } catch {
-          // Corrupt legacy data — start fresh.
+
+      const legacy: GameSession[] = [];
+      try {
+        const raw = (await invoke<string>("load_sessions")) || "[]";
+        const parsed: GameSession[] = JSON.parse(raw);
+        if (Array.isArray(parsed)) legacy.push(...parsed);
+      } catch {
+        // Corrupt legacy file — ignore.
+      }
+      if (legacy.length === 0) {
+        const ls = localStorage.getItem("gamelib-sessions");
+        if (ls) {
+          try {
+            const parsed: GameSession[] = JSON.parse(ls);
+            if (Array.isArray(parsed)) legacy.push(...parsed);
+          } catch {
+            // Corrupt legacy data — ignore.
+          }
+        }
+      }
+      if (legacy.length > 0) {
+        for (const s of legacy) {
+          await importLegacySession(s);
         }
         localStorage.removeItem("gamelib-sessions");
+        try {
+          const records: DbSessionRecord[] = await invoke("get_sessions");
+          const mapped = records
+            .map(mapDbSession)
+            .filter((s): s is GameSession => s !== null);
+          setSessions(mapped);
+        } catch {
+          // Leave empty if the reload fails.
+        }
       }
     };
     loadSessions();
@@ -157,39 +259,26 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     selectedGpuRef.current = selectedGpu;
   }, [selectedGpu]);
 
-  // Persist sessions to <app_data_dir>/sessions.json (file on disk beside
-  // gamelib.db) instead of localStorage. Fire-and-forget: a failed write
-  // logs but never blocks the in-memory state update.
-  const persistSessions = useCallback(async (s: GameSession[]) => {
+  // Reload the canonical session history from SQLite. The backend's
+  // `finish_session` has already committed the new row before the
+  // `game-exited` event fires, so a reload picks it up atomically —
+  // no client-side JSON write, no risk of a truncated file.
+  const reloadSessions = useCallback(async () => {
     try {
-      await invoke("save_sessions", { json: JSON.stringify(s) });
+      const records: DbSessionRecord[] = await invoke("get_sessions");
+      const mapped = records
+        .map(mapDbSession)
+        .filter((s): s is GameSession => s !== null);
+      setSessions(mapped);
     } catch (e) {
-      console.error("Failed to persist sessions:", e);
+      console.error("Failed to reload sessions:", e);
     }
   }, []);
 
-  const recordSession = useCallback(
-    (gameId: string, gameName: string, durationMin: number, metrics?: SessionMetrics) => {
-      // Defence-in-depth: any future Rust regression that sends a poisoned
-      // SessionMetrics (e.g. maxFps = u32::MAX before the RTSS reader
-      // tightened its bounds) is sanitised at the write point so persisted
-      // localStorage stays clean for the next mount.
-      const newSession: GameSession = {
-        id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        gameId,
-        gameName,
-        date: new Date().toISOString(),
-        durationMin,
-        metrics: metrics ? sanitizeSessionMetrics(metrics) : undefined,
-      };
-      setSessions((prev) => {
-        const updated = [newSession, ...prev];
-        persistSessions(updated);
-        return updated;
-      });
-    },
-    [persistSessions]
-  );
+  const recordSession = useCallback(async () => {
+    // The backend is the sole writer; just refresh from the DB.
+    await reloadSessions();
+  }, [reloadSessions]);
 
   // ─── Refs for the game-exited listener ──────────────────────────────────
   // The Tauri event listener subscribes once on mount. Using refs ensures
@@ -207,14 +296,14 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   // ─── Listen for game-exited events to automatically record sessions ──────
   useEffect(() => {
     const unlisten = listen<GameExitEvent>("game-exited", (event) => {
-      const { gameId, elapsedSeconds, metrics } = event.payload;
+      const { gameId, elapsedSeconds } = event.payload;
       const game = gamesRef.current.find((g) => g.id === gameId);
       if (!game) return;
 
       const durationMin = Math.round(elapsedSeconds / 60);
       if (durationMin < 1) return; // Ignore sessions shorter than 1 minute
 
-      recordSessionRef.current(gameId, game.name, durationMin, metrics);
+      recordSessionRef.current();
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -223,14 +312,21 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   }, []); // Subscribe once — refs keep values fresh
 
   const deleteSession = useCallback(
-    (sessionId: string) => {
-      setSessions((prev) => {
-        const updated = prev.filter((s) => s.id !== sessionId);
-        persistSessions(updated);
-        return updated;
-      });
+    async (sessionId: string) => {
+      // Optimistic local removal; reconcile from the DB.
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      try {
+        const id = parseInt(sessionId, 10);
+        if (!Number.isNaN(id)) {
+          await invoke("delete_session", { id });
+        }
+      } catch (e) {
+        console.error("Failed to delete session:", e);
+        // Reconcile so the UI reflects the real DB state.
+        await reloadSessions();
+      }
     },
-    [persistSessions]
+    [reloadSessions]
   );
 
   const getGameSessions = useCallback(

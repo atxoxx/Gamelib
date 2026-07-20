@@ -549,6 +549,7 @@ impl GameWatcher {
             let _ = db::sessions::insert(
                 &self.db,
                 game_id,
+                &session.game_name,
                 started_at_ms,
                 finished_at_ms,
                 elapsed,
