@@ -8,6 +8,7 @@ import { useSettings } from "../../context/SettingsContext";
 import { useToast } from "../../context/ToastContext";
 import { type Game, type GameSession, formatPlayTime } from "../../types/game";
 import { formatTemp, toDisplayTemps, tempMinY, tempMaxY, tempThreshold } from "../../utils/temp";
+import { buildTimelineFromSessions, buildSingleSessionSeries } from "../../utils/perfSamples";
 import BarChart from "../charts/BarChart";
 import LineChart from "../charts/LineChart";
 import { ConfirmModal } from "../ui/ConfirmModal";
@@ -482,57 +483,83 @@ export function GameActivityTab({ game }: { game: Game }) {
     };
   }, [sessionsWithHw]);
 
-  // Generate curves for selected performance session
+  // Build performance curves. Prefer the real per-sample telemetry captured
+  // during the session(s) — this matches the Activity session log. When a
+  // selection has no sessions with captured samples, fall back to a
+  // deterministic synthetic curve shaped from the recorded averages so the
+  // timeline still renders something coherent.
   const perfTimelineData = useMemo(() => {
     if (sessionsWithHw.length === 0) return null;
     const selectedSess = isolatedSessionIndex !== null ? sessionsWithHw[isolatedSessionIndex] : null;
-    
-    // Average duration of sessions with hardware
+
+    // Average duration of sessions with hardware (used to scale the time axis)
     const avgDuration = Math.round(sessionsWithHw.reduce((sum, s) => sum + s.durationMin, 0) / sessionsWithHw.length);
     const durationMin = selectedSess?.durationMin ?? avgDuration;
-    
-    const targetMetrics = selectedSess?.metrics ?? (hwAverages ? {
-      avgFps: hwAverages.avgFps,
-      avgCpuUsage: hwAverages.avgCpu,
-      avgGpuUsage: hwAverages.avgGpu,
-      avgRamUsage: hwAverages.avgRamPct,
-      avgCpuTemp: hwAverages.avgCpuT,
-      avgGpuTemp: hwAverages.avgGpuT,
-      minFps: Math.round(hwAverages.avgFps * 0.8),
-      maxFps: hwAverages.maxFps,
-      resolution: sessionsWithHw[0]?.metrics?.resolution ?? "1920x1080",
-    } : null);
 
-    if (!targetMetrics) return null;
+    const pts = 45;
 
-    const N = 16;
     const labels: string[] = [];
-    for (let i = 0; i < N; i++) {
-      const f = i / (N - 1);
+    for (let i = 0; i < pts; i++) {
+      const f = i / (pts - 1);
       const elapsedSec = Math.round(f * durationMin * 60);
       const m = Math.floor(elapsedSec / 60);
       const s = elapsedSec % 60;
       labels.push(`${m}:${String(s).padStart(2, "0")}`);
     }
 
-    const seedStr = selectedSess ? selectedSess.id : "all-average";
+    let cpu: number[], gpu: number[], ram: number[], fps: number[], cpuTemp: number[], gpuTemp: number[];
+    let real = false;
 
-    // Generate mathematically consistent curves that strictly match the session's actual metrics
-    const cpu = generateConsistentSeries(targetMetrics.avgCpuUsage, Math.max(0, targetMetrics.avgCpuUsage - 15), Math.min(100, targetMetrics.avgCpuUsage + 20), N, seedStr + "-cpu");
-    const gpu = generateConsistentSeries(targetMetrics.avgGpuUsage, Math.max(0, targetMetrics.avgGpuUsage - 10), Math.min(100, targetMetrics.avgGpuUsage + 15), N, seedStr + "-gpu");
-    const ram = generateConsistentSeries(targetMetrics.avgRamUsage, Math.max(0, targetMetrics.avgRamUsage - 5), Math.min(100, targetMetrics.avgRamUsage + 5), N, seedStr + "-ram");
-    const fps = targetMetrics.avgFps > 0
-      ? generateConsistentSeries(targetMetrics.avgFps, targetMetrics.minFps, targetMetrics.maxFps, N, seedStr + "-fps")
-      : new Array(N).fill(0);
-    
-    let cpuTemp: number[] = [];
-    let gpuTemp: number[] = [];
-    if (hasTemps) {
-      cpuTemp = generateConsistentSeries(targetMetrics.avgCpuTemp, Math.max(35, targetMetrics.avgCpuTemp - 8), Math.min(100, targetMetrics.avgCpuTemp + 10), N, seedStr + "-cputemp");
-      gpuTemp = generateConsistentSeries(targetMetrics.avgGpuTemp, Math.max(35, targetMetrics.avgGpuTemp - 6), Math.min(100, targetMetrics.avgGpuTemp + 8), N, seedStr + "-gputemp");
+    if (selectedSess) {
+      const realSeries = buildSingleSessionSeries(selectedSess.metrics, pts);
+      if (realSeries) {
+        cpu = realSeries.cpu;
+        gpu = realSeries.gpu;
+        ram = realSeries.ram;
+        fps = realSeries.fps;
+        cpuTemp = realSeries.cpuTemp;
+        gpuTemp = realSeries.gpuTemp;
+        real = true;
+      } else {
+        // No real samples for this session — synthesize from its averages.
+        const m = selectedSess.metrics!;
+        const seedStr = selectedSess.id;
+        cpu = generateConsistentSeries(m.avgCpuUsage, Math.max(0, m.avgCpuUsage - 15), Math.min(100, m.avgCpuUsage + 20), pts, seedStr + "-cpu");
+        gpu = generateConsistentSeries(m.avgGpuUsage, Math.max(0, m.avgGpuUsage - 10), Math.min(100, m.avgGpuUsage + 15), pts, seedStr + "-gpu");
+        ram = generateConsistentSeries(m.avgRamUsage, Math.max(0, m.avgRamUsage - 5), Math.min(100, m.avgRamUsage + 5), pts, seedStr + "-ram");
+        fps = m.avgFps > 0
+          ? generateConsistentSeries(m.avgFps, m.minFps, m.maxFps, pts, seedStr + "-fps")
+          : new Array(pts).fill(0);
+        cpuTemp = hasTemps ? generateConsistentSeries(m.avgCpuTemp, Math.max(35, m.avgCpuTemp - 8), Math.min(100, m.avgCpuTemp + 10), pts, seedStr + "-cputemp") : [];
+        gpuTemp = hasTemps ? generateConsistentSeries(m.avgGpuTemp, Math.max(35, m.avgGpuTemp - 6), Math.min(100, m.avgGpuTemp + 8), pts, seedStr + "-gputemp") : [];
+      }
+    } else {
+      const realSeries = buildTimelineFromSessions(sessionsWithHw, pts);
+      if (realSeries) {
+        cpu = realSeries.cpu;
+        gpu = realSeries.gpu;
+        ram = realSeries.ram;
+        fps = realSeries.fps;
+        cpuTemp = realSeries.cpuTemp;
+        gpuTemp = realSeries.gpuTemp;
+        real = true;
+      } else if (hwAverages) {
+        // No real samples for any session — synthesize from blended averages.
+        const seedStr = "all-average";
+        cpu = generateConsistentSeries(hwAverages.avgCpu, Math.max(0, hwAverages.avgCpu - 15), Math.min(100, hwAverages.avgCpu + 20), pts, seedStr + "-cpu");
+        gpu = generateConsistentSeries(hwAverages.avgGpu, Math.max(0, hwAverages.avgGpu - 10), Math.min(100, hwAverages.avgGpu + 15), pts, seedStr + "-gpu");
+        ram = generateConsistentSeries(hwAverages.avgRamPct, Math.max(0, hwAverages.avgRamPct - 5), Math.min(100, hwAverages.avgRamPct + 5), pts, seedStr + "-ram");
+        fps = hwAverages.avgFps > 0
+          ? generateConsistentSeries(hwAverages.avgFps, Math.round(hwAverages.avgFps * 0.8), hwAverages.maxFps, pts, seedStr + "-fps")
+          : new Array(pts).fill(0);
+        cpuTemp = hasTemps ? generateConsistentSeries(hwAverages.avgCpuT, Math.max(35, hwAverages.avgCpuT - 8), Math.min(100, hwAverages.avgCpuT + 10), pts, seedStr + "-cputemp") : [];
+        gpuTemp = hasTemps ? generateConsistentSeries(hwAverages.avgGpuT, Math.max(35, hwAverages.avgGpuT - 6), Math.min(100, hwAverages.avgGpuT + 8), pts, seedStr + "-gputemp") : [];
+      } else {
+        return null;
+      }
     }
 
-    return { cpu, gpu, cpuTemp, gpuTemp, ram, fps, labels };
+    return { cpu, gpu, cpuTemp, gpuTemp, ram, fps, labels, real };
   }, [sessionsWithHw, isolatedSessionIndex, hwAverages, hasTemps]);
 
   if (sessions.length === 0) {
@@ -911,9 +938,9 @@ export function GameActivityTab({ game }: { game: Game }) {
                   {perfTimelineData && (
                     <div className="game-activity-stacked-charts">
                       <p className="game-activity-perf-estimated-note">
-                        Curves are estimated from each session's average / peak metrics — raw
-                        per-sample telemetry is not stored, so these lines illustrate shape, not
-                        exact readings.
+                        {perfTimelineData.real
+                          ? "Curves use the real per-sample telemetry captured during the session(s)."
+                          : "Curves are estimated from each session's average / peak metrics — raw per-sample telemetry is not stored, so these lines illustrate shape, not exact readings."}
                       </p>
                       <ChartSection title="CPU & GPU Load">
                         <LineChart
