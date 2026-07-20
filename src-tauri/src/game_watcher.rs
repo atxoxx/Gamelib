@@ -90,8 +90,26 @@ struct ActiveSession {
 
 /// How long a pending session (last_pid == 0) may exist before it is
 /// considered failed and ended. Steam updates / slow UAC prompts can
-/// take a while, so 10 minutes is generous without being infinite.
-const PENDING_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// take a while, but 2 minutes is plenty — if no matching process has
+/// appeared by then, the launch did not actually start the game.
+const PENDING_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Steady-state poll interval when no session is in a "hot" state
+/// (e.g. a pending launch awaiting its process). 5 s is cheap and
+/// sufficient for normal start/exit detection.
+const POLL_INTERVAL_STEADY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Fast poll interval used while a session is pending (last_pid == 0)
+/// — i.e. a launch that hasn't produced a process yet (Steam
+/// protocol, UAC elevation, Ubisoft hand-off). We want to detect the
+/// real process within ~1 s instead of waiting up to POLL_INTERVAL_STEADY.
+const POLL_INTERVAL_PENDING: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Grace period once a tracked process goes missing before the session
+/// is ended. Kept short (was 20 s) so the running indicator and
+/// last-played stamp update promptly; the re-attach window (looking
+/// for another live process in the install dir) still runs first.
+const SESSION_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Serializable info about a candidate exe found during resolution.
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +134,11 @@ pub struct GameWatcher {
     /// cheap and guarantees the row is committed before any
     /// frontend listener sees the event.
     db: Db,
+    /// Sender used to wake the background poll loop immediately (e.g.
+    /// right after a launch registers a pending session) so detection
+    /// latency drops from the steady poll interval to near-zero.
+    /// `None` until `start_background_poll` wires it up.
+    wake_tx: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl GameWatcher {
@@ -126,6 +149,38 @@ impl GameWatcher {
             gpu_id: None,
             gpu_name: None,
             db,
+            wake_tx: None,
+        }
+    }
+
+    /// Wire the wake channel from the background poll thread. Called
+    /// once at startup so the watcher can request an immediate re-poll.
+    pub fn set_wake_sender(&mut self, tx: std::sync::mpsc::Sender<()>) {
+        self.wake_tx = Some(tx);
+    }
+
+    /// Request the background loop to poll right now instead of waiting
+    /// out its current sleep. Best-effort: a disconnected/already-pending
+    /// wake is harmless.
+    fn request_immediate_poll(&self) {
+        if let Some(tx) = &self.wake_tx {
+            let _ = tx.send(());
+        }
+    }
+
+    /// `true` while any session is still pending (no process captured
+    /// yet). Used to pick the faster poll interval right after a launch.
+    fn has_pending_session(&self) -> bool {
+        self.active_sessions.values().any(|s| s.last_pid == 0)
+    }
+
+    /// Interval to use for the next poll cycle: fast while a launch is
+    /// still awaiting its process, steady otherwise.
+    fn current_poll_interval(&self) -> std::time::Duration {
+        if self.has_pending_session() {
+            POLL_INTERVAL_PENDING
+        } else {
+            POLL_INTERVAL_STEADY
         }
     }
 
@@ -211,6 +266,12 @@ impl GameWatcher {
                 },
             );
         }
+
+        // Kick the poll loop immediately so the pending path
+        // (Steam protocol / UAC / Ubisoft hand-off) detects the real
+        // process within ~1 s instead of waiting for the next
+        // steady-interval poll.
+        self.request_immediate_poll();
     }
 
     /// Run one poll cycle. Resolves pending sessions, re-attaches sessions
@@ -261,14 +322,15 @@ impl GameWatcher {
                     }
                 } else {
                     if let Some(lost_time) = session.lost_at {
-                        if lost_time.elapsed() > Duration::from_secs(20) {
+                        if lost_time.elapsed() > SESSION_LOST_GRACE {
                             ended_ids.push(gid.clone());
                         }
                     } else {
                         session.lost_at = Some(Instant::now());
                         eprintln!(
-                            "[game_watcher] {} (PID {}) lost. Starting 20s grace period.",
-                            session.game_name, session.last_pid
+                            "[game_watcher] {} (PID {}) lost. Starting {}s grace period.",
+                            session.game_name, session.last_pid,
+                            SESSION_LOST_GRACE.as_secs()
                         );
                     }
                 }
@@ -1073,15 +1135,54 @@ pub fn start_background_poll(
     watcher: Arc<Mutex<GameWatcher>>,
     app_handle: AppHandle,
 ) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(5));
+    // Wake channel: lets a launch (or session transition) request an
+    // immediate poll instead of waiting out the full sleep.
+    let (wake_tx, wake_rx) = std::sync::mpsc::channel::<()>();
 
-            let mut w = match watcher.lock() {
+    // Wire the sender into the watcher so `request_immediate_poll` works.
+    {
+        let mut w = match watcher.lock() {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+        w.set_wake_sender(wake_tx);
+    }
+
+    std::thread::spawn(move || loop {
+        // Fast poll while a launch is still pending; steady otherwise.
+        // Drains any pending wake signals first so a recent launch is
+        // picked up on the very next cycle.
+        let interval = {
+            let w = match watcher.lock() {
                 Ok(w) => w,
                 Err(_) => break,
             };
-            w.poll(&app_handle);
+            w.current_poll_interval()
+        };
+        // Drop stale wake signals accumulated during the sleep window.
+        while wake_rx.try_recv().is_ok() {}
+
+        let mut w = match watcher.lock() {
+            Ok(w) => w,
+            Err(_) => break,
+        };
+        w.poll(&app_handle);
+
+        // Re-evaluate interval after polling: if we just cleared the last
+        // pending session, settle back to the steady interval promptly.
+        let next_interval = w.current_poll_interval();
+        drop(w);
+
+        let wait = if next_interval < interval {
+            next_interval
+        } else {
+            interval
+        };
+
+        // Sleep until either the interval elapses or a wake arrives.
+        match wake_rx.recv_timeout(wait) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     });
 }
