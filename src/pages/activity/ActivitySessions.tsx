@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ComponentProps } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
 import { GameThumbnail } from "./GameThumbnail";
 import SteamPlayerCount from "../../components/SteamPlayerCount";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { useSettings } from "../../context/SettingsContext";
-import { formatTemp, toDisplayTemp, toDisplayTemps, tempUnitLabel, tempThreshold } from "../../utils/temp";
+import { formatTemp, toDisplayTemp, toDisplayTemps, tempUnitLabel, tempThreshold, tempMinY, tempMaxY } from "../../utils/temp";
 import * as Icons from "./Icons";
 
 export interface ActivitySessionsProps {
@@ -144,6 +144,41 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
     if (activeChartTab === "ram") return `${val.toFixed(1)} GB`;
     return `${Math.round(val)} FPS`;
   };
+
+  // Per-tab chart refinements: smoothing plus reference lines / hot-zone bands.
+  const chartExtra = useMemo<Partial<ComponentProps<typeof LineChart>>>(() => {
+    if (activeChartTab === "usage") {
+      return {
+        smooth: true,
+        minY: 0,
+        maxY: 100,
+        thresholds: [{ value: 90, label: "High 90%", color: "var(--color-warning)" }],
+      };
+    }
+    if (activeChartTab === "temps") {
+      return {
+        smooth: true,
+        minY: tempMinY(tempUnit),
+        maxY: tempMaxY(tempUnit),
+        bands: [
+          { from: tempThreshold(85, tempUnit), to: tempMaxY(tempUnit), color: "var(--color-danger)", opacity: 0.1 },
+        ],
+        thresholds: [
+          { value: tempThreshold(75, tempUnit), label: "Warm 75°", color: "var(--color-warning)" },
+          { value: tempThreshold(85, tempUnit), label: "Hot 85°", color: "var(--color-danger)" },
+        ],
+      };
+    }
+    if (activeChartTab === "ram") {
+      return { smooth: true, niceMax: true };
+    }
+    return {
+      smooth: true,
+      minY: 0,
+      niceMax: true,
+      thresholds: [{ value: 60, label: "60 FPS", color: "var(--color-success)" }],
+    };
+  }, [activeChartTab, tempUnit]);
 
   // Build sparkline structures
   const sparklineData = useMemo(() => {
@@ -305,6 +340,7 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
                       formatValue={yValFormatter}
                       height={180}
                       legend={true}
+                      {...chartExtra}
                     />
                   </div>
                 </div>

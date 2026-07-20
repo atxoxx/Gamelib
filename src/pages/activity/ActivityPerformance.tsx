@@ -555,6 +555,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     height={200}
                     minY={0}
                     maxY={100}
+                    smooth
+                    thresholds={[{ value: 90, label: "High 90%", color: "var(--color-warning)" }]}
                   />
                 </div>
 
@@ -570,6 +572,19 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     height={200}
                     minY={tempMinY(tempUnit)}
                     maxY={tempMaxY(tempUnit)}
+                    smooth
+                    bands={[
+                      {
+                        from: tempThreshold(85, tempUnit),
+                        to: tempMaxY(tempUnit),
+                        color: "var(--color-danger)",
+                        opacity: 0.1,
+                      },
+                    ]}
+                    thresholds={[
+                      { value: tempThreshold(75, tempUnit), label: "Warm 75°", color: "var(--color-warning)" },
+                      { value: tempThreshold(85, tempUnit), label: "Hot 85°", color: "var(--color-danger)" },
+                    ]}
                   />
                 </div>
 
@@ -618,6 +633,8 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     height={200}
                     minY={0}
                     maxY={100}
+                    smooth
+                    thresholds={[{ value: 90, label: "High 90%", color: "var(--color-warning)" }]}
                   />
                 </div>
 
@@ -628,6 +645,10 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     labels={timelineCharts.labels}
                     formatValue={(v) => `${Math.round(v)} FPS`}
                     height={200}
+                    minY={0}
+                    niceMax
+                    smooth
+                    thresholds={[{ value: 60, label: "60 FPS", color: "var(--color-success)" }]}
                   />
                 </div>
               </div>

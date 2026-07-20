@@ -958,7 +958,7 @@
 }
 
 /* ── Sparklines inside Hardware cards ── */
-.activity-sparkline {
+ .activity-sparkline {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -966,6 +966,7 @@
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 12px;
+  position: relative;
 }
 
 .activity-sparkline__label {
@@ -977,11 +978,19 @@
 }
 
 .activity-sparkline__chart {
-  height: 30px;
   width: 100%;
-  display: flex;
-  align-items: center;
-  margin: 4px 0;
+  display: block;
+  margin: 6px 0 2px;
+}
+
+.activity-sparkline__hover-value {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  text-shadow: 0 1px 3px var(--color-bg-primary);
 }
 
 .activity-sparkline__value-group {

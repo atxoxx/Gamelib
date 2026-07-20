@@ -6,6 +6,19 @@ interface Series {
   label: string;
 }
 
+export interface ChartThreshold {
+  value: number;
+  label?: string;
+  color?: string;
+}
+
+export interface ChartBand {
+  from: number;
+  to: number;
+  color?: string;
+  opacity?: number;
+}
+
 interface LineChartProps {
   series: Series[];
   labels: string[];
@@ -23,6 +36,57 @@ interface LineChartProps {
   fillOpacity?: number;
   minY?: number;
   maxY?: number;
+  /** Render smooth Catmull-Rom splines instead of straight segments. */
+  smooth?: boolean;
+  /**
+   * When `maxY` is not supplied, round the auto-computed maximum up to a
+   * "nice" round number so the Y-axis reads 0/30/60/… instead of 0/28/57/….
+   */
+  niceMax?: boolean;
+  /** Dashed horizontal reference lines (e.g. a 60 FPS target or 85°C danger). */
+  thresholds?: ChartThreshold[];
+  /** Shaded vertical regions spanning a value range (e.g. a hot-zone band). */
+  bands?: ChartBand[];
+}
+
+/** Round a value up to the nearest "nice" number (1/2/2.5/5/10 × 10ⁿ). */
+function niceCeil(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const f = v / base;
+  let nf: number;
+  if (f <= 1) nf = 1;
+  else if (f <= 2) nf = 2;
+  else if (f <= 2.5) nf = 2.5;
+  else if (f <= 5) nf = 5;
+  else nf = 10;
+  return nf * base;
+}
+
+/**
+ * Build a smooth path through the given pixel-space points using a
+ * Catmull-Rom → cubic Bézier conversion. Produces a natural, continuous
+ * curve without the kinks of straight segments.
+ */
+function buildSmoothPath(pts: { x: number; y: number }[]): string {
+  if (pts.length === 0) return "";
+  if (pts.length < 3) {
+    return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  }
+  let d = `M ${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] ?? p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+  }
+  return d;
 }
 
 export default function LineChart({
@@ -36,6 +100,10 @@ export default function LineChart({
   fillOpacity = 0.08,
   minY,
   maxY,
+  smooth = false,
+  niceMax = false,
+  thresholds,
+  bands,
 }: LineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -54,12 +122,14 @@ export default function LineChart({
     const allValues = series.flatMap((s) => s.data);
 
     // Use explicit bounds if provided, otherwise fallback to dynamic calculation
-    const maxVal = maxY !== undefined ? maxY : Math.max(...allValues, 1);
+    const rawMax = Math.max(...allValues, 0);
+    const computedMax = niceMax ? niceCeil(rawMax) : rawMax;
+    const maxVal = maxY !== undefined ? maxY : computedMax;
     const minVal = minY !== undefined ? minY : Math.min(...allValues, 0);
     const range = maxVal - minVal || 1;
 
     return { padding, chartW, chartH, maxVal, minVal, range };
-  }, [series, width, height, minY, maxY]);
+  }, [series, width, height, minY, maxY, niceMax]);
 
   // Label stepping: when there are more than ~12 x-axis labels we sample
   // them down so they don't overlap. Every Nth label + always render the
@@ -70,11 +140,16 @@ export default function LineChart({
     return Math.max(1, Math.ceil(labels.length / maxLabels));
   }, [labels.length]);
 
-  const { padding, chartW, chartH, minVal, range } = chart;
+  const { padding, chartW, chartH, minVal, maxVal, range } = chart;
 
   const gridLines = 5;
   const gridValues = Array.from({ length: gridLines + 1 }, (_, i) =>
     Math.round(minVal + (range / gridLines) * i)
+  );
+
+  const yForValue = useCallback(
+    (v: number) => padding.top + chartH - ((v - minVal) / range) * chartH,
+    [padding.top, chartH, minVal, range]
   );
 
   function buildPath(data: number[]): string {
@@ -152,6 +227,22 @@ export default function LineChart({
       ? pointPositions[0][hoverIndex].x
       : null;
 
+  const seriesLinePath = (si: number): string =>
+    smooth ? buildSmoothPath(pointPositions[si] ?? []) : buildPath(series[si].data);
+
+  const seriesAreaPath = (si: number): string => {
+    if (smooth) {
+      const p = pointPositions[si];
+      if (!p || p.length === 0) return "";
+      const bottomY = padding.top + chartH;
+      const line = buildSmoothPath(p);
+      const lastX = p[p.length - 1].x;
+      const firstX = p[0].x;
+      return `${line} L ${lastX},${bottomY} L ${firstX},${bottomY} Z`;
+    }
+    return buildArea(series[si].data);
+  };
+
   return (
     <div style={{ position: "relative", width: "100%" }}>
       <svg
@@ -163,6 +254,27 @@ export default function LineChart({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
+        {/* Shaded bands (drawn under grid + series) */}
+        {bands?.map((band, bi) => {
+          const lo = Math.min(band.from, band.to);
+          const hi = Math.max(band.from, band.to);
+          if (hi < minVal || lo > maxVal) return null;
+          const yHi = yForValue(Math.min(hi, maxVal));
+          const yLo = yForValue(Math.max(lo, minVal));
+          const color = band.color ?? "var(--color-danger)";
+          return (
+            <rect
+              key={`band-${bi}`}
+              x={padding.left}
+              y={yHi}
+              width={chartW}
+              height={Math.max(0, yLo - yHi)}
+              fill={color}
+              opacity={band.opacity ?? 0.08}
+            />
+          );
+        })}
+
         {/* Grid lines */}
         {gridValues.map((v, i) => {
           const y = padding.top + chartH - ((v - minVal) / range) * chartH;
@@ -194,13 +306,9 @@ export default function LineChart({
         {/* Series areas and lines */}
         {series.map((s, si) => (
           <g key={`series-${si}`}>
+            <path d={seriesAreaPath(si)} fill={s.color} opacity={fillOpacity} />
             <path
-              d={buildArea(s.data)}
-              fill={s.color}
-              opacity={fillOpacity}
-            />
-            <path
-              d={buildPath(s.data)}
+              d={seriesLinePath(si)}
               fill="none"
               stroke={s.color}
               strokeWidth="2"
@@ -209,6 +317,40 @@ export default function LineChart({
             />
           </g>
         ))}
+
+        {/* Threshold reference lines (drawn over the series so they stay visible) */}
+        {thresholds?.map((t, ti) => {
+          if (t.value < minVal || t.value > maxVal) return null;
+          const y = yForValue(t.value);
+          const color = t.color ?? "var(--color-text-muted)";
+          return (
+            <g key={`thresh-${ti}`}>
+              <line
+                x1={padding.left}
+                y1={y}
+                x2={padding.left + chartW}
+                y2={y}
+                stroke={color}
+                strokeWidth="1"
+                strokeDasharray="5 4"
+                opacity={0.7}
+              />
+              {t.label && (
+                <text
+                  x={padding.left + chartW - 4}
+                  y={y - 4}
+                  textAnchor="end"
+                  fill={color}
+                  fontSize="9"
+                  fontWeight={600}
+                  style={{ textTransform: "uppercase", letterSpacing: "0.4px" }}
+                >
+                  {t.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
 
         {/* Data dots (dimmed when hovering, except the active column) */}
         {pointPositions.map((points, si) =>

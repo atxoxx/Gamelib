@@ -7,7 +7,7 @@ import { useActivity } from "../../context/ActivityContext";
 import { useSettings } from "../../context/SettingsContext";
 import { useToast } from "../../context/ToastContext";
 import { type Game, type GameSession, formatPlayTime } from "../../types/game";
-import { formatTemp, toDisplayTemps } from "../../utils/temp";
+import { formatTemp, toDisplayTemps, tempMinY, tempMaxY, tempThreshold } from "../../utils/temp";
 import BarChart from "../charts/BarChart";
 import LineChart from "../charts/LineChart";
 import { ConfirmModal } from "../ui/ConfirmModal";
@@ -925,6 +925,8 @@ export function GameActivityTab({ game }: { game: Game }) {
                           height={180}
                           minY={0}
                           maxY={100}
+                          smooth
+                          thresholds={[{ value: 90, label: "High 90%", color: "var(--color-warning)" }]}
                           formatValue={(v) => `${Math.round(v)}%`}
                         />
                       </ChartSection>
@@ -938,34 +940,49 @@ export function GameActivityTab({ game }: { game: Game }) {
                             ]}
                             labels={perfTimelineData.labels}
                             height={180}
+                            minY={tempMinY(tempUnit)}
+                            maxY={tempMaxY(tempUnit)}
+                            smooth
+                            bands={[
+                              { from: tempThreshold(85, tempUnit), to: tempMaxY(tempUnit), color: "var(--color-danger)", opacity: 0.1 },
+                            ]}
+                            thresholds={[
+                              { value: tempThreshold(75, tempUnit), label: "Warm 75°", color: "var(--color-warning)" },
+                              { value: tempThreshold(85, tempUnit), label: "Hot 85°", color: "var(--color-danger)" },
+                            ]}
                             formatValue={(v) => formatTemp(v, tempUnit)}
                           />
                         </ChartSection>
                       )}
 
                       <ChartSection title="RAM Usage">
-                        <LineChart
-                          series={[
-                            { data: perfTimelineData.ram, color: "#2ecc71", label: "RAM" }
-                          ]}
-                          labels={perfTimelineData.labels}
-                          height={180}
-                          minY={0}
-                          maxY={100}
-                          formatValue={(v) => `${v}%`}
-                        />
+                          <LineChart
+                            series={[
+                              { data: perfTimelineData.ram, color: "#2ecc71", label: "RAM" }
+                            ]}
+                            labels={perfTimelineData.labels}
+                            height={180}
+                            minY={0}
+                            maxY={100}
+                            smooth
+                            thresholds={[{ value: 90, label: "High 90%", color: "var(--color-warning)" }]}
+                            formatValue={(v) => `${v}%`}
+                          />
                       </ChartSection>
 
                       <ChartSection title="FPS">
-                        <LineChart
-                          series={[
-                            { data: perfTimelineData.fps, color: "#16b195", label: "FPS" }
-                          ]}
-                          labels={perfTimelineData.labels}
-                          height={180}
-                          minY={0}
-                          formatValue={(v) => `${Math.round(v)} FPS`}
-                        />
+                          <LineChart
+                            series={[
+                              { data: perfTimelineData.fps, color: "#16b195", label: "FPS" }
+                            ]}
+                            labels={perfTimelineData.labels}
+                            height={180}
+                            minY={0}
+                            niceMax
+                            smooth
+                            thresholds={[{ value: 60, label: "60 FPS", color: "var(--color-success)" }]}
+                            formatValue={(v) => `${Math.round(v)} FPS`}
+                          />
                       </ChartSection>
                     </div>
                   )}
