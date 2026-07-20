@@ -462,7 +462,12 @@ impl SourceManager {
         if q.is_empty() {
             return Vec::new();
         }
-        match db::sources::search(&self.db, q, 50) {
+        // Pull a large candidate pool from FTS5 before re-scoring.
+        // Game download titles are highly variable (editions, scene
+        // tags, "name.name" link stems, subtitles), so the bm25 pass
+        // must surface many candidates and let `title_similarity`
+        // rank them rather than hard-dropping most of them.
+        match db::sources::search(&self.db, q, 200) {
             Ok(results) => {
                 let filtered: Vec<MatchedDownload> = results
                     .into_iter()
@@ -473,7 +478,9 @@ impl SourceManager {
                         m.match_score = title_similarity(q, &m.title);
                         m
                     })
-                    .filter(|m| m.match_score >= 0.5)
+                    // Lower floor (0.2) keeps variable-but-relevant
+                    // names while still dropping unrelated noise.
+                    .filter(|m| m.match_score >= 0.2)
                     .collect();
                 // Keep a stable, similarity-sorted order (highest
                 // confidence first). rescale_scores is intentionally
@@ -539,12 +546,11 @@ impl SourceManager {
             let mut results = Vec::new();
             for repack in repacks {
                 let score = title_similarity(q, &repack.title);
-                // Only surface genuinely-relevant repacks. A 0.5 floor
-                // rejects "similar-name" false positives (e.g. searching
-                // "Doom" and getting "Doom Eternal mod tools" or a
-                // completely unrelated "Doomlord") while still allowing
-                // edition-subtitle variants of the right game through.
-                if score < 0.5 {
+                // Surface genuinely-relevant repacks. A low 0.2 floor
+                // lets variable edition/subtitle/link-stem names
+                // ("Game.Name.Repack", "Doom Eternal Deluxe") through,
+                // while still dropping unrelated noise ("Doomlord").
+                if score < 0.2 {
                     continue;
                 }
                 let local_id = hydra_to_local
@@ -1154,6 +1160,13 @@ fn title_similarity(raw_query: &str, title: &str) -> f32 {
     if qn == tn {
         return 1.0;
     }
+
+    let q_tokens = token_set(&qn);
+    let t_tokens = token_set(&tn);
+    if q_tokens.is_empty() {
+        return 0.0;
+    }
+
     // Exact substring containment (either direction) is a strong
     // positive signal but not a perfect match.
     let containment = if tn.contains(&qn) || qn.contains(&tn) {
@@ -1162,18 +1175,23 @@ fn title_similarity(raw_query: &str, title: &str) -> f32 {
         0.0
     };
 
-    let q_tokens = token_set(&qn);
-    let t_tokens = token_set(&tn);
-    if q_tokens.is_empty() {
-        return 0.0;
-    }
-    let inter = q_tokens.iter().filter(|t| t_tokens.contains(t)).count() as f32;
-    let union = (q_tokens.len() + t_tokens.len()) as f32 - inter;
-    let jaccard = if union > 0.0 { inter / union } else { 0.0 };
+    // Recall: how many of the query tokens are actually present in the
+    // title. This is the dominant, intuitive signal — if every token
+    // the user typed appears in the (normalised) title, it's almost
+    // certainly the right game even when the catalog title carries
+    // extra edition / scene / link-stem ("name.name") noise.
+    let matched = q_tokens.iter().filter(|t| t_tokens.contains(t)).count() as f32;
+    let recall = matched / q_tokens.len() as f32;
 
-    // Weight: strong Jaccard overlap dominates; containment adds a
-    // smaller nudge. Cap at 1.0.
-    (jaccard * 0.85 + containment).min(1.0)
+    // Penalise titles that contain many extra tokens beyond the query
+    // (so "elden ring of war" scores lower than "elden ring deluxe"),
+    // but keep the penalty gentle: variable catalog titles routinely
+    // add 2–4 extra tokens and we don't want to crush them.
+    let extra = (t_tokens.len() as f32).max(matched) - matched;
+    let noise_penalty = (extra * 0.05).min(0.35);
+
+    let score = (recall - noise_penalty).max(0.0) * 0.85 + containment;
+    score.min(1.0).max(0.0)
 }
 
 /// Count `tr=` parameter occurrences in a magnet URI.

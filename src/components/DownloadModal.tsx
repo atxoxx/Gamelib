@@ -461,8 +461,8 @@ export default function DownloadModal({
   );
 
   // Confidence gate. The Rust side already filters out anything below
-  // a 0.5 similarity floor, so every result shown is at least a
-  // plausible match — but a 0.5–0.8 result can still be a *similar
+  // a 0.2 similarity floor, so every result shown is at least a
+  // plausible match — but a 0.2–0.8 result can still be a *similar
   // game name* (e.g. searching "Doom" and landing on "Doom Eternal"
   // when the user wanted the 2016 reboot). Surface an explicit
   // warning when the best available result isn't a high-confidence
@@ -477,7 +477,7 @@ export default function DownloadModal({
     );
     if (best >= 0.8) return null;
     const label =
-      best >= 0.5 ? "partial match" : "low-confidence match";
+      best >= 0.4 ? "partial match" : "low-confidence match";
     return (
       <div
         className="dl-confirm-warning"
@@ -838,7 +838,7 @@ function ResultsSection({
     <div className="dl-results-list">
       {matches.map((match, i) => {
         const score = match.matchScore;
-        const scoreLabel = score >= 0.8 ? "High match" : score >= 0.5 ? "Partial match" : "Possible";
+        const scoreLabel = score >= 0.8 ? "High match" : score >= 0.4 ? "Partial match" : "Possible";
         return (
           <button
             key={`${match.sourceId}-${i}`}
