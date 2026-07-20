@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, useContext } from "react";
 import StoreGameCard from "./StoreGameCard";
 import { Button } from "../ui";
 import { DensityContext } from "../../context/DensityContext";
+import { WishlistContext } from "../../context/WishlistContext";
 import type { StoreGameSummary } from "../../types/game";
 
 interface StoreGameGridProps {
@@ -24,6 +25,18 @@ interface StoreGameGridProps {
    * filter empty state so users know the list may grow.
    */
   isSourceCheckPending?: boolean;
+  /** Predicate: is this store game already in the user's library? */
+  isInLibrary?: (game: StoreGameSummary) => boolean;
+  /** Hide ("Not Interested") handler; when set, cards show a hide button. */
+  onHide?: (game: StoreGameSummary) => void;
+  /** Add-to-compare handler; when set, cards show a compare button. */
+  onCompare?: (game: StoreGameSummary) => void;
+  /** Bulk-select mode. */
+  bulkMode?: boolean;
+  /** Selected slugs in bulk mode. */
+  selectedSlugs?: Set<string>;
+  /** Toggle a game's bulk selection. */
+  onToggleSelect?: (game: StoreGameSummary) => void;
 }
 
 /** Card skeleton placeholder shown while the initial batch loads. */
@@ -51,10 +64,75 @@ export default function StoreGameGrid({
   onCardClick,
   isSourceFilterActive = false,
   isSourceCheckPending = false,
+  isInLibrary,
+  onHide,
+  onCompare,
+  bulkMode = false,
+  selectedSlugs,
+  onToggleSelect,
 }: StoreGameGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const density = useContext(DensityContext)?.density ?? "cozy";
+  const wishlistCtx = useContext(WishlistContext);
   const isList = density === "list";
+
+  // ── Keyboard navigation across the card grid ──────────────────────────
+  // Arrow keys move focus between cards; `w` wishlists the focused card.
+  // `Enter`/`Space` are handled on the card itself (activation).
+  const handleGridKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const grid = gridRef.current;
+      if (!grid) return;
+      const cards = Array.from(
+        grid.querySelectorAll<HTMLElement>(".store-game-card")
+      );
+      if (cards.length === 0) return;
+      const active = document.activeElement as HTMLElement | null;
+      const currentIndex = active ? cards.indexOf(active) : -1;
+
+      // Estimate columns from the first row's layout for up/down movement.
+      let cols = 1;
+      if (cards.length > 1) {
+        const firstTop = cards[0].offsetTop;
+        cols = cards.filter((c) => c.offsetTop === firstTop).length || 1;
+      }
+
+      let nextIndex = currentIndex;
+      switch (e.key) {
+        case "ArrowRight":
+          nextIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + 1, cards.length - 1);
+          break;
+        case "ArrowLeft":
+          nextIndex = currentIndex < 0 ? 0 : Math.max(currentIndex - 1, 0);
+          break;
+        case "ArrowDown":
+          nextIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + cols, cards.length - 1);
+          break;
+        case "ArrowUp":
+          nextIndex = currentIndex < 0 ? 0 : Math.max(currentIndex - cols, 0);
+          break;
+        case "w":
+        case "W": {
+          if (currentIndex >= 0 && wishlistCtx) {
+            const game = games[currentIndex];
+            if (game) wishlistCtx.toggle(game);
+            e.preventDefault();
+          }
+          return;
+        }
+        default:
+          return;
+      }
+
+      if (nextIndex !== currentIndex && cards[nextIndex]) {
+        e.preventDefault();
+        cards[nextIndex].focus();
+        cards[nextIndex].scrollIntoView({ block: "nearest" });
+      }
+    },
+    [games, wishlistCtx]
+  );
 
   // ── Infinite scroll: observe sentinel div ─────────────────────────────
   const handleIntersect = useCallback(
@@ -160,14 +238,27 @@ export default function StoreGameGrid({
 
   // ── Game grid ──────────────────────────────────────────────────────────
   return (
-    <div className={`store-game-grid${isList ? " density-list" : ""}`}>
+    <div
+      className={`store-game-grid${isList ? " density-list" : ""}`}
+      ref={gridRef}
+      onKeyDown={handleGridKeyDown}
+    >
       {games.map((game, i) => (
         <div
           key={game.id}
           className="store-game-cell"
           style={{ animationDelay: `${Math.min(i, 24) * 28}ms` }}
         >
-          <StoreGameCard game={game} onClick={onCardClick} />
+          <StoreGameCard
+            game={game}
+            onClick={onCardClick}
+            inLibrary={isInLibrary ? isInLibrary(game) : false}
+            onHide={onHide ? (g) => onHide(g) : undefined}
+            onCompare={onCompare ? (g) => onCompare(g) : undefined}
+            selectable={bulkMode}
+            selected={selectedSlugs ? selectedSlugs.has(game.slug) : false}
+            onToggleSelect={onToggleSelect ? (g) => onToggleSelect(g) : undefined}
+          />
         </div>
       ))}
 

@@ -858,6 +858,105 @@ export const STORE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Number of store games per page (infinite scroll batch size). */
 export const STORE_PAGE_SIZE = 20;
 
+// ─── Store Sort ──────────────────────────────────────────────────────────────
+
+/**
+ * User-selectable sort order for store category browsing. Maps to an IGDB
+ * `sort` clause in `fetch_store_games` (Rust). `default` keeps the
+ * category's built-in ranking (e.g. Trending → hypes desc).
+ */
+export type StoreSort =
+  | "default"
+  | "popularity"
+  | "rating"
+  | "release_new"
+  | "release_old"
+  | "name";
+
+/** Human-readable labels for the sort dropdown. */
+export const STORE_SORT_LABELS: Record<StoreSort, string> = {
+  default: "Relevance",
+  popularity: "Popularity",
+  rating: "Rating",
+  release_new: "Release (newest)",
+  release_old: "Release (oldest)",
+  name: "Name (A–Z)",
+};
+
+/** Ordered list of sort options for rendering the dropdown. */
+export const STORE_SORTS: readonly StoreSort[] = [
+  "default",
+  "popularity",
+  "rating",
+  "release_new",
+  "release_old",
+  "name",
+] as const;
+
+// ─── Store: Recently Viewed / Hidden / Presets (localStorage) ────────────────
+
+/** localStorage key for the last-N store games the user opened. */
+export const STORE_RECENTLY_VIEWED_KEY = "gamelib_store_recently_viewed_v1";
+
+/** Max number of recently-viewed store games retained. */
+export const STORE_RECENTLY_VIEWED_MAX = 12;
+
+/** localStorage key for the user's recent search queries. */
+export const STORE_RECENT_SEARCHES_KEY = "gamelib_store_recent_searches_v1";
+
+/** Max number of recent search queries retained. */
+export const STORE_RECENT_SEARCHES_MAX = 8;
+
+/** Curated popular searches shown alongside recent searches in the empty state. */
+export const STORE_POPULAR_SEARCHES: readonly string[] = [
+  "Elden Ring",
+  "Baldur's Gate 3",
+  "Cyberpunk 2077",
+  "Hades",
+  "Stardew Valley",
+  "Hollow Knight",
+];
+
+/** localStorage key for the set of "not interested" (hidden) game slugs. */
+export const STORE_HIDDEN_KEY = "gamelib_store_hidden_v1";
+
+/** localStorage key for saved filter presets. */
+export const STORE_PRESETS_KEY = "gamelib_store_presets_v1";
+
+/**
+ * A saved filter preset — a named snapshot of the sidebar facets plus
+ * the download-source selection so power users can restore a full
+ * browse configuration in one click.
+ */
+export interface StoreFilterPreset {
+  /** Stable id (timestamp-based) used as the React key + removal handle. */
+  id: string;
+  /** User-supplied display name (e.g. "Co-op RPGs, PC, 2018+"). */
+  name: string;
+  genres: string[];
+  platforms: string[];
+  yearMin: number | null;
+  yearMax: number | null;
+  ratingMin: number | null;
+  /** Download-source ids (may reference deleted sources; pruned on apply). */
+  sourceIds: string[];
+  /** Sort order captured with the preset. */
+  sort: StoreSort;
+}
+
+// ─── Store: Price (CheapShark) ───────────────────────────────────────────────
+
+/** Resolved current price for a game (mirrors the Rust `GamePrice`). */
+export interface GamePrice {
+  title: string;
+  salePrice: number | null;
+  normalPrice: number | null;
+  discountPercent: number;
+  isOnSale: boolean;
+  dealUrl: string | null;
+  storeId: string | null;
+}
+
 // ─── ProtonDB Compatibility ─────────────────────────────────────────────────
 
 /** ProtonDB community-reported Linux / Steam Deck compatibility summary.

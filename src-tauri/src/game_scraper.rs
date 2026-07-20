@@ -2883,6 +2883,7 @@ pub async fn fetch_store_games(
     year_min: Option<i32>,
     year_max: Option<i32>,
     rating_min: Option<f64>,
+    sort: Option<String>,
 ) -> Result<Vec<StoreGameSummary>, String> {
     let token = get_twitch_token().await?;
     let client = http_client();
@@ -2894,11 +2895,25 @@ pub async fn fetch_store_games(
     // for `all`), then AND in any optional filter facets the user
     // supplied from the sidebar. An empty `Vec` or `None` for a
     // facet contributes no constraint so the call degrades cleanly.
-    let (base_where, base_sort) = category_where_sort(category);
+    let (base_where, category_sort) = category_where_sort(category);
     let mut clauses: Vec<String> = Vec::new();
     if !base_where.is_empty() {
         clauses.push(base_where);
     }
+
+    // Optional user-chosen sort override. `default`/None keeps the
+    // category's built-in ranking; any explicit choice replaces it. We
+    // map the frontend `StoreSort` enum to an IGDB `sort` clause here so
+    // the client never has to know IGDB's field names.
+    let base_sort = match sort.as_deref() {
+        Some("popularity") => "total_rating_count desc".to_string(),
+        Some("rating") => "aggregated_rating desc".to_string(),
+        Some("release_new") => "first_release_date desc".to_string(),
+        Some("release_old") => "first_release_date asc".to_string(),
+        Some("name") => "name asc".to_string(),
+        // "default", None, or any unknown value: keep category ranking.
+        _ => category_sort,
+    };
 
     if let Some(g_names) = genres {
         let ids: Vec<u32> = g_names

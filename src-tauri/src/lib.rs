@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 
 mod config;
 mod crackwatch;
+mod price;
 mod protondb;
 mod db;
 mod game_scraper;
@@ -1055,6 +1056,7 @@ async fn fetch_store_games(
     year_min: Option<i32>,
     year_max: Option<i32>,
     rating_min: Option<f64>,
+    sort: Option<String>,
 ) -> Result<Vec<StoreGameSummary>, String> {
     game_scraper::fetch_store_games(
         &category,
@@ -1065,6 +1067,7 @@ async fn fetch_store_games(
         year_min,
         year_max,
         rating_min,
+        sort,
     )
     .await
 }
@@ -2426,6 +2429,9 @@ pub fn run() {
             torrent_engine::torrent_set_speed_limits,
             torrent_engine::torrent_open_folder,
             crackwatch::fetch_crackwatch_status,
+            crackwatch::fetch_crackwatch_status_batch,
+            price::fetch_game_price,
+            price::fetch_game_prices_batch,
             protondb::fetch_protondb_status,
             fetch_url,
             rebuild_watcher_index,

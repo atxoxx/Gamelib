@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StoreGameCard from "../components/store/StoreGameCard";
 import { useWishlistContext } from "../context/WishlistContext";
+import { PriceProvider } from "../context/PriceContext";
 import { requestShareToFriends } from "./friendSuggestionSignal";
 import type { StoreGameSummary, WishlistEntry } from "../types/game";
 
@@ -228,6 +229,7 @@ export default function WishlistPage() {
   };
 
   return (
+    <PriceProvider>
     <div className="wishlist-page">
       <header className="wishlist-page-header">
         <div className="wishlist-page-title-row">
@@ -500,6 +502,7 @@ export default function WishlistPage() {
         </div>
       )}
     </div>
+    </PriceProvider>
   );
 }
 

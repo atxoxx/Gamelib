@@ -1,9 +1,10 @@
-import { useContext, useEffect, useState, type MouseEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useContext, type MouseEvent } from "react";
 import { useProgressiveImage } from "../../hooks/useProgressiveImages";
+import { useCrackWatch } from "../../context/CrackWatchContext";
+import { usePrice } from "../../context/PriceContext";
 import { WishlistContext } from "../../context/WishlistContext";
 import { DensityContext } from "../../context/DensityContext";
-import type { StoreGameSummary, ViewDensity, CrackWatchStatus } from "../../types/game";
+import type { StoreGameSummary, ViewDensity } from "../../types/game";
 
 interface StoreGameCardProps {
   game: StoreGameSummary;
@@ -29,6 +30,16 @@ interface StoreGameCardProps {
    * Click events stop propagation so they don't also fire `onClick`.
    */
   onToggleWishlist?: (game: StoreGameSummary, event: MouseEvent) => void;
+  /** When true, render an "In Library" badge on the cover. */
+  inLibrary?: boolean;
+  /** When true, hide this game from the store ("Not Interested"). */
+  onHide?: (game: StoreGameSummary, event: MouseEvent) => void;
+  /** Add this game to the compare tray. */
+  onCompare?: (game: StoreGameSummary, event: MouseEvent) => void;
+  /** Bulk-select mode: render a selection checkbox and reflect state. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (game: StoreGameSummary, event: MouseEvent) => void;
 }
 
 /** Rating badge colors — emerald for high, amber for mid, red for low. */
@@ -44,6 +55,12 @@ export default function StoreGameCard({
   density: densityProp,
   wishlisted: wishlistedProp,
   onToggleWishlist: onToggleWishlistProp,
+  inLibrary = false,
+  onHide,
+  onCompare,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: StoreGameCardProps) {
   // Read defaults from context. Both can be null when the page hasn't
   // been wrapped in the provider (e.g. during isolated testing), so we
@@ -69,24 +86,11 @@ export default function StoreGameCard({
         }
       : undefined);
 
-  // ── CrackWatch self-fetch ─────────────────────────────────────────────
-  const [crackStatus, setCrackStatus] = useState<CrackWatchStatus | null>(null);
+  // ── CrackWatch (batched via context — one round-trip per grid page) ────
+  const crackStatus = useCrackWatch(game.name);
 
-  useEffect(() => {
-    let cancelled = false;
-    invoke<CrackWatchStatus | null>("fetch_crackwatch_status", {
-      gameName: game.name,
-      appId: null,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        setCrackStatus(result ?? null);
-      })
-      .catch(() => {
-        // Silently ignore — the badge simply won't render
-      });
-    return () => { cancelled = true; };
-  }, [game.name]);
+  // ── Price (batched via context — CheapShark cheapest deal) ─────────────
+  const price = usePrice(game.name);
 
   const [coverUrl, imgRef] = useProgressiveImage(game.coverUrl);
 
@@ -100,12 +104,44 @@ export default function StoreGameCard({
 
   return (
     <div
-      className={`store-game-card density-${density}${density === "list" ? " store-game-card-list" : ""}`}
-      onClick={() => onClick(game)}
+      className={`store-game-card density-${density}${density === "list" ? " store-game-card-list" : ""}${selected ? " selected" : ""}`}
+      onClick={(e) => {
+        if (selectable && onToggleSelect) {
+          onToggleSelect(game, e);
+        } else {
+          onClick(game);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (selectable && onToggleSelect) {
+            onToggleSelect(game, e as unknown as MouseEvent);
+          } else {
+            onClick(game);
+          }
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`${game.name}${game.rating != null ? `, rated ${Math.round(game.rating)} out of 100` : ""}${inLibrary ? ", in your library" : ""}`}
       data-density={density}
       data-wishlisted={wishlisted ? "true" : "false"}
     >
       <div className="store-card-cover">
+        {selectable && (
+          <span
+            className={`store-card-select${selected ? " checked" : ""}`}
+            aria-hidden="true"
+          >
+            {selected && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+          </span>
+        )}
+
         {coverUrl ? (
           <img ref={imgRef} src={coverUrl} alt={game.name} loading="lazy" />
         ) : (
@@ -156,6 +192,78 @@ export default function StoreGameCard({
             </svg>
             {crackStatus.isCracked ? "CRACKED" : "UNCRACKED"}
           </span>
+        )}
+
+        {inLibrary && (
+          <span className="store-card-inlib" title="In your library">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              width="10"
+              height="10"
+              aria-hidden="true"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            In Library
+          </span>
+        )}
+
+        {onHide && (
+          <button
+            type="button"
+            className="store-card-hide"
+            aria-label={`Hide ${game.name}`}
+            title="Not interested"
+            onClick={(e) => {
+              e.stopPropagation();
+              onHide(game, e);
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+          </button>
+        )}
+
+        {onCompare && (
+          <button
+            type="button"
+            className="store-card-compare"
+            aria-label={`Add ${game.name} to compare`}
+            title="Add to compare"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCompare(game, e);
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+          </button>
         )}
 
         {showHeart && (
@@ -212,6 +320,24 @@ export default function StoreGameCard({
                 ? new Date(game.firstReleaseDate).getFullYear()
                 : ""}
           </div>
+
+          {price && price.salePrice != null && (
+            <div className="store-card-price">
+              {price.isOnSale && price.discountPercent > 0 && (
+                <span className="store-card-price-discount">
+                  -{price.discountPercent}%
+                </span>
+              )}
+              <span className="store-card-price-now">
+                ${price.salePrice.toFixed(2)}
+              </span>
+              {price.isOnSale && price.normalPrice != null && (
+                <span className="store-card-price-was">
+                  ${price.normalPrice.toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

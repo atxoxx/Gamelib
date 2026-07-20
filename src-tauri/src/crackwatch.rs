@@ -461,6 +461,79 @@ pub async fn fetch_crackwatch_status(
     status
 }
 
+/// Batch variant of [`fetch_crackwatch_status`]. Accepts a list of game
+/// names and returns a `{ name -> status }` map (only entries with a
+/// resolved status are included). This exists so a store grid of 20 cards
+/// makes a single Tauri round-trip instead of 20 concurrent invokes — the
+/// per-card self-fetch pattern was a real rate-limit / connection-pool
+/// risk against gamestatus.info's anti-bot gate.
+///
+/// Cache lookups happen per-name (same 24h TTL and KV keys as the single
+/// command), so warm names return instantly. Cold names are scraped
+/// sequentially with a small concurrency cap to stay polite.
+#[tauri::command]
+pub async fn fetch_crackwatch_status_batch(
+    app: tauri::AppHandle,
+    game_names: Vec<String>,
+) -> HashMap<String, CrackWatchStatus> {
+    use futures::stream::{self, StreamExt};
+
+    // Cap concurrency so we never fan out 20 PoW-gated scrapes at once.
+    const MAX_CONCURRENT: usize = 3;
+
+    let db_state: tauri::State<'_, Db> = app.state();
+
+    // Split into cache hits (resolved synchronously) and cold names.
+    let mut resolved: HashMap<String, CrackWatchStatus> = HashMap::new();
+    let mut cold: Vec<String> = Vec::new();
+
+    for name in game_names {
+        let slug = slugify(&name);
+        if slug.is_empty() {
+            continue;
+        }
+        let key = cache_key(&slug, None);
+        if let Some(raw) = crate::db::kv::get(db_state.inner(), &key).ok().flatten() {
+            if let Ok(cached) = serde_json::from_str::<CachedCrackWatchStatus>(&raw) {
+                if cached.updated_at + CACHE_TTL_MS > now_ms() {
+                    resolved.insert(name, cached.status);
+                    continue;
+                }
+            }
+        }
+        cold.push(name);
+    }
+
+    // Scrape cold names with bounded concurrency, then persist each result.
+    let scraped: Vec<(String, Option<CrackWatchStatus>)> = stream::iter(cold)
+        .map(|name| async move {
+            let status = service()
+                .get_status_by_title_and_app_id(&name, None)
+                .await;
+            (name, status)
+        })
+        .buffer_unordered(MAX_CONCURRENT)
+        .collect()
+        .await;
+
+    for (name, status) in scraped {
+        if let Some(s) = status {
+            let slug = slugify(&name);
+            let key = cache_key(&slug, None);
+            let envelope = CachedCrackWatchStatus {
+                status: s.clone(),
+                updated_at: now_ms(),
+            };
+            if let Ok(json) = serde_json::to_string(&envelope) {
+                let _ = crate::db::kv::set(db_state.inner(), &key, &json);
+            }
+            resolved.insert(name, s);
+        }
+    }
+
+    resolved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

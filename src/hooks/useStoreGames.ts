@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStoreCache } from "./useStoreCache";
-import type { StoreGameSummary } from "../types/game";
+import type { StoreGameSummary, StoreSort } from "../types/game";
 import type { StoreCategory } from "../types/game";
 import { STORE_PAGE_SIZE } from "../types/game";
 
@@ -66,6 +66,7 @@ export function useStoreGames() {
   const [category, setCategoryState] = useState<StoreCategory>("trending");
   const [searchQuery, setSearchQueryRaw] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [sort, setSortState] = useState<StoreSort>("default");
 
   // ── Mutable refs (avoid stale closures) ────────────────────────────────
   const offsetRef = useRef(0);
@@ -74,6 +75,7 @@ export function useStoreGames() {
   const activeCategoryRef = useRef<StoreCategory>("trending");
   const mountedRef = useRef(true);
   const gamesRef = useRef<StoreGameSummary[]>([]);
+  const sortRef = useRef<StoreSort>("default");
 
   // Keep gamesRef in sync so performFetch can read latest games without
   // needing games in its dependency array (avoids cascading re-creations).
@@ -116,6 +118,7 @@ export function useStoreGames() {
           yearMin: f.yearMin,
           yearMax: f.yearMax,
           ratingMin: f.ratingMin,
+          sort: sortRef.current === "default" ? null : sortRef.current,
         };
         if (query) {
           // Live search — filters not currently applied (server-side
@@ -154,7 +157,8 @@ export function useStoreGames() {
         // results are short-lived (re-fetched on every Apply click) and
         // aren't worth a disk round-trip.
         const isUnfiltered = !recomputeHasFilters(filtersRef.current);
-        if (fetchCategory && !query && isUnfiltered) {
+        const isDefaultSort = sortRef.current === "default";
+        if (fetchCategory && !query && isUnfiltered && isDefaultSort) {
           setCategoryCache(fetchCategory, newList);
         }
       } catch (err) {
@@ -183,8 +187,10 @@ export function useStoreGames() {
       setSearchQueryRaw("");
       setError(null);
 
-      // Try cache first
-      const cached = getCategoryCache(newCategory);
+      // Try cache first (only valid for the default sort — a custom sort
+      // must always re-fetch since we never persist sorted slices).
+      const cached =
+        sortRef.current === "default" ? getCategoryCache(newCategory) : null;
       if (cached) {
         setGames(cached);
         offsetRef.current = cached.length;
@@ -237,6 +243,29 @@ export function useStoreGames() {
   const resetFilters = useCallback(() => {
     applyFilters(EMPTY_STORE_FILTERS);
   }, [applyFilters]);
+
+  // ── Sort: update the active sort and re-fetch the current context ──────
+  const setSort = useCallback(
+    (next: StoreSort) => {
+      sortRef.current = next;
+      setSortState(next);
+      // Re-fetch: search keeps its own server-side ranking, so a sort
+      // change there is a no-op; category browsing re-queries with the
+      // new IGDB sort clause.
+      requestIdRef.current += 1;
+      const reqId = requestIdRef.current;
+      setGames([]);
+      offsetRef.current = 0;
+      setHasMore(true);
+      setError(null);
+      if (isSearching && searchQuery) {
+        performFetch(reqId, null, searchQuery, 0, false);
+      } else {
+        performFetch(reqId, activeCategoryRef.current, "", 0, false);
+      }
+    },
+    [performFetch, isSearching, searchQuery]
+  );
 
   // ── Initial load on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -321,5 +350,9 @@ export function useStoreGames() {
     resetFilters,
     /** True when any filter facet is currently active. */
     hasFilters,
+    /** Active sort order for category browsing. */
+    sort,
+    /** Change the sort order and re-fetch the active category. */
+    setSort,
   };
 }
