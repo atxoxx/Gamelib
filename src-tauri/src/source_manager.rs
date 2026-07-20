@@ -48,6 +48,10 @@ use crate::db::{self, Db};
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+/// A source counts as "new" for the frontend's NEW badge when it was
+/// first fetched (added) within this many seconds of now (7 days).
+const NEW_SOURCE_WINDOW_SECS: u64 = 7 * 24 * 60 * 60;
+
 /// Production Hydra API base URL.
 const HYDRA_API_BASE: &str = "https://hydra-api-us-east-1.losbroxas.org";
 
@@ -243,6 +247,10 @@ pub struct MatchedDownload {
     /// ranker returns a negative value (more negative = closer
     /// match); we map to [0, 1] for the frontend.
     pub match_score: f32,
+    /// True when the owning source was first fetched (added) within
+    /// the last `NEW_SOURCE_WINDOW_SECS` seconds. Frontend shows a
+    /// stylised "NEW" badge so freshly-added sources stand out.
+    pub is_new: bool,
 }
 
 // ─── SourceManager ──────────────────────────────────────────────────────────
@@ -517,10 +525,12 @@ impl SourceManager {
         let sources = db::sources::list_sources(&self.db)?;
         let mut enabled_hydra_ids = Vec::new();
         let mut hydra_to_local = HashMap::new();
+        let mut local_last_fetched: HashMap<String, Option<u64>> = HashMap::new();
         for source in &sources {
             if source.enabled && !source.hydra_source_id.is_empty() {
                 enabled_hydra_ids.push(source.hydra_source_id.clone());
                 hydra_to_local.insert(source.hydra_source_id.clone(), source.id.clone());
+                local_last_fetched.insert(source.id.clone(), source.last_fetched);
             }
         }
 
@@ -578,6 +588,14 @@ impl SourceManager {
                 // the primary URI after this point stays consistent
                 // with what the modal will see.
                 let magnet = uris.iter().find(|u| u.starts_with("magnet:")).cloned();
+                let is_new = local_last_fetched
+                    .get(&local_id)
+                    .and_then(|lf| *lf)
+                    .map(|ts| {
+                        let now = chrono::Utc::now().timestamp();
+                        (now - ts as i64).clamp(0, i64::MAX) as u64 <= NEW_SOURCE_WINDOW_SECS
+                    })
+                    .unwrap_or(false);
                 results.push(MatchedDownload {
                     source_name: repack.download_source_name.clone(),
                     source_id: local_id,
@@ -587,6 +605,7 @@ impl SourceManager {
                     magnet,
                     upload_date: repack.upload_date.clone(),
                     match_score: score,
+                    is_new,
                 });
             }
             results.sort_by(|a, b| {

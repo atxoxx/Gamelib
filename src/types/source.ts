@@ -88,6 +88,11 @@ export interface MatchedDownload {
   magnet: string | null;
   uploadDate: string | null;
   matchScore: number;
+  /**
+   * True when the owning source was first fetched (added) within the
+   * last 7 days. The DownloadModal renders a stylised "NEW" badge.
+   */
+  isNew: boolean;
 }
 
 /**

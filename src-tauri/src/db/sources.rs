@@ -28,6 +28,10 @@ use rusqlite::params;
 use super::pool::Db;
 use crate::source_manager::{CachedSource, GameSource, MatchedDownload, SourceLink, merge_and_pick_best};
 
+/// A source counts as "new" for the frontend's NEW badge when it was
+/// first fetched (added) within this many seconds of now (7 days).
+const NEW_SOURCE_WINDOW_SECS: u64 = 7 * 24 * 60 * 60;
+
 // DAO helpers (`read_cached_source`, `list_sources_with_cache`) are
 // reserved for the upcoming SourceContext migration (today the
 // frontend keeps its own copy of the catalogue) and for the planned
@@ -328,6 +332,7 @@ pub fn search(db: &Db, query: &str, limit: usize) -> Result<Vec<MatchedDownload>
             "SELECT d.source_id, d.title, d.file_size, d.upload_date,
                     d.uris_json, d.magnet,
                     s.name AS source_name,
+                    s.last_fetched AS last_fetched,
                     bm25(downloads_fts) AS score
                FROM downloads_fts
                JOIN downloads d ON d.row_id = downloads_fts.rowid
@@ -349,7 +354,14 @@ pub fn search(db: &Db, query: &str, limit: usize) -> Result<Vec<MatchedDownload>
             let uris_json: String = r.get(4)?;
             let magnet: Option<String> = r.get(5)?;
             let source_name: String = r.get(6)?;
-            let score: f32 = r.get::<_, f64>(7)? as f32;
+            let last_fetched: Option<i64> = r.get(7)?;
+            let score: f32 = r.get::<_, f64>(8)? as f32;
+            let is_new = last_fetched
+                .map(|ts| {
+                    let now = chrono::Utc::now().timestamp();
+                    (now - ts).clamp(0, i64::MAX) as u64 <= NEW_SOURCE_WINDOW_SECS
+                })
+                .unwrap_or(false);
             let mut uris: Vec<String> = serde_json::from_str(&uris_json).unwrap_or_default();
             // Combined merge + best-URI promotion. Same code path as
             // the online (`source_manager::search_online`) search;
@@ -368,6 +380,7 @@ pub fn search(db: &Db, query: &str, limit: usize) -> Result<Vec<MatchedDownload>
                 magnet: resolved_magnet,
                 upload_date,
                 match_score: score,
+                is_new,
             })
         })
         .map_err(|e| format!("FTS query: {e}"))?;

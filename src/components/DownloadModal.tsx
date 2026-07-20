@@ -93,8 +93,8 @@ export default function DownloadModal({
     addDirectDownload,
     selectSavePath,
     activeDownloads,
+    completedDownloads,
     startSelectedDownload,
-    removeDownload
   } = useDownloads();
   const { searchSources } = useSources();
   const { games } = useGames();
@@ -105,6 +105,10 @@ export default function DownloadModal({
   const [matches, setMatches] = useState<MatchedDownload[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedMirrorIdx, setSelectedMirrorIdx] = useState(0);
+  // Remember the last mirror the user picked for each source id, so
+  // switching between results and back restores their choice instead
+  // of always defaulting to Mirror 1.
+  const lastMirrorBySourceRef = useRef<Record<string, number>>({});
   const [savePath, setSavePath] = useState<string | null>(() => {
     // Prefer the last-used path (so repeated downloads stay in one
     // place), then fall back to the configured default download
@@ -117,24 +121,62 @@ export default function DownloadModal({
   });
   const [error, setError] = useState<string | null>(null);
 
+  const [chooseFiles, setChooseFiles] = useState(false);
+  const [autoExtract, setAutoExtract] = useState(false);
+  const [tempTorrentId, setTempTorrentId] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
+  // Collapse low-confidence matches (score < 0.4) behind a toggle so
+  // the list stays focused on the most likely correct title.
+  const [showWeakMatches, setShowWeakMatches] = useState(false);
+  // True after the 30s metadata fetch times out, so we can offer an
+  // explicit "Try again" affordance rather than just an error string.
+  const [metadataTimedOut, setMetadataTimedOut] = useState(false);
+
   // Reset selected mirror when the selected result changes, and keep it
   // inside the bounds of that result's `uris` so we never hand
   // `resolveSourceUri` an out-of-range index (e.g. when moving from a
-  // 4-mirror result to a 1-mirror one).
+  // 4-mirror result to a 1-mirror one). Also restore the user's last
+  // picked mirror for that source, and drop the "Choose files" flag
+  // whenever the resolved URI is no longer a torrent (e.g. the user
+  // switched to a direct-link mirror) so the hidden checkbox can't
+  // leave the flag stale across source types.
   useEffect(() => {
     if (selectedIndex == null) {
       setSelectedMirrorIdx(0);
       return;
     }
     const match = matches[selectedIndex];
-    const maxIdx = Math.max(0, (match?.uris.length ?? 1) - 1);
-    setSelectedMirrorIdx((prev) => (prev > maxIdx ? 0 : prev));
-  }, [selectedIndex, matches]);
+    if (!match) return;
+    const maxIdx = Math.max(0, (match.uris.length ?? 1) - 1);
+    setSelectedMirrorIdx((prevMirror) => {
+      const remembered = lastMirrorBySourceRef.current[match.sourceId];
+      const nextIdx =
+        remembered != null && remembered <= maxIdx
+          ? remembered
+          : prevMirror > maxIdx
+            ? 0
+            : prevMirror;
+      return nextIdx;
+    });
+    const { isDirect } = classifyUri(resolveSourceUri(match, selectedMirrorIdx));
+    if (isDirect && chooseFiles) setChooseFiles(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex, matches, chooseFiles]);
 
-  const [chooseFiles, setChooseFiles] = useState(false);
-  const [autoExtract, setAutoExtract] = useState(false);
-  const [tempTorrentId, setTempTorrentId] = useState<string | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
+  // Single place to update the mirror so the choice is remembered per
+  // source for later re-selection.
+  const handleMirrorChange = useCallback(
+    (idx: number) => {
+      setSelectedMirrorIdx(idx);
+      const match = selectedIndex != null ? matches[selectedIndex] : undefined;
+      if (match) lastMirrorBySourceRef.current[match.sourceId] = idx;
+    },
+    [selectedIndex, matches],
+  );
+  // Marks the moment we entered the metadata-fetch phase so the 30s
+  // timeout below is measured from first entry, not from the latest
+  // progress poll (which would otherwise keep re-arming and never fire).
+  const metadataEnteredAtRef = useRef<number | null>(null);
 
   // Wait for metadata loaded to show file checklist. The engine emits a
   // `download-progress` event once peers return the file list; when that
@@ -143,7 +185,14 @@ export default function DownloadModal({
   // timeout that bails back to `results` with a clear error instead of
   // hanging on the spinner forever.
   useEffect(() => {
-    if (step !== "fetching_metadata" || !tempTorrentId) return;
+    if (step !== "fetching_metadata" || !tempTorrentId) {
+      metadataEnteredAtRef.current = null;
+      return;
+    }
+    // Arm the watchdog once, on first entry into this step.
+    if (metadataEnteredAtRef.current == null) {
+      metadataEnteredAtRef.current = Date.now();
+    }
     const onFilesReady = () => {
       const dl = activeDownloads.find((d) => d.id === tempTorrentId);
       if (dl && dl.files && dl.files.length > 0) {
@@ -154,6 +203,10 @@ export default function DownloadModal({
       return false;
     };
     if (onFilesReady()) return;
+    // Only time out against the original entry timestamp, so the 2s
+    // progress polls that re-run this effect don't keep resetting it.
+    const elapsed = Date.now() - metadataEnteredAtRef.current;
+    const remaining = Math.max(0, 30_000 - elapsed);
     const timeout = window.setTimeout(() => {
       if (cancelledRef.current) return;
       // Clean up the orphaned list-only torrent.
@@ -161,17 +214,21 @@ export default function DownloadModal({
         console.error("Failed to clean up timed-out temporary torrent:", e),
       );
       setTempTorrentId(null);
+      setMetadataTimedOut(true);
       setError(
         "Timed out fetching the torrent's file list. The source may be unreachable — try another mirror or download the full torrent.",
       );
       setStep("results");
-    }, 30_000);
+    }, remaining);
     return () => window.clearTimeout(timeout);
   }, [activeDownloads, step, tempTorrentId]);
   // Suppress the "user has not picked a save path" inline error
   // until they've tried to start at least once.
   const startAttemptedRef = useRef(false);
   const cancelledRef = useRef(false);
+  // Ref to the results list container so we can scroll the keyboard-
+  // highlighted row into view as the user arrows through results.
+  const resultsListRef = useRef<HTMLDivElement | null>(null);
   const tempTorrentIdRef = useRef<string | null>(null);
   tempTorrentIdRef.current = tempTorrentId;
   // Seconds elapsed since the user clicked Start. Reset to 0 the
@@ -200,57 +257,91 @@ export default function DownloadModal({
   );
 
   // ── Step 1: ownership check + source search in parallel ─────────
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // `check_ownership_for_ids` is the variant that takes an
-        // explicit Steam AppID; falls back to `check_ownership`
-        // (name-only) if no id is available. Both go through the
-        // same Rust command registry so the frontend can pick the
-        // most-specific one.
-        const ownershipPromise: Promise<OwnershipResult> = steamAppId != null
-          ? invoke<OwnershipResult>("check_ownership_for_ids", {
-              gameName,
-              steamAppId,
-              localLibraryNames,
-            })
-          : invoke<OwnershipResult>("check_ownership", {
-              gameName,
-              localLibraryNames,
-            });
+  // Extracted into a callback so the Retry button can re-run it after
+  // an error or a dead-swarm timeout.
+  const runSearch = useCallback(async () => {
+    setStep("checking");
+    setError(null);
+    setOwnership(null);
+    try {
+      // `check_ownership_for_ids` is the variant that takes an
+      // explicit Steam AppId; falls back to `check_ownership`
+      // (name-only) if no id is available. Both go through the
+      // same Rust command registry so the frontend can pick the
+      // most-specific one.
+      const ownershipPromise: Promise<OwnershipResult> = steamAppId != null
+        ? invoke<OwnershipResult>("check_ownership_for_ids", {
+            gameName,
+            steamAppId,
+            localLibraryNames,
+          })
+        : invoke<OwnershipResult>("check_ownership", {
+            gameName,
+            localLibraryNames,
+          });
 
-        const [own, searchResults] = await Promise.all([
-          ownershipPromise,
-          searchSources(gameName, steamAppId).catch((e) => {
-            console.error("[DownloadModal] searchSources failed:", e);
-            return [];
-          }),
-        ]);
+      const [own, searchResults] = await Promise.all([
+        ownershipPromise,
+        searchSources(gameName, steamAppId).catch((e) => {
+          console.error("[DownloadModal] searchSources failed:", e);
+          return [];
+        }),
+      ]);
 
-        if (cancelled) return;
-        setOwnership(own);
-        setMatches(searchResults);
-        // A fresh search result invalidates any prior selection
-        // (the user is now looking at a different list) and any
-        // prior error (the previous Start attempt was for stale
-        // data). Clear both so the modal returns to a clean state.
-        setSelectedIndex(null);
-        setError(null);
-        setStep("results");
-      } catch (err) {
-        if (cancelled) return;
-        console.error("[DownloadModal] initial checks failed:", err);
-        setError(String(err));
-        setStep("error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setOwnership(own);
+      // Sort by descending match score so the strongest match is
+      // first, then auto-select it so the user can hit Start
+      // immediately without an extra click.
+      const sorted = [...searchResults].sort(
+        (a, b) => b.matchScore - a.matchScore,
+      );
+      setMatches(sorted);
+      setSelectedIndex(sorted.length > 0 ? 0 : null);
+      setStep("results");
+    } catch (err) {
+      console.error("[DownloadModal] initial checks failed:", err);
+      setError(String(err));
+      setStep("error");
+    }
   }, [gameName, steamAppId, searchSources, localLibraryNames]);
 
+  useEffect(() => {
+    runSearch();
+  }, [runSearch]);
+
   // ── Helpers ──────────────────────────────────────────────────────
+  // Centralised close attempt: when a download is still starting we
+  // confirm with the user before tearing it down (which would orphan the
+  // temporary torrent). During `fetching_metadata` / `file_selection`
+  // the temp torrent is cancelled and we return to the results step so
+  // the user can pick another source rather than losing the whole flow.
+  const handleCloseAttempt = useCallback(() => {
+    if (step === "starting") {
+      if (
+        !window.confirm(
+          "A download is still starting. Closing now will cancel it. Continue?",
+        )
+      ) {
+        return;
+      }
+      cancelledRef.current = true;
+      onClose();
+      return;
+    }
+    if (step === "fetching_metadata" || step === "file_selection") {
+      cancelledRef.current = true;
+      if (tempTorrentIdRef.current) {
+        invoke("torrent_remove", { id: tempTorrentIdRef.current, deleteFiles: true }).catch((e) =>
+          console.error("Failed to remove list-only torrent on close:", e),
+        );
+      }
+      setTempTorrentId(null);
+      setStep("results");
+      return;
+    }
+    onClose();
+  }, [step, onClose]);
+
   const handlePickSavePath = useCallback(async () => {
     try {
       const path = await selectSavePath();
@@ -269,6 +360,7 @@ export default function DownloadModal({
     if (step === "starting" || step === "fetching_metadata") return;
     cancelledRef.current = false;
     startAttemptedRef.current = true;
+    setMetadataTimedOut(false);
     if (selectedIndex == null) {
       setError("Pick a source result to download from.");
       return;
@@ -430,13 +522,42 @@ export default function DownloadModal({
           setTempTorrentId(null);
           setStep("results");
         } else {
-          onClose();
+          handleCloseAttempt();
         }
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [step, onClose]);
+
+  // Arrow-key navigation through the results list (big-screen / remote
+  // friendly). Up/Down move the selection, Enter starts the download.
+  // Only active while we're showing the results list and nothing is
+  // in flight.
+  useEffect(() => {
+    if (step !== "results" && step !== "starting") return;
+    if (matches.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+      if (e.key === "Enter") {
+        if (step === "results" && selectedIndex != null) handleStart();
+        return;
+      }
+      e.preventDefault();
+      setSelectedIndex((prev) => {
+        const base = prev ?? -1;
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        const next = Math.min(matches.length - 1, Math.max(0, base + delta));
+        const el = resultsListRef.current?.querySelectorAll(".dl-result-row")[next] as
+          | HTMLElement
+          | undefined;
+        el?.scrollIntoView({ block: "nearest" });
+        return next;
+      });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [step, matches, selectedIndex, handleStart]);
 
   // Tick the elapsed-seconds counter while the engine is
   // accepting the new torrent. Stops and resets the moment we
@@ -458,6 +579,22 @@ export default function DownloadModal({
   const ownershipBanner = useMemo(
     () => buildOwnershipBanner(ownership, step),
     [ownership, step],
+  );
+
+  // Titles of downloads that have already completed, so the results
+  // list can flag which entries the user has downloaded before. We
+  // normalise to lowercase for a case-insensitive match.
+  const downloadedTitles = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of completedDownloads) {
+      if (d.name) set.add(d.name.trim().toLowerCase());
+    }
+    return set;
+  }, [completedDownloads]);
+
+  const isDownloaded = useCallback(
+    (title: string) => downloadedTitles.has(title.trim().toLowerCase()),
+    [downloadedTitles],
   );
 
   // Confidence gate. The Rust side already filters out anything below
@@ -535,8 +672,7 @@ export default function DownloadModal({
       className="modal-backdrop"
       onMouseDown={() => {
         if (step !== "starting") {
-          cancelledRef.current = true;
-          onClose();
+          handleCloseAttempt();
         }
       }}
     >
@@ -585,15 +721,23 @@ export default function DownloadModal({
               <p className="dl-results-empty-hint">
                 {error ?? "Unknown error"}
               </p>
+              <Button variant="primary" size="sm" onClick={() => runSearch()}>
+                Retry
+              </Button>
             </div>
           )}
 
           {(step === "results" || step === "starting") && (
-            <ResultsSection
-              matches={matches}
-              selectedIndex={selectedIndex}
-              onSelect={setSelectedIndex}
-            />
+            <div ref={resultsListRef}>
+              <ResultsSection
+                matches={matches}
+                selectedIndex={selectedIndex}
+                onSelect={setSelectedIndex}
+                showWeakMatches={showWeakMatches}
+                onToggleWeak={() => setShowWeakMatches((v) => !v)}
+                isDownloaded={isDownloaded}
+              />
+            </div>
           )}
 
           {(step === "results" || step === "starting") && (
@@ -617,7 +761,7 @@ export default function DownloadModal({
                     </span>
                     <select
                       value={selectedMirrorIdx}
-                      onChange={(e) => setSelectedMirrorIdx(parseInt(e.target.value, 10))}
+                      onChange={(e) => handleMirrorChange(parseInt(e.target.value, 10))}
                       style={{
                         padding: "8px 12px",
                         background: "var(--color-bg-tertiary)",
@@ -688,16 +832,28 @@ export default function DownloadModal({
           )}
 
           {error && step === "results" && (
-            <p
-              role="alert"
-              style={{
-                color: "#ef4444",
-                fontSize: "var(--font-size-xs)",
-                marginTop: "var(--space-sm)",
-              }}
-            >
-              {error}
-            </p>
+            <div>
+              <p
+                role="alert"
+                style={{
+                  color: "#ef4444",
+                  fontSize: "var(--font-size-xs)",
+                  marginTop: "var(--space-sm)",
+                }}
+              >
+                {error}
+              </p>
+              {metadataTimedOut && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleStart()}
+                  style={{ marginTop: "var(--space-xs)" }}
+                >
+                  Try again
+                </Button>
+              )}
+            </div>
           )}
 
           {step === "starting" && (
@@ -721,22 +877,7 @@ export default function DownloadModal({
           <div className="modal-footer-actions">
             <Button
               variant="ghost"
-              onClick={async () => {
-                if (step === "fetching_metadata" || step === "file_selection") {
-                  cancelledRef.current = true;
-                  if (tempTorrentId) {
-                    try {
-                      await removeDownload(tempTorrentId, true);
-                    } catch (e) {
-                      console.error("Failed to remove list-only torrent:", e);
-                    }
-                  }
-                  setTempTorrentId(null);
-                  setStep("results");
-                } else {
-                  onClose();
-                }
-              }}
+              onClick={() => handleCloseAttempt()}
               disabled={step === "starting"}
             >
               Cancel
@@ -812,10 +953,16 @@ function ResultsSection({
   matches,
   selectedIndex,
   onSelect,
+  showWeakMatches,
+  onToggleWeak,
+  isDownloaded,
 }: {
   matches: MatchedDownload[];
   selectedIndex: number | null;
   onSelect: (index: number) => void;
+  showWeakMatches: boolean;
+  onToggleWeak: () => void;
+  isDownloaded: (title: string) => boolean;
 }) {
   if (matches.length === 0) {
     return (
@@ -834,49 +981,86 @@ function ResultsSection({
     );
   }
 
+  // Keep the high-confidence matches (>= 0.4) always visible; collapse
+  // the weaker ones behind a toggle so a wall of "Possible" results
+  // doesn't bury the good hit. `realIndex` maps back into `matches`.
+  const visible = matches
+    .map((match, realIndex) => ({ match, realIndex }))
+    .filter(({ match }) => showWeakMatches || match.matchScore >= 0.4);
+  const weakCount = matches.filter((m) => m.matchScore < 0.4).length;
+
   return (
-    <div className="dl-results-list">
-      {matches.map((match, i) => {
-        const score = match.matchScore;
-        const scoreLabel = score >= 0.8 ? "High match" : score >= 0.4 ? "Partial match" : "Possible";
-        return (
-          <button
-            key={`${match.sourceId}-${i}`}
-            type="button"
-            className={`dl-result-row${selectedIndex === i ? " selected" : ""}`}
-            onClick={() => onSelect(i)}
-          >
-            <div className="dl-result-info">
-              <div className="dl-result-title">{match.title}</div>
-              <div className="dl-result-meta">
-                <span className="dl-result-source">{match.sourceName}</span>
-                <span>·</span>
-                <span>{match.fileSize || "Unknown size"}</span>
-                {match.uploadDate && (
-                  <>
-                    <span>·</span>
-                    <span>{match.uploadDate}</span>
-                  </>
-                )}
-                <span className={`dl-result-score ${score >= 0.8 ? "high" : ""}`}>
-                  {scoreLabel} ({(score * 100).toFixed(0)}%)
-                </span>
+    <div>
+      <div className="dl-results-list">
+        {visible.map(({ match, realIndex }) => {
+          const score = match.matchScore;
+          const scoreLabel = score >= 0.8 ? "High match" : score >= 0.4 ? "Partial match" : "Possible";
+          return (
+            <button
+              key={`${match.sourceId}-${realIndex}`}
+              type="button"
+              className={`dl-result-row${selectedIndex === realIndex ? " selected" : ""}`}
+              onClick={() => onSelect(realIndex)}
+            >
+              <div className="dl-result-info">
+                <div className="dl-result-title">
+                  <span className="dl-result-title-text">{match.title}</span>
+                  <span className="dl-result-badges">
+                    {match.isNew && (
+                      <span className="dl-badge dl-badge-new" title="Newly added source">
+                        NEW
+                      </span>
+                    )}
+                    {isDownloaded(match.title) && (
+                      <span className="dl-badge dl-badge-downloaded" title="Already downloaded">
+                        Downloaded
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="dl-result-meta">
+                  <span className="dl-result-source">{match.sourceName}</span>
+                  <span>·</span>
+                  <span>{match.fileSize || "Unknown size"}</span>
+                  {match.uploadDate && (
+                    <>
+                      <span>·</span>
+                      <span>{match.uploadDate}</span>
+                    </>
+                  )}
+                  <span className={`dl-result-score ${score >= 0.8 ? "high" : ""}`}>
+                    {scoreLabel} ({(score * 100).toFixed(0)}%)
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="dl-result-actions" aria-hidden>
-              {selectedIndex === i ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18, opacity: 0.4 }}>
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              )}
-            </div>
-          </button>
-        );
-      })}
+              <div className="dl-result-actions" aria-hidden>
+                {selectedIndex === realIndex ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18, opacity: 0.4 }}>
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {weakCount > 0 && (
+        <button
+          type="button"
+          className="dl-toggle-weak"
+          onClick={onToggleWeak}
+          aria-expanded={showWeakMatches}
+        >
+          {showWeakMatches
+            ? "Hide weaker matches"
+            : `Show ${weakCount} weaker match${weakCount !== 1 ? "es" : ""}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -947,7 +1131,7 @@ function StartingStatus({
       aria-live="polite"
       style={{
         fontSize: "var(--font-size-xs)",
-        color: "var(--text-muted, #888)",
+        color: "var(--color-text-muted)",
         marginTop: "var(--space-sm)",
         textAlign: "center",
       }}
@@ -1031,6 +1215,25 @@ function FileSelectionSection({
             Clear
           </Button>
         </div>
+      </div>
+
+      <div
+        className="dl-file-selection-summary"
+        style={{
+          fontSize: "var(--font-size-xs)",
+          color: "var(--color-text-secondary)",
+          marginBottom: "var(--space-sm)",
+        }}
+      >
+        {selectedFiles.size} of {files.length} files selected
+        {" · "}
+        {formatBytesShort(
+          files.reduce(
+            (sum, f, i) => (selectedFiles.has(i) ? sum + f.size : sum),
+            0,
+          ),
+        )}{" "}
+        of {formatBytesShort(files.reduce((sum, f) => sum + f.size, 0))}
       </div>
 
       <div
