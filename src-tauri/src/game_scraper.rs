@@ -1,6 +1,116 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// ─── Title Matching Helpers ─────────────────────────────────────────────────────
+
+/// Normalize a game title for fuzzy comparison: lowercase, strip punctuation
+/// and non-alphanumeric separators, and collapse whitespace. This makes
+/// "The Wolf Among Us" vs "Among Us" (or "Halo: Combat Evolved" vs "Halo")
+/// compare on the meaningful words rather than exact punctuation/casing.
+fn normalize_title(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+}
+
+/// Score how well a candidate title matches the query.
+/// Returns a value in `[0.0, 1.0]` where `1.0` means an exact normalized
+/// match. A candidate that is a substring of the query (or vice-versa), or
+/// that shares all of the query's significant tokens, scores highly; a
+/// loosely-related title like "The Wolf Among Us" for query "Among Us"
+/// scores low because it contains extra significant words.
+fn title_similarity(query: &str, candidate: &str) -> f64 {
+    let q = normalize_title(query);
+    let c = normalize_title(candidate);
+    if q.is_empty() || c.is_empty() {
+        return 0.0;
+    }
+    if q == c {
+        return 1.0;
+    }
+    // Substring containment: only meaningful when the shorter string is the
+    // whole query or the whole candidate. Score by how much of the longer
+    // title the shorter one covers *in significant words*, so a much longer
+    // unrelated title (e.g. "The Wolf Among Us" for query "Among Us") scores
+    // low instead of winning on a bare substring hit.
+    if c.contains(&q) || q.contains(&c) {
+        let q_tokens = q.split_whitespace().count().max(1);
+        let c_tokens = c.split_whitespace().count().max(1);
+        return (q_tokens as f64) / (c_tokens as f64);
+    }
+    // Token overlap (Jaccard over significant words). This prevents a
+    // longer unrelated title from winning just because it contains the
+    // query as a token subset.
+    let q_tokens: Vec<&str> = q.split_whitespace().collect();
+    let c_tokens: Vec<&str> = c.split_whitespace().collect();
+    let q_set: std::collections::HashSet<&str> = q_tokens.iter().copied().collect();
+    let c_set: std::collections::HashSet<&str> = c_tokens.iter().copied().collect();
+    let intersection = q_set.intersection(&c_set).count() as f64;
+    let union = q_set.union(&c_set).count() as f64;
+    if union == 0.0 {
+        return 0.0;
+    }
+    intersection / union
+}
+
+/// Minimum similarity a metadata source title must reach before we accept it
+/// as a match for the queried game. Below this we treat the source as having
+/// no real match (which lets the next source, or a "no metadata" sentinel,
+/// take over) instead of wrongly attributing "The Wolf Among Us" to "Among Us".
+///
+/// Set to 0.6 so that a query covering only half of a longer candidate's
+/// significant words (e.g. "Among Us" inside "The Wolf Among Us", which
+/// scores exactly 0.5) is rejected rather than accepted.
+const MIN_TITLE_SIMILARITY: f64 = 0.6;
+
+#[cfg(test)]
+mod title_match_tests {
+    use super::*;
+
+    #[test]
+    fn exact_match_scores_one() {
+        assert_eq!(title_similarity("Among Us", "Among Us"), 1.0);
+        assert_eq!(title_similarity("AMONG US", "among us"), 1.0);
+    }
+
+    #[test]
+    fn unrelated_longer_title_is_rejected() {
+        // The reported bug: "The Wolf Among Us" must NOT be accepted for "Among Us".
+        let s = title_similarity("Among Us", "The Wolf Among Us");
+        assert!(s < MIN_TITLE_SIMILARITY, "score was {s}");
+    }
+
+    #[test]
+    fn punctuation_insensitive() {
+        assert_eq!(title_similarity("Halo: Combat Evolved", "Halo Combat Evolved"), 1.0);
+    }
+
+    #[test]
+    fn borderline_subtitle_rejected_when_too_long() {
+        // "Doom (2016)" shares only half its significant words with "Doom",
+        // so it falls below the 0.6 threshold and is not auto-attributed.
+        // IGDB (the preferred source) still resolves the correct title.
+        assert!(title_similarity("Doom", "Doom (2016)") < MIN_TITLE_SIMILARITY);
+    }
+
+    #[test]
+    fn ranking_picks_best_candidate() {
+        let mut candidates = vec![
+            ("The Wolf Among Us".to_string(), title_similarity("Among Us", "The Wolf Among Us")),
+            ("Among Us".to_string(), title_similarity("Among Us", "Among Us")),
+            ("Among Us VR".to_string(), title_similarity("Among Us", "Among Us VR")),
+        ];
+        candidates.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        assert_eq!(candidates[0].0, "Among Us");
+    }
+}
+
 // ─── Data Types ───────────────────────────────────────────────────────────────
 
 /// Represents a collection of game images (URLs) from a metadata source.
@@ -1267,7 +1377,22 @@ async fn search_steam(game_name: &str) -> Option<GameMetadataResult> {
     let search_resp = client.get(&search_url).send().await.ok()?;
     let search_data: SteamSearchResponse = search_resp.json().await.ok()?;
 
-    let best_match = search_data.items.into_iter().next()?;
+    // Steam's storesearch ranks results by its own relevance, which can put a
+    // loosely-related title first — e.g. "The Wolf Among Us" ahead of the
+    // actual "Among Us" because of substring overlap. Instead of blindly
+    // taking the first item, pick the candidate whose normalized title is
+    // most similar to the query and reject it if even the best is a poor
+    // match. This prevents one game's metadata being attributed to another.
+    let best_match = search_data
+        .items
+        .into_iter()
+        .map(|item| {
+            let score = title_similarity(game_name, &item.name);
+            (score, item)
+        })
+        .filter(|(score, _)| *score >= MIN_TITLE_SIMILARITY)
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, item)| item)?;
     let app_id = best_match.id;
     let title = best_match.name;
 
@@ -1482,10 +1607,25 @@ async fn search_launchbox(game_name: &str) -> Option<GameMetadataResult> {
             return None;
         }
 
-        // Prefer Windows platform if available, otherwise take first result
+        // Pick the hit whose normalized title is most similar to the query,
+        // preferring a Windows platform as a tiebreaker. This stops a
+        // loosely-related title (e.g. "The Wolf Among Us" for "Among Us")
+        // from being selected just because it appears first.
         let best_idx = hits
             .iter()
-            .position(|h| h._platform.eq_ignore_ascii_case("Windows"))
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                let sa = title_similarity(game_name, &a.title);
+                let sb = title_similarity(game_name, &b.title);
+                sa.partial_cmp(&sb)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        a._platform
+                            .eq_ignore_ascii_case("Windows")
+                            .cmp(&b._platform.eq_ignore_ascii_case("Windows"))
+                    })
+            })
+            .map(|(i, _)| i)
             .unwrap_or(0);
 
         let detail_url = if hits[best_idx].href.starts_with("http") {
@@ -1498,10 +1638,22 @@ async fn search_launchbox(game_name: &str) -> Option<GameMetadataResult> {
         // document is dropped here — scraper::Html is no longer alive across .await
     };
 
-    // Prefer Windows platform, fallback to first
+    // Prefer the most title-similar hit (Windows as tiebreaker)
     let best_idx = hits
         .iter()
-        .position(|h| h._platform.eq_ignore_ascii_case("Windows"))
+        .enumerate()
+        .max_by(|(_, a), (_, b)| {
+            let sa = title_similarity(game_name, &a.title);
+            let sb = title_similarity(game_name, &b.title);
+            sa.partial_cmp(&sb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a._platform
+                        .eq_ignore_ascii_case("Windows")
+                        .cmp(&b._platform.eq_ignore_ascii_case("Windows"))
+                })
+        })
+        .map(|(i, _)| i)
         .unwrap_or(0);
     let best = &hits[best_idx];
 
@@ -2591,12 +2743,19 @@ limit 8;"#,
             release_status,
             language_supports,
         });
+        }
+        
+        results.sort_by(|a, b| {
+            let sa = title_similarity(game_name, &a.title);
+            let sb = title_similarity(game_name, &b.title);
+            sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        results
     }
-    
-    results
-}
 
 // ─── Store: Browse & Search IGDB Catalog ──────────────────────────────────────
+// (post-fix) IGDB results are similarity-sorted above.
 
 /// Fetch a page of store games by category from IGDB.
 ///
