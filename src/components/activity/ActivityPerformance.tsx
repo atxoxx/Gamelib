@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { type Game, type GameSession, buildSessionMetricsSeries } from "../../types/game";
 import LineChart from "../charts/LineChart";
 import { useActivity } from "../../context/ActivityContext";
+import { useSettings } from "../../context/SettingsContext";
+import { formatTemp, toDisplayTemps, tempMinY, tempMaxY, tempUnitLabel } from "../../utils/temp";
 import * as Icons from "./Icons";
 
 /**
@@ -30,6 +32,7 @@ export function ActivityPerformance({
   games: Game[];
 }) {
   const { getGameStats } = useActivity();
+  const { tempUnit } = useSettings();
 
   // Sessions with usable metrics are the only data we can chart. The
   // helper sorts them oldest→newest so the x-axis timeline reads
@@ -90,10 +93,10 @@ export function ActivityPerformance({
 
   const tempSeries = useMemo(
     () => [
-      { data: series.cpuTemp, color: "#ef4444", label: "CPU °C" },
-      { data: series.gpuTemp, color: "#fb923c", label: "GPU °C" },
+      { data: toDisplayTemps(series.cpuTemp, tempUnit), color: "#ef4444", label: `CPU ${tempUnitLabel(tempUnit)}` },
+      { data: toDisplayTemps(series.gpuTemp, tempUnit), color: "#fb923c", label: `GPU ${tempUnitLabel(tempUnit)}` },
     ],
-    [series.cpuTemp, series.gpuTemp],
+    [series.cpuTemp, series.gpuTemp, tempUnit],
   );
 
   const isEmpty = series.labels.length === 0;
@@ -163,7 +166,7 @@ export function ActivityPerformance({
             </div>
           </div>
 
-          {/* ── Temperatures trend (FIXED 0-100 °C) ────────────────────── */}
+          {/* ── Temperatures trend (FIXED scale) ────────────────────── */}
           <div className="section-panel">
             <div className="performance-insights__chart-header">
               <h3 className="section-panel__title performance-timeline__title">
@@ -171,7 +174,7 @@ export function ActivityPerformance({
                 Temperatures (CPU · GPU)
               </h3>
               <span className="performance-timeline__game-selector-label">
-                Fixed 0-100 °C scale
+                Fixed {tempMinY(tempUnit)}-{tempMaxY(tempUnit)} {tempUnitLabel(tempUnit)} scale
               </span>
             </div>
             <div className="performance-insights__chart-container">
@@ -180,12 +183,12 @@ export function ActivityPerformance({
                 labels={series.labels}
                 width={640}
                 height={220}
-                minY={0}
-                maxY={100}
-                formatValue={(v) => `${v.toFixed(0)}°C`}
+                minY={tempMinY(tempUnit)}
+                maxY={tempMaxY(tempUnit)}
+                formatValue={(v) => formatTemp(v, tempUnit)}
                 formatTooltipValue={(v) => (
                   <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {v.toFixed(0)}°C
+                    {formatTemp(v, tempUnit)}
                   </span>
                 )}
                 fillOpacity={0.06}

@@ -5,6 +5,8 @@ import html2canvas from "html2canvas";
 import { prepareClonedDocumentForCanvasCapture } from "../utils/color";
 import { useActivity } from "../context/ActivityContext";
 import { useGames } from "../context/GameContext";
+import { useSettings } from "../context/SettingsContext";
+import { tempUnitLabel } from "../utils/temp";
 import { useToast } from "../context/ToastContext";
 import { ActivityDashboard } from "./activity/ActivityDashboard";
 import { ActivityGantt } from "./activity/ActivityGantt";
@@ -28,6 +30,7 @@ export default function ActivityPage() {
   }
   const { sessions, deleteSession } = useActivity();
   const { games } = useGames();
+  const { tempUnit } = useSettings();
   // Toast feedback for screenshot success / error (matches the rest of
   // the app instead of throwing a native alert()).
   const { showToast } = useToast();
@@ -95,8 +98,8 @@ export default function ActivityPage() {
       "Avg CPU Usage (%)",
       "Avg GPU Usage (%)",
       "Avg RAM Usage (%)",
-      "Avg CPU Temp (°C)",
-      "Avg GPU Temp (°C)",
+      "Avg CPU Temp (" + tempUnitLabel(tempUnit) + ")",
+      "Avg GPU Temp (" + tempUnitLabel(tempUnit) + ")",
     ];
 
     const rows = sessions.map((s) => {

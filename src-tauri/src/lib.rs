@@ -277,6 +277,15 @@ fn detect_gpus() -> Vec<GpuInfo> {
     gpu_detector::detect_gpus()
 }
 
+/// Static summary of the host hardware, returned by `get_system_info`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemInfo {
+    pub cpu_name: String,
+    pub ram_gb: u32,
+    pub gpus: Vec<GpuInfo>,
+}
+
 /// Force-terminate the tracked process for `game_id` and finalize the
 /// session. Frontend exposes this as the "Force Close" button on the
 /// Game page when a game is in the running state.
@@ -750,17 +759,22 @@ fn launch_game(
     }
 
     // â”€â”€ Register with watcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Lock the watcher once here (std::sync::Mutex is not reentrant) so the
+    // same guard can both supply the live telemetry config and register the
+    // launched session below without a double-lock deadlock.
+    let mut w = watcher.lock().map_err(|e| e.to_string())?;
+
     // Start metrics collection immediately if we have a valid PID.
     // The stop_tx and metrics_rx are stored in the session so the
     // watcher's finish_session can stop collection and read results.
     let (metrics_stop_tx, metrics_rx) = if initial_pid > 0 {
         let (tx, rx) = metrics_collector::start_metrics_collection(
-            5, initial_pid, gpu_id.clone(), gpu_name.clone(),
+            w.metrics_config().clone(), initial_pid, gpu_id.clone(), gpu_name.clone(),
         );
         (tx, rx)
     } else {
-        // No PID yet (Steam protocol launch) â€” create dummy channels.
-        // Sends will fail silently in finish_session â€” acceptable
+        // No PID yet (Steam protocol launch) — create dummy channels.
+        // Sends will fail silently in finish_session — acceptable
         // because metrics were never started for this session.
         let (dummy_stop_tx, _) = std::sync::mpsc::channel::<()>();
         let (_, dummy_metrics_rx) = std::sync::mpsc::channel::<Option<metrics_collector::SessionMetrics>>();
@@ -768,7 +782,6 @@ fn launch_game(
     };
 
     {
-        let mut w = watcher.lock().map_err(|e| e.to_string())?;
         w.register_launched_session(
             &app,
             &game_id,
@@ -1442,6 +1455,42 @@ fn scan_dir(dir: &Path, exes: &mut Vec<ExeInfo>) {
 #[tauri::command]
 fn get_system_ram_gb() -> u32 {
     metrics_collector::get_system_ram_gb()
+}
+
+/// Summary of the host system's hardware, used by the Settings → Hardware
+/// tab's "System summary" card. Returns the CPU model name, total RAM (GB),
+/// and the full list of detected GPUs (not just the one chosen for monitoring).
+#[tauri::command]
+fn get_system_info() -> SystemInfo {
+    SystemInfo {
+        cpu_name: metrics_collector::get_cpu_name(),
+        ram_gb: metrics_collector::get_system_ram_gb(),
+        gpus: gpu_detector::detect_gpus(),
+    }
+}
+
+/// Persist the user's telemetry configuration (master toggle, sampling
+/// interval, per-metric capture flags) so the game watcher applies it to
+/// the next collection thread.
+#[tauri::command]
+fn set_metrics_config(
+    state: tauri::State<Arc<std::sync::Mutex<GameWatcher>>>,
+    config: metrics_collector::MetricsConfig,
+) -> Result<(), String> {
+    let mut w = state.lock().map_err(|e| e.to_string())?;
+    w.set_metrics_config(config);
+    Ok(())
+}
+
+/// Read the current telemetry configuration (seeds the Settings UI on load).
+#[tauri::command]
+fn get_metrics_config(
+    state: tauri::State<Arc<std::sync::Mutex<GameWatcher>>>,
+) -> metrics_collector::MetricsConfig {
+    state
+        .lock()
+        .map(|w| w.metrics_config())
+        .unwrap_or_default()
 }
 
 /// Debug command: dump all MSI Afterburner shared memory entries for diagnostics.
@@ -2386,7 +2435,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, debug_mahm_entries, get_system_ram_gb, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, debug_mahm_entries, get_system_ram_gb, get_system_info, get_metrics_config, set_metrics_config, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,

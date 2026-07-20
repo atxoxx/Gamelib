@@ -128,6 +128,11 @@ pub struct GameWatcher {
     active_sessions: HashMap<String, ActiveSession>,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
+    /// User-configurable telemetry knobs (master toggle, sampling
+    /// interval, per-metric capture flags). Read at the moment a
+    /// collection thread is started so live setting changes apply to
+    /// the next game launch / detection without a restart.
+    metrics_config: metrics_collector::MetricsConfig,
     /// Phase 3: handle to the SQLite pool so `finish_session` can
     /// record each session row before emitting the `game-exited`
     /// event. Pool ops are sync and ~ms, so the inline write is
@@ -148,6 +153,7 @@ impl GameWatcher {
             active_sessions: HashMap::new(),
             gpu_id: None,
             gpu_name: None,
+            metrics_config: metrics_collector::MetricsConfig::default(),
             db,
             wake_tx: None,
         }
@@ -208,6 +214,17 @@ impl GameWatcher {
     pub fn set_gpu(&mut self, id: Option<String>, name: Option<String>) {
         self.gpu_id = id;
         self.gpu_name = name;
+    }
+
+    /// Update the user-configurable telemetry knobs. Applied to the next
+    /// collection thread started for a launch or passive detection.
+    pub fn set_metrics_config(&mut self, config: metrics_collector::MetricsConfig) {
+        self.metrics_config = config;
+    }
+
+    /// Read the current telemetry config (used to seed the frontend on load).
+    pub fn metrics_config(&self) -> metrics_collector::MetricsConfig {
+        self.metrics_config.clone()
     }
 
     /// Register a session launched explicitly through the app.
@@ -357,7 +374,7 @@ impl GameWatcher {
                 );
 
                 let (tx, rx) = metrics_collector::start_metrics_collection(
-                    5,
+                    self.metrics_config.clone(),
                     proc.pid,
                     self.gpu_id.clone(),
                     self.gpu_name.clone(),
@@ -442,7 +459,7 @@ impl GameWatcher {
     ) {
         let pid = proc.pid;
         let (stop_tx, metrics_rx) = metrics_collector::start_metrics_collection(
-            5,
+            self.metrics_config.clone(),
             pid,
             self.gpu_id.clone(),
             self.gpu_name.clone(),

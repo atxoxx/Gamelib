@@ -4,6 +4,8 @@ import { ActivitySparkline } from "./ActivitySparkline";
 import { GameThumbnail } from "./GameThumbnail";
 import SteamPlayerCount from "../../components/SteamPlayerCount";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
+import { useSettings } from "../../context/SettingsContext";
+import { formatTemp, toDisplayTemp, toDisplayTemps, tempUnitLabel, tempThreshold } from "../../utils/temp";
 import * as Icons from "./Icons";
 
 export interface ActivitySessionsProps {
@@ -56,6 +58,7 @@ interface SessionItemProps {
 function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeChartTab, setActiveChartTab] = useState<"usage" | "temps" | "ram" | "fps">("usage");
+  const { tempUnit } = useSettings();
 
   // Resolve the Steam appid for this session's game. The hook also
   // persists successful lookups back onto the library row via
@@ -122,8 +125,8 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
       ];
     } else if (activeChartTab === "temps") {
       return [
-        { data: chartProps.cpuTemp, color: "var(--color-danger)", label: "CPU Temp" },
-        { data: chartProps.gpuTemp, color: "var(--color-warning)", label: "GPU Temp" },
+        { data: toDisplayTemps(chartProps.cpuTemp, tempUnit), color: "var(--color-danger)", label: `CPU Temp` },
+        { data: toDisplayTemps(chartProps.gpuTemp, tempUnit), color: "var(--color-warning)", label: `GPU Temp` },
       ];
     } else if (activeChartTab === "ram") {
       // Read total system RAM from localStorage
@@ -133,11 +136,11 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
     } else {
       return [{ data: chartProps.fps, color: "var(--color-brand-teal)", label: "FPS" }];
     }
-  }, [chartProps, activeChartTab]);
+  }, [chartProps, activeChartTab, tempUnit]);
 
   const yValFormatter = (val: number) => {
     if (activeChartTab === "usage") return `${Math.round(val)}%`;
-    if (activeChartTab === "temps") return `${Math.round(val)}°C`;
+    if (activeChartTab === "temps") return formatTemp(val, tempUnit);
     if (activeChartTab === "ram") return `${val.toFixed(1)} GB`;
     return `${Math.round(val)} FPS`;
   };
@@ -234,21 +237,21 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
                 />
 
                 <ActivitySparkline
-                  data={sparklineData.cpuTemp}
+                  data={sparklineData.cpuTemp.map((p) => ({ ...p, y: toDisplayTemp(p.y, tempUnit) }))}
                   label="CPU Temperature"
-                  unit="°C"
-                  value={session.metrics.avgCpuTemp}
-                  max={session.metrics.avgCpuTemp + 10}
-                  thresholds={{ warn: 75, danger: 85 }}
+                  unit={tempUnitLabel(tempUnit)}
+                  value={toDisplayTemp(session.metrics.avgCpuTemp, tempUnit)}
+                  max={toDisplayTemp(session.metrics.avgCpuTemp + 10, tempUnit)}
+                  thresholds={{ warn: tempThreshold(75, tempUnit), danger: tempThreshold(85, tempUnit) }}
                 />
 
                 <ActivitySparkline
-                  data={sparklineData.gpuTemp}
+                  data={sparklineData.gpuTemp.map((p) => ({ ...p, y: toDisplayTemp(p.y, tempUnit) }))}
                   label="GPU Temperature"
-                  unit="°C"
-                  value={session.metrics.avgGpuTemp}
-                  max={session.metrics.avgGpuTemp + 8}
-                  thresholds={{ warn: 75, danger: 85 }}
+                  unit={tempUnitLabel(tempUnit)}
+                  value={toDisplayTemp(session.metrics.avgGpuTemp, tempUnit)}
+                  max={toDisplayTemp(session.metrics.avgGpuTemp + 8, tempUnit)}
+                  thresholds={{ warn: tempThreshold(75, tempUnit), danger: tempThreshold(85, tempUnit) }}
                 />
 
                 <ActivitySparkline

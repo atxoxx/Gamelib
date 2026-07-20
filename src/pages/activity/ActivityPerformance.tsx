@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
+import { useSettings } from "../../context/SettingsContext";
+import { formatTemp, toDisplayTemp, toDisplayTemps, tempMinY, tempMaxY, tempUnitLabel, tempThreshold } from "../../utils/temp";
 import * as Icons from "./Icons";
 
 export interface ActivityPerformanceProps {
@@ -62,6 +64,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
   const [metricTab, setMetricTab] = useState<"fps" | "temps" | "ram">("fps");
   const [selectedGameFilter, setSelectedGameFilter] = useState<string>("all");
   const [selectedSessionIndex, setSelectedSessionIndex] = useState<string>("all");
+  const { tempUnit } = useSettings();
 
   // 1. Filter sessions that have valid hardware metrics
   const hwSessions = useMemo(() => {
@@ -302,7 +305,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                 {m === "fps" && <Icons.BarChart3 size={12} />}
                 {m === "temps" && <Icons.Flame size={12} />}
                 {m === "ram" && <Icons.Cpu size={12} />}
-                {m === "fps" ? "Avg FPS" : m === "temps" ? "Temps (°C)" : "RAM (GB)"}
+                {m === "fps" ? "Avg FPS" : m === "temps" ? `Temps (${tempUnitLabel(tempUnit)})` : "RAM (GB)"}
               </button>
             ))}
           </div>
@@ -376,10 +379,10 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                       {g.avgFps > 0 ? `${g.avgFps} FPS` : "—"}
                     </td>
                     <td className={isCpuHot ? "text-hot-temp" : ""}>
-                      {g.avgCpuTemp > 0 ? `${g.avgCpuTemp}°C` : "—"}
+                      {g.avgCpuTemp > 0 ? formatTemp(g.avgCpuTemp, tempUnit) : "—"}
                     </td>
                     <td className={isGpuHot ? "text-hot-temp" : ""}>
-                      {g.avgGpuTemp > 0 ? `${g.avgGpuTemp}°C` : "—"}
+                      {g.avgGpuTemp > 0 ? formatTemp(g.avgGpuTemp, tempUnit) : "—"}
                     </td>
                     <td>
                       {g.avgRamUsage > 0
@@ -489,11 +492,12 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                   <span className="performance-stat-cards__label">CPU Temp</span>
                   <div className="performance-stat-cards__sparkline">
                     <ActivitySparkline
-                      data={timelineCharts.sparklines.cpuTemp}
+                      data={timelineCharts.sparklines.cpuTemp.map((p) => ({ ...p, y: toDisplayTemp(p.y, tempUnit) }))}
                       label=""
-                      unit="°C"
-                      value={timelineCharts.raw.avgCpuTemp}
-                      max={timelineCharts.raw.avgCpuTemp + 10}
+                      unit={tempUnitLabel(tempUnit)}
+                      value={toDisplayTemp(timelineCharts.raw.avgCpuTemp, tempUnit)}
+                      max={toDisplayTemp(timelineCharts.raw.avgCpuTemp + 10, tempUnit)}
+                      thresholds={{ warn: tempThreshold(75, tempUnit), danger: tempThreshold(85, tempUnit) }}
                     />
                   </div>
                 </div>
@@ -502,11 +506,12 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                   <span className="performance-stat-cards__label">GPU Temp</span>
                   <div className="performance-stat-cards__sparkline">
                     <ActivitySparkline
-                      data={timelineCharts.sparklines.gpuTemp}
+                      data={timelineCharts.sparklines.gpuTemp.map((p) => ({ ...p, y: toDisplayTemp(p.y, tempUnit) }))}
                       label=""
-                      unit="°C"
-                      value={timelineCharts.raw.avgGpuTemp}
-                      max={timelineCharts.raw.avgGpuTemp + 8}
+                      unit={tempUnitLabel(tempUnit)}
+                      value={toDisplayTemp(timelineCharts.raw.avgGpuTemp, tempUnit)}
+                      max={toDisplayTemp(timelineCharts.raw.avgGpuTemp + 8, tempUnit)}
+                      thresholds={{ warn: tempThreshold(75, tempUnit), danger: tempThreshold(85, tempUnit) }}
                     />
                   </div>
                 </div>
@@ -556,12 +561,15 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                 <div className="performance-timeline__chart-card">
                   <div className="performance-timeline__chart-title">Temperatures</div>
                   <LineChart
-                    series={timelineCharts.temps}
+                    series={timelineCharts.temps.map((s) => ({
+                      ...s,
+                      data: toDisplayTemps(s.data, tempUnit),
+                    }))}
                     labels={timelineCharts.labels}
-                    formatValue={(v) => `${Math.round(v)}°C`}
+                    formatValue={(v) => formatTemp(v, tempUnit)}
                     height={200}
-                    minY={0}
-                    maxY={100}
+                    minY={tempMinY(tempUnit)}
+                    maxY={tempMaxY(tempUnit)}
                   />
                 </div>
 

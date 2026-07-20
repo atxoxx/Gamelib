@@ -47,6 +47,12 @@ const LS_DISCORD_PRESENCE = "gamelib.discord_rich_presence_enabled";
 const LS_HISTORY_CAP_DAYS = "gamelib.player_count_history_cap_days";
 const LS_BLOCKED_DOMAINS = "gamelib.blocked_source_domains";
 
+// Hardware monitoring (Settings → Hardware tab)
+const LS_HW_MONITORING = "gamelib.hardware_monitoring_enabled";
+const LS_METRIC_CAPTURE = "gamelib.metric_capture";
+const LS_SAMPLING_SEC = "gamelib.metrics_sampling_interval_sec";
+const LS_TEMP_UNIT = "gamelib.temp_unit";
+
 // ── Public shape ─────────────────────────────────────────────────────────────
 
 export type LandingPage =
@@ -62,6 +68,19 @@ export type LandingPage =
   | "community";
 
 export type SyncIntervalMinutes = 0 | 15 | 30 | 60 | 360 | 720 | 1440;
+
+/** Which individual telemetry streams to record during a session. */
+export interface MetricCapture {
+  fps: boolean;
+  cpu: boolean;
+  gpu: boolean;
+  ram: boolean;
+  cpuTemp: boolean;
+  gpuTemp: boolean;
+}
+
+/** Temperature display unit for every hardware readout in the UI. */
+export type TempUnit = "c" | "f";
 
 export interface SettingsContextValue {
   // ── Launcher (Rust-backed) ───────────────────────────────────────
@@ -91,6 +110,16 @@ export interface SettingsContextValue {
   setHistoryCapDays: (next: 1 | 7 | 30) => void;
   blockedSourceDomains: string[];
   setBlockedSourceDomains: (next: string[]) => void;
+
+  // ── Hardware monitoring (Settings → Hardware tab) ───────────────
+  hardwareMonitoringEnabled: boolean;
+  setHardwareMonitoringEnabled: (next: boolean) => void;
+  metricCapture: MetricCapture;
+  setMetricCapture: (next: MetricCapture) => void;
+  samplingIntervalSec: number;
+  setSamplingIntervalSec: (next: number) => void;
+  tempUnit: TempUnit;
+  setTempUnit: (next: TempUnit) => void;
 
   // True until the very first Rust-side fetch has resolved. Mirrors
   // SettingsPage's existing `steamAuthReady` gating pattern so a
@@ -358,6 +387,52 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     lsSetJSON(LS_BLOCKED_DOMAINS, cleaned);
   }, []);
 
+  // ── Hardware monitoring ────────────────────────────────────────────────
+  const [hardwareMonitoringEnabled, setHardwareMonitoringEnabledState] =
+    useState<boolean>(() => lsGet(LS_HW_MONITORING) !== "false");
+  const setHardwareMonitoringEnabled = useCallback((next: boolean) => {
+    setHardwareMonitoringEnabledState(next);
+    lsSet(LS_HW_MONITORING, String(next));
+  }, []);
+
+  const [metricCapture, setMetricCaptureState] = useState<MetricCapture>(
+    () =>
+      lsGetJSON<MetricCapture>(LS_METRIC_CAPTURE, {
+        fps: true,
+        cpu: true,
+        gpu: true,
+        ram: true,
+        cpuTemp: true,
+        gpuTemp: true,
+      }),
+  );
+  const setMetricCapture = useCallback((next: MetricCapture) => {
+    setMetricCaptureState(next);
+    lsSetJSON(LS_METRIC_CAPTURE, next);
+  }, []);
+
+  const [samplingIntervalSec, setSamplingIntervalSecState] = useState<number>(
+    () => {
+      const raw = parseFloat(lsGet(LS_SAMPLING_SEC) ?? "5");
+      return Number.isFinite(raw) && raw >= 0.25 ? raw : 5;
+    },
+  );
+  const setSamplingIntervalSec = useCallback((next: number) => {
+    const clamped = Number.isFinite(next)
+      ? Math.min(60, Math.max(0.25, Math.round(next * 4) / 4))
+      : 5;
+    setSamplingIntervalSecState(clamped);
+    lsSet(LS_SAMPLING_SEC, String(clamped));
+  }, []);
+
+  const [tempUnit, setTempUnitState] = useState<TempUnit>(() =>
+    lsGet(LS_TEMP_UNIT) === "f" ? "f" : "c",
+  );
+  const setTempUnit = useCallback((next: TempUnit) => {
+    setTempUnitState(next);
+    lsSet(LS_TEMP_UNIT, next);
+  }, []);
+
   const value = useMemo<SettingsContextValue>(
     () => ({
       closeToTray,
@@ -384,6 +459,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setHistoryCapDays,
       blockedSourceDomains,
       setBlockedSourceDomains,
+      hardwareMonitoringEnabled,
+      setHardwareMonitoringEnabled,
+      metricCapture,
+      setMetricCapture,
+      samplingIntervalSec,
+      setSamplingIntervalSec,
+      tempUnit,
+      setTempUnit,
       ready,
     }),
     [
@@ -411,6 +494,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setHistoryCapDays,
       blockedSourceDomains,
       setBlockedSourceDomains,
+      hardwareMonitoringEnabled,
+      setHardwareMonitoringEnabled,
+      metricCapture,
+      setMetricCapture,
+      samplingIntervalSec,
+      setSamplingIntervalSec,
+      tempUnit,
+      setTempUnit,
       ready,
     ],
   );

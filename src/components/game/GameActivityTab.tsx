@@ -4,8 +4,10 @@ import { save } from "@tauri-apps/plugin-dialog";
 import html2canvas from "html2canvas";
 import { prepareClonedDocumentForCanvasCapture } from "../../utils/color";
 import { useActivity } from "../../context/ActivityContext";
+import { useSettings } from "../../context/SettingsContext";
 import { useToast } from "../../context/ToastContext";
 import { type Game, type GameSession, formatPlayTime } from "../../types/game";
+import { formatTemp, toDisplayTemps } from "../../utils/temp";
 import BarChart from "../charts/BarChart";
 import LineChart from "../charts/LineChart";
 import { ConfirmModal } from "../ui/ConfirmModal";
@@ -63,6 +65,7 @@ function generateConsistentSeries(avgVal: number, minVal: number, maxVal: number
 
 export function GameActivityTab({ game }: { game: Game }) {
   const { getGameSessions, deleteSession } = useActivity();
+  const { tempUnit } = useSettings();
   // Toast feedback for screenshot success / error — GameActivityTab is
   // a sibling component to GameDetail, so its own useToast() (rather
   // than the one inside GameDetail) is in scope here.
@@ -864,8 +867,8 @@ export function GameActivityTab({ game }: { game: Game }) {
                     <PerfMiniCard label="RAM Usage" avg={`${hwAverages.avgRamPct}%`} max={`MAX: ${hwAverages.maxRamPct}%`} />
                     {hasTemps && (
                       <>
-                        <PerfMiniCard label="CPU Temp" avg={`${hwAverages.avgCpuT}°C`} max={`MAX: ${hwAverages.maxCpuT}°C`} />
-                        <PerfMiniCard label="GPU Temp" avg={`${hwAverages.avgGpuT}°C`} max={`MAX: ${hwAverages.maxGpuT}°C`} />
+                        <PerfMiniCard label="CPU Temp" avg={formatTemp(hwAverages.avgCpuT, tempUnit)} max={`MAX: ${formatTemp(hwAverages.maxCpuT, tempUnit)}`} />
+                        <PerfMiniCard label="GPU Temp" avg={formatTemp(hwAverages.avgGpuT, tempUnit)} max={`MAX: ${formatTemp(hwAverages.maxGpuT, tempUnit)}`} />
                       </>
                     )}
                   </div>
@@ -930,12 +933,12 @@ export function GameActivityTab({ game }: { game: Game }) {
                         <ChartSection title="CPU & GPU Temperatures">
                           <LineChart
                             series={[
-                              { data: perfTimelineData.cpuTemp, color: "#ffab00", label: "CPU" },
-                              { data: perfTimelineData.gpuTemp, color: "#ff5252", label: "GPU" },
+                              { data: toDisplayTemps(perfTimelineData.cpuTemp, tempUnit), color: "#ffab00", label: "CPU" },
+                              { data: toDisplayTemps(perfTimelineData.gpuTemp, tempUnit), color: "#ff5252", label: "GPU" },
                             ]}
                             labels={perfTimelineData.labels}
                             height={180}
-                            formatValue={(v) => `${Math.round(v)}°C`}
+                            formatValue={(v) => formatTemp(v, tempUnit)}
                           />
                         </ChartSection>
                       )}

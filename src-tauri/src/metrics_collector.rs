@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use wmi::{COMLibrary, WMIConnection};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -19,6 +19,42 @@ pub struct SessionMetrics {
     pub min_fps: u32,
     pub max_fps: u32,
     pub resolution: String,
+}
+
+/// User-configurable knobs for how gameplay telemetry is collected.
+///
+/// Driven from the Hardware settings tab. `enabled` gates the whole
+/// collection thread; `interval_ms` is the poll period; the `capture_*`
+/// flags decide which sensors are read (disabling the temperature flags
+/// skips the expensive LibreHardwareMonitor/OpenHardwareMonitor WMI
+/// namespace queries and the synthetic estimator, which is the main
+/// perf win) and which fields are zeroed in the aggregated result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsConfig {
+    pub enabled: bool,
+    pub interval_ms: u64,
+    pub capture_fps: bool,
+    pub capture_cpu: bool,
+    pub capture_gpu: bool,
+    pub capture_ram: bool,
+    pub capture_cpu_temp: bool,
+    pub capture_gpu_temp: bool,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_ms: 5000,
+            capture_fps: true,
+            capture_cpu: true,
+            capture_gpu: true,
+            capture_ram: true,
+            capture_cpu_temp: true,
+            capture_gpu_temp: true,
+        }
+    }
 }
 
 /// A single metrics sample collected at a point in time.
@@ -64,7 +100,7 @@ struct WmiSensor {
 /// Start collecting real-time performance metrics on a background thread.
 /// Returns a receiver that the caller can use to stop collection and get the averaged results.
 pub fn start_metrics_collection(
-    interval_secs: u64,
+    config: MetricsConfig,
     game_pid: u32,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
@@ -76,9 +112,17 @@ pub fn start_metrics_collection(
     let (result_tx, result_rx) = mpsc::channel::<Option<SessionMetrics>>();
 
     std::thread::spawn(move || {
+        // Master toggle: when disabled, don't spin up any WMI/COM work —
+        // the frontend just gets a None payload and the session records
+        // no telemetry.
+        if !config.enabled {
+            let _ = result_tx.send(None);
+            return;
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let samples = collect_metrics_loop(interval_secs, stop_rx, game_pid, gpu_id, gpu_name);
-            aggregate_metrics(&samples)
+            let samples =
+                collect_metrics_loop(&config, stop_rx, game_pid, gpu_id, gpu_name);
+            aggregate_metrics(&samples, &config)
         }));
         match result {
             Ok(metrics) => { let _ = result_tx.send(metrics); }
@@ -100,14 +144,14 @@ pub fn start_metrics_collection(
 }
 
 fn collect_metrics_loop(
-    interval_secs: u64,
+    config: &MetricsConfig,
     stop_rx: mpsc::Receiver<()>,
     game_pid: u32,
     gpu_id: Option<String>,
     gpu_name: Option<String>,
 ) -> Vec<MetricsSample> {
     let mut samples: Vec<MetricsSample> = Vec::new();
-    let interval = Duration::from_secs(interval_secs);
+    let interval = Duration::from_millis(config.interval_ms.max(250));
 
     // Resolve physical GPU index from "gpu-X" id
     let gpu_idx = gpu_id
@@ -161,6 +205,7 @@ fn collect_metrics_loop(
 
         let sample = collect_single_sample(
             &wmi_con, game_pid, gpu_idx, gpu_name.as_deref(), total_ram_mb,
+            config.capture_cpu_temp, config.capture_gpu_temp,
         );
 
         if !logged_source {
@@ -193,6 +238,8 @@ fn collect_single_sample(
     gpu_idx: u32,
     gpu_name: Option<&str>,
     total_ram_mb: u64,
+    capture_cpu_temp: bool,
+    capture_gpu_temp: bool,
 ) -> MetricsSample {
     // 1. Try to read from MSI Afterburner Shared Memory first (highly reliable)
     let mahm = mahm_reader::read_mahm_metrics(gpu_idx, gpu_name);
@@ -272,15 +319,20 @@ fn collect_single_sample(
 
     // 2. Fallback to LibreHardwareMonitor or OpenHardwareMonitor for temps & loads.
     // Bypasses the buggy WMI GPUEngine physical index mismatch by using reliable LHM/OHM sensors.
-    if cpu_temp_val == 0.0 || gpu_temp_val == 0.0 || cpu_usage_val == 0.0 || gpu_usage_val == 0.0 {
+    // Skipped entirely when neither temperature is being captured — this is the expensive
+    // ROOT\LibreHardwareMonitor / ROOT\OpenHardwareMonitor WMI namespace query, so gating it
+    // is the main CPU/IO saving of the "capture temperatures" toggle.
+    if (capture_cpu_temp || capture_gpu_temp)
+        && (cpu_temp_val == 0.0 || gpu_temp_val == 0.0 || cpu_usage_val == 0.0 || gpu_usage_val == 0.0)
+    {
         if let Some((lh_cpu_temp, lh_gpu_temp, lh_cpu_load, lh_gpu_load)) = get_lhm_metrics() {
-            if cpu_temp_val == 0.0 { cpu_temp_val = lh_cpu_temp; }
-            if gpu_temp_val == 0.0 { gpu_temp_val = lh_gpu_temp; }
+            if capture_cpu_temp && cpu_temp_val == 0.0 { cpu_temp_val = lh_cpu_temp; }
+            if capture_gpu_temp && gpu_temp_val == 0.0 { gpu_temp_val = lh_gpu_temp; }
             if cpu_usage_val == 0.0 { cpu_usage_val = lh_cpu_load; }
             if gpu_usage_val == 0.0 { gpu_usage_val = lh_gpu_load; }
         } else if let Some((oh_cpu_temp, oh_gpu_temp, oh_cpu_load, oh_gpu_load)) = get_ohm_metrics() {
-            if cpu_temp_val == 0.0 { cpu_temp_val = oh_cpu_temp; }
-            if gpu_temp_val == 0.0 { gpu_temp_val = oh_gpu_temp; }
+            if capture_cpu_temp && cpu_temp_val == 0.0 { cpu_temp_val = oh_cpu_temp; }
+            if capture_gpu_temp && gpu_temp_val == 0.0 { gpu_temp_val = oh_gpu_temp; }
             if cpu_usage_val == 0.0 { cpu_usage_val = oh_cpu_load; }
             if gpu_usage_val == 0.0 { gpu_usage_val = oh_gpu_load; }
         }
@@ -302,15 +354,14 @@ fn collect_single_sample(
     }
 
     // 4. Fallback to smart temperature estimator if still 0 (ensures data is always present)
-    if cpu_temp_val == 0.0 {
+    if capture_cpu_temp && cpu_temp_val == 0.0 {
         let time_factor = (Instant::now().elapsed().as_secs_f64().sin() as f32) * 1.2;
         cpu_temp_val = 42.0 + (cpu_usage_val * 0.28) + time_factor;
     }
-    if gpu_temp_val == 0.0 {
+    if capture_gpu_temp && gpu_temp_val == 0.0 {
         let time_factor = ((Instant::now().elapsed().as_secs_f64() + 2.0).sin() as f32) * 1.5;
         gpu_temp_val = 38.0 + (gpu_usage_val * 0.32) + time_factor;
     }
-
     // 5. Try to read RTSS FPS if Afterburner did not supply it
     if fps_val.is_none() {
         let rtss = rtss_reader::read_rtss_metrics(game_pid);
@@ -583,7 +634,7 @@ fn get_ohm_metrics() -> Option<(f32, f32, f32, f32)> {
 /// "No performance data recorded" dead-end. This makes it obvious that
 /// metrics collection was attempted but the data source wasn't available,
 /// rather than silently hiding the entire section.
-fn aggregate_metrics(samples: &[MetricsSample]) -> Option<SessionMetrics> {
+fn aggregate_metrics(samples: &[MetricsSample], config: &MetricsConfig) -> Option<SessionMetrics> {
     if samples.is_empty() {
         return Some(SessionMetrics {
             avg_fps: 0,
@@ -621,7 +672,12 @@ fn aggregate_metrics(samples: &[MetricsSample]) -> Option<SessionMetrics> {
     //    historical session stats confusing. Without a measured FPS source
     //    there's nothing meaningful to report, so we emit zeros and let
     //    the frontend surface "no FPS data" instead.
-    let (avg_fps, min_fps, max_fps) = if rtss_samples.len() >= 2 {
+    // FPS is only emitted when capture_fps is on; otherwise the channel
+    // carries zeros so the frontend shows "no FPS data" rather than a
+    // fabricated curve.
+    let (avg_fps, min_fps, max_fps) = if !config.capture_fps {
+        (0, 0, 0)
+    } else if rtss_samples.len() >= 2 {
         let avg = rtss_samples.iter().sum::<f64>() / rtss_samples.len() as f64;
         let min = rtss_samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = rtss_samples.iter().cloned().fold(0.0f64, f64::max);
@@ -634,14 +690,14 @@ fn aggregate_metrics(samples: &[MetricsSample]) -> Option<SessionMetrics> {
     };
 
     Some(SessionMetrics {
-        avg_fps,
-        avg_cpu_usage: avg_cpu.round() as u32,
-        avg_gpu_usage: avg_gpu.round() as u32,
-        avg_ram_usage: avg_ram.round() as u32,
-        avg_cpu_temp: avg_cpu_t.round() as u32,
-        avg_gpu_temp: avg_gpu_t.round() as u32,
-        min_fps: min_fps.max(1),
-        max_fps,
+        avg_fps: if config.capture_fps { avg_fps } else { 0 },
+        avg_cpu_usage: if config.capture_cpu { avg_cpu.round() as u32 } else { 0 },
+        avg_gpu_usage: if config.capture_gpu { avg_gpu.round() as u32 } else { 0 },
+        avg_ram_usage: if config.capture_ram { avg_ram.round() as u32 } else { 0 },
+        avg_cpu_temp: if config.capture_cpu_temp { avg_cpu_t.round() as u32 } else { 0 },
+        avg_gpu_temp: if config.capture_gpu_temp { avg_gpu_t.round() as u32 } else { 0 },
+        min_fps: if config.capture_fps { min_fps.max(1) } else { 0 },
+        max_fps: if config.capture_fps { max_fps } else { 0 },
         resolution: "1920x1080".to_string(),
     })
 }
@@ -660,6 +716,33 @@ pub fn get_system_ram_gb() -> u32 {
     // Convert MB to GB: MB / 1024
     let total_gb = (total_mb as f64 / 1024.0).round();
     total_gb as u32
+}
+
+/// Query the CPU model name from WMI (e.g. "AMD Ryzen 7 5800X 8-Core
+/// Processor"). Returns "Unknown CPU" when COM/WMI is unavailable.
+pub fn get_cpu_name() -> String {
+    let com_lib = match COMLibrary::new() {
+        Ok(lib) => lib,
+        Err(_) => return "Unknown CPU".to_string(),
+    };
+    let wmi_con = match WMIConnection::new(com_lib) {
+        Ok(con) => con,
+        Err(_) => return "Unknown CPU".to_string(),
+    };
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct WmiProcessorName {
+        name: Option<String>,
+    }
+    match wmi_con.raw_query::<WmiProcessorName>("SELECT Name FROM Win32_Processor") {
+        Ok(results) => results
+            .into_iter()
+            .next()
+            .and_then(|p| p.name)
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "Unknown CPU".to_string()),
+        Err(_) => "Unknown CPU".to_string(),
+    }
 }
 
 #[cfg(test)]

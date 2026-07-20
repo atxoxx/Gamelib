@@ -4,6 +4,8 @@ import {
   type GameSession,
   formatPlayTime,
 } from "../../types/game";
+import { useSettings } from "../../context/SettingsContext";
+import { formatTemp, toDisplayTemp, tempMaxY } from "../../utils/temp";
 import * as Icons from "./Icons";
 
 /**
@@ -198,6 +200,7 @@ function SessionMetricsCard({
 }: {
   metrics: NonNullable<GameSession["metrics"]>;
 }) {
+  const { tempUnit } = useSettings();
   return (
     <div className="activity-hardware-card">
       <h4 className="activity-hardware-card__title">
@@ -234,15 +237,15 @@ function SessionMetricsCard({
         <StatTile
           icon={<Icons.Thermometer size={11} />}
           label="CPU Temp"
-          value={`${metrics.avgCpuTemp}°C`}
-          // 0-100 °C scale (cool → hot).
-          fraction={metrics.avgCpuTemp / 100}
+          value={formatTemp(metrics.avgCpuTemp, tempUnit)}
+          // 0-100 (°C) / 32-212 (°F) scale (cool → hot).
+          fraction={toDisplayTemp(metrics.avgCpuTemp, tempUnit) / tempMaxY(tempUnit)}
         />
         <StatTile
           icon={<Icons.Thermometer size={11} />}
           label="GPU Temp"
-          value={`${metrics.avgGpuTemp}°C`}
-          fraction={metrics.avgGpuTemp / 100}
+          value={formatTemp(metrics.avgGpuTemp, tempUnit)}
+          fraction={toDisplayTemp(metrics.avgGpuTemp, tempUnit) / tempMaxY(tempUnit)}
         />
       </div>
     </div>

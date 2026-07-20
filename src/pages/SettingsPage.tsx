@@ -140,10 +140,72 @@ export default function SettingsPage() {
     setHistoryCapDays,
     blockedSourceDomains,
     setBlockedSourceDomains,
+    hardwareMonitoringEnabled,
+    setHardwareMonitoringEnabled,
+    metricCapture,
+    setMetricCapture,
+    samplingIntervalSec,
+    setSamplingIntervalSec,
+    tempUnit,
+    setTempUnit,
     ready,
   } = useSettings();
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("appearance");
+
+  // System summary (CPU / RAM / all GPUs) for the Hardware tab. Fetched
+  // once on mount; the Rust side reads real hardware via WMI.
+  const [systemInfo, setSystemInfo] = useState<{
+    cpuName: string;
+    ramGb: number;
+    gpus: { id: string; name: string; vendor: string; vramMb: number }[];
+  } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const info = await invoke<{
+          cpuName: string;
+          ramGb: number;
+          gpus: { id: string; name: string; vendor: string; vramMb: number }[];
+        }>("get_system_info");
+        setSystemInfo(info);
+      } catch (e) {
+        console.warn("[SettingsPage] get_system_info failed:", e);
+      }
+    })();
+  }, []);
+
+  // The Rust telemetry config wants milliseconds, but the user-facing
+  // settings store the interval in seconds. Derive the ms value so the
+  // range slider (in ms) and the backend payload stay in sync.
+  const samplingIntervalMs = Math.round(samplingIntervalSec * 1000);
+
+  // Push telemetry config to the Rust watcher whenever the master
+  // toggle, per-metric capture flags, or sampling interval change. The
+  // watcher reads this at the moment a collection thread is started, so
+  // the next launch / passive detection honours the new settings.
+  useEffect(() => {
+    (async () => {
+      try {
+        await invoke("set_metrics_config", {
+          config: {
+            enabled: hardwareMonitoringEnabled,
+            intervalMs: samplingIntervalMs,
+            captureFps: metricCapture.fps,
+            captureCpu: metricCapture.cpu,
+            captureGpu: metricCapture.gpu,
+            captureRam: metricCapture.ram,
+            captureCpuTemp: metricCapture.cpuTemp,
+            captureGpuTemp: metricCapture.gpuTemp,
+          },
+        });
+      } catch (e) {
+        console.warn("[SettingsPage] set_metrics_config failed:", e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hardwareMonitoringEnabled, metricCapture, samplingIntervalMs]);
 
   // Speed Limit Settings State
   const [dlLimitEnabled, setDlLimitEnabled] = useState(false);
@@ -1632,6 +1694,120 @@ export default function SettingsPage() {
             </div>
           </header>
 
+          {/* Master toggle — gates the entire telemetry collection thread */}
+          <div className="settings-row">
+            <div className="settings-hardware-control-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={hardwareMonitoringEnabled}
+                  onChange={(e) => setHardwareMonitoringEnabled(e.target.checked)}
+                />
+                <span>Enable hardware monitoring during gameplay</span>
+              </label>
+              <p className="settings-helper-lead">
+                When off, no CPU, GPU, RAM, or temperature telemetry is
+                collected while games run, and the Activity page shows no
+                performance data for future sessions.
+              </p>
+            </div>
+          </div>
+
+          {/* Per-metric capture toggles */}
+          <div className="settings-row">
+            <div className="settings-hardware-control-card">
+              <div className="settings-control">
+                <label className="settings-label">Metrics to capture</label>
+                <p className="settings-helper-lead">
+                  Disable streams you don't need. Turning off temperature
+                  capture skips the expensive sensor queries, lowering
+                  overhead while a game runs.
+                </p>
+                <div className="settings-metric-toggles">
+                  {(
+                    [
+                      ["fps", "FPS"],
+                      ["cpu", "CPU Load"],
+                      ["gpu", "GPU Load"],
+                      ["ram", "RAM Usage"],
+                      ["cpuTemp", "CPU Temp"],
+                      ["gpuTemp", "GPU Temp"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="settings-metric-toggle">
+                      <input
+                        type="checkbox"
+                        checked={metricCapture[key]}
+                        disabled={!hardwareMonitoringEnabled}
+                        onChange={(e) =>
+                          setMetricCapture({ ...metricCapture, [key]: e.target.checked })
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sampling interval */}
+          <div className="settings-row">
+            <div className="settings-hardware-control-card">
+              <div className="settings-control">
+                <label className="settings-label">Sampling interval</label>
+                <p className="settings-helper-lead">
+                  How often telemetry is polled while a game runs. Lower
+                  values produce finer charts but add more overhead.
+                </p>
+                <div className="settings-input-group">
+                  <input
+                    type="range"
+                    min={0.25}
+                    max={60}
+                    step={0.25}
+                    value={samplingIntervalSec}
+                    disabled={!hardwareMonitoringEnabled}
+                    onChange={(e) =>
+                      setSamplingIntervalSec(Number(e.target.value))
+                    }
+                    aria-label="Sampling interval in seconds"
+                  />
+                  <span className="settings-range-value">{samplingIntervalSec} s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Temperature unit */}
+          <div className="settings-row">
+            <div className="settings-hardware-control-card">
+              <div className="settings-control">
+                <label className="settings-label">Temperature unit</label>
+                <p className="settings-helper-lead">
+                  Used everywhere temperatures are shown across the app —
+                  the Activity page, session cards, and performance charts.
+                </p>
+                <div className="settings-segmented" role="group" aria-label="Temperature unit">
+                  <button
+                    type="button"
+                    className={tempUnit === "c" ? "active" : ""}
+                    onClick={() => setTempUnit("c")}
+                  >
+                    °C
+                  </button>
+                  <button
+                    type="button"
+                    className={tempUnit === "f" ? "active" : ""}
+                    onClick={() => setTempUnit("f")}
+                  >
+                    °F
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* GPU selection */}
           <div className="settings-row">
             <div className="settings-hardware-control-card">
@@ -2815,9 +2991,47 @@ export default function SettingsPage() {
                   />
                   <span>Disable upload completely (do not seed)</span>
                 </label>
+            </div>
+          </div>
+
+          {/* System summary — detected CPU / RAM / all GPUs */}
+          <div className="settings-row settings-row--spaced">
+            <div className="settings-hardware-control-card settings-system-summary">
+              <div className="settings-control">
+                <label className="settings-label">System summary</label>
+                <p className="settings-helper-lead">
+                  Hardware detected on this machine.
+                </p>
+                <div className="settings-system-summary__grid">
+                  <div className="settings-system-summary__item">
+                    <span className="settings-system-summary__label">CPU</span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo?.cpuName ?? "Detecting…"}
+                    </span>
+                  </div>
+                  <div className="settings-system-summary__item">
+                    <span className="settings-system-summary__label">Memory</span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo ? `${systemInfo.ramGb} GB` : "—"}
+                    </span>
+                  </div>
+                  <div className="settings-system-summary__item settings-system-summary__item--wide">
+                    <span className="settings-system-summary__label">
+                      GPUs ({systemInfo?.gpus.length ?? 0})
+                    </span>
+                    <span className="settings-system-summary__value">
+                      {systemInfo && systemInfo.gpus.length > 0
+                        ? systemInfo.gpus
+                            .map((g) => `${g.name} (${g.vramMb} MB)`)
+                            .join(" · ")
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
-          </section>
+          </div>
+        </section>
 
           <section className="settings-section">
             <header className="settings-section-header">

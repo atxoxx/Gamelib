@@ -863,6 +863,148 @@
   flex-shrink: 0;
 }
 
+/* Per-metric capture toggles — a compact checkbox grid so the six
+ * telemetry streams read as a single grouped control. */
+.settings-metric-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.settings-metric-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.settings-metric-toggle:hover {
+  border-color: var(--color-border-light);
+}
+
+.settings-metric-toggle input {
+  accent-color: var(--color-accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.settings-metric-toggle input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-metric-toggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Sampling interval range + value readout */
+.settings-range-value {
+  min-width: 64px;
+  padding: var(--space-xs) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.settings-input-group input[type="range"] {
+  flex: 1;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.settings-input-group input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Segmented control (temperature unit °C / °F) */
+.settings-segmented {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  gap: 2px;
+  margin-top: var(--space-sm);
+}
+
+.settings-segmented button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-xs) var(--space-lg);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-segmented button:hover {
+  color: var(--color-text-primary);
+}
+
+.settings-segmented button.active {
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 0 10px var(--color-accent-glow);
+}
+
+/* System summary card — detected CPU / RAM / all GPUs */
+.settings-system-summary__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.settings-system-summary__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.settings-system-summary__item--wide {
+  grid-column: 1 / -1;
+}
+
+.settings-system-summary__label {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text-muted);
+}
+
+.settings-system-summary__value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
 /* ── 7. Integration tiles (Steam / Epic) ─────────────────────────── */
 
 .integration-tile {
