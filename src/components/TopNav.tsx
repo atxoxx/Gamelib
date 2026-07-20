@@ -1,9 +1,14 @@
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState, useEffect } from "react";
 import type { MouseEvent } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useActiveDownloadCount } from "../context/DownloadContext";
 import { useBigScreen } from "../context/BigScreenContext";
+import {
+  getUnseenCommunityItems,
+  clearUnseenCommunityItems,
+  subscribeUnseenCommunity,
+} from "../pages/friendsStorage";
 import DownloadPopover from "./DownloadPopover";
 import WindowControls from "./WindowControls";
 
@@ -278,6 +283,17 @@ export default function TopNav() {
   const { isBigScreen, setBigScreen } = useBigScreen();
   const location = useLocation();
 
+  // Unseen "new community items" badge. Counts new sessions /
+  // recommendations / suggestions pulled from friends. Cleared when the
+  // user opens the Community tab.
+  const [unseenCommunity, setUnseenCommunity] = useState<number>(() =>
+    getUnseenCommunityItems()
+  );
+  useEffect(() => {
+    setUnseenCommunity(getUnseenCommunityItems());
+    return subscribeUnseenCommunity(setUnseenCommunity);
+  }, []);
+
   // Download popover state. We keep the trigger element and the
   // popover as siblings inside `.topnav-right`, so the popover can
   // position itself relative to the trigger via the absolute
@@ -332,6 +348,8 @@ export default function TopNav() {
         <div className="topnav-tabs" role="tablist">
           {tabs.map((tab) => {
             const isActive = location.pathname.startsWith(tab.path);
+            const showCommunityBadge =
+              tab.path === "/friends" && unseenCommunity > 0;
             return (
               <NavLink
                 key={tab.path}
@@ -340,9 +358,21 @@ export default function TopNav() {
                 aria-current={isActive ? "page" : undefined}
                 role="tab"
                 aria-selected={isActive ? "true" : "false"}
+                onClick={() => {
+                  if (tab.path === "/friends") clearUnseenCommunityItems();
+                }}
               >
                 {tab.icon}
                 {tab.label}
+                {showCommunityBadge && (
+                  <span
+                    className="topnav-tab-badge"
+                    role="status"
+                    aria-label={`${unseenCommunity} new community item${unseenCommunity !== 1 ? "s" : ""}`}
+                  >
+                    {unseenCommunity > 99 ? "99+" : unseenCommunity}
+                  </span>
+                )}
               </NavLink>
             );
           })}

@@ -55,6 +55,7 @@ import {
   mergeDatabases,
   listPeerOutboxes,
   getNostrKeys,
+  addUnseenCommunityItems,
 } from "./friendsStorage";
 import "./friends.css";
 
@@ -1432,6 +1433,9 @@ export default function FriendsPage() {
     let pulledRecs = 0;
     // Friends are no longer auto-discovered (added via friend codes only).
     let discoveredNew = false;
+    // Genuinely new social items pulled from friends this sync — drives the
+    // "new items" number badge on the Community tab.
+    let newCommunityItems = 0;
     const pullErrors: string[] = [];
     // Detailed per-friend activity for the sync log in the P2P modal.
     const friendLogs: string[] = [];
@@ -1461,7 +1465,10 @@ export default function FriendsPage() {
           // Merge sessions
           if (remoteOutbox.sessions && remoteOutbox.sessions.length > 0) {
             const prevLength = mergedSessions.length;
+            const prevIds = new Set(mergedSessions.map((s) => s.id));
             mergedSessions = mergeSessions(mergedSessions, remoteOutbox.sessions);
+            const addedSessions = remoteOutbox.sessions.filter((s) => !prevIds.has(s.id)).length;
+            newCommunityItems += addedSessions;
             if (mergedSessions.length !== prevLength || JSON.stringify(mergedSessions) !== localStorage.getItem(`gamelib.friends.sessions.${profileName}`)) {
               changesMade = true;
               friendSessions = remoteOutbox.sessions.length;
@@ -1472,7 +1479,10 @@ export default function FriendsPage() {
           // Merge recommendations
           if (remoteOutbox.recommendations && remoteOutbox.recommendations.length > 0) {
             const prevLength = mergedRecs.length;
+            const prevIds = new Set(mergedRecs.map((r) => r.id));
             mergedRecs = mergeRecommendations(mergedRecs, remoteOutbox.recommendations);
+            const addedRecs = remoteOutbox.recommendations.filter((r) => !prevIds.has(r.id)).length;
+            newCommunityItems += addedRecs;
             if (mergedRecs.length !== prevLength || JSON.stringify(mergedRecs) !== localStorage.getItem(`gamelib.friends.recommendations.${profileName}`)) {
               changesMade = true;
               friendRecs = remoteOutbox.recommendations.length;
@@ -1483,7 +1493,10 @@ export default function FriendsPage() {
           // Merge wishlist game suggestions
           if (remoteOutbox.suggestions && remoteOutbox.suggestions.length > 0) {
             const prevLength = mergedSuggestions.length;
+            const prevIds = new Set(mergedSuggestions.map((s) => s.id));
             mergedSuggestions = mergeSuggestions(mergedSuggestions, remoteOutbox.suggestions);
+            const addedSuggestions = remoteOutbox.suggestions.filter((s) => !prevIds.has(s.id)).length;
+            newCommunityItems += addedSuggestions;
             if (mergedSuggestions.length !== prevLength || JSON.stringify(mergedSuggestions) !== localStorage.getItem(`gamelib.friends.suggestions.${profileName}`)) {
               changesMade = true;
             }
@@ -1612,6 +1625,12 @@ export default function FriendsPage() {
     }
     
     await checkFolderInvitations(profile.syncId, localFriends);
+
+    // Surface genuinely-new social items as a number badge on the
+    // Community tab (sessions / recommendations / suggestions pulled
+    // from friends this sync). Only bumps when items are truly new.
+    addUnseenCommunityItems(newCommunityItems);
+
     setIsSyncing(false);
 
     // Honor a manual sync that was requested while this one was running.
