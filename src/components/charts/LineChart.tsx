@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback, useRef, useLayoutEffect } from "react";
 
 interface Series {
   data: number[];
@@ -106,7 +106,23 @@ export default function LineChart({
   bands,
 }: LineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  // Measure the real rendered width so the SVG viewBox matches the element
+  // exactly. A fixed 640-wide viewBox inside a wider/narrower container is
+  // letterboxed by the default `preserveAspectRatio="xMidYMid meet"`, which
+  // is what makes the hover crosshair / tooltip drift away from the cursor.
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const effectiveWidth = measuredWidth && measuredWidth > 0 ? measuredWidth : width;
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setMeasuredWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const chart = useMemo(() => {
     // Padding tuned for the new default height (280px): a touch more room at
@@ -116,7 +132,7 @@ export default function LineChart({
     // tooltip can render past the chart bounds when it would otherwise
     // overflow the right edge.
     const padding = { top: 20, right: 20, bottom: 32, left: 48 };
-    const chartW = width - padding.left - padding.right;
+    const chartW = effectiveWidth - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
     const allValues = series.flatMap((s) => s.data);
@@ -129,7 +145,7 @@ export default function LineChart({
     const range = maxVal - minVal || 1;
 
     return { padding, chartW, chartH, maxVal, minVal, range };
-  }, [series, width, height, minY, maxY, niceMax]);
+  }, [series, effectiveWidth, height, minY, maxY, niceMax]);
 
   // Label stepping: when there are more than ~12 x-axis labels we sample
   // them down so they don't overlap. Every Nth label + always render the
@@ -176,7 +192,7 @@ export default function LineChart({
       const svg = svgRef.current;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
-      const scaleX = width / rect.width;
+      const scaleX = effectiveWidth / rect.width;
       const mouseX = (e.clientX - rect.left) * scaleX;
 
       // Only track within chart area
@@ -193,7 +209,7 @@ export default function LineChart({
 
       setHoverIndex(clampedIdx);
     },
-    [width, height, padding.left, chartW, chartH, padding.top, series]
+    [effectiveWidth, height, padding.left, chartW, chartH, padding.top, series]
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -244,10 +260,10 @@ export default function LineChart({
   };
 
   return (
-    <div style={{ position: "relative", width: "100%" }}>
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox={`0 0 ${effectiveWidth} ${height}`}
         width="100%"
         height={height}
         style={{ fontFamily: "inherit", cursor: "crosshair" }}
@@ -482,7 +498,7 @@ export default function LineChart({
           className="chart-tooltip-card"
           style={{
             position: "absolute",
-            left: crosshairX !== null ? `${((crosshairX + (crosshairX > width * 0.6 ? -160 : 20)) / width) * 100}%` : "0%",
+            left: crosshairX !== null ? `${((crosshairX + (crosshairX > effectiveWidth * 0.6 ? -160 : 20)) / effectiveWidth) * 100}%` : "0%",
             top: "8px",
             pointerEvents: "none",
             zIndex: 20,
