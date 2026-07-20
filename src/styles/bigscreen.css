@@ -72,7 +72,14 @@
   -webkit-backdrop-filter: blur(12px);
 }
 
-.bigscreen-header-left,
+.bigscreen-header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex: 1;
+  min-width: 0;
+}
+
 .bigscreen-header-right {
   display: flex;
   align-items: center;
@@ -105,7 +112,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;

@@ -250,6 +250,16 @@ export default function BigScreenHeader({
     active?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   }, [location.pathname]);
 
+  // Keep the focused tab scrolled into view during controller navigation
+  useEffect(() => {
+    const nav = tabsNavRef.current;
+    if (!nav) return;
+    const focused = gamepad.focusedElement;
+    if (focused && nav.contains(focused)) {
+      focused.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [gamepad.focusedElement]);
+
   // LB / RB: Cycle main tabs
   useEffect(() => {
     return gamepad.registerTabCycler((direction) => {
