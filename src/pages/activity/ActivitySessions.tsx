@@ -5,6 +5,8 @@ import { GameThumbnail } from "./GameThumbnail";
 import SteamPlayerCount from "../../components/SteamPlayerCount";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { useSettings } from "../../context/SettingsContext";
+import { useActivity } from "../../context/ActivityContext";
+import { buildSingleSessionSeries } from "../../utils/perfSamples";
 import { formatTemp, toDisplayTemp, toDisplayTemps, tempUnitLabel, tempThreshold, tempMinY, tempMaxY } from "../../utils/temp";
 import * as Icons from "./Icons";
 
@@ -59,6 +61,7 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeChartTab, setActiveChartTab] = useState<"usage" | "temps" | "ram" | "fps">("usage");
   const { tempUnit } = useSettings();
+  const { totalRamGb } = useActivity();
 
   // Resolve the Steam appid for this session's game. The hook also
   // persists successful lookups back onto the library row via
@@ -96,24 +99,39 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
     return `${m}m`;
   }, [session.durationMin]);
 
-  // Generate virtual hardware sample logs for chart overlays
+  // Build real hardware sample logs for chart overlays. Prefer the
+  // per-sample telemetry captured during the session (metrics.samples);
+  // when a session has no real samples (legacy / synthetic recordings) we
+  // fall back to reconstructing a plausible curve from the recorded
+  // averages so the timeline still renders something coherent.
   const chartProps = useMemo(() => {
     if (!session.metrics) return null;
     const m = session.metrics;
     const pts = 45;
 
-    // Generate samples for each metric
-    const fps = generateVirtualSamples(m.avgFps, m.minFps, m.maxFps, pts);
-    const cpu = generateVirtualSamples(m.avgCpuUsage, Math.round(m.avgCpuUsage * 0.4), Math.round(m.avgCpuUsage * 1.5), pts).map(v => Math.min(100, Math.max(0, v)));
-    const gpu = generateVirtualSamples(m.avgGpuUsage, Math.round(m.avgGpuUsage * 0.3), Math.round(m.avgGpuUsage * 1.6), pts).map(v => Math.min(100, Math.max(0, v)));
-    const cpuTemp = generateVirtualSamples(m.avgCpuTemp, m.avgCpuTemp - 7, m.avgCpuTemp + 11, pts);
-    const gpuTemp = generateVirtualSamples(m.avgGpuTemp, m.avgGpuTemp - 6, m.avgGpuTemp + 9, pts);
-    const ram = generateVirtualSamples(m.avgRamUsage, Math.round(m.avgRamUsage * 0.8), Math.round(m.avgRamUsage * 1.15), pts).map(v => Math.min(100, Math.max(0, v)));
+    const real = buildSingleSessionSeries(m, pts);
+    let fps: number[], cpu: number[], gpu: number[], cpuTemp: number[], gpuTemp: number[], ram: number[];
+
+    if (real) {
+      fps = real.fps;
+      cpu = real.cpu;
+      gpu = real.gpu;
+      cpuTemp = real.cpuTemp;
+      gpuTemp = real.gpuTemp;
+      ram = real.ram;
+    } else {
+      fps = generateVirtualSamples(m.avgFps, m.minFps, m.maxFps, pts);
+      cpu = generateVirtualSamples(m.avgCpuUsage, Math.round(m.avgCpuUsage * 0.4), Math.round(m.avgCpuUsage * 1.5), pts).map(v => Math.min(100, Math.max(0, v)));
+      gpu = generateVirtualSamples(m.avgGpuUsage, Math.round(m.avgGpuUsage * 0.3), Math.round(m.avgGpuUsage * 1.6), pts).map(v => Math.min(100, Math.max(0, v)));
+      cpuTemp = generateVirtualSamples(m.avgCpuTemp, m.avgCpuTemp - 7, m.avgCpuTemp + 11, pts);
+      gpuTemp = generateVirtualSamples(m.avgGpuTemp, m.avgGpuTemp - 6, m.avgGpuTemp + 9, pts);
+      ram = generateVirtualSamples(m.avgRamUsage, Math.round(m.avgRamUsage * 0.8), Math.round(m.avgRamUsage * 1.15), pts).map(v => Math.min(100, Math.max(0, v)));
+    }
 
     // Labels represent timeline progress
     const labels = Array.from({ length: pts }).map((_, i) => `${Math.round((i / (pts - 1)) * 100)}%`);
 
-    return { fps, cpu, gpu, cpuTemp, gpuTemp, ram, labels };
+    return { fps, cpu, gpu, cpuTemp, gpuTemp, ram, labels, real: !!real };
   }, [session.metrics]);
 
   const chartSeries = useMemo(() => {
@@ -129,8 +147,8 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
         { data: toDisplayTemps(chartProps.gpuTemp, tempUnit), color: "var(--color-warning)", label: `GPU Temp` },
       ];
     } else if (activeChartTab === "ram") {
-      // Read total system RAM from localStorage
-      const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
+      // Read total system RAM from the activity context (no localStorage).
+      const totalRam = totalRamGb || 16;
       const ramGb = chartProps.ram.map((v) => Math.round((totalRam * v) / 10) / 10);
       return [{ data: ramGb, color: "var(--color-success)", label: "RAM Usage" }];
     } else {
@@ -316,6 +334,14 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
                     <div className="activity-session-item__chart-title">
                       <Icons.BarChart3 size={12} />
                       Performance Timeline
+                      {!chartProps.real && (
+                        <span
+                          className="activity-session-item__chart-estimated"
+                          title="No per-sample telemetry was captured for this session; the curve is estimated from recorded averages."
+                        >
+                          estimated
+                        </span>
+                      )}
                     </div>
                     <div className="activity-session-item__chart-tabs">
                       {(["usage", "temps", "ram", "fps"] as const).map((tab) => (

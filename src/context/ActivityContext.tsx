@@ -29,6 +29,11 @@ interface ActivityContextType {
   sessions: GameSession[];
   selectedGpu: GpuInfo | null;
   availableGpus: GpuInfo[];
+  /** Total system RAM in GB, queried from the backend on mount. Used to
+   *  convert RAM-usage percentages into absolute GB for the charts. Kept in
+   *  React state (not localStorage) so the graph data carries no webview
+   *  persistence dependency. */
+  totalRamGb: number;
   setSelectedGpu: (gpu: GpuInfo | null) => void;
   refreshGpus: () => Promise<void>;
   getGameSessions: (gameId: string) => GameSession[];
@@ -45,6 +50,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<GameSession[]>([]);
   const [availableGpus, setAvailableGpus] = useState<GpuInfo[]>([]);
   const [selectedGpu, setSelectedGpu] = useState<GpuInfo | null>(null);
+  const [totalRamGb, setTotalRamGb] = useState<number>(16);
   const initializedRef = useRef(false);
 
   // Keep a ref to selectedGpu so the event listener always sees the latest value
@@ -55,26 +61,46 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    // Load persisted sessions (no mock seeding — real data only).
-    // Each session's metrics are sanitized on read so legacy data with
-    // poisoned FPS fields (maxFps = u32::MAX from older RTSS builds whose
-    // validation only checked avg_fps, not max_fps) doesn't drive every
-    // downstream consumer — ActivityPage table, GameActivity FPS chart,
-    // Splashscreen "Last Played", etc. — into the 0x33/0x66/0x99/0xCC/0xFF
-    // banding. Sanitize in-memory only; localStorage isn't rewritten so a
-    // user-driven migration can decide later whether to re-persist.
-    const saved = localStorage.getItem("gamelib-sessions");
-    if (saved) {
+    // Load persisted sessions from the app data directory
+    // (<app_data_dir>/sessions.json) instead of localStorage, so the
+    // canonical session history lives on disk beside gamelib.db. Each
+    // session's metrics are sanitized on read so legacy data with poisoned
+    // FPS fields (maxFps = u32::MAX from older RTSS builds) doesn't drive
+    // downstream consumers into the 0x33/…/0xFF banding. A one-time
+    // migration pulls any existing localStorage history into the file so
+    // users don't lose their old sessions.
+    const loadSessions = async () => {
       try {
-        const parsed: GameSession[] = JSON.parse(saved);
+        const raw = (await invoke<string>("load_sessions")) || "[]";
+        const parsed: GameSession[] = JSON.parse(raw);
         const cleaned = parsed.map((s) =>
           s.metrics ? { ...s, metrics: sanitizeSessionMetrics(s.metrics) } : s
         );
-        setSessions(cleaned);
+        if (cleaned.length > 0) {
+          setSessions(cleaned);
+          return;
+        }
       } catch {
-        // Corrupted data — start fresh
+        // Corrupt app-data file — fall through to migration / fresh start.
       }
-    }
+      const legacy = localStorage.getItem("gamelib-sessions");
+      if (legacy) {
+        try {
+          const parsed: GameSession[] = JSON.parse(legacy);
+          const cleaned = parsed.map((s) =>
+            s.metrics ? { ...s, metrics: sanitizeSessionMetrics(s.metrics) } : s
+          );
+          setSessions(cleaned);
+          // Persist the migrated history to the app folder and drop the
+          // localStorage copy so we never read from two sources.
+          persistSessions(cleaned);
+        } catch {
+          // Corrupt legacy data — start fresh.
+        }
+        localStorage.removeItem("gamelib-sessions");
+      }
+    };
+    loadSessions();
 
     // Load GPUs — try real detection first, fall back to cached data
     const savedGpus = localStorage.getItem("gamelib-gpus");
@@ -113,11 +139,11 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Query and store total system RAM
+      // Query total system RAM and hold it in React state (no localStorage).
       try {
-        const totalRamGb = await invoke("get_system_ram_gb");
-        if (typeof totalRamGb === "number" && totalRamGb > 0) {
-          localStorage.setItem("gamelib-total-ram", totalRamGb.toString());
+        const totalRamGbResult = await invoke("get_system_ram_gb");
+        if (typeof totalRamGbResult === "number" && totalRamGbResult > 0) {
+          setTotalRamGb(totalRamGbResult);
         }
       } catch (e) {
         console.error("Failed to query total RAM from backend", e);
@@ -131,9 +157,15 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     selectedGpuRef.current = selectedGpu;
   }, [selectedGpu]);
 
-  // Persist sessions
-  const persistSessions = useCallback((s: GameSession[]) => {
-    localStorage.setItem("gamelib-sessions", JSON.stringify(s));
+  // Persist sessions to <app_data_dir>/sessions.json (file on disk beside
+  // gamelib.db) instead of localStorage. Fire-and-forget: a failed write
+  // logs but never blocks the in-memory state update.
+  const persistSessions = useCallback(async (s: GameSession[]) => {
+    try {
+      await invoke("save_sessions", { json: JSON.stringify(s) });
+    } catch (e) {
+      console.error("Failed to persist sessions:", e);
+    }
   }, []);
 
   const recordSession = useCallback(
@@ -246,6 +278,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         sessions,
         selectedGpu,
         availableGpus,
+        totalRamGb,
         setSelectedGpu: handleSetSelectedGpu,
         refreshGpus,
         getGameSessions,

@@ -1122,6 +1122,19 @@ export interface GameSession {
   metrics?: SessionMetrics;
 }
 
+/** A single real telemetry sample captured during a session. */
+export interface PerfSample {
+  /** Seconds since the session (metrics collection) started. */
+  t: number;
+  cpu: number;        // %
+  gpu: number;        // %
+  ram: number;        // %
+  cpuTemp: number;    // °C
+  gpuTemp: number;    // °C
+  /** Instantaneous FPS when a real source reported it, else null. */
+  fps?: number | null;
+}
+
 /** Hardware metrics captured during a session. */
 export interface SessionMetrics {
   avgFps: number;
@@ -1133,6 +1146,10 @@ export interface SessionMetrics {
   minFps: number;
   maxFps: number;
   resolution: string;      // e.g. "1920x1080"
+  /** Real per-sample telemetry. Present for sessions recorded after the
+   *  per-sample capture was added; absent (or empty) for older sessions,
+   *  in which case the charts fall back to synthetic curves. */
+  samples?: PerfSample[];
 }
 
 /**
@@ -1223,7 +1240,17 @@ export function sanitizeSessionMetrics(m: SessionMetrics): SessionMetrics {
       console.warn(`[sanitizeSessionMetrics] dropped poisoned FPS field(s) [${sig}] from session(s); reconstructed min/max from avg (sane cap ${SANE_MAX_FPS}). Once-per-signature dedupe; further occurrences are silent.`);
     }
   }
-  return { ...m, avgFps: avg, minFps: min, maxFps: max };
+  // Preserve real per-sample telemetry (clamping any poisoned FPS). Legacy
+  // sessions without samples simply carry `undefined` through.
+  const samples = m.samples?.map((s) => ({
+    ...s,
+    fps:
+      s.fps != null && Number.isFinite(s.fps) && s.fps >= 0 && s.fps <= SANE_MAX_FPS
+        ? s.fps
+        : null,
+  }));
+
+  return { ...m, avgFps: avg, minFps: min, maxFps: max, samples };
 }
 
 /** GPU info returned from the system. */

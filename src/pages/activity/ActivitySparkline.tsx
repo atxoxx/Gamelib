@@ -217,7 +217,7 @@ export function ActivitySparkline({
       {/* Hover value bubble */}
       {hoverIdx !== null && (
         <div className="activity-sparkline__hover-value" style={{ color }}>
-          {data[hoverIdx].y}
+          {unit === "GB" ? data[hoverIdx].y.toFixed(1) : Math.round(data[hoverIdx].y)}
           {unit}
         </div>
       )}

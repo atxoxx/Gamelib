@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
 import { useSettings } from "../../context/SettingsContext";
+import { useActivity } from "../../context/ActivityContext";
+import { buildTimelineFromSessions, buildSingleSessionSeries, type PerfTimelineSeries } from "../../utils/perfSamples";
 import { formatTemp, toDisplayTemp, toDisplayTemps, tempMinY, tempMaxY, tempUnitLabel, tempThreshold } from "../../utils/temp";
 import * as Icons from "./Icons";
 
@@ -65,6 +67,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
   const [selectedGameFilter, setSelectedGameFilter] = useState<string>("all");
   const [selectedSessionIndex, setSelectedSessionIndex] = useState<string>("all");
   const { tempUnit } = useSettings();
+  const { totalRamGb } = useActivity();
 
   // 1. Filter sessions that have valid hardware metrics
   const hwSessions = useMemo(() => {
@@ -145,10 +148,10 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
         value = Math.max(g.avgCpuTemp, g.avgGpuTemp);
         label = `CPU ${g.avgCpuTemp}°C / GPU ${g.avgGpuTemp}°C`;
       } else {
-        const totalRam = Number(localStorage.getItem("gamelib-total-ram") || "16");
+        const totalRam = totalRamGb || 16;
         const gb = Math.round((totalRam * g.avgRamUsage) / 10) / 10;
         value = g.avgRamUsage;
-        label = `${gb} GB (${g.avgRamUsage}%)`;
+        label = `${gb.toFixed(1)} GB (${g.avgRamUsage}%)`;
       }
 
       return {
@@ -184,6 +187,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
     const labels = Array.from({ length: pts }).map((_, i) => `${Math.round((i / (pts - 1)) * 100)}%`);
 
     let avgMetrics: any = null;
+    let realSeries: PerfTimelineSeries | null = null;
 
     if (selectedGameFilter === "all") {
       // Average of ALL games combined
@@ -199,16 +203,22 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
           avgGpuTemp: Math.round(gameAverages.reduce((sum, g) => sum + g.avgGpuTemp, 0) / c),
           avgRamUsage: Math.round(gameAverages.reduce((sum, g) => sum + g.avgRamUsage, 0) / c),
         };
+        // Real averaged curve across every session that captured samples.
+        realSeries = buildTimelineFromSessions(hwSessions, pts);
       }
     } else {
+      const gameSessions = hwSessions.filter((s) => s.gameId === selectedGameFilter);
       if (selectedSessionIndex === "all") {
         // Average of selected game's sessions
         const match = gameAverages.find((g) => g.gameId === selectedGameFilter);
-        if (match) avgMetrics = match;
+        if (match) {
+          avgMetrics = match;
+          realSeries = buildTimelineFromSessions(gameSessions, pts);
+        }
       } else {
         // Specific session selected
         const idx = Number(selectedSessionIndex);
-        const s = sessionsForSelectedGame[idx];
+        const s = gameSessions[idx];
         if (s && s.metrics) {
           const m = s.metrics;
           avgMetrics = {
@@ -221,23 +231,39 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
             avgGpuTemp: m.avgGpuTemp,
             avgRamUsage: m.avgRamUsage,
           };
+          realSeries = buildSingleSessionSeries(m, pts);
         }
       }
     }
 
     if (!avgMetrics) return null;
 
-    // Generate virtual timeline curves
-    const fps = generateVirtualTimeline(avgMetrics.avgFps, avgMetrics.minFps, avgMetrics.maxFps, pts);
-    const cpu = generateVirtualTimeline(avgMetrics.avgCpuUsage, Math.round(avgMetrics.avgCpuUsage * 0.4), Math.round(avgMetrics.avgCpuUsage * 1.5), pts).map(v => Math.min(100, Math.max(0, v)));
-    const gpu = generateVirtualTimeline(avgMetrics.avgGpuUsage, Math.round(avgMetrics.avgGpuUsage * 0.3), Math.round(avgMetrics.avgGpuUsage * 1.6), pts).map(v => Math.min(100, Math.max(0, v)));
-    const cpuTemp = generateVirtualTimeline(avgMetrics.avgCpuTemp, avgMetrics.avgCpuTemp - 7, avgMetrics.avgCpuTemp + 11, pts);
-    const gpuTemp = generateVirtualTimeline(avgMetrics.avgGpuTemp, avgMetrics.avgGpuTemp - 6, avgMetrics.avgGpuTemp + 9, pts);
-    const ram = generateVirtualTimeline(avgMetrics.avgRamUsage, Math.round(avgMetrics.avgRamUsage * 0.8), Math.round(avgMetrics.avgRamUsage * 1.12), pts).map(v => Math.min(100, Math.max(0, v)));
+    // Prefer the real per-sample telemetry. When a selection has no sessions
+    // with real samples (legacy / synthetic recordings) fall back to
+    // reconstructing a plausible curve from the recorded averages.
+    const cpu = realSeries
+      ? realSeries.cpu
+      : generateVirtualTimeline(avgMetrics.avgCpuUsage, Math.round(avgMetrics.avgCpuUsage * 0.4), Math.round(avgMetrics.avgCpuUsage * 1.5), pts).map(v => Math.min(100, Math.max(0, v)));
+    const gpu = realSeries
+      ? realSeries.gpu
+      : generateVirtualTimeline(avgMetrics.avgGpuUsage, Math.round(avgMetrics.avgGpuUsage * 0.3), Math.round(avgMetrics.avgGpuUsage * 1.6), pts).map(v => Math.min(100, Math.max(0, v)));
+    const cpuTemp = realSeries
+      ? realSeries.cpuTemp
+      : generateVirtualTimeline(avgMetrics.avgCpuTemp, avgMetrics.avgCpuTemp - 7, avgMetrics.avgCpuTemp + 11, pts);
+    const gpuTemp = realSeries
+      ? realSeries.gpuTemp
+      : generateVirtualTimeline(avgMetrics.avgGpuTemp, avgMetrics.avgGpuTemp - 6, avgMetrics.avgGpuTemp + 9, pts);
+    const ram = realSeries
+      ? realSeries.ram
+      : generateVirtualTimeline(avgMetrics.avgRamUsage, Math.round(avgMetrics.avgRamUsage * 0.8), Math.round(avgMetrics.avgRamUsage * 1.12), pts).map(v => Math.min(100, Math.max(0, v)));
+    const fps = realSeries
+      ? realSeries.fps
+      : generateVirtualTimeline(avgMetrics.avgFps, avgMetrics.minFps, avgMetrics.maxFps, pts);
 
     // Create overlays
     return {
       labels,
+      estimated: !realSeries,
       cpuGpu: [
         { data: cpu, color: "var(--color-brand-blue)", label: "CPU Usage" },
         { data: gpu, color: "var(--color-accent)", label: "GPU Usage" },
@@ -266,7 +292,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
         fps: fps.map((y, x) => ({ x, y })),
       },
     };
-  }, [selectedGameFilter, selectedSessionIndex, gameAverages, sessionsForSelectedGame]);
+  }, [selectedGameFilter, selectedSessionIndex, gameAverages, sessionsForSelectedGame, hwSessions]);
 
   if (gameAverages.length === 0) {
     return (
@@ -386,7 +412,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     </td>
                     <td>
                       {g.avgRamUsage > 0
-                        ? `${Math.round((Number(localStorage.getItem("gamelib-total-ram") || "16") * g.avgRamUsage) / 10) / 10} GB`
+                        ? `${(Math.round((totalRamGb || 16) * g.avgRamUsage) / 100).toFixed(1)} GB`
                         : "—"}
                     </td>
                     <td>{g.avgCpuUsage > 0 ? `${g.avgCpuUsage}%` : "—"}</td>
@@ -402,11 +428,19 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
       {/* Session Performance Timeline Section */}
       <div className="section-panel">
         <div className="performance-timeline">
-          <div className="performance-timeline__header">
-            <h3 className="performance-timeline__title">
-              <Icons.History size={14} />
-              Session Performance Timeline
-            </h3>
+              <div className="performance-timeline__header">
+                <h3 className="performance-timeline__title">
+                  <Icons.History size={14} />
+                  Session Performance Timeline
+                  {timelineCharts?.estimated && (
+                    <span
+                      className="performance-timeline__estimated"
+                      title="No per-sample telemetry was captured for the selected sessions; the curve is estimated from recorded averages."
+                    >
+                      estimated
+                    </span>
+                  )}
+                </h3>
 
             <div className="performance-timeline__controls">
               {/* Game Filter */}
@@ -595,9 +629,7 @@ export function ActivityPerformance({ sessions, games }: ActivityPerformanceProp
                     labels={timelineCharts.labels}
                     formatValue={(v) => `${Math.round(v)}%`}
                     formatTooltipValue={(v) => {
-                      const totalRam = Number(
-                        localStorage.getItem("gamelib-total-ram") || "16"
-                      );
+                      const totalRam = totalRamGb || 16;
                       // When the sample exceeds 100% (rare anomaly where the
                       // reported value is greater than the user's total RAM),
                       // surface the plain GB value under the percentage so the

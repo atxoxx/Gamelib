@@ -7,7 +7,7 @@ use crate::rtss_reader;
 use crate::mahm_reader;
 
 /// Serializable session metrics — matches the frontend SessionMetrics type.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMetrics {
     pub avg_fps: u32,
@@ -19,6 +19,33 @@ pub struct SessionMetrics {
     pub min_fps: u32,
     pub max_fps: u32,
     pub resolution: String,
+    /// Real per-sample telemetry captured during the session. Empty for
+    /// legacy / synthetic sessions. Lets the frontend plot measured curves
+    /// instead of re-synthesising them from the averages. Serialised as
+    /// `samples` (camelCase → `samples`); omitted entirely when empty so
+    /// older payloads and zero-sample sessions stay compact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samples: Vec<MetricsSamplePoint>,
+}
+
+/// A single captured telemetry sample (one real poll during gameplay).
+///
+/// `t` is the elapsed seconds since metrics collection started. All fields
+/// use the same units as `SessionMetrics` (CPU/GPU/RAM in percent, temps in
+/// °C, FPS instantaneous or `None` when no real FPS source was available).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsSamplePoint {
+    pub t: f64,
+    pub cpu: f32,
+    pub gpu: f32,
+    pub ram: f32,
+    pub cpu_temp: f32,
+    pub gpu_temp: f32,
+    /// Instantaneous FPS when a real source (RTSS / Afterburner) reported it
+    /// this poll, else `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fps: Option<f64>,
 }
 
 /// User-configurable knobs for how gameplay telemetry is collected.
@@ -66,6 +93,9 @@ struct MetricsSample {
     cpu_temp: u32,
     gpu_temp: u32,
     rtss_fps: Option<f64>,
+    /// Elapsed seconds since collection started (set by the loop, not the
+    /// single-sample reader).
+    t: f64,
 }
 
 /// WMI structs for deserializing performance data.
@@ -151,6 +181,7 @@ fn collect_metrics_loop(
     gpu_name: Option<String>,
 ) -> Vec<MetricsSample> {
     let mut samples: Vec<MetricsSample> = Vec::new();
+    let loop_start = Instant::now();
     let interval = Duration::from_millis(config.interval_ms.max(250));
 
     // Resolve physical GPU index from "gpu-X" id
@@ -203,7 +234,7 @@ fn collect_metrics_loop(
             break;
         }
 
-        let sample = collect_single_sample(
+        let mut sample = collect_single_sample(
             &wmi_con, game_pid, gpu_idx, gpu_name.as_deref(), total_ram_mb,
             config.capture_cpu_temp, config.capture_gpu_temp,
         );
@@ -217,6 +248,7 @@ fn collect_metrics_loop(
             );
         }
 
+        sample.t = loop_start.elapsed().as_secs_f64();
         samples.push(sample);
 
         // Sleep for the polling interval, but check for stop signal periodically
@@ -376,6 +408,7 @@ fn collect_single_sample(
         cpu_temp: cpu_temp_val.max(0.0).round() as u32,
         gpu_temp: gpu_temp_val.max(0.0).round() as u32,
         rtss_fps: fps_val,
+        t: 0.0,
     }
 }
 
@@ -643,10 +676,11 @@ fn aggregate_metrics(samples: &[MetricsSample], config: &MetricsConfig) -> Optio
             avg_ram_usage: 0,
             avg_cpu_temp: 0,
             avg_gpu_temp: 0,
-            min_fps: 0,
-            max_fps: 0,
-            resolution: "unknown".to_string(),
-        });
+        min_fps: 0,
+        max_fps: 0,
+        resolution: "unknown".to_string(),
+        samples: Vec::new(),
+    });
     }
 
     let count = samples.len() as f64;
@@ -656,6 +690,21 @@ fn aggregate_metrics(samples: &[MetricsSample], config: &MetricsConfig) -> Optio
     let avg_ram: f64 = samples.iter().map(|s| s.ram_usage as f64).sum::<f64>() / count;
     let avg_cpu_t: f64 = samples.iter().map(|s| s.cpu_temp as f64).sum::<f64>() / count;
     let avg_gpu_t: f64 = samples.iter().map(|s| s.gpu_temp as f64).sum::<f64>() / count;
+
+    // Carry the real per-sample telemetry through so the frontend can plot
+    // measured curves instead of re-synthesising them from the averages.
+    let samples_out: Vec<MetricsSamplePoint> = samples
+        .iter()
+        .map(|s| MetricsSamplePoint {
+            t: s.t,
+            cpu: s.cpu_usage as f32,
+            gpu: s.gpu_usage as f32,
+            ram: s.ram_usage as f32,
+            cpu_temp: s.cpu_temp as f32,
+            gpu_temp: s.gpu_temp as f32,
+            fps: if config.capture_fps { s.rtss_fps } else { None },
+        })
+        .collect();
 
     // Prefer real RTSS/Afterburner FPS over estimated FPS
     let rtss_samples: Vec<_> = samples.iter().filter_map(|s| s.rtss_fps).collect();
@@ -699,6 +748,7 @@ fn aggregate_metrics(samples: &[MetricsSample], config: &MetricsConfig) -> Optio
         min_fps: if config.capture_fps { min_fps.max(1) } else { 0 },
         max_fps: if config.capture_fps { max_fps } else { 0 },
         resolution: "1920x1080".to_string(),
+        samples: samples_out,
     })
 }
 
