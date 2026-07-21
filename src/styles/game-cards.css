@@ -803,8 +803,8 @@
 }
 
 .game-hero--compact .game-hero-logo {
-  max-height: 160px;
-  max-width: 480px;
+  max-height: 120px;
+  max-width: 360px;
   object-fit: contain;
   display: block;
   margin: -10px 0 0 0;

@@ -224,12 +224,12 @@ export default function BigScreenStore() {
                   <img
                     src={featuredGame.logoUrl}
                     alt={featuredGame.name}
-                    className="bigscreen-details-logo"
-                    width={400}
-                    height={120}
+                    className="bigscreen-gamepage-hero-logo"
+                    width={480}
+                    height={140}
                   />
                 ) : (
-                  <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+                  <h1 className="bigscreen-gamepage-hero-title">{featuredGame.name}</h1>
                 )}
               </div>
 

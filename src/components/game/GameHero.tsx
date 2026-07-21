@@ -210,8 +210,8 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
               src={game.logoUrl}
               alt={game.name}
               className="game-hero-logo"
-              width={400}
-              height={120}
+              width={300}
+              height={90}
             />
             ) : (
             <h1 className="game-hero-title">{game.name}</h1>

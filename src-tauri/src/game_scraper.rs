@@ -3027,12 +3027,16 @@ pub async fn fetch_store_games(
                 clean.replace("t_thumb", "t_cover_big")
             });
 
-            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
-                if url.starts_with("//") {
-                    format!("https:{}", url)
-                } else {
-                    url
-                }
+            let logo_url = g.artworks.and_then(|list| {
+                list.into_iter()
+                    .filter(|a| a.url.as_ref().map(|u| u.contains("/t_logo")).unwrap_or(false))
+                    .find_map(|a| a.url).map(|url| {
+                        if url.starts_with("//") {
+                            format!("https:{}", url)
+                        } else {
+                            url
+                        }
+                    })
             });
 
             let release_date = g.first_release_date.map(format_unix_timestamp);
@@ -3143,12 +3147,16 @@ pub async fn search_store_games(
                 clean.replace("t_thumb", "t_cover_big")
             });
 
-            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
-                if url.starts_with("//") {
-                    format!("https:{}", url)
-                } else {
-                    url
-                }
+            let logo_url = g.artworks.and_then(|list| {
+                list.into_iter()
+                    .filter(|a| a.url.as_ref().map(|u| u.contains("/t_logo")).unwrap_or(false))
+                    .find_map(|a| a.url).map(|url| {
+                        if url.starts_with("//") {
+                            format!("https:{}", url)
+                        } else {
+                            url
+                        }
+                    })
             });
 
             let release_date = g.first_release_date.map(format_unix_timestamp);
@@ -5102,12 +5110,16 @@ offset 0;"#,
                 clean.replace("t_thumb", "t_cover_big")
             });
 
-            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
-                if url.starts_with("//") {
-                    format!("https:{}", url)
-                } else {
-                    url
-                }
+            let logo_url = g.artworks.and_then(|list| {
+                list.into_iter()
+                    .filter(|a| a.url.as_ref().map(|u| u.contains("/t_logo")).unwrap_or(false))
+                    .find_map(|a| a.url).map(|url| {
+                        if url.starts_with("//") {
+                            format!("https:{}", url)
+                        } else {
+                            url
+                        }
+                    })
             });
 
             let release_date = g.first_release_date.map(format_unix_timestamp);
