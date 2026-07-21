@@ -322,12 +322,17 @@ impl GameWatcher {
                 continue;
             }
 
-            let mut found_proc = None;
-            if let Some(ref install_dir) = session.install_dir {
-                if let Some(proc) = find_best_process_in_dir(&processes, install_dir) {
-                    found_proc = Some(proc);
-                }
-            }
+            // Re-attach to a still-running process for this game. The
+            // tracked PID (often a launcher / bootstrapper) may have exited
+            // when the real game process took over — e.g. after the player
+            // clicks Play and the game goes fullscreen. `find_session_process`
+            // searches the install dir first, then climbs up the directory
+            // tree (shared publisher roots like `Rockstar Games\Launcher`
+            // vs `Rockstar Games\GameName`), and finally falls back to an
+            // exe-stem match. Without this broadening, launcher-based games
+            // lose their session a few seconds after launch.
+            let found_proc =
+                find_session_process(&processes, session.install_dir.as_ref(), &session.matched_exe);
 
             if let Some(proc) = found_proc {
                 session.lost_at = None;
@@ -366,6 +371,11 @@ impl GameWatcher {
 
                 session.last_pid = proc.pid;
                 session.matched_exe = proc.exe_path.clone();
+                // Re-anchor the install dir to the real game's location so
+                // subsequent re-attaches and Force Close target the actual
+                // process (the originally-tracked launcher may live in a
+                // different folder under a shared publisher root).
+                session.install_dir = get_game_root_dir(Path::new(&proc.exe_path));
                 session.lost_at = None;
 
                 eprintln!(
@@ -412,6 +422,22 @@ impl GameWatcher {
 
         for proc in &processes {
             let norm = proc.exe_path.to_lowercase().replace('/', "\\");
+
+            // Blacklist: never treat known non-game processes (launchers,
+            // crash handlers, Wallpaper Engine's wallpaper64.exe, etc.) as a
+            // launched game. Without this, a background app like Wallpaper
+            // Engine that is always running would be picked up as a session
+            // the moment the real game quits and its process index entry
+            // matches (the running indicator would "shift" to it).
+            if let Some(stem) = Path::new(&proc.exe_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+            {
+                let lower = stem.to_lowercase();
+                if SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+                    continue;
+                }
+            }
 
             // Exact path match
             if let Some(games) = self.process_index.get(&norm) {
@@ -1162,6 +1188,125 @@ fn get_game_root_dir(exe_path: &Path) -> Option<PathBuf> {
     Some(current.to_path_buf())
 }
 
+/// Locate a still-running process for an active session when the tracked
+/// PID has gone missing (the launcher / bootstrapper exited and handed off
+/// to the real game — commonly right as the game goes fullscreen).
+///
+/// Search strategy, in priority order:
+///   1. The session's `install_dir` (the original behaviour).
+///   2. Progressively higher parent directories (up to 3 levels). This
+///      catches publisher launchers that install their games in a *sibling*
+///      folder under a shared root — e.g. `Rockstar Games\Launcher` launches
+///      `Rockstar Games\Grand Theft Auto V`, or `Ubisoft\UbisoftConnect`
+///      launches `Ubisoft\GameName`. Without this step the watcher never
+///      re-attaches and the session is ended a few seconds after launch.
+///   3. As a last resort, any running process whose exe stem exactly matches
+///      the session's tracked exe stem (handles games that relaunch the same
+///      binary under a different path). Candidates are restricted to the
+///      install-dir tree (and its parents) so an unrelated title with a
+///      similar name is never grabbed.
+///
+/// Skip-keyword executables (launchers, crash handlers, etc.) are always
+/// excluded from every tier.
+fn find_session_process(
+    processes: &[ProcessInfo],
+    install_dir: Option<&PathBuf>,
+    matched_exe: &str,
+) -> Option<ProcessInfo> {
+    // Tier 1: the session's own install dir.
+    if let Some(dir) = install_dir {
+        if let Some(p) = find_best_process_in_dir(processes, dir) {
+            return Some(p);
+        }
+
+        // Tier 2: climb the directory tree (max 3 levels) to catch sibling
+        // publisher folders.
+        let mut cur = dir.parent();
+        for _ in 0..3 {
+            match cur {
+                Some(p) if !p.as_os_str().is_empty() => {
+                    if let Some(found) = find_best_process_in_dir(processes, p) {
+                        return Some(found);
+                    }
+                    cur = p.parent();
+                }
+                _ => break,
+            }
+        }
+    }
+
+    // Tier 3: exact exe-stem match, restricted to the install-dir tree.
+    let stem = Path::new(matched_exe)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase());
+    if let Some(lower) = stem {
+        if !lower.is_empty() && !SKIP_KEYWORDS.iter().any(|kw| lower.contains(kw)) {
+            if let Some(dir_lower) = install_dir.map(|d| {
+                d.to_string_lossy()
+                    .to_lowercase()
+                    .replace('/', "\\")
+                    .trim_end_matches('\\')
+                    .to_string()
+            }) {
+                let mut best: Option<(u64, ProcessInfo)> = None;
+                for p in processes {
+                    let pstem = match Path::new(&p.exe_path).file_stem().and_then(|s| s.to_str()) {
+                        Some(s) => s.to_lowercase(),
+                        None => continue,
+                    };
+                    if SKIP_KEYWORDS.iter().any(|kw| pstem.contains(kw)) {
+                        continue;
+                    }
+                    if pstem != lower {
+                        continue;
+                    }
+                    // Keep the candidate within the install-dir tree (or its
+                    // parents) to avoid stealing an unrelated game.
+                    let pl = p.exe_path.to_lowercase().replace('/', "\\");
+                    if pl.starts_with(&dir_lower) {
+                        let score = p.working_set_size;
+                        if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                            best = Some((score, p.clone()));
+                        }
+                        continue;
+                    }
+                    let mut cur = install_dir.and_then(|d| d.parent());
+                    let mut within = false;
+                    for _ in 0..4 {
+                        if let Some(pp) = cur {
+                            let pp_l = pp
+                                .to_string_lossy()
+                                .to_lowercase()
+                                .replace('/', "\\")
+                                .trim_end_matches('\\')
+                                .to_string();
+                            if !pp_l.is_empty() && pl.starts_with(&pp_l) {
+                                within = true;
+                                break;
+                            }
+                            cur = pp.parent();
+                        } else {
+                            break;
+                        }
+                    }
+                    if within {
+                        let score = p.working_set_size;
+                        if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                            best = Some((score, p.clone()));
+                        }
+                    }
+                }
+                if let Some((_, p)) = best {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Find the best running process inside an install directory. Prefers
 /// executables whose stem does not contain known non-game keywords
 /// (launchers, crash handlers, etc.) and, when multiple candidates
@@ -1212,9 +1357,16 @@ fn find_best_process_in_dir(processes: &[ProcessInfo], install_dir: &Path) -> Op
         .cloned()
         .collect();
 
-    if !skip_filtered.is_empty() {
-        candidates = skip_filtered;
+    // Skip-keyword executables (launchers, crash handlers, Wallpaper
+    // Engine, etc.) are NEVER the game we're looking for. If every
+    // candidate matches a skip keyword we return None rather than
+    // picking one — without this guard a lone wallpaper64.exe (or
+    // similar background app) in a parent directory like
+    // `…\steamapps\common\` would be chosen as the "best process".
+    if skip_filtered.is_empty() {
+        return None;
     }
+    candidates = skip_filtered;
 
     candidates.sort_by(|a, b| b.working_set_size.cmp(&a.working_set_size));
     candidates.into_iter().next()
@@ -1308,6 +1460,9 @@ const SKIP_KEYWORDS: &[&str] = &[
     "gamingservices", "gamingservice",
     "eadesktop", "origin", "ubisoftconnect", "upc",
     "epicgameslauncher", "galaxyclient",
+    // Wallpaper Engine — always-running background app that must never be
+    // tracked as a game (covers wallpaper64.exe / wallpaper32.exe).
+    "wallpaper",
 ];
 
 /// Resolve the main game executable for a given install directory.
@@ -1505,7 +1660,7 @@ mod tests {
         let bad_names = [
             "vcredist_x64", "UE4PrereqSetup", "UnityCrashHandler64",
             "CrashReportClient", "unins000", "dotnetfx35", "launcher",
-            "patcher", "updater", "dxsetup",
+            "patcher", "updater", "dxsetup", "wallpaper64",
         ];
         for name in bad_names {
             assert!(
