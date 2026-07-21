@@ -220,7 +220,17 @@ export default function BigScreenStore() {
           {featuredGame ? (
             <>
               <div className="bigscreen-details-logo-area">
-                <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+                {featuredGame.logoUrl ? (
+                  <img
+                    src={featuredGame.logoUrl}
+                    alt={featuredGame.name}
+                    className="bigscreen-details-logo"
+                    width={400}
+                    height={120}
+                  />
+                ) : (
+                  <h2 className="bigscreen-details-title">{featuredGame.name}</h2>
+                )}
               </div>
 
               <div className="bigscreen-details-meta">

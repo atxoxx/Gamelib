@@ -828,6 +828,7 @@ export interface StoreGameSummary {
   rating: number | null;
   aggregatedRating: number | null;
   coverUrl: string | null;
+  logoUrl: string | null;
   genres: string[];
   platforms: string[];
   firstReleaseDate: string | null;

@@ -296,6 +296,7 @@
   max-height: 120px;
   max-width: 400px;
   object-fit: contain;
+  display: block;
 }
 
 .bigscreen-details-title {
@@ -1546,6 +1547,7 @@
   max-height: 140px;
   max-width: 480px;
   object-fit: contain;
+  display: block;
   filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.85));
   margin-bottom: 8px;
 }

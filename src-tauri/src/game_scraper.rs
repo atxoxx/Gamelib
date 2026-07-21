@@ -375,6 +375,9 @@ pub struct StoreGameSummary {
     pub rating: Option<f64>,
     pub aggregated_rating: Option<f64>,
     pub cover_url: Option<String>,
+    /// Game logo URL from IGDB (transparent PNG, e.g. t_logo_med).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_url: Option<String>,
     pub genres: Vec<String>,
     pub platforms: Vec<String>,
     pub first_release_date: Option<String>,
@@ -398,6 +401,7 @@ struct IgdbGameSummary {
     rating: Option<f64>,
     aggregated_rating: Option<f64>,
     cover: Option<IgdbCover>,
+    artworks: Option<Vec<IgdbCover>>,
     genres: Option<Vec<IgdbName>>,
     platforms: Option<Vec<IgdbName>>,
     first_release_date: Option<i64>,
@@ -2976,12 +2980,12 @@ pub async fn fetch_store_games(
     // adds a few extra bytes per response and zero extra API calls.
     let body = if where_clause.is_empty() {
         format!(
-            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; sort {}; limit {}; offset {};",
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; sort {}; limit {}; offset {};",
             base_sort, limit.min(50), offset
         )
     } else {
         format!(
-            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; where {}; sort {}; limit {}; offset {};",
+            "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,follows,websites.url; where {}; sort {}; limit {}; offset {};",
             where_clause, base_sort, limit.min(50), offset
         )
     };
@@ -3023,6 +3027,14 @@ pub async fn fetch_store_games(
                 clean.replace("t_thumb", "t_cover_big")
             });
 
+            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
+                if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                }
+            });
+
             let release_date = g.first_release_date.map(format_unix_timestamp);
 
             // De-duped via an inline HashSet so duplicate IGDB entries
@@ -3051,6 +3063,7 @@ pub async fn fetch_store_games(
                 rating: g.rating,
                 aggregated_rating: g.aggregated_rating,
                 cover_url,
+                logo_url,
                 genres: g
                     .genres
                     .unwrap_or_default()
@@ -3087,7 +3100,7 @@ pub async fn search_store_games(
 
     let escaped = query.replace('"', "\\\"");
     let body = format!(
-        r#"search "{}"; fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,websites.url; limit {}; offset {};"#,
+        r#"search "{}"; fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,websites.url; limit {}; offset {};"#,
         escaped,
         limit.min(50),
         offset
@@ -3130,6 +3143,14 @@ pub async fn search_store_games(
                 clean.replace("t_thumb", "t_cover_big")
             });
 
+            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
+                if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                }
+            });
+
             let release_date = g.first_release_date.map(format_unix_timestamp);
 
             let websites = g.websites.and_then(|list| {
@@ -3153,6 +3174,7 @@ pub async fn search_store_games(
                 rating: g.rating,
                 aggregated_rating: g.aggregated_rating,
                 cover_url,
+                logo_url,
                 genres: g
                     .genres
                     .unwrap_or_default()
@@ -3429,14 +3451,14 @@ limit 1;"#,
     let similar_games = game.similar_games.map(|list| {
         list.into_iter()
             .map(|g| {
-                let cover_url = g.cover.and_then(|c| c.url).map(|url| {
-                    let clean = if url.starts_with("//") {
-                        format!("https:{}", url)
-                    } else {
-                        url
-                    };
-                    clean.replace("t_thumb", "t_cover_big")
-                });
+            let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+                let clean = if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                };
+                clean.replace("t_thumb", "t_cover_big")
+            });
                 SimilarGame {
                     id: g.id,
                     name: g.name,
@@ -5019,7 +5041,7 @@ pub async fn get_collection_games(
     // what the Store grid expects. The `limit` is clamped to 50
     // (IGDB's per-request max) to avoid silent truncation.
     let body = format!(
-        r#"fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,genres.name,platforms.name,total_rating_count,hypes,websites.url;
+        r#"fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,websites.url;
 where collections = ({});
 sort first_release_date asc;
 limit {};
@@ -5080,6 +5102,14 @@ offset 0;"#,
                 clean.replace("t_thumb", "t_cover_big")
             });
 
+            let logo_url = g.artworks.and_then(|list| list.into_iter().find_map(|a| a.url)).map(|url| {
+                if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                }
+            });
+
             let release_date = g.first_release_date.map(format_unix_timestamp);
 
             let websites = g.websites.and_then(|list| {
@@ -5103,6 +5133,7 @@ offset 0;"#,
                 rating: g.rating,
                 aggregated_rating: g.aggregated_rating,
                 cover_url,
+                logo_url,
                 genres: g
                     .genres
                     .unwrap_or_default()

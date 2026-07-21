@@ -259,16 +259,18 @@ export default function BigScreenGamePage({
           </button>
 
           <div className="bigscreen-gamepage-hero-info">
-            {resolvedLogo && !logoError ? (
-              <img
-                src={resolvedLogo}
-                alt={game.name}
-                className="bigscreen-gamepage-hero-logo"
-                onError={() => setLogoError(true)}
-              />
-            ) : (
-              <h1 className="bigscreen-gamepage-hero-title">{game.name}</h1>
-            )}
+          {resolvedLogo && !logoError ? (
+            <img
+              src={resolvedLogo}
+              alt={game.name}
+              className="bigscreen-gamepage-hero-logo"
+              width={480}
+              height={140}
+              onError={() => setLogoError(true)}
+            />
+          ) : (
+            <h1 className="bigscreen-gamepage-hero-title">{game.name}</h1>
+          )}
             <div className="bigscreen-gamepage-hero-subtitle-row">
               {game.developer && (
                 <span className="bigscreen-gamepage-hero-subtitle">

@@ -2462,6 +2462,7 @@ export default function FriendsPage() {
         rating: null,
         aggregatedRating: null,
         coverUrl: sug.coverUrl || null,
+        logoUrl: null,
         genres: [],
         platforms: [],
         firstReleaseDate: null,

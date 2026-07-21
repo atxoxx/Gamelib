@@ -67,6 +67,7 @@ export default function BigScreenStoreGamePage({
   const [activeTab, setActiveTab] = useState<StorePageTab>("overview");
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   // Bumper tab cycling
   useEffect(() => {
@@ -130,8 +131,15 @@ export default function BigScreenStoreGamePage({
           </button>
 
           <div className="bigscreen-gamepage-hero-info">
-            {game.logoUrl ? (
-              <img src={game.logoUrl} alt={game.name} className="bigscreen-gamepage-hero-logo" />
+            {game.logoUrl && !logoError ? (
+              <img
+                src={game.logoUrl}
+                alt={game.name}
+                className="bigscreen-gamepage-hero-logo"
+                width={480}
+                height={140}
+                onError={() => setLogoError(true)}
+              />
             ) : (
               <h1 className="bigscreen-gamepage-hero-title">{game.name}</h1>
             )}

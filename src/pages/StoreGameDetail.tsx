@@ -370,6 +370,8 @@ export default function StoreGameDetail() {
                 src={data.images.logo}
                 alt={data.title}
                 className="game-hero-logo"
+                width={200}
+                height={60}
                 onError={() => setLogoFailed(true)}
               />
             ) : (
