@@ -15,6 +15,13 @@ import type { Game, GameSession } from "../types/game";
 export type SplashStatus = "launching" | "started" | "error";
 
 /**
+ * Animated launch-step index. Advances on a timer while status is
+ * "launching" so the user sees progressive feedback instead of a
+ * static "Launching..." message.
+ */
+export type LaunchStep = 0 | 1 | 2 | 3;
+
+/**
  * Pre-rendered payload displayed in the splash overlay. Includes the
  * last session so the splash doesn't need to bootstrap ActivityContext
  * on mount and excludes the full game list.
@@ -32,13 +39,14 @@ export interface SplashPayload {
 export interface SplashRecord extends SplashPayload {
   status: SplashStatus;
   startedAt: number;
+  launchStep: LaunchStep;
 }
 
 function buildSplashRecord(
   payload: SplashPayload,
   status: SplashStatus
 ): SplashRecord {
-  return { ...payload, status, startedAt: Date.now() };
+  return { ...payload, status, startedAt: Date.now(), launchStep: 0 };
 }
 
 interface SplashContextType {
@@ -52,6 +60,9 @@ interface SplashContextType {
   /** Flip just the status field, preserving `startedAt` so the splash's
    *  min-visibility timer is consistent across status flips. */
   updateStatus: (status: SplashStatus) => void;
+  /** Advance the animated launch-step counter. Safe to call even when
+   *  the splash has already closed (no-op in that case). */
+  updateLaunchStep: (step: LaunchStep) => void;
   /** Tear the splash down. The Splashscreen component calls this from
    *  its fade lifecycle. */
   close: () => void;
@@ -87,6 +98,10 @@ export function SplashProvider({ children }: { children: ReactNode }) {
     setRecord((prev) => (prev ? { ...prev, status } : prev));
   }, []);
 
+  const updateLaunchStep = useCallback((step: LaunchStep) => {
+    setRecord((prev) => (prev ? { ...prev, launchStep: step } : prev));
+  }, []);
+
   const close = useCallback(() => {
     setRecord(null);
   }, []);
@@ -97,9 +112,10 @@ export function SplashProvider({ children }: { children: ReactNode }) {
       record,
       open,
       updateStatus,
+      updateLaunchStep,
       close,
     }),
-    [record, open, updateStatus, close]
+    [record, open, updateStatus, updateLaunchStep, close]
   );
 
   return (

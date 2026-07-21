@@ -16,6 +16,8 @@ import {
   type Game,
   type GameMetadataResult,
   type IgdbReview,
+  sanitizeSessionMetrics,
+  type SessionMetrics,
 } from "../types/game";
 import { useToast } from "./ToastContext";
 import {
@@ -26,24 +28,61 @@ import {
 import type { GameSession } from "../types/game";
 
 /**
- * Read the most recently persisted session for a given game from
- * localStorage. We deliberately do NOT pull from ActivityContext
- * here — GameContext is mounted *below* SplashContext but
- * *above* ActivityContext in the provider tree, and adding a
- * `useActivity()` call would crash on startup. localStorage is the
- * source of truth (ActivityContext persists every change
- * synchronously) so we read it directly.
+ * Shape of a `sessions` table row as returned by the Rust backend.
+ * Mirrors the serde mapping on `db::sessions::SessionRecord`.
  */
-function getLastPersistedSession(gameId: string): GameSession | null {
-  try {
-    const raw = localStorage.getItem("gamelib-sessions");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as GameSession[];
-    if (!Array.isArray(parsed)) return null;
-    return parsed.find((s) => s.gameId === gameId) ?? null;
-  } catch {
-    return null;
+interface DbSessionRecord {
+  id: number;
+  gameId: string;
+  gameName?: string | null;
+  startedAt: number;
+  endedAt?: number | null;
+  elapsedSeconds?: number | null;
+  avgFps?: number | null;
+  avgCpu?: number | null;
+  avgGpu?: number | null;
+  avgRam?: number | null;
+  metricsJson?: string | null;
+}
+
+/** Map a SQLite session row to the frontend GameSession shape. */
+function mapDbSession(r: DbSessionRecord): GameSession | null {
+  const elapsed = r.elapsedSeconds ?? 0;
+  if (elapsed < 60) return null;
+  const date = r.endedAt
+    ? new Date(r.endedAt).toISOString()
+    : new Date(r.startedAt).toISOString();
+  const durationMin = Math.round(elapsed / 60);
+  let metrics: SessionMetrics | undefined;
+  if (r.metricsJson) {
+    try {
+      metrics = sanitizeSessionMetrics(JSON.parse(r.metricsJson) as SessionMetrics);
+    } catch {
+      // Fall through to reconstructing from the average columns.
+    }
   }
+  if (!metrics && r.avgFps != null) {
+    metrics = {
+      avgFps: r.avgFps,
+      avgCpuUsage: r.avgCpu ?? 0,
+      avgGpuUsage: r.avgGpu ?? 0,
+      avgRamUsage: r.avgRam ?? 0,
+      avgCpuTemp: 0,
+      avgGpuTemp: 0,
+      minFps: 0,
+      maxFps: 0,
+      resolution: "",
+      samples: [],
+    };
+  }
+  return {
+    id: String(r.id),
+    gameId: r.gameId,
+    gameName: r.gameName ?? "",
+    date,
+    durationMin,
+    metrics,
+  };
 }
 
 interface GameExitEvent {
@@ -552,7 +591,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // Show the launch splash if the user has it enabled
     const splashOn = isSplashEnabled();
     if (splashOn) {
-      const lastSession = getLastPersistedSession(game.id);
+      let lastSession: GameSession | null = null;
+      try {
+        const records: DbSessionRecord[] = await invoke("get_last_session_for_game", {
+          gameId: game.id,
+        });
+        if (records.length > 0) {
+          const mapped = mapDbSession(records[0]);
+          if (mapped) lastSession = mapped;
+        }
+      } catch {
+        // Backend unavailable or DB empty — splash falls back to
+        // "First time playing".
+      }
       const payload: SplashPayload = { game, lastSession };
       splash.open(payload);
     }

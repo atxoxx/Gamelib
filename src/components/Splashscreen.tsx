@@ -3,6 +3,7 @@ import {
   useSplash,
 } from "../context/SplashContext";
 import type { Game } from "../types/game";
+import type { LaunchStep } from "../context/SplashContext";
 
 /**
  * Minimum visibility before fade-out begins. Holds the splash long
@@ -10,18 +11,17 @@ import type { Game } from "../types/game";
  * of seeing a flash.
  */
 const MIN_VISIBILITY_MS = 1400;
-
-/**
- * Fade-out animation duration. Matches the CSS transition on
- * `.splashscreen-card` so we tear down the React subtree after the
- * visual fade completes.
- */
 const FADE_OUT_MS = 250;
-
-/** Errors get a shorter hold so the user can see "Launch failed"
- *  without sitting on a useless card for the full min-visibility
- *  window. */
 const ERROR_HOLD_REDUCTION_MS = 600;
+const LAUNCH_STEP_INTERVAL_MS = 900;
+const MAX_LAUNCH_STEP: LaunchStep = 3;
+
+const LAUNCH_STEP_MESSAGES: Record<LaunchStep, string> = {
+  0: "Resolving paths",
+  1: "Starting game",
+  2: "Loading assets",
+  3: "Game is launching",
+};
 
 /**
  * Helper: convert IGDB's time-to-beat (seconds) into whole hours.
@@ -82,9 +82,10 @@ function InfoCard({ icon, label, children }: InfoCardProps) {
  * flips to "started" or "error" via the useSplash().close() callback.
  */
 export default function Splashscreen() {
-  const { record, close } = useSplash();
+  const { record, close, updateLaunchStep } = useSplash();
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastScheduledStartedAtRef = useRef<number | null>(null);
+  const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lifecycle: when status flips to "started" or "error", enforce the
   // min-visibility hold then schedule a fade-out. Discriminated by
@@ -102,10 +103,6 @@ export default function Splashscreen() {
     const id = setTimeout(() => beginClose(), holdMs);
     return () => {
       clearTimeout(id);
-      // Also cancel any pending fade-out close timer inherited from a
-      // previously-visible record. Without this, a queued close() from
-      // the *previous* launch could fire 250 ms after a fresh open() and
-      // prematurely tear down the new splash.
       if (fadeTimerRef.current) {
         clearTimeout(fadeTimerRef.current);
         fadeTimerRef.current = null;
@@ -114,6 +111,37 @@ export default function Splashscreen() {
     // close / beginClose deliberately omitted — they're stable refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record]);
+
+  // Animated launch steps: advance through a sequence of messages while
+  // the game is still in the "launching" state. Caps at the final step
+  // so the message never repeats. Resets to 0 on a fresh launch.
+  useEffect(() => {
+    if (!record || record.status !== "launching") {
+      if (stepTimerRef.current) {
+        clearTimeout(stepTimerRef.current);
+        stepTimerRef.current = null;
+      }
+      return;
+    }
+
+    const advance = () => {
+      if (!record || record.status !== "launching") return;
+      const next = (record.launchStep + 1) as LaunchStep;
+      if (next > MAX_LAUNCH_STEP) return;
+      updateLaunchStep(next);
+    };
+
+    stepTimerRef.current = setTimeout(advance, LAUNCH_STEP_INTERVAL_MS);
+
+    return () => {
+      if (stepTimerRef.current) {
+        clearTimeout(stepTimerRef.current);
+        stepTimerRef.current = null;
+      }
+    };
+    // Advance only on record object change (fresh launch) or status flip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record, updateLaunchStep]);
 
   // Clear any pending fade timer on unmount (e.g. context provider
   // teardown, route change).
@@ -264,7 +292,7 @@ export default function Splashscreen() {
               ? "Game is launching"
               : record.status === "error"
               ? "Launch failed"
-              : "Launching"}
+              : LAUNCH_STEP_MESSAGES[record.launchStep]}
             {record.status === "launching" && (
               <span className="splashscreen-status-dots" aria-hidden="true">
                 <span>.</span>
