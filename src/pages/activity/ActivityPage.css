@@ -1479,6 +1479,249 @@
   color: var(--color-text-muted);
 }
 
+/* ── Session Notes & Tags in Detail Modal ── */
+.activity-gantt__notes-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-gantt__notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.activity-gantt__notes-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.activity-gantt__notes-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.activity-gantt__notes-save,
+.activity-gantt__notes-cancel,
+.activity-gantt__notes-edit {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  transition: all 0.15s ease;
+}
+
+.activity-gantt__notes-save:hover {
+  background: var(--color-brand-teal);
+  color: #fff;
+  border-color: var(--color-brand-teal);
+}
+
+.activity-gantt__notes-cancel:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.activity-gantt__notes-edit {
+  background: none;
+  border-color: transparent;
+}
+
+.activity-gantt__notes-edit:hover {
+  color: var(--color-brand-teal);
+}
+
+.activity-gantt__notes-input,
+.activity-gantt__notes-textarea {
+  width: 100%;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.activity-gantt__notes-input:focus,
+.activity-gantt__notes-textarea:focus {
+  border-color: var(--color-brand-teal);
+}
+
+.activity-gantt__notes-textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+
+.activity-gantt__tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.activity-gantt__tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.activity-gantt__notes-empty {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.activity-gantt__note-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+/* ── Session bar inline tags ── */
+.activity-gantt__bar-tags {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 12px);
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+/* ── Rich tooltip chips/notes ── */
+.activity-gantt__tooltip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.activity-gantt__tooltip-chip {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.activity-gantt__tooltip-note {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activity-gantt__tooltip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.activity-gantt__tooltip-tag {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-brand-teal);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+.activity-gantt__tooltip-text {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ── Time-of-Day Heatmap ── */
+.activity-gantt__heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.activity-gantt__heatmap-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.activity-gantt__heatmap-track {
+  display: flex;
+  gap: 3px;
+  height: 48px;
+  align-items: flex-end;
+}
+
+.activity-gantt__heatmap-cell {
+  flex: 1;
+  border-radius: 2px;
+  min-height: 4px;
+  transition: background 0.2s ease, height 0.3s ease;
+}
+
+.activity-gantt__heatmap-cell--empty {
+  background: var(--color-bg-tertiary);
+}
+
+.activity-gantt__heatmap-cell--low {
+  background: color-mix(in srgb, var(--color-accent) 20%, var(--color-bg-tertiary));
+}
+
+.activity-gantt__heatmap-cell--medium {
+  background: color-mix(in srgb, var(--color-accent) 45%, var(--color-bg-tertiary));
+}
+
+.activity-gantt__heatmap-cell--high {
+  background: color-mix(in srgb, var(--color-accent) 70%, var(--color-bg-tertiary));
+}
+
+.activity-gantt__heatmap-cell--peak {
+  background: var(--color-accent);
+}
+
+.activity-gantt__heatmap-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  padding: 0 1px;
+}
+
 /* ==========================================================================
    Performance Tab (Comparisons & Timelines)
    ========================================================================== */

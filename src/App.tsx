@@ -28,6 +28,7 @@ import { SourceProvider } from "./context/SourceContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { AchievementProvider } from "./context/AchievementContext";
 import { SettingsProvider } from "./context/SettingsContext";
+import { SessionNotesProvider } from "./context/SessionNotesContext";
 import { BigScreenProvider, useBigScreen } from "./context/BigScreenContext";
 import {
   SidebarCollapseProvider,
@@ -143,9 +144,11 @@ function App() {
                   <SourceProvider>
                     <DownloadProvider>
                       <SettingsProvider>
-                      <BigScreenProvider>
-                      <AppShell />
-                      </BigScreenProvider>
+                        <SessionNotesProvider>
+                        <BigScreenProvider>
+                        <AppShell />
+                        </BigScreenProvider>
+                        </SessionNotesProvider>
                       </SettingsProvider>
                     </DownloadProvider>
                   </SourceProvider>

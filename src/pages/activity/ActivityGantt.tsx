@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import html2canvas from "html2canvas";
 import { prepareClonedDocumentForCanvasCapture } from "../../utils/color";
 import { useToast } from "../../context/ToastContext";
+import { useSessionNotes } from "../../context/SessionNotesContext";
 import type { Game, GameSession, SessionMetrics } from "../../types/game";
 import { formatPlayTime } from "../../types/game";
 
@@ -87,6 +88,37 @@ function formatDateLabel(date: Date): string {
   });
 }
 
+function getHourBuckets(sessions: GameSession[]): { hour: number; mins: number }[] {
+  const counts = new Array(24).fill(0);
+  for (const s of sessions) {
+    const end = new Date(s.date).getTime();
+    const start = end - s.durationMin * MINUTE;
+    let cursor = start;
+    while (cursor < end) {
+      const d = new Date(cursor);
+      const hour = d.getHours();
+      const hourStart = new Date(d);
+      hourStart.setHours(hour, 0, 0, 0);
+      const hourEnd = hourStart.getTime() + 60 * MINUTE;
+      const overlap = Math.max(0, Math.min(end, hourEnd) - Math.max(cursor, hourStart.getTime()));
+      if (overlap > 0) {
+        counts[hour] += overlap / MINUTE;
+      }
+      cursor = hourEnd;
+      if (cursor <= hourStart.getTime()) break;
+    }
+  }
+  return counts.map((mins, hour) => ({ hour, mins }));
+}
+
+function getHeatmapIntensity(mins: number): string {
+  if (mins <= 0) return "activity-gantt__heatmap-cell--empty";
+  if (mins < 15) return "activity-gantt__heatmap-cell--low";
+  if (mins < 45) return "activity-gantt__heatmap-cell--medium";
+  if (mins < 90) return "activity-gantt__heatmap-cell--high";
+  return "activity-gantt__heatmap-cell--peak";
+}
+
 export function ActivityGantt({
   sessions,
   games,
@@ -95,9 +127,9 @@ export function ActivityGantt({
   sourceFilter = "all",
 }: ActivityGanttProps) {
   const { showToast } = useToast();
+  const { getNote, setTags, setNote } = useSessionNotes();
   const ganttRef = useRef<HTMLDivElement>(null);
 
-  // Interaction state
   const [highlightGame, setHighlightGame] = useState<string | null>(null);
   const [selected, setSelected] = useState<Segment | null>(null);
   const [showAllLegend, setShowAllLegend] = useState(false);
@@ -108,6 +140,9 @@ export function ActivityGantt({
     clientX: number;
     clientY: number;
   } | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+  const [editingTagsText, setEditingTagsText] = useState("");
 
   // ── 1. Build id→Game lookup ───────────────────────────────────────────
   const gameById = useMemo(() => {
@@ -248,6 +283,13 @@ export function ActivityGantt({
     };
   }, [filtered, startDate, endDate]);
 
+  // ── 3b. Time-of-day play-pattern heatmap data ────────────────────────
+  const hourBuckets = useMemo(() => getHourBuckets(filtered), [filtered]);
+  const maxHourMins = useMemo(
+    () => Math.max(1, ...hourBuckets.map((h) => h.mins)),
+    [hourBuckets]
+  );
+
   // ── 4. Game totals → rank → stable color map ──────────────────────────
   const { colorMap, topGames, allGameCount } = useMemo(() => {
     const totals = new Map<string, number>();
@@ -331,6 +373,24 @@ export function ActivityGantt({
 
   const legendGames = showAllLegend ? topGames : topGames.slice(0, 8);
   const overflowCount = allGameCount - topGames.length;
+
+  const openNoteEditor = (sessionId: string) => {
+    const existing = getNote(sessionId);
+    setEditingNoteId(sessionId);
+    setEditingNoteText(existing.note);
+    setEditingTagsText(existing.tags.join(", "));
+  };
+
+  const saveNoteEditor = () => {
+    if (!editingNoteId) return;
+    const tags = editingTagsText
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setTags(editingNoteId, tags);
+    setNote(editingNoteId, editingNoteText);
+    setEditingNoteId(null);
+  };
 
   return (
     <div className="activity-gantt" ref={ganttRef}>
@@ -419,6 +479,32 @@ export function ActivityGantt({
         <span className="activity-gantt__legend-total">
           {formatPlayTime(totalPlayedMinutes)} total
         </span>
+      </div>
+
+      {/* ── Time-of-day play-pattern heatmap ───────────────────────── */}
+      <div className="activity-gantt__heatmap">
+        <div className="activity-gantt__heatmap-header">Play pattern</div>
+        <div className="activity-gantt__heatmap-track">
+          {hourBuckets.map(({ hour, mins }) => {
+            const pct = (mins / maxHourMins) * 100;
+            const cls = getHeatmapIntensity(mins);
+            return (
+              <div
+                key={hour}
+                className={`activity-gantt__heatmap-cell ${cls}`}
+                style={{ height: `${Math.max(8, pct)}%` }}
+                title={`${String(hour).padStart(2, "0")}:00 — ${formatPlayTime(Math.round(mins))}`}
+              />
+            );
+          })}
+        </div>
+        <div className="activity-gantt__heatmap-axis">
+          <span>00:00</span>
+          <span>06:00</span>
+          <span>12:00</span>
+          <span>18:00</span>
+          <span>24:00</span>
+        </div>
       </div>
 
       {/* ── Timeline header (00:00 … 24:00) ───────────────────────── */}
@@ -512,6 +598,7 @@ export function ActivityGantt({
                     minute: "2-digit",
                   });
                   const segDur = Math.round(seg.endMin - seg.startMin);
+                  const note = getNote(seg.sessionId);
 
                   return (
                     <div
@@ -559,7 +646,13 @@ export function ActivityGantt({
                       onMouseLeave={() =>
                         setHover((prev) => (prev?.seg.id === seg.id ? null : prev))
                       }
-                    />
+                    >
+                      {note.tags.length > 0 && (
+                        <span className="activity-gantt__bar-tags" title={note.tags.join(", ")}>
+                          {note.tags.slice(0, 2).join(", ")}
+                        </span>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -600,6 +693,46 @@ export function ActivityGantt({
           <span className="activity-gantt__tooltip-duration">
             {formatPlayTime(Math.round(hover.seg.endMin - hover.seg.startMin))} this day
           </span>
+          {(() => {
+            const g = gameById.get(hover.seg.gameId);
+            if (!g) return null;
+            return (
+              <span className="activity-gantt__tooltip-meta">
+                {g.platform ? <span className="activity-gantt__tooltip-chip">{g.platform}</span> : null}
+                {hover.seg.metrics?.avgFps ? (
+                  <span className="activity-gantt__tooltip-chip">
+                    {Math.round(hover.seg.metrics.avgFps)} FPS
+                  </span>
+                ) : null}
+                {hover.seg.metrics?.avgCpuUsage != null ? (
+                  <span className="activity-gantt__tooltip-chip">
+                    CPU {Math.round(hover.seg.metrics.avgCpuUsage)}%
+                  </span>
+                ) : null}
+                {hover.seg.metrics?.avgGpuUsage != null ? (
+                  <span className="activity-gantt__tooltip-chip">
+                    GPU {Math.round(hover.seg.metrics.avgGpuUsage)}%
+                  </span>
+                ) : null}
+              </span>
+            );
+          })()}
+          {(() => {
+            const note = getNote(hover.seg.sessionId);
+            if (!note.tags.length && !note.note) return null;
+            return (
+              <span className="activity-gantt__tooltip-note">
+                {note.tags.length > 0 && (
+                  <span className="activity-gantt__tooltip-tags">
+                    {note.tags.map((t) => (
+                      <span key={t} className="activity-gantt__tooltip-tag">{t}</span>
+                    ))}
+                  </span>
+                )}
+                {note.note ? <span className="activity-gantt__tooltip-text">{note.note}</span> : null}
+              </span>
+            );
+          })()}
         </div>
       )}
 
@@ -713,6 +846,93 @@ export function ActivityGantt({
                   </>
                 )}
               </div>
+
+              <div className="activity-gantt__notes-section">
+                <div className="activity-gantt__notes-header">
+                  <span className="activity-gantt__notes-title">Tags</span>
+                  {editingNoteId === selected.sessionId ? (
+                    <div className="activity-gantt__notes-actions">
+                      <button
+                        type="button"
+                        className="activity-gantt__notes-save"
+                        onClick={saveNoteEditor}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="activity-gantt__notes-cancel"
+                        onClick={() => setEditingNoteId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="activity-gantt__notes-edit"
+                      onClick={() => openNoteEditor(selected.sessionId)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {editingNoteId === selected.sessionId ? (
+                  <input
+                    type="text"
+                    className="activity-gantt__notes-input"
+                    placeholder="Comma-separated tags"
+                    value={editingTagsText}
+                    onChange={(e) => setEditingTagsText(e.target.value)}
+                    autoFocus
+                  />
+                ) : (
+                  <div className="activity-gantt__tags-list">
+                    {getNote(selected.sessionId).tags.map((t) => (
+                      <span key={t} className="activity-gantt__tag">{t}</span>
+                    ))}
+                    {getNote(selected.sessionId).tags.length === 0 && (
+                      <span className="activity-gantt__notes-empty">No tags</span>
+                    )}
+                  </div>
+                )}
+
+                <div className="activity-gantt__notes-header">
+                  <span className="activity-gantt__notes-title">Note</span>
+                  {editingNoteId === selected.sessionId && (
+                    <div className="activity-gantt__notes-actions">
+                      <button
+                        type="button"
+                        className="activity-gantt__notes-save"
+                        onClick={saveNoteEditor}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="activity-gantt__notes-cancel"
+                        onClick={() => setEditingNoteId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {editingNoteId === selected.sessionId ? (
+                  <textarea
+                    className="activity-gantt__notes-textarea"
+                    placeholder="Add a note for this session..."
+                    value={editingNoteText}
+                    onChange={(e) => setEditingNoteText(e.target.value)}
+                    rows={3}
+                  />
+                ) : (
+                  <div className="activity-gantt__note-text">
+                    {getNote(selected.sessionId).note || <span className="activity-gantt__notes-empty">No note</span>}
+                  </div>
+                )}
+              </div>
+
               {selected.isContinuation || selected.continuationTail ? (
                 <p className="activity-gantt__detail-note">
                   This session spans midnight and is split across multiple days in
