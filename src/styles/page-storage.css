@@ -1,0 +1,59 @@
+/* Page-level brand styling for storage (gradient + depth design language). */
+
+/* ── Eyebrow + gradient page title ─────────────────────────────── */
+.storage__page-title.brand-text {
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.01em;
+}
+
+/* Brand-tinted elevation for the page header icon chip. */
+.storage-page .storage__page-header-icon {
+  background: color-mix(in srgb, var(--brand-1) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand-2) 30%, transparent);
+  box-shadow: var(--shadow-brand);
+}
+
+.storage-page .storage__page-header-icon svg {
+  color: var(--brand-2);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-2) 70%, transparent));
+}
+
+/* ── Elevate the dashboard / drive / usage panels ──────────────── */
+.storage-page .storage__card {
+  border: 1px solid color-mix(in srgb, var(--brand-1) 18%, var(--color-border));
+  box-shadow: var(--shadow-brand), var(--depth-2);
+}
+
+.storage-page .storage__card:hover {
+  box-shadow: var(--shadow-brand), var(--depth-3);
+  border-color: color-mix(in srgb, var(--brand-2) 45%, var(--color-border));
+}
+
+/* Subtle brand-tinted track for the usage breakdown bars
+   (keeps the existing fill colors as the semantic accent). */
+.storage-page .storage__breakdown-track {
+  background: color-mix(in srgb, var(--brand-1) 10%, var(--color-bg-tertiary));
+}
+
+.storage-page .storage__drive-usage-track {
+  background: color-mix(in srgb, var(--brand-2) 10%, var(--color-bg-tertiary));
+}
+
+/* ── Branded empty state (low-opacity mesh wash) ───────────────── */
+.storage-page .storage__empty-state {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  border: 1px solid color-mix(in srgb, var(--brand-1) 22%, var(--color-border));
+  background:
+    var(--mesh-gradient),
+    var(--color-bg-secondary);
+  box-shadow: var(--depth-2);
+}
+
+.storage-page .storage__empty-state-icon svg {
+  color: color-mix(in srgb, var(--brand-2) 70%, var(--color-text-muted));
+}

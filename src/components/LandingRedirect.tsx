@@ -23,6 +23,7 @@ import { Navigate } from "react-router-dom";
 import { useSettings, type LandingPage } from "../context/SettingsContext";
 
 const LANDING_TO_PATH: Record<LandingPage, string> = {
+  home: "/home",
   library: "/library",
   store: "/store",
   wishlist: "/wishlist",

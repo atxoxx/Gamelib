@@ -469,6 +469,27 @@
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: calc(var(--spacing-unit) * 2);
   width: 100%;
+  padding: var(--space-md);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--depth-2);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Brand-gradient hairline across the top of the broadcast strip. */
+.activity-stats-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--brand-gradient);
+  opacity: 0.9;
 }
 
 .activity-stats-bar__pill {
@@ -480,11 +501,21 @@
   align-items: center;
   gap: 12px;
   box-sizing: border-box;
+  transition: transform var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+.activity-stats-bar__pill:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-border-light);
+  box-shadow: var(--depth-1);
 }
 
 .activity-stats-bar__pill--highlight {
-  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
-  background-color: color-mix(in srgb, var(--color-accent) 2%, transparent);
+  border-color: color-mix(in srgb, var(--brand-1) 45%, transparent);
+  background-color: color-mix(in srgb, var(--brand-1) 6%, transparent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--brand-1) 28%, transparent);
 }
 
 .activity-stats-bar__pill-icon {
@@ -500,8 +531,9 @@
 }
 
 .activity-stats-bar__pill--highlight .activity-stats-bar__pill-icon {
-  background-color: color-mix(in srgb, var(--color-accent) 15%, transparent);
-  color: var(--color-brand-teal);
+  background-color: color-mix(in srgb, var(--brand-1) 18%, transparent);
+  color: var(--brand-2);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--brand-2) 40%, transparent);
 }
 
 .activity-stats-bar__pill-content {
@@ -519,17 +551,26 @@
   letter-spacing: 0.5px;
 }
 
+/* Broadcast-grade numbers: large, tabular, slightly glowing. */
 .activity-stats-bar__pill-value {
   color: var(--color-text-primary);
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
 }
 
 .activity-stats-bar__pill--highlight .activity-stats-bar__pill-value {
-  color: var(--color-brand-teal);
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--brand-1) 45%, transparent);
 }
 
 .activity-stats-bar--loading {

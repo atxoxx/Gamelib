@@ -58,6 +58,7 @@ import {
   addUnseenCommunityItems,
 } from "./friendsStorage";
 import "./friends.css";
+import "../styles/page-friends.css";
 
 // SVG Icons
 function UsersIcon() {
@@ -3068,7 +3069,10 @@ export default function FriendsPage() {
             )}
 
             <div className="friends-list-header">
-              <h2 className="friends-list-title">My Friends ({friends.length})</h2>
+              <div className="friends-list-heading">
+                <span className="brand-eyebrow">Your crew</span>
+                <h2 className="friends-list-title"><span className="brand-text">My Friends ({friends.length})</span></h2>
+              </div>
               <div className="friends-list-header-actions">
                 <button
                   type="button"

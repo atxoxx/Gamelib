@@ -12,9 +12,10 @@
   --color-bg-hover: #1e222d;
   --color-bg-active: #242938;
   
-  /* Premium radial background gradient for depth */
-  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(124, 102, 255, 0.06) 0%, transparent 40%),
-                        radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.04) 0%, transparent 40%),
+  /* Premium radial background gradient for depth — bolder brand mesh */
+  --color-bg-gradient: radial-gradient(circle at 8% 12%, rgba(124, 102, 255, 0.14) 0%, transparent 45%),
+                        radial-gradient(circle at 92% 82%, rgba(34, 211, 238, 0.10) 0%, transparent 42%),
+                        radial-gradient(circle at 70% 50%, rgba(255, 92, 157, 0.05) 0%, transparent 50%),
                         var(--color-bg-primary);
 
   /* Surface system with glassmorphism support */
@@ -47,6 +48,25 @@
   --color-danger: #ff5c7a;
   --color-info: #5ab7ff;
   --color-stale: #f5b76b;
+
+  /* Brand gradient identity — the bold, poster-like "GameLib" signature.
+     A consistent violet → cyan → magenta mesh that recurs on the logo glow,
+     hero backdrops, primary actions, and active states so the app reads as
+     one recognizable product across every surface. */
+  --brand-1: #7c66ff;
+  --brand-2: #22d3ee;
+  --brand-3: #ff5c9d;
+  --brand-gradient: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 100%);
+  --brand-gradient-strong: linear-gradient(
+    135deg,
+    var(--brand-3) 0%,
+    var(--brand-1) 50%,
+    var(--brand-2) 100%
+  );
+  --mesh-gradient:
+    radial-gradient(circle at 12% 18%, rgba(124, 102, 255, 0.18) 0%, transparent 42%),
+    radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.14) 0%, transparent 40%),
+    radial-gradient(circle at 75% 88%, rgba(255, 92, 157, 0.12) 0%, transparent 44%);
 
   /* ── Spacing Scale ──────────────────────────────────────────────── */
   --space-3xs: 2px;
@@ -105,6 +125,17 @@
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
   --shadow-xl: 0 16px 64px rgba(0, 0, 0, 0.65);
   --shadow-glow: 0 0 32px var(--color-accent-glow);
+
+  /* Layered depth scale — physical 3D lift for the bold, tactile UI.
+     Each step stacks two soft shadows (tight contact + wide ambient) so
+     panels read as stacked glass rather than flat fills. */
+  --depth-1: 0 1px 1px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --depth-2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 6px 16px rgba(0, 0, 0, 0.45);
+  --depth-3: 0 4px 8px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --depth-float: 0 8px 16px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.6);
+  /* Brand-tinted lift for hero/feature surfaces. */
+  --shadow-brand: 0 8px 32px color-mix(in srgb, var(--brand-1) 35%, transparent),
+                  0 2px 8px color-mix(in srgb, var(--brand-2) 25%, transparent);
 
   /* ── Animation System ───────────────────────────────────────────── */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -167,6 +198,27 @@
 .elevation-3 { box-shadow: var(--shadow-lg); }
 .elevation-glow { box-shadow: var(--shadow-glow); }
 
+/* ── Brand utilities (shared across pages) ───────────────────────────
+   Gradient-filled text + eyebrow label that carry the signature
+   violet→cyan→magenta brand identity onto every page heading. */
+.brand-text {
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 28px color-mix(in srgb, var(--brand-1) 35%, transparent);
+}
+
+.brand-eyebrow {
+  display: inline-block;
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text-secondary) 70%, var(--brand-2));
+}
+
 /* Hover lift — subtle vertical raise on hover */
 .hover-lift {
   transition: transform var(--duration-normal) var(--ease-standard),
@@ -206,7 +258,8 @@
   --color-bg-tertiary: #f1f5f9;
   --color-bg-hover: #e2e8f0;
   --color-bg-active: #cbd5e1;
-  --color-bg-gradient: radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.04) 0%, transparent 40%),
+  --color-bg-gradient: radial-gradient(circle at 8% 12%, rgba(124, 58, 237, 0.10) 0%, transparent 45%),
+                        radial-gradient(circle at 92% 82%, rgba(34, 211, 238, 0.08) 0%, transparent 42%),
                         var(--color-bg-primary);
 
   --color-surface: rgba(255, 255, 255, 0.92);
@@ -707,6 +760,51 @@
   --shadow-glow: 0 0 24px var(--color-accent-glow);
 }
 
+/* Aurora Theme — bold statement default.
+   A deep near-black canvas lit by a vivid violet → cyan → magenta brand mesh.
+   This is the "wow" theme: the strongest expression of the gradient + depth
+   identity. Surfaces are glassy, borders glow with the brand, and the accent
+   is a saturated electric violet. */
+[data-theme="aurora"] {
+  --color-bg-primary: #07060f;
+  --color-bg-secondary: #0d0b1a;
+  --color-bg-tertiary: #15122a;
+  --color-bg-hover: #1e1a3a;
+  --color-bg-active: #2a2452;
+  --color-bg-gradient:
+    radial-gradient(circle at 10% 15%, rgba(124, 102, 255, 0.30) 0%, transparent 45%),
+    radial-gradient(circle at 88% 85%, rgba(34, 211, 238, 0.22) 0%, transparent 45%),
+    radial-gradient(circle at 65% 60%, rgba(255, 92, 157, 0.16) 0%, transparent 50%),
+    var(--color-bg-primary);
+
+  --color-surface: rgba(13, 11, 26, 0.72);
+  --color-surface-raised: rgba(21, 18, 42, 0.85);
+  --color-surface-overlay: rgba(5, 4, 12, 0.88);
+  --color-surface-glass: rgba(13, 11, 26, 0.55);
+
+  --color-border: rgba(124, 102, 255, 0.14);
+  --color-border-light: rgba(34, 211, 238, 0.22);
+  --color-border-glow: color-mix(in srgb, var(--color-accent) 40%, transparent);
+
+  --color-text-primary: #f4f2ff;
+  --color-text-secondary: #b9b4d6;
+  --color-text-muted: #6f6a92;
+  --color-text-inverse: #07060f;
+
+  --color-accent: #8b5cff;
+  --color-accent-hover: #a47bff;
+  --color-accent-active: #6f3fe0;
+  --color-accent-glow: rgba(139, 92, 255, 0.45);
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg-secondary));
+
+  /* Brand mesh tuned for the aurora canvas. */
+  --brand-1: #8b5cff;
+  --brand-2: #22d3ee;
+  --brand-3: #ff5c9d;
+
+  --shadow-glow: 0 0 32px var(--color-accent-glow);
+}
+
 /* ==============================
    App Layout
    ============================== */
@@ -800,12 +898,25 @@
   letter-spacing: 0.5px;
 }
 
-.topnav-logo svg {
+.topnav-logo__mark {
   width: 22px;
   height: 22px;
-  color: var(--color-accent);
-  filter: drop-shadow(0 0 10px var(--color-accent-glow));
+  color: var(--brand-1);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent));
   transition: transform var(--duration-normal) var(--ease-standard);
+}
+
+.topnav-logo:hover .topnav-logo__mark {
+  transform: rotate(-6deg) scale(1.1);
+}
+
+/* Wordmark carries the brand gradient so the logo reads as one
+   recognizable, colorful product mark across the whole app. */
+.topnav-logo__word {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .topnav-logo:hover svg {

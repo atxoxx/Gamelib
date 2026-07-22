@@ -31,6 +31,7 @@ import DensityToggle from "../components/DensityToggle";
 import type { GameMetadataResult, StoreGameSummary, StoreCategory } from "../types/game";
 import { useBigScreen } from "../context/BigScreenContext";
 import BigScreenStore from "../components/store/BigScreenStore";
+import "../styles/page-store.css";
 
 /**
  * Max number of consecutive empty-page auto-loads performed while the
@@ -557,7 +558,10 @@ export default function StorePage() {
               single tap away. */}
           <div className="store-toolbar">
             <div className="store-toolbar-title">
-              <h2>{resultsTitle}</h2>
+              <div className="store-toolbar-heading">
+                <span className="brand-eyebrow">Store</span>
+                <h2 className="brand-text">{resultsTitle}</h2>
+              </div>
               <span className="store-toolbar-count">
                 {sourceFilterChipCount !== undefined
                   ? sourceFilterChipCount

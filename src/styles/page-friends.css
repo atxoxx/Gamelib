@@ -1,0 +1,51 @@
+/* ============================================================================
+   Friends — bold gradient + depth brand language.
+   Accent on headers, elevated cards/rows, branded empty states.
+   ============================================================================ */
+
+/* List heading: stack eyebrow above the gradient title */
+.friends-list-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs, 4px);
+}
+
+/* Friend cards + session cards gain brand depth + brand-tinted top hairline */
+.friend-card {
+  position: relative;
+  box-shadow: var(--depth-2);
+  border-top: 1px solid color-mix(in srgb, var(--brand-1) 28%, transparent);
+}
+
+.friend-card:hover {
+  box-shadow: var(--depth-3);
+}
+
+.session-card {
+  position: relative;
+  box-shadow: var(--depth-2);
+  border-top: 1px solid color-mix(in srgb, var(--brand-1) 24%, transparent);
+}
+
+.session-card:hover {
+  box-shadow: var(--depth-3);
+}
+
+/* Branded empty states (mesh wash) */
+.friends-empty-state {
+  position: relative;
+  overflow: hidden;
+}
+
+.friends-empty-state::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--mesh-gradient);
+  opacity: 0.3;
+}
+
+.friends-empty-icon {
+  color: var(--brand-2);
+}

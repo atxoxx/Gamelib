@@ -744,6 +744,30 @@
   min-height: clamp(120px, 15vw, 180px);
 }
 
+/* Brand mesh wash + legibility scrim layered over the banner art, so
+   every game hero carries the signature violet→cyan→magenta gradient
+   identity while keeping the KPI strip readable. Sits above the art
+   (z-index 0) but below the KPI strip (z-index 3). */
+.game-hero__banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--mesh-gradient);
+  opacity: 0.38;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.game-hero__banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, transparent 50%, rgba(0, 0, 0, 0.5));
+  pointer-events: none;
+}
+
 .game-hero__kpis {
   position: absolute;
   bottom: var(--space-md);

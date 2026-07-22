@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import "../styles/page-achievements.css";
 import { useAchievements } from "../context/AchievementContext";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
@@ -145,8 +146,9 @@ export default function AchievementsPage() {
     <div className="achievements-page">
       {/* Page header */}
       <div className="achievements-page-header">
+        <span className="brand-eyebrow">Your Progress</span>
         <div className="achievements-page-title-row">
-          <h1 className="achievements-page-title">
+          <h1 className="achievements-page-title brand-text">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
               <circle cx="12" cy="8" r="6" />
               <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11" />

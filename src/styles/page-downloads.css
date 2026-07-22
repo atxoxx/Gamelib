@@ -1,0 +1,66 @@
+/* Page-level brand styling for downloads (gradient + depth design language). */
+
+/* ── Eyebrow + gradient page title ─────────────────────────────── */
+.dl-page-title.brand-text {
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.01em;
+}
+
+/* ── Lift the download list + rows with depth & brand glow ──────── */
+/* Scoped to .dl-page so these win regardless of stylesheet order. */
+.dl-page .dl-list {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-brand), var(--depth-1);
+}
+
+.dl-page .dl-row {
+  border-left: 3px solid color-mix(in srgb, var(--brand-1) 60%, var(--color-border));
+  box-shadow: var(--depth-1);
+}
+
+.dl-page .dl-row:hover {
+  box-shadow: var(--shadow-brand), var(--depth-2);
+  border-color: color-mix(in srgb, var(--brand-2) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--brand-1) 6%, var(--color-bg-primary));
+}
+
+/* Semantic status accents stay on the left border (download.css). */
+
+/* ── Banded section headers ────────────────────────────────────── */
+.dl-page .dl-section-title {
+  position: relative;
+  padding-left: 12px;
+}
+
+.dl-page .dl-section-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 1.1em;
+  border-radius: var(--radius-full);
+  background: var(--brand-gradient);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent);
+}
+
+/* ── Branded empty states (low-opacity mesh wash) ───────────────── */
+.dl-page .dl-list-empty {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background:
+    var(--mesh-gradient),
+    var(--color-bg-secondary);
+  box-shadow: var(--depth-1);
+}
+
+.dl-page .dl-list-empty-icon {
+  color: color-mix(in srgb, var(--brand-2) 70%, var(--color-text-muted));
+}

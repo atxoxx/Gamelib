@@ -36,6 +36,7 @@ import {
 } from "./communityStorage";
 import { ScreenshotThumb } from "./communityScreenshotThumb";
 import "./community.css";
+import "../styles/page-community.css";
 
 // ─── Tab types ─────────────────────────────────────────────────────────────
 
@@ -334,7 +335,10 @@ function ProfileSection() {
     <div className="community-profile">
       {/* ── Profile header / share ─────────────────────────────────── */}
       <div className="community-profile-header">
-        <h2 className="community-profile-title">Player Profile</h2>
+        <div className="community-profile-heading">
+          <span className="brand-eyebrow">Your gaming identity</span>
+          <h2 className="community-profile-title"><span className="brand-text">Player Profile</span></h2>
+        </div>
         <Button variant="ghost" size="sm" onClick={handleShareProfile} leftIcon={
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
             <circle cx="18" cy="5" r="3" />

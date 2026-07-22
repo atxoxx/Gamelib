@@ -1,0 +1,50 @@
+/* ============================================================================
+   News — bold gradient + depth brand language.
+   Brand reads as accent: gradient title, elevated cards, mesh empty states.
+   ============================================================================ */
+
+/* Header: stack eyebrow above the gradient title */
+.news-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs, 4px);
+}
+
+.news-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Article cards gain brand depth + a brand-tinted top hairline */
+.news-article-card {
+  position: relative;
+  box-shadow: var(--depth-2);
+  border-top: 1px solid color-mix(in srgb, var(--brand-1) 30%, transparent);
+}
+
+.news-article-card:hover {
+  box-shadow: var(--depth-3);
+}
+
+/* Branded empty + error states (low-opacity mesh wash) */
+.news-empty,
+.news-error {
+  position: relative;
+  overflow: hidden;
+}
+
+.news-empty::before,
+.news-error::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--mesh-gradient);
+  opacity: 0.35;
+}
+
+.news-empty svg,
+.news-error svg {
+  color: var(--brand-2);
+}

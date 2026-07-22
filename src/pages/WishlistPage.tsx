@@ -5,6 +5,7 @@ import { useWishlistContext } from "../context/WishlistContext";
 import { PriceProvider } from "../context/PriceContext";
 import { requestShareToFriends } from "./friendSuggestionSignal";
 import type { StoreGameSummary, WishlistEntry } from "../types/game";
+import "../styles/page-wishlist.css";
 
 type WishlistSort = "date_added" | "name" | "rating" | "release_date";
 type WishlistGroup = "all" | "released" | "coming_soon";
@@ -231,7 +232,8 @@ export default function WishlistPage() {
   return (
     <PriceProvider>
     <div className="wishlist-page">
-      <header className="wishlist-page-header">
+      <header className="wishlist-page-header wishlist-page-header--brand">
+        <span className="brand-eyebrow wishlist-page-eyebrow">Your Wishlist</span>
         <div className="wishlist-page-title-row">
           <span className="wishlist-page-icon" aria-hidden="true">
             <svg
@@ -245,7 +247,7 @@ export default function WishlistPage() {
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </span>
-          <h1 className="wishlist-page-title">Your Wishlist</h1>
+          <h1 className="wishlist-page-title brand-text">Saved to play</h1>
           <span className="wishlist-page-count">
             {wishlist.length === 0
               ? "Empty"
@@ -269,7 +271,16 @@ export default function WishlistPage() {
       </header>
 
       {wishlist.length === 0 ? (
-        <div className="wishlist-empty" role="status" aria-live="polite">
+        <div
+          className="wishlist-empty wishlist-empty--brand"
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            className="wishlist-empty-mesh"
+            aria-hidden="true"
+            style={{ background: "var(--mesh-gradient)" }}
+          />
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -598,7 +609,7 @@ function WishlistCard({
   const showFullNote = expanded || draft.length <= 120;
 
   return (
-    <div className="wishlist-card-wrap">
+    <div className="wishlist-card-wrap wishlist-card-wrap--brand">
       <StoreGameCard
         game={entry}
         wishlisted

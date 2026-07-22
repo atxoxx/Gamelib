@@ -12,6 +12,7 @@ import { StorageSortSelect } from "./storage/StorageSortSelect";
 import { StorageRow } from "./storage/StorageRow";
 import { useStalePaths } from "./storage/useStalePaths";
 import "./StoragePage.css";
+import "../styles/page-storage.css";
 
 /** Active list filter for the Storage tab. */
 export type StorageFilter = "all" | "sized" | "missing" | "stale";
@@ -151,7 +152,8 @@ export default function StoragePage() {
           </svg>
         </div>
         <div className="storage__page-header-text">
-          <h1 className="storage__page-title">Storage</h1>
+          <span className="brand-eyebrow">Disk &amp; Library</span>
+          <h1 className="storage__page-title brand-text">Storage</h1>
           <p className="storage__page-subtitle">
             Disk usage across every installed game, broken down by platform and drive.
           </p>

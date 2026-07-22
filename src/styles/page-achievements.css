@@ -1,0 +1,82 @@
+/* Page-level brand styling for achievements (gradient + depth design language). */
+
+.achievements-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-lg);
+}
+
+.achievements-page-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-3xl, 2rem);
+  font-weight: var(--font-weight-bold, 700);
+  margin: 0;
+}
+
+.achievements-page-title svg {
+  color: var(--brand-1);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent));
+}
+
+/* Summary stat cards — layered depth + brand-tinted glow */
+.achievements-summary-card {
+  background: var(--color-surface-raised, var(--color-surface));
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--depth-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.achievements-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--depth-2), var(--shadow-brand);
+}
+
+.achievements-summary-perfect {
+  border-color: color-mix(in srgb, var(--brand-3) 45%, var(--color-border));
+  box-shadow: var(--depth-1), 0 6px 20px color-mix(in srgb, var(--brand-3) 22%, transparent);
+}
+
+.achievements-summary-value {
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Timeline items + game rows — tactile depth, brand glow on hover */
+.achievements-timeline-item,
+.achievements-game-row {
+  background: var(--color-surface-raised, var(--color-surface));
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--depth-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.achievements-timeline-item:hover,
+.achievements-game-row:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--brand-1) 45%, var(--color-border));
+  box-shadow: var(--depth-2), var(--shadow-brand);
+}
+
+.achievements-game-progress-fill {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--brand-2) 45%, transparent);
+}
+
+/* Branded empty state */
+.achievements-no-results {
+  background:
+    var(--mesh-gradient) padding-box,
+    var(--color-surface-raised, var(--color-surface));
+  border: 1px dashed color-mix(in srgb, var(--brand-1) 50%, var(--color-border));
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  padding: var(--space-xl);
+  text-align: center;
+  box-shadow: var(--depth-1);
+}

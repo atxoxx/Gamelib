@@ -1,0 +1,138 @@
+/* ============================================================================
+   Home — the app's first-run "wow" surface.
+   Bold brand-gradient hero + personalized library overview.
+   ============================================================================ */
+
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  padding: var(--space-lg) var(--space-2xl) var(--space-3xl);
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Brand-gradient hero ─────────────────────────────────────────────── */
+.home-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-2xl);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-secondary);
+  box-shadow: var(--shadow-brand), var(--depth-2);
+  padding: clamp(32px, 6vw, 72px) clamp(24px, 5vw, 64px);
+  isolation: isolate;
+}
+
+.home-hero__mesh {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--mesh-gradient);
+  opacity: 0.9;
+}
+
+/* Subtle brand-gradient wash so the mesh reads as a single surface. */
+.home-hero__mesh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--brand-1) 22%, transparent) 0%,
+    transparent 45%,
+    color-mix(in srgb, var(--brand-2) 18%, transparent) 100%
+  );
+}
+
+.home-hero__content {
+  position: relative;
+  max-width: 640px;
+}
+
+.home-hero__eyebrow {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text-primary) 80%, var(--brand-2));
+}
+
+.home-hero__title {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+}
+
+.home-hero__title-accent {
+  background: var(--brand-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.home-hero__subtitle {
+  margin: var(--space-lg) 0 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+  max-width: 52ch;
+}
+
+.home-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-2xl);
+}
+
+.home-hero__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xl);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    background var(--duration-normal) var(--ease-standard);
+}
+
+.home-hero__btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.home-hero__btn--primary {
+  background: var(--brand-gradient);
+  color: #fff;
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--brand-1) 45%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.home-hero__btn--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 36px color-mix(in srgb, var(--brand-1) 55%, transparent);
+}
+
+.home-hero__btn--ghost {
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.home-hero__btn--ghost:hover {
+  transform: translateY(-2px);
+  border-color: var(--brand-2);
+  color: var(--color-text-primary);
+}

@@ -9,6 +9,7 @@ import "./styles/wishlist.css";
 import "./styles/download.css";
 import "./styles/source-manager.css";
 import "./library.css";
+import "./styles/home.css";
 import "./pages/deals/DealsPage.css";
 import "./styles/bigscreen.css";
 

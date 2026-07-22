@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import MainContent from "./components/MainContent";
 import BigScreenLayout from "./components/BigScreenLayout";
 import LibraryPage from "./pages/LibraryPage";
+import HomePage from "./pages/HomePage";
 import GamePage from "./pages/GamePage";
 import StorePage from "./pages/StorePage";
 import StoreGameDetail from "./pages/StoreGameDetail";
@@ -110,6 +111,7 @@ function AppShell() {
               resolved-target computation; <Navigate>
               itself only sees the resolved path. */}
           <Route index element={<LandingRedirect />} />
+          <Route path="home" element={<HomePage />} />
           <Route path="library" element={<LibraryPage />} />
           <Route path="library/:gameId" element={<GamePage />} />
           <Route path="wishlist" element={<WishlistPage />} />

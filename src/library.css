@@ -1308,6 +1308,29 @@
   max-width: 100%;
 }
 
+/* ── Editorial emphasis ───────────────────────────────────────────────
+   When enabled (small, non-list libraries), the first game is highlighted
+   as a "feature" with a brand ring, depth, and a larger title — but it
+   stays a single normal grid cell. This keeps placement pixel-aligned
+   with every other card (no spanning, no shift) while still giving the
+   library a sense of curation. */
+.lib-cards--editorial {
+  /* normal grid flow — the feature is one cell, so nothing special needed */
+}
+
+.lib-cards--editorial > .lib-card--featured {
+  box-shadow: var(--shadow-brand), var(--depth-2);
+  border-color: var(--color-border-light);
+}
+
+.lib-cards--editorial > .lib-card--featured .lib-card-name {
+  font-size: var(--font-size-xl);
+}
+
+.lib-cards--editorial > .lib-card--featured:hover {
+  transform: translateY(-2px);
+}
+
 .lib-card.density-compact {
   max-width: 150px;
 }

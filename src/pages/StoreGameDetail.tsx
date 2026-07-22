@@ -29,6 +29,7 @@ import {
   VideosSection,
   SystemRequirementsCard,
 } from "../components/game";
+import "../styles/page-store.css";
 
 
 /* ------------------------------------------------------------------ */
@@ -305,7 +306,7 @@ export default function StoreGameDetail() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
-          Store
+          <span className="brand-text">Store</span>
         </button>
       </div>
 
@@ -365,6 +366,7 @@ export default function StoreGameDetail() {
         {/* Info row below banner: logo/title + meta + actions */}
         <div className={`game-hero__info-row${data.images.cover && !coverErrored ? " game-hero__info-row--with-cover" : ""}`}>
           <div className="game-hero__title-block">
+            <span className="brand-eyebrow">GameLib Store</span>
             {data.images.logo && !logoFailed ? (
               <img
                 src={data.images.logo}
@@ -375,7 +377,7 @@ export default function StoreGameDetail() {
                 onError={() => setLogoFailed(true)}
               />
             ) : (
-              <h1 className="game-hero-title">{data.title}</h1>
+              <h1 className="game-hero-title brand-text">{data.title}</h1>
             )}
           </div>
           <div className="game-hero-meta">

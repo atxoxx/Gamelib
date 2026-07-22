@@ -56,6 +56,7 @@ const LS_TEMP_UNIT = "gamelib.temp_unit";
 // ── Public shape ─────────────────────────────────────────────────────────────
 
 export type LandingPage =
+  | "home"
   | "library"
   | "store"
   | "wishlist"
@@ -262,6 +263,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [landingPage, setLandingPageState] = useState<LandingPage>(() => {
     const raw = lsGet(LS_LANDING_PAGE);
     if (
+      raw === "home" ||
       raw === "library" ||
       raw === "store" ||
       raw === "wishlist" ||
@@ -275,7 +277,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     ) {
       return raw;
     }
-    return "library";
+    return "home";
   });
 
   const setLandingPage = useCallback((next: LandingPage) => {

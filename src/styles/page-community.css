@@ -1,0 +1,56 @@
+/* ============================================================================
+   Community (Stats) — bold gradient + depth brand language.
+   Accent on headers, elevated cards/panels, branded empty states.
+   ============================================================================ */
+
+/* Profile heading: stack eyebrow above the gradient title */
+.community-profile-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs, 4px);
+}
+
+.community-profile-header {
+  align-items: flex-end;
+}
+
+/* Panels / cards get real depth + a brand-tinted top hairline */
+.community-chart-card,
+.community-year-card,
+.community-breakdown-card,
+.community-screenshot-group {
+  position: relative;
+  box-shadow: var(--depth-2);
+  border-top: 1px solid color-mix(in srgb, var(--brand-1) 28%, transparent);
+}
+
+.community-chart-card:hover,
+.community-year-card:hover,
+.community-breakdown-card:hover {
+  box-shadow: var(--depth-3);
+}
+
+/* Branded empty states (mesh wash) for charts + screenshots */
+.community-empty-chart,
+.community-screenshots-empty {
+  position: relative;
+  overflow: hidden;
+}
+
+.community-empty-chart::before,
+.community-screenshots-empty::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--mesh-gradient);
+  opacity: 0.3;
+}
+
+.community-screenshots-empty-icon {
+  color: var(--brand-2);
+}
+
+.community-screenshot-group {
+  overflow: hidden;
+}

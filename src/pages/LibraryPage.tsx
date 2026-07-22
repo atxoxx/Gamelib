@@ -116,11 +116,18 @@ export default function LibraryPage() {
 
   const runningSet = useMemo(() => runningGameIds, [runningGameIds]);
 
+  // Editorial mode: when the library is small enough to render without
+  // virtualization (and not in a list/compact view), promote the first
+  // card to a wide "feature" tile to create visual rhythm — a curated
+  // feel instead of a uniform wall of equal cards.
+  const editorial = !isBigScreen && density !== "list" && density !== "compact";
+
   const renderCard = useCallback(
     (game: Game, index: number) => {
       if (isBigScreen) {
         return <BigScreenGameCard key={game.id} game={game} onClick={() => handleCardClick(game)} />;
       }
+      const featured = editorial && index === 0 && !!game.coverArtUrl;
       return (
         <LibraryGameCard
           key={game.id}
@@ -130,11 +137,11 @@ export default function LibraryPage() {
           onClick={() => handleCardClick(game)}
           onContextMenu={(e) => handleGameContextMenu(e, game)}
           onLaunch={handleLaunch}
-          className={`animate-fade-in stagger-${Math.min(index + 1, 8)}`}
+          className={`animate-fade-in stagger-${Math.min(index + 1, 8)}${featured ? " lib-card--featured" : ""}`}
         />
       );
     },
-    [isBigScreen, density, runningSet, handleCardClick, handleGameContextMenu, handleLaunch]
+    [isBigScreen, density, editorial, runningSet, handleCardClick, handleGameContextMenu, handleLaunch]
   );
 
   const sidebarProps = {
@@ -289,7 +296,7 @@ export default function LibraryPage() {
                     </button>
                   </div>
                 ) : (
-                  <VirtualGrid items={filteredGames} density={density} isBigScreen={isBigScreen} renderItem={renderCard} />
+                  <VirtualGrid items={filteredGames} density={density} isBigScreen={isBigScreen} editorial={editorial} renderItem={renderCard} />
                 )}
               </div>
             </div>
@@ -316,10 +323,11 @@ interface VirtualGridProps {
   items: Game[];
   density: string;
   isBigScreen: boolean;
+  editorial?: boolean;
   renderItem: (game: Game, index: number) => React.ReactNode;
 }
 
-function VirtualGrid({ items, density, isBigScreen, renderItem }: VirtualGridProps) {
+function VirtualGrid({ items, density, isBigScreen, editorial, renderItem }: VirtualGridProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
   const [containerW, setContainerW] = useState(0);
@@ -362,7 +370,9 @@ function VirtualGrid({ items, density, isBigScreen, renderItem }: VirtualGridPro
 
   if (!useVirtual) {
     return (
-      <div className={`lib-cards density-${density}${isBigScreen ? " bigscreen-cards" : ""}`}>
+      <div
+        className={`lib-cards density-${density}${isBigScreen ? " bigscreen-cards" : ""}${editorial ? " lib-cards--editorial" : ""}`}
+      >
         {items.map((g, i) => renderItem(g, i))}
       </div>
     );

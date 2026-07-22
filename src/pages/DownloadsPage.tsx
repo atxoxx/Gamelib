@@ -43,6 +43,7 @@ import DownloadsToolbar from "../components/downloads/DownloadsToolbar";
 import DownloadsFilterBar from "../components/downloads/DownloadsFilterBar";
 import DownloadRow from "../components/downloads/DownloadRow";
 import { ConfirmModal } from "../components/ui";
+import "../styles/page-downloads.css";
 
 const HISTORY_PREVIEW = 5;
 
@@ -219,7 +220,8 @@ export default function DownloadsPage() {
     <div className="dl-page">
       <div className="dl-page-header">
         <div className="dl-page-title-block">
-          <h2 className="dl-page-title">Downloads</h2>
+          <span className="brand-eyebrow">Download Manager</span>
+          <h2 className="dl-page-title brand-text">Downloads</h2>
           <p className="dl-page-subtitle">
             Manage active torrents, browse history, and add new downloads.
           </p>

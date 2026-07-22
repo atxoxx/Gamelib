@@ -11,6 +11,7 @@ import type {
 } from "../../types/deals";
 import { Button } from "../../components/ui";
 import "./DealsPage.css";
+import "../../styles/page-deals.css";
 
 /**
  * DealsPage — /deals
@@ -322,7 +323,8 @@ export default function DealsPage() {
 
   return (
     <div className="deals-page">
-      <header className="deals-page-header">
+      <header className="deals-page-header" style={{ background: "var(--mesh-gradient)" }}>
+        <span className="brand-eyebrow">Savings &amp; free games</span>
         <h1 className="deals-page-title">
           <span className="deals-page-title-icon" aria-hidden="true">
             <svg
@@ -340,7 +342,7 @@ export default function DealsPage() {
               <path d="M11 17V7" />
             </svg>
           </span>
-          Deals
+          <span className="brand-text">Deals</span>
         </h1>
         <p className="deals-page-subtitle">
           Browse the Xbox GamePass catalog, the best current deals across PC

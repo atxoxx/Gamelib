@@ -1,0 +1,120 @@
+/* Page-level brand styling for deals (gradient + depth design language). */
+
+/* Header: glassy brand panel with mesh wash + brand title treatment. */
+.deals-page-header {
+  padding: var(--space-xl) var(--space-xl) var(--space-2xl);
+  margin-bottom: var(--space-xl);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border-light);
+  background-color: color-mix(in srgb, var(--color-surface-raised) 80%, transparent);
+  box-shadow: var(--depth-2);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.deals-page-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin: 0;
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+}
+
+.deals-page-title-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  color: var(--brand-1);
+  background: color-mix(in srgb, var(--brand-1) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand-1) 32%, transparent);
+  box-shadow: var(--shadow-brand);
+  flex: none;
+}
+
+.deals-page-title-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.deals-page-subtitle {
+  max-width: 64ch;
+  margin: var(--space-md) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+}
+
+/* Deal cards: layered depth + brand-tinted glow lift. */
+.deals-gamepass-card,
+.deals-deal-card,
+.deals-giveaway-card {
+  box-shadow: var(--depth-2);
+  border: 1px solid var(--color-border-light);
+  transition:
+    transform var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+.deals-gamepass-card:hover,
+.deals-deal-card:hover,
+.deals-giveaway-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-brand), var(--depth-3);
+}
+
+/* Discount corner badge leans into the brand gradient. */
+.deals-deal-card-discount-corner {
+  background: var(--brand-gradient);
+  color: #0b0b14;
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-brand);
+}
+
+.deals-deal-card-discount-corner.large {
+  background: var(--brand-gradient-strong);
+}
+
+.deals-deal-card-discount-corner.mega {
+  background: var(--brand-gradient-strong);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--brand-3) 55%, transparent);
+}
+
+/* FREE badge on giveaways carries the brand, not a generic semantic color. */
+.deals-giveaway-card-free-badge {
+  background: var(--brand-gradient-strong);
+  color: #0b0b14;
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-brand);
+}
+
+/* Branded empty state with low-opacity mesh wash. */
+.deals-empty {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-3xl) var(--space-xl);
+  text-align: center;
+  border-radius: var(--radius-xl);
+  border: 1px dashed color-mix(in srgb, var(--brand-1) 35%, var(--color-border));
+  background: var(--mesh-gradient), var(--color-surface-raised);
+  box-shadow: var(--depth-1);
+}
+
+.deals-empty-icon {
+  width: 48px;
+  height: 48px;
+  color: color-mix(in srgb, var(--brand-2) 70%, var(--color-text-secondary));
+}
+
+.deals-empty span {
+  max-width: 48ch;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+}
