@@ -7,40 +7,35 @@ import { useGameAccent } from "../../hooks/useGameAccent";
 import SteamPlayerCount from "../SteamPlayerCount";
 import GameStatusDropdown from "./GameStatusDropdown";
 import GameLaunchActions from "./GameLaunchActions";
-import { IconClock, IconPlatform, IconUsers } from "./icons";
+import HeroTrailer from "../hero/HeroTrailer";
+import FriendsPlayingStrip from "../hero/FriendsPlayingStrip";
+import { IconClock, IconPlatform, IconShield, IconUsers } from "./icons";
 
 /**
  * GameHero
  *
- *  The compact banner at the top of the Game page. Layout:
+ *  The cinematic banner at the top of the Game page. Layout:
  *
- *  ┌──────────────────────────────────────────────────────┐
- *  │  Banner (compact, clamp 120-180px tall)              │
- *  │  ┌──────────────┐                       ┌──────────┐ │
- *  │  │ Players Now  │   KPI overlay          │  Status  │ │
- *  │  │ Play Time    │   (bottom-right,       │  KPI     │ │
- *  │  │              │    glass tiles)        │          │ │
- *  │  └──────────────┘                        └──────────┘ │
- *  └──────────────────────────────────────────────────────┘
- *  ┌──────────────────────────────────────────────────────┐
- *  │ Logo / Title          Steam · 20h 38m · 10 Jul    ▶ L │
- *  │  (left)                (meta middle)     Launch (R) │
- *  └──────────────────────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────┐
+ *  │  Cinematic banner (clamp 320–460px)                        │
+ *  │   · ambient blur + optional muted trailer (big-screen)    │
+ *  │   · floating 2:3 cover overlapping the bottom edge        │
+ *  │   · glass KPI strip (bottom-right): Players / Time /      │
+ *  │     Status / Rating / Time-to-beat / Achievements         │
+ *  └──────────────────────────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────┐
+ *  │ Logo / Title      Friends playing        ▶ Launch         │
+ *  │ Steam · 20h 38m · 10 Jul                                │
+ *  └──────────────────────────────────────────────────────────┘
  *
  *  The TopBar (`.game-top-bar`) above the hero in `GamePage.tsx`
- *  owns the Return-to-Library / Edit / Remove affordances. This
- *  keeps the hero compact and avoids duplicate controls inside the
- *  banner.
+ *  owns the Return-to-Library / Edit / Remove affordances.
  *
- *  Steam player count
- *  ──────────────────
- *  The "Players Now" KPI tile is gated on `useSteamAppId`, which
- *  resolves `game.steamAppId` for non-Steam games (manual imports,
- *  games added from the Store, Epic-synced, GOG-synced) via a
- *  one-shot Steam store-search fallback. The resolved appid is
- *  persisted back onto `game.steamAppId` so subsequent library
- *  loads skip the lookup; the tile "just appears" for every game
- *  Steam has a matching entry for.
+ *  Steam player count + achievement progress
+ *  ───────────────────────────────────────────
+ *  The "Players Now" tile is gated on `useSteamAppId`, which resolves
+ *  `game.steamAppId` for non-Steam games. The "Achievements" tile is
+ *  gated on `game.steamAchievements` (synced Steam data).
  */
 
 interface GameHeroProps {
@@ -55,16 +50,8 @@ function formatHeroPlayTime(playTime: string): string {
 
 export default function GameHero({ game, onLaunch }: GameHeroProps) {
   const { updateGame } = useGames();
-  // useSteamAppId resolves `game.steamAppId` for non-Steam games
-  // via a one-shot Steam store-search fallback. Persists the
-  // resolution back onto the row, so the next time this game is
-  // loaded the badge is instant.
   const { appId: steamAppId } = useSteamAppId(game);
   const [bannerErrored, setBannerErrored] = useState(false);
-  // Per-game accent: sample the cover art so the hero stripe, KPI
-  // tiles, and status dot pick up the game's palette instead of the
-  // global accent when a cover is available. Exposed as the local
-  // --game-accent custom property; falls back to --color-accent.
   const gameAccent = useGameAccent(game.coverArtUrl || game.bannerUrl);
 
   const addedDate = new Date(game.addedAt).toLocaleDateString(undefined, {
@@ -72,16 +59,22 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
     month: "short",
     day: "numeric",
   });
-  const showCoverFallback = !game.bannerUrl && !game.coverArtUrl;
-  // Ambient backdrop: derive a blurred, scaled copy of the hero/cover
-  // art so every game (even banner-less ones) gets a cohesive colored
-  // glow behind the hero. `object-fit: cover` + heavy blur + dark
-  // scrim (see .game-hero__ambient in game-cards.css).
+
+  const trailerSrc = game.videos && game.videos.length ? game.videos[0] : null;
+  const showCoverFallback = !game.bannerUrl && !game.coverArtUrl && !trailerSrc;
   const ambientSrc = game.bannerUrl || game.coverArtUrl || null;
+
+  // Achievement progress (Steam-synced, if present).
+  const achievements = game.steamAchievements;
+  const achUnlocked = achievements?.filter((a) => a.achieved).length ?? 0;
+  const achTotal = achievements?.length ?? 0;
+  const achPercent = achTotal > 0 ? Math.round((achUnlocked / achTotal) * 100) : null;
+
+  const statusKey = game.playStatus || "backlog";
 
   return (
     <div
-      className="game-hero game-hero--compact"
+      className="game-hero game-hero--cinematic"
       style={gameAccent ? ({ "--game-accent": gameAccent } as React.CSSProperties) : undefined}
     >
       <div className="game-hero__banner">
@@ -92,51 +85,54 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
             aria-hidden="true"
           />
         )}
-        {game.bannerUrl && (
+
+        {/* Main banner visual: trailer when available, else the still
+            banner image. Both carry the same poster art so the layout
+            is stable whether or not a trailer is wired up. */}
+        {trailerSrc ? (
+          <HeroTrailer
+            className="game-hero__trailer"
+            src={trailerSrc}
+            poster={game.bannerUrl || game.coverArtUrl}
+          />
+        ) : game.bannerUrl ? (
           <div
             className="game-banner-bg"
             style={{ backgroundImage: `url(${game.bannerUrl})` }}
           />
-        )}
+        ) : null}
 
-        <div className="game-banner">
-          {!bannerErrored && (game.bannerUrl || game.coverArtUrl) ? (
-            <img
-              src={game.bannerUrl || game.coverArtUrl}
-              alt={game.name}
-              className="game-cover-img"
-              onError={() => setBannerErrored(true)}
-            />
-          ) : showCoverFallback ? (
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-              opacity={0.2}
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-          ) : null}
-        </div>
+        {!trailerSrc && !bannerErrored && (game.bannerUrl || game.coverArtUrl) ? (
+          <img
+            src={game.bannerUrl || game.coverArtUrl}
+            alt={game.name}
+            className="game-cover-img"
+            onError={() => setBannerErrored(true)}
+          />
+        ) : !trailerSrc && showCoverFallback ? (
+          <svg
+            width="64"
+            height="64"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+            opacity={0.2}
+          >
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        ) : null}
 
-        {/* Floating cover (2:3) overlapping the banner's bottom edge,
-            with the logo/title sitting to its right in the info row. */}
+        {/* Floating cover (2:3) overlapping the banner's bottom edge. */}
         {game.coverArtUrl && !bannerErrored && (
           <div className="game-hero__cover" aria-hidden="true">
             <img src={game.coverArtUrl} alt="" className="game-hero__cover-img" />
           </div>
         )}
 
-        {/* KPI overlay: glass tiles that surface the most-glanced
-            stats right on the banner. The "Players Now" tile now
-            follows the resolved appid from `useSteamAppId` so it
-            works on manual imports / Store-added / Epic / GOG rows
-            the moment the hook finds a Steam match for the name. */}
+        {/* Glass KPI strip — the most-glanced stats right on the banner. */}
         <div className="game-hero__kpis">
-          {steamAppId != null ? (
+          {steamAppId != null && (
             <KpiTile
               glass
               size="sm"
@@ -145,7 +141,7 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
               value={<SteamPlayerCount appId={steamAppId} />}
               intent="accent"
             />
-          ) : null}
+          )}
           <KpiTile
             glass
             size="sm"
@@ -167,17 +163,14 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
                   width: 8,
                   height: 8,
                   borderRadius: "50%",
-                  backgroundColor:
-                    PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color,
-                  boxShadow: `0 0 6px ${
-                    PLAY_STATUS_DETAILS[game.playStatus || "backlog"].color
-                  }`,
+                  backgroundColor: PLAY_STATUS_DETAILS[statusKey].color,
+                  boxShadow: `0 0 6px ${PLAY_STATUS_DETAILS[statusKey].color}`,
                 }}
               />
             }
             value={
               <span className="game-hero__status-value">
-                {PLAY_STATUS_DETAILS[game.playStatus || "backlog"].label}
+                {PLAY_STATUS_DETAILS[statusKey].label}
               </span>
             }
             trailing={
@@ -187,22 +180,32 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
               />
             }
             intent={
-              game.playStatus === "playing"
+              statusKey === "playing"
                 ? "success"
-                : game.playStatus === "completed"
+                : statusKey === "completed"
                   ? "info"
-                  : game.playStatus === "on_hold"
+                  : statusKey === "on_hold"
                     ? "warning"
-                    : game.playStatus === "abandoned"
+                    : statusKey === "abandoned"
                       ? "danger"
                       : "default"
             }
           />
+          {achPercent != null && (
+            <KpiTile
+              glass
+              size="sm"
+              label="Achievements"
+              icon={<IconShield size={12} />}
+              value={`${achPercent}%`}
+              subtext={`${achUnlocked}/${achTotal}`}
+              intent={achPercent >= 100 ? "success" : "default"}
+            />
+          )}
         </div>
       </div>
 
-      {/* Single row below the banner: logo/title (left) + meta
-          (middle) + launch actions (right). No stacked blocks. */}
+      {/* Info row: logo/title (left) + friends (mid) + launch (right). */}
       <div className={`game-hero__info-row${game.coverArtUrl && !bannerErrored ? " game-hero__info-row--with-cover" : ""}`}>
         <div className="game-hero__title-block">
           {game.logoUrl ? (
@@ -213,9 +216,10 @@ export default function GameHero({ game, onLaunch }: GameHeroProps) {
               width={300}
               height={90}
             />
-            ) : (
+          ) : (
             <h1 className="game-hero-title">{game.name}</h1>
           )}
+          <FriendsPlayingStrip gameName={game.name} gameId={game.id} />
         </div>
         <div className="game-hero-meta">
           <span className="game-hero-meta-item">

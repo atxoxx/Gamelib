@@ -3,10 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
+import HeroTrailer from "../hero/HeroTrailer";
+import FriendsPlayingStrip from "../hero/FriendsPlayingStrip";
 
 interface StoreHeroProps {
   /** Called when the user clicks "View" on a featured game. */
   onCardClick?: (game: StoreGameSummary) => void;
+  /** Optional trailer URL/ID per slide; rendered as a cinematic
+   *  background when present (data source is a backend dependency). */
+  trailerUrl?: (game: StoreGameSummary) => string | null | undefined;
 }
 
 const HERO_ROTATE_MS = 6000;
@@ -24,7 +29,7 @@ const HERO_POOL_SIZE = 5; // preload a wider pool; rotate through it
  * - Respects `prefers-reduced-motion` (no auto-rotation, no progress sweep).
  * - Memoized so unrelated Store re-renders don't re-fetch the trending pool.
  */
-function StoreHero({ onCardClick }: StoreHeroProps) {
+function StoreHero({ onCardClick, trailerUrl }: StoreHeroProps) {
   const navigate = useNavigate();
 
   const [pool, setPool] = useState<StoreGameSummary[]>([]);
@@ -165,6 +170,7 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
   if (!pool.length || !active) return null;
 
   const backdrop = active.coverUrl ?? "";
+  const trailerSrc = trailerUrl ? trailerUrl(active) : null;
 
   return (
     <div
@@ -179,11 +185,19 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
       aria-roledescription="carousel"
       aria-label="Featured trending games"
     >
-      <div
-        className="store-hero-bg"
-        style={{ backgroundImage: `url(${backdrop})` }}
-        aria-hidden="true"
-      />
+      {trailerSrc ? (
+        <HeroTrailer
+          className="store-hero-bg store-hero-bg--trailer"
+          src={trailerSrc}
+          poster={backdrop}
+        />
+      ) : (
+        <div
+          className="store-hero-bg"
+          style={{ backgroundImage: `url(${backdrop})` }}
+          aria-hidden="true"
+        />
+      )}
       <div className="store-hero-veil" aria-hidden="true" />
       <div className="store-hero-shine" aria-hidden="true" />
 
@@ -273,6 +287,12 @@ function StoreHero({ onCardClick }: StoreHeroProps) {
           </button>
         </div>
       </div>
+
+      <FriendsPlayingStrip
+        className="store-hero-friends"
+        gameName={active.name}
+        gameId={active.id}
+      />
 
       {/* Prev / Next controls */}
       {pool.length > 1 && (

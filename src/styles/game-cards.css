@@ -897,6 +897,163 @@
   padding-left: calc(var(--space-xl) + clamp(96px, 11vw, 150px) + var(--space-lg));
 }
 
+/* ── Cinematic variant (GameHero) ───────────────────────────────
+ * Taller full-bleed banner with the trailer/ambient carrying the
+ * visual weight. Inherits the compact hero's framed look. */
+.game-hero--cinematic {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  isolation: isolate;
+  --game-accent: var(--color-accent);
+  --game-accent-hover: var(--color-accent-hover);
+  --game-accent-glow: var(--color-accent-glow);
+}
+
+.game-hero--cinematic .game-hero__banner {
+  min-height: clamp(320px, 38vw, 460px);
+}
+
+/* The still banner image (when no trailer) fills the cinematic
+ * frame; sits above the ambient + trailer layers. */
+.game-hero__banner > img.game-cover-img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ── Hero trailer (shared Game + Store) ───────────────────────── */
+.hero-trailer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-trailer__video,
+.hero-trailer__poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 0;
+}
+
+.hero-trailer__play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 66px;
+  height: 66px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-bg-primary) 50%, transparent);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.hero-trailer__play:hover {
+  transform: scale(1.08);
+  background: color-mix(in srgb, var(--color-bg-primary) 32%, transparent);
+}
+
+.hero-trailer__play svg {
+  width: 28px;
+  height: 28px;
+  margin-left: 3px;
+}
+
+/* ── Friends playing (shared Game + Store hero) ───────────────── */
+.friends-playing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.friends-playing__avatars {
+  display: inline-flex;
+  align-items: center;
+}
+
+.friends-playing__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--color-bg-primary);
+  margin-left: -8px;
+  background: var(--color-bg-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-secondary);
+}
+
+.friends-playing__avatar:first-child { margin-left: 0; }
+
+.friends-playing__avatar--initials {
+  text-transform: uppercase;
+}
+
+.friends-playing__avatar--more {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.friends-playing__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.friends-playing__session {
+  margin-left: var(--space-xs);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--game-accent) 50%, transparent);
+  background: color-mix(in srgb, var(--game-accent) 14%, transparent);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.friends-playing__session:hover {
+  background: color-mix(in srgb, var(--game-accent) 26%, transparent);
+}
+
+.store-hero-bg--trailer {
+  filter: none;
+  animation: none;
+  transform: none;
+}
+
+.store-hero-friends {
+  margin-top: var(--space-md);
+}
+
 /* ── Store detail hero refinements ────────────────────────────────
  * Layered on top of the shared GameHero look: a cinematic bottom
  * scrim on the banner, an accent hairline, and a more prominent
