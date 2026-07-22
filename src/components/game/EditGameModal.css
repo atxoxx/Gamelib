@@ -1,0 +1,526 @@
+/* ============================================================
+   Edit Game Modal — rebuilt component styles
+   (Generic .edit-input / .edit-label / .edit-textarea /
+   .edit-fieldset live in App.css and are reused here.)
+   ============================================================ */
+
+.edit-modal {
+  width: 100%;
+  max-width: 860px;
+  max-height: 88vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Live preview header ─────────────────────────────────── */
+.edit-modal-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent),
+    var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.edit-modal-preview-art {
+  position: relative;
+  width: 200px;
+  height: 76px;
+  flex-shrink: 0;
+}
+
+.edit-preview-hero {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-md);
+  background-size: cover;
+  background-position: center;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-preview-hero-ph {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.edit-preview-cover {
+  position: absolute;
+  left: 8px;
+  bottom: -14px;
+  width: 56px;
+  height: 76px;
+  border-radius: var(--radius-sm);
+  background-size: cover;
+  background-position: center;
+  background-color: var(--color-bg-secondary);
+  border: 2px solid var(--color-bg-tertiary);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  z-index: 2;
+}
+
+.edit-preview-icon {
+  position: absolute;
+  left: 70px;
+  bottom: -10px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-bg-tertiary);
+  box-shadow: var(--shadow-md);
+  z-index: 3;
+}
+
+.edit-modal-preview-meta {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: var(--space-md);
+}
+
+.edit-preview-eyebrow {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: var(--space-xs);
+}
+
+.edit-preview-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-preview-sub {
+  margin: 2px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-modal-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding-bottom: var(--space-md);
+}
+
+/* ─── Tabs (with icons) ───────────────────────────────────── */
+.edit-modal-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  padding: 0 var(--space-xl);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.edit-modal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-md);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.edit-modal-tab-icon {
+  display: inline-flex;
+}
+
+.edit-modal-tab-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.edit-modal-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.edit-modal-tab.active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.edit-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-xl);
+}
+
+.edit-modal-body .edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.edit-modal-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: var(--space-lg) 0 var(--space-md) 0;
+}
+
+.edit-modal-section-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-accent);
+}
+
+/* ─── Tag / chip input ────────────────────────────────────── */
+.tag-input {
+  width: 100%;
+}
+
+.tag-input-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: text;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.tag-input.is-focused .tag-input-field {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-glow);
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px var(--space-sm);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tag-chip-remove:hover {
+  background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+  color: var(--color-danger);
+}
+
+.tag-chip-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tag-input-control {
+  flex: 1 1 80px;
+  min-width: 80px;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-family: inherit;
+  padding: 4px 2px;
+}
+
+.tag-input-control::placeholder {
+  color: var(--color-text-muted);
+}
+
+.tag-input-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.tag-suggestion {
+  padding: 2px var(--space-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tag-suggestion:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* ─── Array editor (Releases / Reviews / Languages) ───────── */
+.array-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.array-editor-empty {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.array-editor-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.array-editor-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.array-editor-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.array-editor-cell-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.array-editor-input {
+  width: 100%;
+}
+
+.array-editor-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-bottom: 1px;
+}
+
+.array-editor-remove:hover {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+
+.array-editor-remove svg {
+  width: 15px;
+  height: 15px;
+}
+
+.array-editor-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.array-editor-add-actions {
+  display: flex;
+  gap: var(--space-xs);
+  width: 100%;
+  justify-content: flex-end;
+  margin-top: var(--space-xs);
+}
+
+.array-editor-add-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  align-self: flex-start;
+  padding: var(--space-sm) var(--space-md);
+  background: transparent;
+  border: 1px dashed var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.array-editor-add-trigger:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.array-editor-add-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ─── Media browser buttons + URL list editors ───────────── */
+.edit-media-browser-row {
+  display: flex;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.url-list-editor {
+  margin-top: var(--space-xl);
+}
+
+.url-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.url-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.url-list-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--color-bg-tertiary);
+  flex-shrink: 0;
+}
+
+.url-list-thumb--empty {
+  border: 1px dashed var(--color-border-light);
+}
+
+.url-list-url {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url-list-remove {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.url-add-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.url-add-row .edit-input {
+  flex: 1;
+}
+
+/* ─── Footer hint ─────────────────────────────────────────── */
+.modal-footer-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.edit-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+@media (max-width: 640px) {
+  .edit-modal-preview {
+    flex-wrap: wrap;
+  }
+  .edit-modal-preview-art {
+    width: 160px;
+  }
+  .edit-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
