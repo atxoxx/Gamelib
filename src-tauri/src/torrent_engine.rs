@@ -937,6 +937,29 @@ impl TorrentEngine {
                     // mark the torrent as Completed).
                     d.status = gate_completion(entry.status, d.had_real_downloads);
                 }
+
+                // Watchdog: a torrent that stays in "Fetching Metadata"
+                // (Initializing / no total) without ever transferring a
+                // single byte is a connectivity dead-end — UDP trackers
+                // firewalled, DHT unreachable, or a dead magnet. Without
+                // this, the user is stuck forever on
+                // "Contacting trackers & bootstrapping DHT…" with no way
+                // to tell it's never going to start. After the bounded
+                // timeout we surface a clear error so they can try
+                // another source/mirror. Paused torrents are excluded
+                // (their status is `Paused`), and anything that has
+                // actually transferred bytes (`had_real_downloads`) is
+                // left alone — a slow-but-live metadata fetch keeps
+                // going.
+                if matches!(d.status, DownloadStatus::FetchingMetadata)
+                    && d.had_real_downloads != Some(true)
+                    && (unix_now().saturating_sub(d.added_at)) as u64
+                        > METADATA_FETCH_TIMEOUT_SECS
+                {
+                    d.status = DownloadStatus::Error(
+                        "Timed out fetching metadata — no peers responded. Your network may be blocking trackers/DHT; try another source or mirror.".to_string(),
+                    );
+                }
                 // Only overwrite the file list when we have a live
                 // snapshot from librqbit. A `None` snapshot preserves
                 // the user's confirmed selection across a transient
@@ -1539,19 +1562,25 @@ pub async fn initialize_engine(
 // ─── Tauri commands ─────────────────────────────────────────────────────────
 
 /// Curated list of reliable public BitTorrent trackers (2025).
-/// Sourced from the ngosang/trackerslist project — these are the
-/// highest-uptime UDP trackers that work from behind most home
-/// routers. We inject them into magnet links that have fewer than 3
-/// existing `tr=` parameters to ensure librqbit can find peers even
-/// when the source-provided magnet has no trackers at all (common
-/// with Hydra API repacks that rely on DHT-only discovery).
+/// Sourced from the ngosang/trackerslist project. We inject them
+/// into magnet links that have fewer than 3 existing `tr=` parameters
+/// to ensure librqbit can find peers even when the source-provided
+/// magnet has no trackers at all (common with Hydra API repacks that
+/// rely on DHT-only discovery).
 ///
-/// This mirrors what qBittorrent does automatically (Settings →
-/// BitTorrent → "Automatically append these trackers to new
-/// downloads") and is the single most effective fix for the
-/// "stuck at Fetching Metadata" problem when DHT hasn't bootstrapped
-/// enough nodes yet.
+/// The list is intentionally **mixed-protocol**: UDP trackers are
+/// compact and fast but are frequently blocked by corporate/ISP
+/// firewalls and some home routers — which is the single most common
+/// cause of a torrent being stuck at "Contacting trackers &
+/// bootstrapping DHT…" forever. The TCP (`http://`) and HTTPS
+/// (`https://`) trackers below traverse most firewalls the same way
+/// ordinary web traffic does, giving librqbit a working peer-
+/// discovery path when UDP is blocked. This mirrors what qBittorrent
+/// does (Settings → BitTorrent → "Automatically append these
+/// trackers to new downloads") and is the #1 fix for the "stuck at
+/// Fetching Metadata" problem.
 const DEFAULT_TRACKERS: &[&str] = &[
+    // UDP (fast, but often firewalled)
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://tracker.openbittorrent.com:6969/announce",
     "udp://tracker.tiny-vps.com:6969/announce",
@@ -1560,7 +1589,23 @@ const DEFAULT_TRACKERS: &[&str] = &[
     "udp://tracker.dler.org:6969/announce",
     "udp://opentracker.i2p.rocks:6969/announce",
     "udp://tracker.openbittorrent.com:80/announce",
+    // TCP / HTTPS (traverse most firewalls; used when UDP is blocked)
+    "http://tracker.opentrackr.org:80/announce",
+    "udp://tracker.internetwarriors.net:1337/announce",
+    "http://tracker.internetwarriors.net:1337/announce",
+    "https://tracker.tamersunion.org:443/announce",
+    "https://tracker.bittorrentic.com:443/announce",
+    "https://tracker.cyberia.is:6969/announce",
+    "http://tracker.gbitt.info:80/announce",
 ];
+
+/// How long a torrent may remain in "Fetching Metadata" (Initializing,
+/// zero bytes transferred) before we stop waiting and surface a clear
+/// error. Prevents a dead magnet / blocked DHT+UDP from hanging forever
+/// on "Contacting trackers & bootstrapping DHT…". Measured from the
+/// record's `added_at`; paused torrents are excluded because their
+/// status is `Paused`, not `FetchingMetadata`.
+const METADATA_FETCH_TIMEOUT_SECS: u64 = 180;
 
 /// Minimum number of trackers a magnet must have before we skip
 /// augmentation. If the source already provided 3+ trackers, the
@@ -1727,12 +1772,32 @@ pub async fn torrent_add(
     // Step 2: Validate the URI and call `add_torrent` WITHOUT
     // holding the engine mutex.
     let trimmed = magnet_uri.trim().to_string();
-    if !(trimmed.starts_with("magnet:")
-        || trimmed.starts_with("http://")
-        || trimmed.starts_with("https://"))
+
+    // A local `.torrent` file path (or a `file://` URI) is a valid
+    // torrent source — librqbit can ingest the bytes directly via
+    // `AddTorrent::from_bytes`, so it must not be rejected by the
+    // URL-only check below. The download modal already routes
+    // `*.torrent` paths here, so this closes the gap that previously
+    // returned "Source URI must be a magnet: link or http(s):// URL".
+    let local_path: Option<String> = if trimmed.starts_with("file://") {
+        Some(trimmed.trim_start_matches("file://").to_string())
+    } else if (trimmed.ends_with(".torrent") || trimmed.contains(".torrent?"))
+        && !trimmed.starts_with("http://")
+        && !trimmed.starts_with("https://")
+        && !trimmed.starts_with("magnet:")
+    {
+        Some(trimmed.clone())
+    } else {
+        None
+    };
+
+    if local_path.is_none()
+        && !(trimmed.starts_with("magnet:")
+            || trimmed.starts_with("http://")
+            || trimmed.starts_with("https://"))
     {
         return Err(
-            "Source URI must be a magnet: link or http(s):// torrent URL"
+            "Source URI must be a magnet: link, a .torrent file path, or an http(s):// torrent URL"
                 .to_string(),
         );
     }
@@ -1820,6 +1885,7 @@ pub async fn torrent_add(
         let game_id_clone = game_id.clone();
         let source_name_clone = source_name.clone();
         let auto_extract_val = auto_extract.unwrap_or(false);
+        let local_path_clone = local_path.clone();
 
         tokio::spawn(async move {
             // Augment magnet links with default public trackers to
@@ -1829,7 +1895,30 @@ pub async fn torrent_add(
             // and the torrent can sit at FetchingMetadata indefinitely
             // if the DHT hasn't bootstrapped enough nodes.
             let augmented = augment_magnet_with_trackers(&trimmed_clone);
-            let add = librqbit::AddTorrent::from_url(augmented);
+            // A local `.torrent` file path is read into bytes and fed
+            // to librqbit via `AddTorrent::from_bytes` — `from_url`
+            // only accepts magnet/http(s) URIs and would otherwise
+            // reject a filesystem path.
+            let add = match &local_path_clone {
+                Some(path) => match tokio::fs::read(path).await {
+                    Ok(bytes) => librqbit::AddTorrent::from_bytes(bytes),
+                    Err(e) => {
+                        let mut guard = engine_clone.write().await;
+                        if let Some(d) =
+                            guard.downloads_mut().get_mut(&temp_id_clone)
+                        {
+                            d.status = DownloadStatus::Error(format!(
+                                "Failed to read .torrent file: {}",
+                                e
+                            ));
+                        }
+                        guard.mark_dirty();
+                        guard.emit_progress_force();
+                        return;
+                    }
+                },
+                None => librqbit::AddTorrent::from_url(augmented),
+            };
             let add_opts = librqbit::AddTorrentOptions {
                 output_folder: Some(save_path_clone.clone().into()),
                 overwrite: true,
@@ -2075,7 +2164,16 @@ pub async fn torrent_add(
     // magnets with 0 trackers, and without trackers librqbit can
     // sit at FetchingMetadata forever if DHT hasn't bootstrapped).
     let augmented = augment_magnet_with_trackers(&trimmed);
-    let add = librqbit::AddTorrent::from_url(augmented);
+    // Local `.torrent` file path → read bytes and use
+    // `AddTorrent::from_bytes` (mirrors the non-blocking path above).
+    let add = match &local_path {
+        Some(path) => {
+            let bytes = tokio::fs::read(path).await
+                .map_err(|e| format!("Failed to read .torrent file: {}", e))?;
+            librqbit::AddTorrent::from_bytes(bytes)
+        }
+        None => librqbit::AddTorrent::from_url(augmented),
+    };
     let add_opts = librqbit::AddTorrentOptions {
         output_folder: Some(save_path.clone().into()),
         overwrite: true,
@@ -2807,8 +2905,34 @@ pub async fn torrent_start_selected(
         }
 
         // Augment with default trackers (same rationale as torrent_add).
-        let augmented = augment_magnet_with_trackers(&source_uri);
-        let add = librqbit::AddTorrent::from_url(augmented);
+        // A local `.torrent` file path (opened via "Fetch Files List")
+        // must be read into bytes and fed through `from_bytes` — `from_url`
+        // only accepts magnet/http(s) URIs.
+        let is_local_torrent = (source_uri.ends_with(".torrent")
+            || source_uri.contains(".torrent?"))
+            && !source_uri.starts_with("http://")
+            && !source_uri.starts_with("https://")
+            && !source_uri.starts_with("magnet:");
+        let add = if is_local_torrent {
+            match tokio::fs::read(&source_uri).await {
+                Ok(bytes) => librqbit::AddTorrent::from_bytes(bytes),
+                Err(e) => {
+                    let mut guard = engine_clone.write().await;
+                    if let Some(d) = guard.downloads_mut().get_mut(&id) {
+                        d.status = DownloadStatus::Error(format!(
+                            "Failed to read .torrent file: {}",
+                            e
+                        ));
+                    }
+                    guard.mark_dirty();
+                    guard.emit_progress_force();
+                    return;
+                }
+            }
+        } else {
+            let augmented = augment_magnet_with_trackers(&source_uri);
+            librqbit::AddTorrent::from_url(augmented)
+        };
         let add_opts = librqbit::AddTorrentOptions {
             output_folder: Some(save_path.clone().into()),
             overwrite: true,

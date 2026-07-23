@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::path::Path;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use reqwest::header::RANGE;
+use reqwest::header::{CONTENT_TYPE, RANGE};
 use crate::torrent_engine::{TorrentEngine, DownloadStatus};
 
 fn try_next_mirror_or_fail(
@@ -40,6 +40,21 @@ fn try_next_mirror_or_fail(
         }
 
         if let Some((next_url, save_path)) = transition_info {
+            // Each mirror serves different bytes, so a partial downloaded
+            // from a failed mirror must not be appended to by the next one.
+            // Drop the stale temp file so the next mirror starts clean.
+            let path = Path::new(&save_path);
+            let fname = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("direct_download")
+                .to_string();
+            let parent = path.parent().unwrap_or_else(|| Path::new("."));
+            let stale_temp = parent.join(format!("{}.gamelib_tmp", fname));
+            if stale_temp.exists() {
+                let _ = std::fs::remove_file(&stale_temp);
+            }
+
             let bytes_counter = Arc::new(AtomicU64::new(0));
             guard.direct_counters.insert(id.clone(), Arc::clone(&bytes_counter));
             guard.mark_dirty();
@@ -100,8 +115,9 @@ pub async fn run_direct_download(
     println!("[DirectDownloader] Starting download for {} from byte {}", filename, current_size);
 
     // Build the request.
+    let is_resume = current_size > 0;
     let mut req = client.get(&url);
-    if current_size > 0 {
+    if is_resume {
         req = req.header(RANGE, format!("bytes={}-", current_size));
     }
 
@@ -122,8 +138,42 @@ pub async fn run_direct_download(
         }
     };
 
+    // Guard against the server returning an HTML error/expired page
+    // instead of the file (common with dead hoster links). Saving a
+    // `text/html` body as the download would silently corrupt it and
+    // mark the download "Completed". Upstream Hydra's `JsHttpDownloader`
+    // rejects `text/html` the same way — fail fast here (and let the
+    // mirror fallback / error path take over).
+    if let Some(content_type) = resp.headers().get(CONTENT_TYPE) {
+        if let Ok(ct) = content_type.to_str() {
+            if ct.to_ascii_lowercase().starts_with("text/html") {
+                let err =
+                    "Server returned an HTML page instead of a file (link may be expired or blocked)"
+                        .to_string();
+                try_next_mirror_or_fail(engine_weak.clone(), id.clone(), err);
+                return;
+            }
+        }
+    }
+
+    let status = resp.status();
+    // If we asked to resume (Range header) but the server ignored it and
+    // returned a full `200` (instead of `206 Partial Content`), appending
+    // the full body onto our existing partial would corrupt the file and
+    // report the wrong size. Restart from byte 0 instead (mirrors
+    // upstream's `resolveResumeAction` 200-branch).
+    let restart_from_zero = is_resume && status != reqwest::StatusCode::PARTIAL_CONTENT;
+    if restart_from_zero {
+        current_size = 0;
+        bytes_counter.store(0, Ordering::SeqCst);
+        // Drop the stale partial so we don't append the full body to it.
+        if temp_path.exists() {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+        }
+    }
+
     if let Some(content_length) = resp.content_length() {
-        let total = if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+        let total = if status == reqwest::StatusCode::PARTIAL_CONTENT {
             current_size + content_length
         } else {
             content_length
@@ -141,10 +191,14 @@ pub async fn run_direct_download(
         }
     }
 
+    // Resume (206) appends to the partial; a fresh download or a
+    // restart-from-zero truncates so we never duplicate bytes.
+    let append_mode = status == reqwest::StatusCode::PARTIAL_CONTENT && !restart_from_zero;
     let file_res = OpenOptions::new()
         .create(true)
         .write(true)
-        .append(true)
+        .append(append_mode)
+        .truncate(!append_mode)
         .open(&temp_path)
         .await;
 
@@ -217,6 +271,9 @@ pub async fn run_direct_download(
             item.status = DownloadStatus::Completed;
             item.progress = Some(1.0);
             item.downloaded = item.total_size.unwrap_or(buffer_size);
+            item.download_speed = 0;
+            item.upload_speed = 0;
+            item.had_real_downloads = Some(true);
             auto_extract = item.auto_extract.unwrap_or(false);
             files_clone = item.files.clone();
         }
