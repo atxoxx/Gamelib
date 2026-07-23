@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Game } from "../types/game";
-import { extractSteamAppId } from "../types/game";
+import { extractSteamAppId, extractSteamAppIdFromWebsites } from "../types/game";
 import { useGames } from "../context/GameContext";
 
 /**
@@ -30,6 +30,11 @@ import { useGames } from "../context/GameContext";
  *  2. `extractSteamAppId(game.path)` for `steam://run/<id>` paths
  *     used by the "Launch via Steam" flow, even when no exe exists
  *     on disk.
+ *  2b. `extractSteamAppIdFromWebsites(game.websites)` — IGDB
+ *     enrichment stores the Steam store URL in `websites`; parsing
+ *     it is free and needs no network. Positive hits are persisted
+ *     to the row (this is how manually added exe/batch games get a
+ *     stored Steam id).
  *  3. Module-level positive cache — survives across renders and
  *     across multiple hook instances on the same gameId so a
  *     library carousel + activity page + Game page each still
@@ -239,6 +244,8 @@ export function useSteamAppId(game: Game | null | undefined): UseSteamAppIdResul
     }
     const fromPath = extractSteamAppId(game.path);
     if (fromPath != null) return fromPath;
+    const fromWebsites = extractSteamAppIdFromWebsites(game.websites);
+    if (fromWebsites != null) return fromWebsites;
     const cached = sessionPositiveCache.get(game.id);
     if (cached != null) return cached;
     if (isMissCached(game.id, Date.now())) return null;
@@ -267,6 +274,18 @@ export function useSteamAppId(game: Game | null | undefined): UseSteamAppIdResul
     const fromPath = extractSteamAppId(game.path);
     if (fromPath != null) {
       setResolved(fromPath);
+      return;
+    }
+    // IGDB-enriched games carry the Steam store URL in `websites` —
+    // zero-cost resolution, no Steam search round-trip. PERSIST the
+    // finding on the row so every consumer (reviews, Hydra user
+    // reviews, ProtonDB, deep links) reads it straight off
+    // `game.steamAppId` on the next load.
+    const fromWebsites = extractSteamAppIdFromWebsites(game.websites);
+    if (fromWebsites != null) {
+      sessionPositiveCache.set(game.id, fromWebsites);
+      setResolved(fromWebsites);
+      updateGame(game.id, { steamAppId: fromWebsites });
       return;
     }
     if (sessionPositiveCache.has(game.id)) {
@@ -323,7 +342,7 @@ export function useSteamAppId(game: Game | null | undefined): UseSteamAppIdResul
       // particular hook instance.
       cancelled = true;
     };
-  }, [game?.id, game?.path, game?.name, game?.steamAppId, updateGame]);
+  }, [game?.id, game?.path, game?.name, game?.steamAppId, game?.websites, updateGame]);
 
   // No second sync `useEffect` is needed: the main effect above
   // already includes `game?.steamAppId` in its dep array, so when

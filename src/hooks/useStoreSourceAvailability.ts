@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSources } from "../context/SourceContext";
 import type { StoreGameSummary } from "../types/game";
+import { extractSteamAppIdFromWebsites } from "../types/game";
 import type { MatchedDownload } from "../types/source";
 
 /**
@@ -27,26 +28,9 @@ const MAX_CONCURRENT = 3;
  */
 const MAX_AVAILABILITY_ENTRIES = 500;
 
-/**
- * Pull the Steam AppID out of a `StoreGameSummary.websites` array.
- * IGDB's `websites` field stores all external URLs (store pages, wikis,
- * official sites), so we scan for the canonical Steam store-page host.
- * Returns `undefined` when no Steam URL is present (most non-Steam
- * titles) — in that case the Rust side falls back to catalogue-by-title.
- */
-function extractSteamAppIdFromWebsites(
-  websites: string[] | undefined
-): number | undefined {
-  if (!websites) return undefined;
-  for (const url of websites) {
-    const m = url.match(/store\.steampowered\.com\/app\/(\d+)/);
-    if (m && m[1]) {
-      const id = parseInt(m[1], 10);
-      if (Number.isFinite(id)) return id;
-    }
-  }
-  return undefined;
-}
+// The Steam-appid-from-websites parser now lives in `types/game.ts`
+// (`extractSteamAppIdFromWebsites`) so the library-side steamAppId
+// resolution and this store-side hook share one implementation.
 
 /**
  * Per-source membership for a single game.
@@ -227,7 +211,7 @@ export function useStoreSourceAvailability(
       tasks.push({
         slug: game.slug,
         query: game.name,
-        steamAppId: extractSteamAppIdFromWebsites(game.websites),
+        steamAppId: extractSteamAppIdFromWebsites(game.websites) ?? undefined,
         dedupeKey,
       });
     }

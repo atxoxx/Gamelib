@@ -13,6 +13,7 @@ import {
   addSessionTime,
   gameNameFromPath,
   extractSteamAppId,
+  extractSteamAppIdFromWebsites,
   type Game,
   type GameMetadataResult,
   type IgdbReview,
@@ -416,7 +417,23 @@ export function GameProvider({ children }: { children: ReactNode }) {
         if (current[key] === undefined || current[key] === null) return value;
         return current[key];
       };
+      // Steam identity for manually added games (local exe / batch):
+      // IGDB's `websites` list usually contains the Steam store URL.
+      // Extract the appid and PERSIST it on the game row so reviews,
+      // Hydra user reviews, ProtonDB, achievements and deep links all
+      // work without a name-based Steam search. Scan every source's
+      // websites (not just the preferred `meta`) — LaunchBox results
+      // carry no websites but a sibling IGDB result might.
+      const websitesForSteamId =
+        current.websites ??
+        meta.websites ??
+        results.find((r) => r.websites && r.websites.length > 0)?.websites;
+      const resolvedSteamAppId =
+        current.steamAppId ??
+        extractSteamAppIdFromWebsites(websitesForSteamId) ??
+        undefined;
       updateGame(gameId, {
+        steamAppId: resolvedSteamAppId,
         description: setIfEmpty("description", meta.description ?? undefined),
         developer: setIfEmpty("developer", meta.developer ?? undefined),
         publisher: setIfEmpty("publisher", meta.publisher ?? undefined),

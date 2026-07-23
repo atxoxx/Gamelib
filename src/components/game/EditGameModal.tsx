@@ -15,6 +15,7 @@ import {
   formatSize,
   type PlayStatus,
   PLAY_STATUS_DETAILS,
+  extractSteamAppIdFromWebsites,
 } from "../../types/game";
 import { Button } from "../../components/ui";
 import { EditImageSlot } from "./EditImageSlot";
@@ -436,9 +437,18 @@ export function EditGameModal({ game, onClose }: EditGameModalProps) {
     const newLanguageSupports = editLanguageSupports.length > 0 ? editLanguageSupports : undefined;
     const newAlternativeNames = editAlternativeNames.filter(Boolean);
 
+    // Steam identity: derive the appid from the (possibly freshly
+    // applied) IGDB websites list when the game doesn't already have
+    // one, so manually added exe/batch games get a STORED Steam id
+    // the moment metadata is applied — reviews, Hydra user reviews,
+    // ProtonDB and Steam deep links then read it off the row.
+    const newSteamAppId =
+      game.steamAppId ?? extractSteamAppIdFromWebsites(editWebsites) ?? undefined;
+
     updateGame(game.id, {
       name: newName,
       platform: newPlatform,
+      steamAppId: newSteamAppId,
       iconUrl: newIcon,
       coverArtUrl: newCover,
       bannerUrl: newHero,

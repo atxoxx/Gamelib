@@ -1168,22 +1168,45 @@ export function extractSteamAppId(path: string): number | null {
   return null;
 }
 
+/** Pull a Steam app id out of an IGDB `websites` URL list. IGDB stores
+ *  all external URLs (store pages, wikis, official sites) there; we
+ *  scan for the canonical Steam store-page host. This is how manually
+ *  added games (local exe / batch) get a Steam identity after IGDB
+ *  enrichment — the WebLinks tab already relied on the same trick. */
+export function extractSteamAppIdFromWebsites(
+  websites: string[] | undefined | null
+): number | null {
+  if (!websites) return null;
+  for (const url of websites) {
+    const m = url.match(/store\.steampowered\.com\/app\/(\d+)/i);
+    if (m && m[1]) {
+      const id = parseInt(m[1], 10);
+      if (Number.isFinite(id)) return id;
+    }
+  }
+  return null;
+}
+
 /** Resolve the Steam app id for a Game, preferring the explicit
- *  `game.steamAppId` field over parsing the (often-empty) `path`.
- *  Returns `null` when neither source yields a valid id.
+ *  `game.steamAppId` field over parsing the (often-empty) `path`,
+ *  then falling back to the IGDB `websites` Steam store URL.
+ *  Returns `null` when no source yields a valid id.
  *
  *  This is the canonical "give me the Steam app id" helper — the
  *  ReviewsTab previously called `extractSteamAppId(game.path)`, which
  *  only worked for Steam games launched via the `steam://run/<id>`
  *  protocol and silently returned null for every other case (Steam
  *  games with a local exe path, EGS/GOG games with a Steam listing
- *  we matched via IGDB, etc.). Preferring `game.steamAppId` makes
+ *  we matched via IGDB, manually added exe/batch games, etc.).
+ *  Preferring `game.steamAppId` + the websites fallback makes
  *  reviews + deep links work for the entire library. */
 export function resolveSteamAppId(game: Game): number | null {
   if (typeof game.steamAppId === "number" && Number.isFinite(game.steamAppId)) {
     return game.steamAppId;
   }
-  return extractSteamAppId(game.path);
+  const fromPath = extractSteamAppId(game.path);
+  if (fromPath != null) return fromPath;
+  return extractSteamAppIdFromWebsites(game.websites);
 }
 
 /** Parse a play-time string like "142h" or "3h 15m" into total minutes. */
