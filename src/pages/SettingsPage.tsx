@@ -21,12 +21,25 @@ import { useDownloads } from "../context/DownloadContext";
 import { Button } from "../components/ui";
 import "../styles/page-settings.css";
 
-/** Maps theme ids to preview colors — kept in sync with App.css overrides.
- *  Trimmed to the 3 signature defaults (dark / light / aurora). */
+/** Maps theme ids to preview colors — kept in sync with App.css overrides. */
 const THEME_PREVIEW_COLORS: Record<string, { bg: string; text: string; accent: string }> = {
-  dark:   { bg: "#0a0c10", text: "#f0f2f7", accent: "#7c66ff" },
-  light:  { bg: "#f8fafc", text: "#0f172a", accent: "#7c3aed" },
-  aurora: { bg: "#07060f", text: "#f4f2ff", accent: "#8b5cff" },
+  dark:      { bg: "#0a0c10", text: "#f0f2f7", accent: "#7c66ff" },
+  light:     { bg: "#f8fafc", text: "#0f172a", accent: "#7c3aed" },
+  nord:      { bg: "#2e3440", text: "#eceff4", accent: "#88c0d0" },
+  cyberpunk: { bg: "#050508", text: "#f0f2f5", accent: "#00f0ff" },
+  emerald:   { bg: "#08110c", text: "#ecf3ee", accent: "#10b981" },
+  dracula:   { bg: "#1e1f29", text: "#f8f8f2", accent: "#bd93f9" },
+  solarized: { bg: "#002b36", text: "#fdf6e3", accent: "#268bd2" },
+  tokyonight:{ bg: "#1a1b26", text: "#c0caf5", accent: "#7aa2f7" },
+  gruvbox:   { bg: "#282828", text: "#ebdbb2", accent: "#fe8019" },
+  catppuccin:{ bg: "#1e1e2e", text: "#cad3f5", accent: "#cba6f7" },
+  sunset:    { bg: "#1f0f1a", text: "#fdeef2", accent: "#ff7a59" },
+  oceanic:   { bg: "#071a2b", text: "#e6f6fb", accent: "#22d3ee" },
+  rosepine:  { bg: "#191724", text: "#e0def4", accent: "#eb6f92" },
+  synthwave: { bg: "#170d2b", text: "#f9f2ff", accent: "#ff71ce" },
+  forest:    { bg: "#0c1510", text: "#eef5ea", accent: "#84cc16" },
+  desert:    { bg: "#1c160f", text: "#f5ead7", accent: "#e0ab55" },
+  aurora:    { bg: "#07060f", text: "#f4f2ff", accent: "#8b5cff" },
 };
 
 /**

@@ -27,11 +27,7 @@ export interface ThemeConfig {
   meta: ThemeMeta;
 }
 
-/** Well-known built-in themes — kept to 3 signature defaults.
- *  Each is crafted to high polish rather than offering many mediocre ones.
- *  - `dark`   — refined default with a bolder brand mesh
- *  - `light`  — refined light counterpart
- *  - `aurora` — bold statement theme (violet→cyan→magenta gradient + depth) */
+/** Well-known built-in themes. */
 const BUILTIN_THEMES: ThemeConfig[] = [
   {
     id: "dark",
@@ -40,6 +36,62 @@ const BUILTIN_THEMES: ThemeConfig[] = [
   {
     id: "light",
     meta: { name: "Light Mode", descriptor: "minimal" },
+  },
+  {
+    id: "nord",
+    meta: { name: "Nord Ice", descriptor: "calm" },
+  },
+  {
+    id: "cyberpunk",
+    meta: { name: "Cyberpunk", descriptor: "vibrant" },
+  },
+  {
+    id: "emerald",
+    meta: { name: "Emerald", descriptor: "calm" },
+  },
+  {
+    id: "dracula",
+    meta: { name: "Dracula", descriptor: "vibrant" },
+  },
+  {
+    id: "solarized",
+    meta: { name: "Solarized", descriptor: "calm" },
+  },
+  {
+    id: "tokyonight",
+    meta: { name: "Tokyo Night", descriptor: "calm" },
+  },
+  {
+    id: "gruvbox",
+    meta: { name: "Gruvbox", descriptor: "minimal" },
+  },
+  {
+    id: "catppuccin",
+    meta: { name: "Catppuccin", descriptor: "vibrant" },
+  },
+  {
+    id: "sunset",
+    meta: { name: "Sunset", descriptor: "vibrant" },
+  },
+  {
+    id: "oceanic",
+    meta: { name: "Oceanic", descriptor: "calm" },
+  },
+  {
+    id: "rosepine",
+    meta: { name: "Rose Pine", descriptor: "minimal" },
+  },
+  {
+    id: "synthwave",
+    meta: { name: "Synthwave", descriptor: "vibrant" },
+  },
+  {
+    id: "forest",
+    meta: { name: "Forest", descriptor: "calm" },
+  },
+  {
+    id: "desert",
+    meta: { name: "Desert Mirage", descriptor: "minimal" },
   },
   {
     id: "aurora",
