@@ -1,18 +1,13 @@
-# GameLib — Project Roadmap & TODO
+# GameIndex — Project Roadmap & TODO
 
 ---
 
 ## 🏗️ Project Foundations
 
-### 1. Find a Good Name
-- The project currently uses the codename "GameLib" — brainstorm a catchy, memorable, brandable name.
-- Constraints: available as a domain, GitHub org/name, social handles, and not trademarked in the gaming space.
-- Name style ideas:
-  - **One word**: something punchy (e.g. "Ludus", "Cartridge", "Playstack").
-  - **Compound**: Game + something (e.g. "GameHub", "LaunchBay", "PlayDeck").
-  - **Abstract / made-up**: unique and SEO-friendly (e.g. "Zynith", "Velox", "Arcadeum").
-- Vet the top 3 candidates against domain registrars, GitHub, and trademark databases before finalizing.
-- Update `package.json` name, Tauri config, repo name, and all references.
+### 1. Find a Good Name — ✅ Resolved: **GameIndex**
+- The project codename "GameLib" has been replaced with **GameIndex**.
+- `package.json` name, Tauri `productName` / `identifier`, and the window title are all updated to `GameIndex` / `com.gameindex.app`.
+- Remaining internal identifiers (SQLite `gamelib.db`, `localStorage` key prefixes like `gamelib-*`) are intentionally kept for backward compatibility.
 
 ### 2. Write a Complete README
 - Comprehensive `README.md` covering:
@@ -289,8 +284,8 @@
 | 🔴 High | 3 | Fix game icon fetching |
 | 🔴 High | 4 | Fix activity page UI inconsistencies |
 | 🔴 High | 5 | Import modal with rename & metadata fetch |
-| 🔴 High | 1 | Find a good name for the project |
-| 🔴 High | 2 | Write a complete README |
+| ✅ Done | 1 | Find a good name for the project (→ GameIndex) |
+| ✅ Done | 2 | Write a complete README |
 | 🟡 Medium | 6 | News tab: Xbox Game Pass + ITAD |
 | 🟡 Medium | 7 | RSS news page |
 | 🟡 Medium | 8 | Game page media (screenshots, trailers) |
