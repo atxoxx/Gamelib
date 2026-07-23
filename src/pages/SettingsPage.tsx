@@ -1459,7 +1459,7 @@ export default function SettingsPage() {
             Settings
           </h1>
           <p className="settings-desc">
-            Customize Gamelib's appearance, choose which GPU to monitor
+            Customize GameIndex's appearance, choose which GPU to monitor
             during gameplay, and connect external store integrations.
           </p>
         </div>
@@ -1963,7 +1963,7 @@ export default function SettingsPage() {
               <h2 className="settings-section-title">Integrations</h2>
               <p className="settings-section-desc">
                 Connect external store accounts to import your owned
-                games, playtime, and achievements into Gamelib.
+                games, playtime, and achievements into GameIndex.
               </p>
             </div>
           </header>
@@ -2550,7 +2550,7 @@ export default function SettingsPage() {
                 )}
 
                 <p className="auth-note">
-                  Detection is fully local: Gamelib reads the Windows
+                  Detection is fully local: GameIndex reads the Windows
                   uninstall registry for installed Rockstar titles.
                 </p>
 
@@ -2617,7 +2617,7 @@ export default function SettingsPage() {
                 )}
 
                 <p className="auth-note">
-                  Detection is fully local: Gamelib reads the Windows
+                  Detection is fully local: GameIndex reads the Windows
                   uninstall registry for installed titles and the Ubisoft
                   Connect cache for your owned library.
                 </p>
@@ -2691,7 +2691,7 @@ export default function SettingsPage() {
               <div className="settings-control">
                 <label className="settings-label">Auto-sync interval</label>
                 <p className="settings-helper-lead">
-                  How often Gamelib re-imports your library from Steam,
+                  How often GameIndex re-imports your library from Steam,
                   Epic, and GOG in the background.
                 </p>
                 <div className="settings-input-group">
@@ -3218,7 +3218,7 @@ export default function SettingsPage() {
             <div className="settings-section-header-text">
               <h2 className="settings-section-title">Launcher behaviour</h2>
               <p className="settings-section-desc">
-                Decide what Gamelib does at boot, when you launch a game,
+                Decide what GameIndex does at boot, when you launch a game,
                 and how the window itself behaves.
               </p>
             </div>
@@ -3232,7 +3232,7 @@ export default function SettingsPage() {
                   Default landing page
                 </label>
                 <p className="settings-helper-lead">
-                  Which route opens when Gamelib launches. Useful if your
+                  Which route opens when GameIndex launches. Useful if your
                   workflow starts in Activity, Downloads, or Deals rather
                   than the Library.
                 </p>
@@ -3278,7 +3278,7 @@ export default function SettingsPage() {
                     showToast(
                       e.target.checked
                         ? "Closing will now minimize to tray"
-                        : "Closing will now exit Gamelib",
+                        : "Closing will now exit GameIndex",
                       "info",
                     );
                   }}
@@ -3307,8 +3307,8 @@ export default function SettingsPage() {
                     void setMinimizeOnLaunch(e.target.checked);
                     showToast(
                       e.target.checked
-                        ? "Gamelib will minimize when you launch a game"
-                        : "Gamelib will stay open while you play",
+                        ? "GameIndex will minimize when you launch a game"
+                        : "GameIndex will stay open while you play",
                       "info",
                     );
                   }}
@@ -3349,7 +3349,7 @@ export default function SettingsPage() {
                 />
                 <div className="settings-checkbox-text">
                   <span className="settings-checkbox-title">
-                    Start Gamelib when you sign in
+                    Start GameIndex when you sign in
                   </span>
                   <span className="settings-checkbox-desc">
                     Registers the app in your OS startup list (Windows

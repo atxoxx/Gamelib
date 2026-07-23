@@ -436,7 +436,7 @@ struct LauncherSettings {
     /// tray/dock icon.
     close_to_tray_enabled: bool,
     /// L3: When the user clicks Play, the main window hides itself so
-    /// the game gets full-screen focus without a competing Gamelib
+    /// the game gets full-screen focus without a competing GameIndex
     /// window in the taskbar.
     minimize_on_launch_enabled: bool,
     /// L5: When true, the launch path REFUSES to silently retry with
@@ -2819,7 +2819,7 @@ fn resolve_steam_exe(steam_app_id: u32) -> Option<String> {
 /// Rebuild the game watcher's process index from the current library.
 /// Called by the frontend after loading games and after Steam/Epic syncs.
 /// This enables passive detection â€” the background poll loop can match
-/// running processes to known games even when launched outside Gamelib.
+/// running processes to known games even when launched outside GameIndex.
 #[tauri::command]
 fn rebuild_watcher_index(
     app: tauri::AppHandle,
@@ -2838,7 +2838,7 @@ fn rebuild_watcher_index(
 async fn fetch_url(url: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("Gamelib/0.1 (RSS Reader)")
+        .user_agent("GameIndex/0.1 (RSS Reader)")
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -3030,7 +3030,7 @@ pub fn run() {
             let db = match db::init(&app_data_dir) {
                 Ok(db) => db,
                 Err(e) => {
-                    eprintln!("[gamelib] db::init failed: {e}");
+                    eprintln!("[gameindex] db::init failed: {e}");
                     return Err(Box::new(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         format!("db::init: {e}"),
@@ -3055,7 +3055,7 @@ pub fn run() {
             // â”€â”€ Initialize the GameWatcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Long-lived background service that polls WMI for running
             // game processes. Handles both app-launched sessions and
-            // passive detection (games launched outside Gamelib).
+            // passive detection (games launched outside GameIndex).
             //
             // Phase 3: the watcher now holds an Arc<Db> so its
             // background poller thread can write session rows to the
@@ -3139,11 +3139,11 @@ pub fn run() {
                 )
                 .await
                 {
-                    eprintln!("[gamelib] torrent_engine::initialize_engine failed: {}", e);
+                    eprintln!("[gameindex] torrent_engine::initialize_engine failed: {}", e);
                 }
             });
 
-            tray::build_tray(app).unwrap_or_else(|e| eprintln!("[gamelib] tray setup failed: {e}"));
+            tray::build_tray(app).unwrap_or_else(|e| eprintln!("[gameindex] tray setup failed: {e}"));
 
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::channel(10);
@@ -3470,17 +3470,17 @@ async fn map_port_upnp(local_ip: std::net::IpAddr, port: u16) -> bool {
                     "GameLib Internet Sync",
                 ) {
                     Ok(_) => {
-                        println!("[gamelib] UPnP: successfully mapped port {} to {}", port, local_addr);
+                        println!("[gameindex] UPnP: successfully mapped port {} to {}", port, local_addr);
                         true
                     }
                     Err(e) => {
-                        eprintln!("[gamelib] UPnP: failed to map port: {}", e);
+                        eprintln!("[gameindex] UPnP: failed to map port: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[gamelib] UPnP: gateway search failed: {}", e);
+                eprintln!("[gameindex] UPnP: gateway search failed: {}", e);
                 false
             }
         }
@@ -3584,17 +3584,17 @@ async fn run_tcp_host(app: tauri::AppHandle, state: Arc<InternetSyncState>, list
     loop {
         match listener.accept().await {
             Ok((mut socket, peer_addr)) => {
-                println!("[gamelib] Accepted internet sync connection from {}", peer_addr);
+                println!("[gameindex] Accepted internet sync connection from {}", peer_addr);
                 let app_clone = app.clone();
                 let state_clone = state.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_inbound_connection(&app_clone, &state_clone, &mut socket).await {
-                        eprintln!("[gamelib] Error handling inbound connection: {}", e);
+                        eprintln!("[gameindex] Error handling inbound connection: {}", e);
                     }
                 });
             }
             Err(e) => {
-                eprintln!("[gamelib] TCP listener accept error: {}", e);
+                eprintln!("[gameindex] TCP listener accept error: {}", e);
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
@@ -3638,7 +3638,7 @@ async fn sync_with_friend(
     use tokio::time::timeout;
     use std::time::Duration;
 
-    println!("[gamelib] Connecting to friend {} at {}", friend_sync_id, friend_addr);
+    println!("[gameindex] Connecting to friend {} at {}", friend_sync_id, friend_addr);
     let mut socket = match timeout(Duration::from_secs(8), tokio::net::TcpStream::connect(friend_addr)).await {
         Ok(Ok(stream)) => stream,
         Ok(Err(e)) => return Err(format!("TCP connect error: {}", e)),
@@ -3673,7 +3673,7 @@ pub async fn start_internet_sync_loop(app: tauri::AppHandle, mut trigger_rx: tok
         tokio::select! {
             _ = interval.tick() => {},
             _ = trigger_rx.recv() => {
-                println!("[gamelib] Internet sync manually triggered");
+                println!("[gameindex] Internet sync manually triggered");
             }
         }
 
@@ -3703,7 +3703,7 @@ pub async fn start_internet_sync_loop(app: tauri::AppHandle, mut trigger_rx: tok
                         let port = local_addr.port();
                         active_listener = Some(port);
                         *state.bound_port.lock().unwrap() = Some(port);
-                        println!("[gamelib] Internet sync host listening on port {}", port);
+                        println!("[gameindex] Internet sync host listening on port {}", port);
 
                         let app_clone = app.clone();
                         let state_clone = state.clone();
@@ -3714,7 +3714,7 @@ pub async fn start_internet_sync_loop(app: tauri::AppHandle, mut trigger_rx: tok
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to start TCP listener: {}", e);
-                    eprintln!("[gamelib] {}", err_msg);
+                    eprintln!("[gameindex] {}", err_msg);
                     *state.error_message.lock().unwrap() = Some(err_msg);
                 }
             }
@@ -3741,15 +3741,15 @@ pub async fn start_internet_sync_loop(app: tauri::AppHandle, mut trigger_rx: tok
                     }
                     
                     if let Err(e) = publish_address_to_kv(&profile.sync_id, &current_addr).await {
-                        eprintln!("[gamelib] Failed to publish sync address to KV: {}", e);
+                        eprintln!("[gameindex] Failed to publish sync address to KV: {}", e);
                         *state.error_message.lock().unwrap() = Some(format!("KV publish failed: {}", e));
                     } else {
-                        println!("[gamelib] Published sync address {} to KV", current_addr);
+                        println!("[gameindex] Published sync address {} to KV", current_addr);
                         *state.error_message.lock().unwrap() = None;
                     }
                 }
             } else {
-                eprintln!("[gamelib] Failed to fetch external IP");
+                eprintln!("[gameindex] Failed to fetch external IP");
                 *state.error_message.lock().unwrap() = Some("Could not resolve external IP".to_string());
             }
         }
@@ -3774,9 +3774,9 @@ pub async fn start_internet_sync_loop(app: tauri::AppHandle, mut trigger_rx: tok
                         let f_sync_id = friend.sync_id.clone();
                         tokio::spawn(async move {
                             if let Err(e) = sync_with_friend(&app_clone, &state_clone, &f_sync_id, &friend_addr).await {
-                                println!("[gamelib] Passive sync with {} failed: {}", f_sync_id, e);
+                                println!("[gameindex] Passive sync with {} failed: {}", f_sync_id, e);
                             } else {
-                                println!("[gamelib] Passive sync with {} succeeded", f_sync_id);
+                                println!("[gameindex] Passive sync with {} succeeded", f_sync_id);
                             }
                         });
                     }

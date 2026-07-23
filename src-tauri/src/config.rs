@@ -1,4 +1,4 @@
-//! Centralized credential management for Gamelib.
+//! Centralized credential management for GameIndex.
 //!
 //! # Strategy
 //!

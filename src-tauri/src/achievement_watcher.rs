@@ -143,7 +143,7 @@ fn cached_achieved(app: &AppHandle, game_id: &str) -> HashSet<String> {
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let client = match reqwest::Client::builder()
-            .user_agent("Gamelib/1.0 (+hydra-api)")
+            .user_agent("GameIndex/1.0 (+hydra-api)")
             .timeout(Duration::from_secs(20))
             .build()
         {
@@ -288,7 +288,7 @@ pub fn get_local_achievements_enabled(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 pub async fn scan_all_local_achievements(app: AppHandle) -> Result<usize, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Gamelib/1.0 (+hydra-api)")
+        .user_agent("GameIndex/1.0 (+hydra-api)")
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?;

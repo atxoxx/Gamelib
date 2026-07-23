@@ -81,7 +81,7 @@ pub async fn fetch_protondb_status(app_id: u32) -> Result<ProtonDBStatus, String
     let resp = client
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::USER_AGENT, "Gamelib/1.0")
+        .header(reqwest::header::USER_AGENT, "GameIndex/1.0")
         .send()
         .await
         .map_err(|e| format!("ProtonDB request failed: {}", e))?;

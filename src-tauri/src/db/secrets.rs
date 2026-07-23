@@ -18,8 +18,9 @@
 //! - `steam_config`
 //! - `debrid_api_key`
 //!
-//! The service name is `gamelib/gamelib-app` (matching the bundle
-//! identifier `com.gamelib.app`). On Windows this groups entries
+//! The service name is `gamelib/gamelib-app` (kept as-is to keep
+//! existing OS-keychain credentials accessible after the rename to
+//! GameIndex). On Windows this groups entries
 //! under "Generic Credentials → gamelib/gamelib-app"; on macOS the
 //! user sees them as "Gamelib" in Keychain Access; on Linux a
 //! single secret-service collection per service name.

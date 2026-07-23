@@ -343,7 +343,7 @@ export default function TopNav() {
           <svg className="topnav-logo__mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
           </svg>
-          <span className="topnav-logo__word">Gamelib</span>
+          <span className="topnav-logo__word">GameIndex</span>
         </div>
         <div className="topnav-tabs" role="tablist">
           {tabs.map((tab) => {

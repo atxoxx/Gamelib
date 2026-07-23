@@ -34,9 +34,9 @@ This file gives Codebuff context about your project: goals, commands, convention
 - **Styles (`src/styles/`, `src/*.css`)** — co-located CSS files (`App.css` for layout + theme tokens, `library.css`, `store.css`, plus themed style sheets under `src/styles/`). All theme colors go through CSS custom properties defined in `:root` / `[data-theme="light"]` in `App.css`. **Never hardcode hex/rgb values** — use `var(--…)`.
 
 ### Backend (`src-tauri/src/`)
-- **Entry point:** `lib.rs::run()` registers every Tauri command and initializes state in `.setup(...)`. `main.rs` simply calls `gamelib_lib::run()`.
+- **Entry point:** `lib.rs::run()` registers every Tauri command and initializes state in `.setup(...)`. `main.rs` simply calls `gameindex_lib::run()`.
 - **Modules:** `game_scraper`, `game_watcher`, `gpu_detector`, `mahm_reader`, `rtss_reader`, `metrics_collector`, `source_manager`, `store_checker`, `torrent_engine`, `achievements`, `crackwatch`, `deals`, `size`, `config`. `mahm_reader` and `rtss_reader` read shared memory from **MSI Afterburner** and **RivaTuner Statistics Server** to power the in-game FPS / frametime overlays on the Activity page (`debug_mahm_entries` IPC exposes raw MAHM entries for diagnostics).
-- **Side binary:** `src-tauri/src/bin/` holds additional executables built alongside `gamelib_lib` (`cargo build --bin <name>`). Contents change frequently — list the directory before assuming anything about it. Leave alone unless the change is explicitly for a bin target.
+- **Side binary:** `src-tauri/src/bin/` holds additional executables built alongside `gameindex_lib` (`cargo build --bin <name>`). Contents change frequently — list the directory before assuming anything about it. Leave alone unless the change is explicitly for a bin target.
 - **Per-store integrations (`src-tauri/src/steam/`, `gog/`, `epic/`)** — each has `auth.rs` + `sync.rs` + `types.rs`. Steam uses a pasted **Web API key** (not OpenID). GOG uses a Tauri WebView to capture session cookies after the 2026 OAuth client_id rotation. Epic uses OAuth via stored refresh tokens.
 - **Downloads (`src-tauri/src/downloader/`)** — `mod.rs` orchestrates three paths:
   - `direct.rs` — HTTP/chunk downloader with resume support.

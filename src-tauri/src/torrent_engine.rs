@@ -310,11 +310,11 @@ impl TorrentEngine {
             Err(e) => {
                 let err_msg = e.to_string();
                 eprintln!(
-                    "[gamelib] Warning: persistent torrent session init failed: {}",
+                    "[gameindex] Warning: persistent torrent session init failed: {}",
                     err_msg
                 );
                 eprintln!(
-                    "[gamelib] Falling back to non-persistent session \
+                    "[gameindex] Falling back to non-persistent session \
                      (downloads will not resume after app restart)."
                 );
 
@@ -1162,7 +1162,7 @@ impl TorrentEngine {
                 && now.saturating_sub(d.added_at) >= FETCHING_METADATA_GRACE_SECS
             {
                 eprintln!(
-                    "[gamelib] FetchingMetadata timed out after {} s for {}; \
+                    "[gameindex] FetchingMetadata timed out after {} s for {}; \
                      transitioning to Error.",
                     now.saturating_sub(d.added_at),
                     id
@@ -1680,7 +1680,7 @@ fn augment_magnet_with_trackers(uri: &str) -> String {
 
     if added > 0 {
         eprintln!(
-            "[gamelib] Magnet had {} tracker(s) — added {} default public tracker(s) ({} total)",
+            "[gameindex] Magnet had {} tracker(s) — added {} default public tracker(s) ({} total)",
             existing_trackers.len(),
             added,
             existing_trackers.len() + added
@@ -2854,7 +2854,7 @@ pub async fn torrent_start_selected(
     // error and we don't waste 90 s of metadata-fetch time.
         if save_path.trim().is_empty() {
             eprintln!(
-                "[gamelib] torrent_start_selected aborted: empty save_path for {id}; \
+                "[gameindex] torrent_start_selected aborted: empty save_path for {id}; \
                  refusing to re-add to the libqbit session"
             );
             let mut guard = engine.write().await;
@@ -2899,7 +2899,7 @@ pub async fn torrent_start_selected(
                     .delete(librqbit::api::TorrentIdOrHash::Id(real_session_id), false)
                     .await
                 {
-                    eprintln!("[gamelib] torrent_start_selected: pre-delete failed (will continue): {}", e);
+                    eprintln!("[gameindex] torrent_start_selected: pre-delete failed (will continue): {}", e);
                 }
             }
         }
@@ -2950,7 +2950,7 @@ pub async fn torrent_start_selected(
             Ok(Ok(response)) => {
                 let handle_opt = response.into_handle();
                 if handle_opt.is_none() {
-                    eprintln!("[gamelib] torrent_start_selected: add_torrent returned a response with no handle (unexpected for list_only=false); surfacing as Error.");
+                    eprintln!("[gameindex] torrent_start_selected: add_torrent returned a response with no handle (unexpected for list_only=false); surfacing as Error.");
                 }
                 if let Some(mut handle) = handle_opt {
                     let only_files_set: std::collections::HashSet<usize> =
@@ -2981,7 +2981,7 @@ pub async fn torrent_start_selected(
                                 }
                                 Err(e) => {
                                     eprintln!(
-                                        "[gamelib] torrent_start_selected: update_only_files failed (will retry): {}",
+                                        "[gameindex] torrent_start_selected: update_only_files failed (will retry): {}",
                                         e
                                     );
                                 }
@@ -2992,19 +2992,19 @@ pub async fn torrent_start_selected(
                             // of looking like a hang. Don't spam
                             // every iteration.
                             eprintln!(
-                                "[gamelib] torrent_start_selected: metadata not parsed after 10s; continuing to wait for file selection to apply..."
+                                "[gameindex] torrent_start_selected: metadata not parsed after 10s; continuing to wait for file selection to apply..."
                             );
                         }
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                     if !update_ok {
                         eprintln!(
-                            "[gamelib] torrent_start_selected: gave up waiting for metadata; file selection may not be applied."
+                            "[gameindex] torrent_start_selected: gave up waiting for metadata; file selection may not be applied."
                         );
                     }
 
                     if let Err(e) = session.unpause(&handle).await {
-                        eprintln!("[gamelib] torrent_start_selected: unpause failed: {}", e);
+                        eprintln!("[gameindex] torrent_start_selected: unpause failed: {}", e);
                     }
 
                     // SAFETY NET (librqbit session-state restore quirk):
@@ -3042,7 +3042,7 @@ pub async fn torrent_start_selected(
                         }
                         retry_attempted = true;
                         eprintln!(
-                            "[gamelib] torrent_start_selected: stale \"completed\" state \
+                            "[gameindex] torrent_start_selected: stale \"completed\" state \
                              detected (progress_bytes={}, total_bytes={}) — forcing clean \
                              re-add (attempt {}/2)",
                             snapshot.progress_bytes,
@@ -3057,7 +3057,7 @@ pub async fn torrent_start_selected(
                             .await
                         {
                             eprintln!(
-                                "[gamelib] torrent_start_selected: stale-retry delete \
+                                "[gameindex] torrent_start_selected: stale-retry delete \
                                  failed (will continue): {}",
                                 e
                             );
@@ -3111,7 +3111,7 @@ pub async fn torrent_start_selected(
                                                 }
                                                 Err(e) => {
                                                     eprintln!(
-                                                        "[gamelib] torrent_start_selected: \
+                                                        "[gameindex] torrent_start_selected: \
                                                          stale-retry update_only_files \
                                                          failed (will retry): {}",
                                                         e
@@ -3120,7 +3120,7 @@ pub async fn torrent_start_selected(
                                             }
                                         } else if attempt == 9 {
                                             eprintln!(
-                                                "[gamelib] torrent_start_selected: \
+                                                "[gameindex] torrent_start_selected: \
                                                  stale-retry metadata not parsed \
                                                  after 10s; continuing to wait \
                                                  for file selection to apply..."
@@ -3130,7 +3130,7 @@ pub async fn torrent_start_selected(
                                     }
                                     if !update_ok {
                                         eprintln!(
-                                            "[gamelib] torrent_start_selected: stale-retry \
+                                            "[gameindex] torrent_start_selected: stale-retry \
                                              gave up waiting for metadata; file selection \
                                              may not be applied and torrent may \
                                              download ALL files."
@@ -3151,7 +3151,7 @@ pub async fn torrent_start_selected(
                                     // still-empty save folder) rather
                                     // than the bogus `Completed`.
                                     eprintln!(
-                                        "[gamelib] torrent_start_selected: stale-retry \
+                                        "[gameindex] torrent_start_selected: stale-retry \
                                          returned a response with no handle \
                                          (unexpected for list_only=false)."
                                     );
@@ -3160,7 +3160,7 @@ pub async fn torrent_start_selected(
                             }
                             Ok(Err(e)) => {
                                 eprintln!(
-                                    "[gamelib] torrent_start_selected: stale-retry \
+                                    "[gameindex] torrent_start_selected: stale-retry \
                                      add_torrent failed (will abort retry): {}",
                                     e
                                 );
@@ -3168,7 +3168,7 @@ pub async fn torrent_start_selected(
                             }
                             Err(_) => {
                                 eprintln!(
-                                    "[gamelib] torrent_start_selected: stale-retry \
+                                    "[gameindex] torrent_start_selected: stale-retry \
                                      add_torrent timed out (will abort retry)."
                                 );
                                 break;
@@ -3205,7 +3205,7 @@ pub async fn torrent_start_selected(
                         && stats.progress_bytes == total_bytes
                     {
                         eprintln!(
-                            "[gamelib] torrent_start_selected: retry couldn't \
+                            "[gameindex] torrent_start_selected: retry couldn't \
                              dislodge stale completed state; demoting \
                              initial Completed to Downloading \
                              (progress={}, total={}).",
@@ -3351,7 +3351,7 @@ pub async fn torrent_start_selected(
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("[gamelib] Failed to add torrent in background: {}", e);
+                eprintln!("[gameindex] Failed to add torrent in background: {}", e);
                 let mut guard = engine_clone.write().await;
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error(format!("Failed to start torrent: {}", e));
@@ -3360,7 +3360,7 @@ pub async fn torrent_start_selected(
                 }
             }
             Err(_) => {
-                eprintln!("[gamelib] Timeout starting torrent in background");
+                eprintln!("[gameindex] Timeout starting torrent in background");
                 let mut guard = engine_clone.write().await;
                 if let Some(d) = guard.downloads_mut().get_mut(&id) {
                     d.status = DownloadStatus::Error("Timeout starting torrent".to_string());

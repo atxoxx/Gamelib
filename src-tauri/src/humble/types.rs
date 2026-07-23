@@ -1,7 +1,7 @@
 //! Humble Bundle library integration.
 //!
 //! Module surface — Playnite `HumbleLibrary` (JosefNemec/PlayniteExtensions)
-//! parity, adapted to Gamelib's pure-Rust + Tauri WebView model:
+//! parity, adapted to GameIndex's pure-Rust + Tauri WebView model:
 //!
 //! - `types`   — wire DTOs + auth/session/settings types (camelCase).
 //! - `auth`    — cookie-based Tauri WebView login (navigate to

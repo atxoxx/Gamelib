@@ -1755,7 +1755,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gamelib"
+name = "gameindex"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",

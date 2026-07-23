@@ -7,16 +7,16 @@
 //! ## Menu shape
 //!
 //! ```text
-//!   Status line (disabled): "Gamelib — idle"  or  "Playing: <name>"
+//!   Status line (disabled): "GameIndex — idle"  or  "Playing: <name>"
 //!   ─────────────────
-//!   Show Gamelib
+//!   Show GameIndex
 //!   Hide to tray                (disabled when window is already hidden)
 //!   ─────────────────
-//!   Quit Gamelib
+//!   Quit GameIndex
 //! ```
 //!
 //! Left-click on the tray icon is **not** a menu trigger — it acts as
-//! "Show Gamelib" so the user can dismiss the menu without an extra
+//! "Show GameIndex" so the user can dismiss the menu without an extra
 //! click. Right-click opens the context menu (built-in behaviour when
 //! `show_menu_on_left_click(false)` is set).
 //!
@@ -54,7 +54,7 @@ use tauri::{App, Listener, Manager, Wry};
 /// `TypeId`, not generics) happy without forcing every consumer to
 /// spell out `Wry`.
 pub struct TrayHandles {
-    /// Disabled label "Gamelib — idle" / "Playing: <name>". Clicking
+    /// Disabled label "GameIndex — idle" / "Playing: <name>". Clicking
     /// it is a no-op (Tauri treats disabled `MenuItem`s as
     /// non-interactive rows in the menu).
     pub status_item: MenuItem<Wry>,
@@ -81,11 +81,11 @@ impl TrayHandles {
         let _ = self.hide_item.set_enabled(true);
     }
 
-    /// Reset to "Gamelib — idle" and disable Hide (can't hide a
+    /// Reset to "GameIndex — idle" and disable Hide (can't hide a
     /// hidden window). Show stays enabled so the menu still serves
     /// users whose window sits hidden behind other apps.
     pub fn show_idle(&self) {
-        let _ = self.status_item.set_text("Gamelib — idle");
+        let _ = self.status_item.set_text("GameIndex — idle");
         let _ = self.show_item.set_enabled(true);
         let _ = self.hide_item.set_enabled(false);
     }
@@ -107,10 +107,10 @@ pub fn build_tray(app: &App<Wry>) -> tauri::Result<()> {
     // `with_id`'s fourth arg is `enabled`; `None` for accelerator on
     // every row (we don't currently expose a Ctrl+1/Ctrl+W-style
     // shortcut).
-    let status_item = MenuItem::with_id(handle, "status", "Gamelib — idle", false, None::<&str>)?;
-    let show_item = MenuItem::with_id(handle, "show", "Show Gamelib", true, None::<&str>)?;
+    let status_item = MenuItem::with_id(handle, "status", "GameIndex — idle", false, None::<&str>)?;
+    let show_item = MenuItem::with_id(handle, "show", "Show GameIndex", true, None::<&str>)?;
     let hide_item = MenuItem::with_id(handle, "hide", "Hide to tray", false, None::<&str>)?;
-    let quit_item = MenuItem::with_id(handle, "quit", "Quit Gamelib", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(handle, "quit", "Quit GameIndex", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         handle,
@@ -142,7 +142,7 @@ pub fn build_tray(app: &App<Wry>) -> tauri::Result<()> {
         .icon(icon)
         .menu(&menu)
         // Show the menu on right-click only; left-click is "Show
-        // Gamelib" via the on_tray_icon_event handler below. This
+        // GameIndex" via the on_tray_icon_event handler below. This
         // matches Discord / Steam / Spotify behaviour.
         .show_menu_on_left_click(false)
         .on_menu_event({

@@ -341,7 +341,7 @@ export function ActivityGantt({
       const dataUrl = canvas.toDataURL("image/png");
       const filePath = await save({
         title: "Save Timeline",
-        defaultPath: `gamelib_timeline_${new Date().toISOString().slice(0, 10)}.png`,
+        defaultPath: `gameindex_timeline_${new Date().toISOString().slice(0, 10)}.png`,
         filters: [{ name: "PNG Image", extensions: ["png"] }],
       });
       if (!filePath) return;

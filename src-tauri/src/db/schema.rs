@@ -1,6 +1,6 @@
 //! Embedded SQL schema strings.
 //!
-//! Every table Gamelib uses lives in a constant here, so the schema
+//! Every table GameIndex uses lives in a constant here, so the schema
 //! is reviewable in one place and can be unit-tested (we apply each
 //! DDL against a temp DB and verify it's idempotent).
 //!

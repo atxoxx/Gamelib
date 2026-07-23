@@ -310,7 +310,7 @@ function ProfileSection() {
       .map((g, i) => `${i + 1}. ${g.gameName} — ${formatHours(g.minutes)}`)
       .join("\n");
     const md = [
-      "# My Gamelib Year in Review",
+      "# My GameIndex Year in Review",
       "",
       `- Total Playtime: ${formatHours(stats.totalPlayTimeMin)}`,
       `- Sessions: ${stats.totalSessions}`,

@@ -136,7 +136,7 @@
 
 /* Steam auth button — keeps the in-house Steam dark-blue brand color
  * instead of the accent color so users can visually separate "Steam
- * action" from "Gamelib action". Solid gradient + Steam-blue border
+ * action" from "GameIndex action". Solid gradient + Steam-blue border
  * reads as official Steam UI at a glance. */
 .btn-steam {
   background: linear-gradient(135deg, #1b2838, #2a475e);

@@ -1,7 +1,7 @@
 //! Ubisoft Connect (Uplay) library integration.
 //!
 //! Module surface — Playnite `UplayLibrary` parity (JosefNemec/
-//! PlayniteExtensions), adapted to Gamelib's pure-Rust + Tauri WebView
+//! PlayniteExtensions), adapted to GameIndex's pure-Rust + Tauri WebView
 //! model:
 //! - `cache`   — parse the proprietary protobuf `configurations` cache
 //!               (`%LOCALAPPDATA%\Ubisoft Game Launcher\cache\configuration

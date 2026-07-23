@@ -2,7 +2,7 @@
  Deals Page (/deals)
  - Dual-subtab interface: Xbox GamePass & IsThereAnyDeal
  - Filterable grids with density support
- - Follows Gamelib theme system (CSS custom properties from :root)
+ - Follows GameIndex theme system (CSS custom properties from :root)
  ============================================================================ */
 
 .deals-page {

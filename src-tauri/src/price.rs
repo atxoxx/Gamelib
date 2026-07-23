@@ -175,7 +175,7 @@ pub async fn fetch_game_prices_batch(
 /// Perform the actual CheapShark query for a single title.
 async fn lookup(title: &str) -> Option<GamePrice> {
     let client = reqwest::Client::builder()
-        .user_agent("Gamelib/1.0")
+        .user_agent("GameIndex/1.0")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .ok()?;

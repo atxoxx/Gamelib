@@ -77,7 +77,7 @@ export interface Game {
   /**
    * Unix-millisecond timestamp of the most recent session exit for this
    * game. Stamped by the Rust `GameWatcher.finish_session` hook when a
-   * game process terminates (whether launched through Gamelib or
+   * game process terminates (whether launched through GameIndex or
    * detected passively). Drives the Library page's "Continue Playing"
    * rail — games with `lastPlayed` within the last 14 days surface in
    * that section. Persisted automatically by the existing `save_games`

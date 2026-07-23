@@ -198,7 +198,7 @@ export function buildOpml(feeds: NewsFeed[]): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
   <head>
-    <title>Gamelib News Feeds</title>
+    <title>GameIndex News Feeds</title>
     <dateCreated>${now}</dateCreated>
   </head>
   <body>

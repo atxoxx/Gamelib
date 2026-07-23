@@ -61,7 +61,7 @@ export default function LibraryEmptyState({ onImported }: LibraryEmptyStateProps
         </svg>
       </div>
 
-      <h2 className="lib-empty-title">Welcome to Gamelib</h2>
+      <h2 className="lib-empty-title">Welcome to GameIndex</h2>
       <p className="lib-empty-subtitle">
         Your collection is looking a little empty. Pick a path below to get started — you can always import more games later.
       </p>

@@ -5042,7 +5042,7 @@ export default function FriendsPage() {
           >
             <h3 className="friends-modal-title">Add a Friend</h3>
             <p className="friends-modal-desc">
-              Paste your friend's Gamelib Public Key below.
+              Paste your friend's GameIndex Public Key below.
             </p>
             <button
               type="button"

@@ -3237,7 +3237,7 @@ fn map_igdb_summary(g: IgdbGameSummary) -> StoreGameSummary {
 /// `external_games` endpoint (category 1 = Steam).
 ///
 /// Hydra's `/catalogue/{category}` identifies every game by its Steam
-/// `objectId`. Gamelib's store, however, is IGDB-backed (detail pages,
+/// `objectId`. GameIndex's store, however, is IGDB-backed (detail pages,
 /// covers, ratings all key off the IGDB id/slug). This helper is the
 /// bridge: given Steam appids it returns `appid -> igdb_id` so the
 /// catalogue listing can be enriched into `StoreGameSummary`s without

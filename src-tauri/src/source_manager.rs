@@ -191,7 +191,7 @@ pub struct SourceLink {
 
 /// A single game returned by Hydra's `/catalogue/{category}` endpoint
 /// (the same endpoint Hydra Launcher's own home page calls). Only the
-/// fields Gamelib needs are deserialized; everything else is ignored.
+/// fields GameIndex needs are deserialized; everything else is ignored.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct HydraCatalogueGame {
@@ -296,7 +296,7 @@ impl SourceManager {
         Self {
             db,
             client: reqwest::Client::builder()
-                .user_agent("Gamelib/1.0 (+hydra-api)")
+                .user_agent("GameIndex/1.0 (+hydra-api)")
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .expect("HTTP client build is infallible with these settings"),
@@ -1485,7 +1485,7 @@ pub(crate) fn merge_magnet_into_uris(uris: &mut Vec<String>, magnet: Option<&Str
 /// already carries an embedded announce-list. Without promotion,
 /// the modal's default picks the bare magnet and
 /// `augment_magnet_with_trackers` in `torrent_engine.rs` emits
-/// `[gamelib] Magnet had 0 tracker(s) — added 8 default public
+/// `[gameindex] Magnet had 0 tracker(s) — added 8 default public
 /// tracker(s)` even though a tracker-bearing alternative was a
 /// click away in the mirror selector.
 ///
@@ -1530,7 +1530,7 @@ pub(crate) fn promote_best_uri_to_front(uris: &mut Vec<String>) {
             better.clone()
         };
         eprintln!(
-            "[gamelib] promote_best_uri_to_front: promoted {preview} to uris[0] \
+            "[gameindex] promote_best_uri_to_front: promoted {preview} to uris[0] \
              (was a bare magnet at position 0)"
         );
         uris.insert(0, better);

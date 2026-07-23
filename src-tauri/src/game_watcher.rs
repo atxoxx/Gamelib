@@ -861,7 +861,7 @@ pub struct ForceCloseResult {
 ///      the SYSTEM-owned Task Scheduler service which has rights
 ///      the user's token doesn't. This is the escape hatch for the
 ///      elevation case: game launched with `runas`/UAC and our
-///      Gamelib process runs at a lower integrity level, so the
+///      GameIndex process runs at a lower integrity level, so the
 ///      DACL on the game's process token denies us
 ///      `PROCESS_TERMINATE` and TerminateProcess returns
 ///      `ERROR_ACCESS_DENIED`.

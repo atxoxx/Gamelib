@@ -97,7 +97,7 @@ Returns updated `DownloadSource` objects for each ID that had changes.
 ### Items to ADD
 
 1. **Hydra API client (new `reqwest::Client`):**
-   - `user_agent: "Gamelib/1.0 (+hydra-api)"`
+    - `user_agent: "GameIndex/1.0 (+hydra-api)"`
    - `timeout: 15s`
    - Base URL constant: `HYDRA_API_BASE = "https://hydra-api-us-east-1.losbroxas.org"`
 
