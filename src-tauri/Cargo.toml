@@ -117,6 +117,11 @@ windows = { version = "0.58", features = ["Win32_System_Memory", "Win32_System_T
 #   The `disable_upload` field is a runtime toggle in 8.x.
 librqbit = { version = "8", default-features = false, features = ["default-tls"] }
 igd-next = "0.17"
+# HTML sanitizer for Hydra community review bodies (TipTap-generated
+# HTML fetched from the public Hydra API). The frontend renders the
+# sanitized output via dangerouslySetInnerHTML, so ALL sanitization
+# must happen here in Rust before the payload crosses the IPC bridge.
+ammonia = "4"
 # Magnet URI parsing — extract the info-hash, trackers, and
 # exact-topic fields without rolling our own URI parser.
 url = "2"

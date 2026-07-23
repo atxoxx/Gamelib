@@ -5407,3 +5407,218 @@ offset 0;"#,
 
     Ok(summaries)
 }
+
+
+// ─── Hydra Community Reviews (public read-only API) ───────────────────────────
+//
+// Hydra Launcher (https://github.com/hydralauncher/hydra) runs its own
+// user-review backend. Listing reviews and replies ("answers") is public
+// (no auth); posting/voting requires a Hydra account, so GameLib only
+// implements the read side. Endpoints:
+//   GET /games/steam/{appid}/reviews?take=N&skip=N&sortBy=...
+//   GET /games/steam/{appid}/reviews/{reviewId}/answers?take=N&skip=N
+//
+// Review/answer bodies are TipTap-generated HTML. The frontend renders
+// them with dangerouslySetInnerHTML, so we sanitize EVERY html field
+// (including translations) with ammonia before returning.
+
+const HYDRA_API_BASE: &str = "https://hydra-api-us-east-1.losbroxas.org";
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraReviewUser {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub profile_image_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraReviewAnswer {
+    pub id: String,
+    #[serde(default)]
+    pub answer_html: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub upvotes: i64,
+    #[serde(default)]
+    pub downvotes: i64,
+    #[serde(default)]
+    pub user: HydraReviewUser,
+    #[serde(default)]
+    pub translations: HashMap<String, String>,
+    #[serde(default)]
+    pub detected_language: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraReview {
+    pub id: String,
+    #[serde(default)]
+    pub review_html: String,
+    /// 1..=5 star score.
+    #[serde(default)]
+    pub score: u32,
+    #[serde(default)]
+    pub play_time_in_seconds: Option<u64>,
+    #[serde(default)]
+    pub upvotes: i64,
+    #[serde(default)]
+    pub downvotes: i64,
+    /// Total reply count on the server (may exceed `answers.len()`).
+    #[serde(default)]
+    pub answer_count: u64,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub user: HydraReviewUser,
+    /// First page of replies, eagerly embedded by the server.
+    #[serde(default)]
+    pub answers: Vec<HydraReviewAnswer>,
+    #[serde(default)]
+    pub translations: HashMap<String, String>,
+    #[serde(default)]
+    pub detected_language: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraReviewsResult {
+    #[serde(default)]
+    pub reviews: Vec<HydraReview>,
+    #[serde(default)]
+    pub total_count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraAnswersResult {
+    #[serde(default)]
+    pub answers: Vec<HydraReviewAnswer>,
+    #[serde(default)]
+    pub total_count: u64,
+}
+
+fn sanitize_hydra_html(html: &str) -> String {
+    ammonia::clean(html)
+}
+
+fn sanitize_hydra_answer(answer: &mut HydraReviewAnswer) {
+    answer.answer_html = sanitize_hydra_html(&answer.answer_html);
+    for value in answer.translations.values_mut() {
+        *value = sanitize_hydra_html(value);
+    }
+}
+
+fn sanitize_hydra_review(review: &mut HydraReview) {
+    review.review_html = sanitize_hydra_html(&review.review_html);
+    for value in review.translations.values_mut() {
+        *value = sanitize_hydra_html(value);
+    }
+    for answer in review.answers.iter_mut() {
+        sanitize_hydra_answer(answer);
+    }
+}
+
+/// Fetch a page of Hydra community reviews for a Steam appid.
+/// `sort_by` mirrors Hydra: newest | oldest | score_high | score_low | most_voted.
+/// The API rejects `take < 5`, so we clamp to 5..=50.
+pub async fn fetch_hydra_reviews(
+    app_id: u64,
+    take: u32,
+    skip: u32,
+    sort_by: &str,
+) -> Result<HydraReviewsResult, String> {
+    let client = http_client();
+    let take = take.clamp(5, 50);
+    let sort = match sort_by {
+        "newest" | "oldest" | "score_high" | "score_low" | "most_voted" => sort_by,
+        _ => "newest",
+    };
+
+    let url = format!(
+        "{}/games/steam/{}/reviews?take={}&skip={}&sortBy={}",
+        HYDRA_API_BASE, app_id, take, skip, sort
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Hydra reviews request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Hydra reviews failed with status {}: {}",
+            status, err_text
+        ));
+    }
+
+    let mut result: HydraReviewsResult = resp
+        .json()
+        .await
+        .map_err(|e| format!("Hydra reviews parse error: {}", e))?;
+
+    for review in result.reviews.iter_mut() {
+        sanitize_hydra_review(review);
+    }
+
+    Ok(result)
+}
+
+/// Fetch a page of replies ("answers") for a single Hydra review.
+pub async fn fetch_hydra_review_replies(
+    app_id: u64,
+    review_id: &str,
+    take: u32,
+    skip: u32,
+) -> Result<HydraAnswersResult, String> {
+    let client = http_client();
+    let take = take.clamp(1, 50);
+
+    let url = format!(
+        "{}/games/steam/{}/reviews/{}/answers?take={}&skip={}",
+        HYDRA_API_BASE,
+        app_id,
+        url_encode(review_id),
+        take,
+        skip
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Hydra replies request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Hydra replies failed with status {}: {}",
+            status, err_text
+        ));
+    }
+
+    let mut result: HydraAnswersResult = resp
+        .json()
+        .await
+        .map_err(|e| format!("Hydra replies parse error: {}", e))?;
+
+    for answer in result.answers.iter_mut() {
+        sanitize_hydra_answer(answer);
+    }
+
+    Ok(result)
+}

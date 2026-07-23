@@ -16,12 +16,13 @@ import {
   formatPlayTime,
   reactionImagePath,
 } from "../types/game";
+import HydraReviewsPanel from "./HydraReviewsPanel";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type SourceFilter = "all" | "steam" | "you" | "metacritic" | "opencritic" | "rawg";
+type SourceFilter = "all" | "steam" | "you" | "hydra" | "metacritic" | "opencritic" | "rawg";
 
 /** A normalized review record we render. Combines local + Steam-fetched data. */
 interface ReviewItem {
@@ -1639,41 +1640,47 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       </div>
 
-      <ReviewSummary
-        reviews={allReviews}
-        totalReviewCount={totalReviewCount}
-        steamReviewScoreDesc={steamReviewScoreDesc}
-        steamReviewScore={steamReviewScore}
-        steamTotalPositive={steamTotalPositive}
-        steamTotalNegative={steamTotalNegative}
-      />
+      {/* Steam summary + refresh are hidden on the Hydra sub-tab — they
+          describe Steam data and the Hydra panel fetches on its own. */}
+      {sourceFilter !== "hydra" && (
+        <>
+          <ReviewSummary
+            reviews={allReviews}
+            totalReviewCount={totalReviewCount}
+            steamReviewScoreDesc={steamReviewScoreDesc}
+            steamReviewScore={steamReviewScore}
+            steamTotalPositive={steamTotalPositive}
+            steamTotalNegative={steamTotalNegative}
+          />
 
-      {/* ── Refresh button ──────────────────────────────────────────── */}
-      <div className="rv-refresh-row">
-        <button
-          type="button"
-          className="rv-refresh-btn"
-          onClick={() => { setNextCursor(null); fetchReviews(true, null); }}
-          disabled={isFetchingReviews}
-          title="Fetch latest reviews from Steam"
-          aria-label="Refresh reviews"
-        >
-          {isFetchingReviews ? (
-            <><span className="rv-spinner" aria-hidden="true" />Fetching reviews…</>
-          ) : (
-            <>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="23 4 23 10 17 10" />
-                <polyline points="1 20 1 14 7 14" />
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-              </svg>
-              Refresh reviews
-            </>
-          )}
-        </button>
-      </div>
+          {/* ── Refresh button ──────────────────────────────────────── */}
+          <div className="rv-refresh-row">
+            <button
+              type="button"
+              className="rv-refresh-btn"
+              onClick={() => { setNextCursor(null); fetchReviews(true, null); }}
+              disabled={isFetchingReviews}
+              title="Fetch latest reviews from Steam"
+              aria-label="Refresh reviews"
+            >
+              {isFetchingReviews ? (
+                <><span className="rv-spinner" aria-hidden="true" />Fetching reviews…</>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  Refresh reviews
+                </>
+              )}
+            </button>
+          </div>
+        </>
+      )}
 
-      {totalAll > 0 && (
+      {totalAll > 0 && sourceFilter !== "hydra" && (
         <>
           {/* ── Toolbar ──────────────────────────────────────────────── */}
           <div className="rv-toolbar">
@@ -1818,32 +1825,51 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
             )}
           </div>
 
-          {/* ── Source tabs ────────────────────────────────────────── */}
-          <div className="rv-source-tabs">
-            <button type="button" className={`rv-source-tab${sourceFilter === "all" ? " active" : ""}`} onClick={() => setSourceFilter("all")}>
-              All Reviews ({totalAll})
-            </button>
-            <button type="button" className={`rv-source-tab${sourceFilter === "steam" ? " active" : ""}`} onClick={() => setSourceFilter("steam")}>
-              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
-                <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
-              </svg>
-              Steam ({steamCount > 0 ? steamCount.toLocaleString() : steamCount})
-            </button>
-            {youCount > 0 && (
-              <button type="button" className={`rv-source-tab${sourceFilter === "you" ? " active" : ""}`} onClick={() => setSourceFilter("you")}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" width="14" height="14" aria-hidden="true">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-                You ({youCount})
-              </button>
-            )}
-          </div>
         </>
       )}
 
+      {/* ── Source tabs ────────────────────────────────────────────
+          Rendered outside the `totalAll > 0` gate so the Hydra
+          sub-tab stays reachable even when Steam has no reviews. */}
+      <div className="rv-source-tabs">
+          <button type="button" className={`rv-source-tab${sourceFilter === "all" ? " active" : ""}`} onClick={() => setSourceFilter("all")}>
+            All Reviews ({totalAll})
+          </button>
+          <button type="button" className={`rv-source-tab${sourceFilter === "steam" ? " active" : ""}`} onClick={() => setSourceFilter("steam")}>
+            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
+              <path d="M3 5h18v14H3V5zm9 2L5 19h4l1-2.5h2L13 19h4L12 7zm0 4.6L13.2 14h-2.4L12 11.6z" />
+            </svg>
+            Steam ({steamCount > 0 ? steamCount.toLocaleString() : steamCount})
+          </button>
+          <button
+            type="button"
+            className={`rv-source-tab${sourceFilter === "hydra" ? " active" : ""}`}
+            onClick={() => setSourceFilter("hydra")}
+            title="Community reviews from the Hydra launcher"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            User Reviews
+          </button>
+          {youCount > 0 && (
+            <button type="button" className={`rv-source-tab${sourceFilter === "you" ? " active" : ""}`} onClick={() => setSourceFilter("you")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" width="14" height="14" aria-hidden="true">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              You ({youCount})
+            </button>
+          )}
+      </div>
+
       {/* ── Content area ──────────────────────────────────────────── */}
-      {(externalLoading["metacritic"] || externalLoading["opencritic"] || externalLoading["rawg"]) &&
+      {sourceFilter === "hydra" ? (
+        <HydraReviewsPanel appId={appId} gameName={game.name} />
+      ) : (externalLoading["metacritic"] || externalLoading["opencritic"] || externalLoading["rawg"]) &&
         (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg") ? (
         <div className="rv-empty">
           <div className="rv-empty-icon"><span className="rv-spinner" aria-hidden="true" style={{ width: 28, height: 28, borderWidth: 3 }} /></div>
@@ -1912,7 +1938,8 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       )}
 
-      {/* ── External reviews section ─────────────────────────────── */}
+      {/* ── External reviews section (hidden on the Hydra sub-tab) ── */}
+      {sourceFilter !== "hydra" && (
       <div className="rv-external-section">
         <div className="rv-external-header">
           <div className="rv-external-header-text">
@@ -1933,6 +1960,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }

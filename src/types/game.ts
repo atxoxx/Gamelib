@@ -266,6 +266,75 @@ export interface LanguageSupportInfo {
   supportType: string;
 }
 
+// ─── Hydra community reviews (public Hydra launcher API, read-only) ────────
+
+/** Author of a Hydra community review or reply. */
+export interface HydraReviewUser {
+  id: string;
+  /** Falls back to "Anonymous" in the UI when empty. */
+  displayName: string;
+  profileImageUrl?: string | null;
+}
+
+/** A reply ("answer") to a Hydra community review. `answerHtml` is
+ *  sanitized by the Rust backend (ammonia) before crossing the IPC
+ *  bridge, so it is safe to render with dangerouslySetInnerHTML. */
+export interface HydraReviewAnswer {
+  id: string;
+  answerHtml: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  upvotes: number;
+  downvotes: number;
+  user: HydraReviewUser;
+  /** Other-language HTML versions keyed by base lang code (e.g. "en"). */
+  translations: Record<string, string>;
+  detectedLanguage?: string | null;
+}
+
+/** A Hydra community review. `reviewHtml` is sanitized by the Rust
+ *  backend (ammonia) before crossing the IPC bridge. */
+export interface HydraReview {
+  id: string;
+  reviewHtml: string;
+  /** 1–5 star score ("note"). */
+  score: number;
+  /** Author playtime for this game, in seconds. Shown only when > 0. */
+  playTimeInSeconds?: number | null;
+  upvotes: number;
+  downvotes: number;
+  /** Total reply count on the server (may exceed answers.length). */
+  answerCount: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  user: HydraReviewUser;
+  /** First page of replies, eagerly embedded by the server. */
+  answers: HydraReviewAnswer[];
+  translations: Record<string, string>;
+  detectedLanguage?: string | null;
+}
+
+export interface HydraReviewsResult {
+  reviews: HydraReview[];
+  totalCount: number;
+}
+
+export interface HydraAnswersResult {
+  answers: HydraReviewAnswer[];
+  totalCount: number;
+}
+
+/** Sort options accepted by the Hydra reviews endpoint (`sortBy=`). */
+export type HydraSortOption = "newest" | "oldest" | "score_high" | "score_low" | "most_voted";
+
+export const HYDRA_SORT_OPTIONS: { value: HydraSortOption; label: string }[] = [
+  { value: "newest",     label: "Newest" },
+  { value: "oldest",     label: "Oldest" },
+  { value: "score_high", label: "Highest score" },
+  { value: "score_low",  label: "Lowest score" },
+  { value: "most_voted", label: "Most voted" },
+];
+
 /** Steam achievement data synced from Steam. */
 export interface SteamAchievement {
   apiname: string;

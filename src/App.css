@@ -7596,6 +7596,252 @@
   color: var(--color-text-muted);
 }
 
+/* ── Hydra community reviews (User Reviews sub-tab) ──────────────────── */
+
+.hrv-root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hrv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hrv-toolbar-count {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.hrv-row-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hrv-row-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hrv-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hrv-avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--color-bg-tertiary);
+}
+
+.hrv-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.hrv-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.hrv-date {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.hrv-playtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.hrv-playtime svg {
+  width: 12px;
+  height: 12px;
+}
+
+.hrv-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.hrv-score-stars {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.hrv-score-label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hrv-score-pos { color: #6fdd8b; }
+.hrv-score-mid { color: #ffcc33; }
+.hrv-score-neg { color: #f47174; }
+
+.hrv-html {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+.hrv-html p {
+  margin: 0 0 6px;
+}
+.hrv-html p:last-child {
+  margin-bottom: 0;
+}
+.hrv-html img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.hrv-translate-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.hrv-translate-toggle:hover {
+  text-decoration: underline;
+}
+
+.hrv-row-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.hrv-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hrv-vote {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.hrv-vote svg {
+  width: 14px;
+  height: 14px;
+}
+.hrv-vote-up svg { color: #6fdd8b; }
+.hrv-vote-down svg { color: #f47174; }
+
+.hrv-reply-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Reply thread */
+
+.hrv-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 2px solid var(--color-border);
+  padding-left: 14px;
+  margin-left: 6px;
+}
+
+.hrv-thread-toggle,
+.hrv-thread-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.hrv-thread-toggle:hover,
+.hrv-thread-more:hover {
+  text-decoration: underline;
+}
+.hrv-thread-toggle:disabled,
+.hrv-thread-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.hrv-thread-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+
+.hrv-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hrv-reply {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.hrv-reply-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hrv-reply-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hrv-reply-meta .hrv-name {
+  font-size: 12.5px;
+}
+.hrv-reply-meta .hrv-vote {
+  font-size: 11px;
+}
+.hrv-reply-meta .hrv-vote svg {
+  width: 12px;
+  height: 12px;
+}
+
+.hrv-error-inline {
+  margin: 0;
+  font-size: 11px;
+  color: #f47174;
+}
+
 /* ── Reactions (image-based) ──────────────────────────────────────────── */
 
 .rv-reaction-img {
