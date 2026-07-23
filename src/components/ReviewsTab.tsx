@@ -843,33 +843,18 @@ function CommentsLink({
 function ThumbBadge({ sentiment }: { sentiment: ReviewItem["sentiment"] }) {
   if (sentiment !== "positive" && sentiment !== "negative") return null;
   const isPos = sentiment === "positive";
+  // Material "thumb_up" / "thumb_down" glyphs (24x24). The down state
+  // reuses the up glyph flipped vertically, which guarantees a correct,
+  // symmetric shape without hand-writing a second path.
+  const thumbPath =
+    "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z";
   return (
     <div className={`rv-thumb-badge${isPos ? " rv-thumb-pos" : " rv-thumb-neg"}`}>
-      <svg className="rv-thumb-svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <svg className="rv-thumb-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         {isPos ? (
-          <g transform="translate(24 30) scale(0.85)">
-            <path
-              d="M-14-8v12M-6-14l-1 6h6l-7 26h-18a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h4z"
-              fill="currentColor"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.9"
-            />
-          </g>
+          <path d={thumbPath} />
         ) : (
-          <g transform="translate(24 18) scale(0.85) rotate(180)">
-            <path
-              d="M-14-8v12M-6-14l-1 6h6l-7 26h-18a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h4z"
-              fill="currentColor"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.9"
-            />
-          </g>
+          <path transform="translate(0 24) scale(1 -1)" d={thumbPath} />
         )}
       </svg>
       <span className="rv-thumb-label">{isPos ? "Recommended" : "Not Recommended"}</span>
