@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
+import HydraPlayerCount from "../HydraPlayerCount";
 import HeroTrailer from "../hero/HeroTrailer";
 import FriendsPlayingStrip from "../hero/FriendsPlayingStrip";
 
@@ -212,6 +213,7 @@ function StoreHero({ onCardClick, trailerUrl }: StoreHeroProps) {
 
       <div className="store-hero-player-count">
         <SteamPlayerCount appId={steamAppId} />
+        <HydraPlayerCount appId={steamAppId} />
       </div>
 
       {active.coverUrl && (

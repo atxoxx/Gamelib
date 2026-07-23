@@ -5622,3 +5622,59 @@ pub async fn fetch_hydra_review_replies(
 
     Ok(result)
 }
+
+// ─── Hydra Community Game Stats (public read-only API) ────────────────────────
+//
+// Aggregate community stats for a game, as tracked by the Hydra launcher
+// backend: currently active Hydra players, total download count across
+// community sources, and the average 1-5 star score from Hydra user
+// reviews. Endpoint (anonymous, no auth):
+//   GET /games/stats?objectId={steamAppId}&shop=steam
+
+/// Aggregate Hydra community stats for a single game.
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HydraGameStats {
+    /// Players currently in-game according to Hydra launcher telemetry.
+    #[serde(default)]
+    pub player_count: u64,
+    /// Total community downloads recorded by Hydra.
+    #[serde(default)]
+    pub download_count: u64,
+    /// Average Hydra user-review score, 1..=5 stars (0 when unreviewed).
+    #[serde(default)]
+    pub average_score: f64,
+    /// Number of Hydra user reviews backing `average_score`.
+    #[serde(default)]
+    pub review_count: u64,
+}
+
+/// Fetch Hydra community stats (active players, downloads, review score)
+/// for a Steam appid from Hydra's public API.
+pub async fn fetch_hydra_game_stats(app_id: u64) -> Result<HydraGameStats, String> {
+    let client = http_client();
+
+    let url = format!(
+        "{}/games/stats?objectId={}&shop=steam",
+        HYDRA_API_BASE, app_id
+    );
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Hydra stats request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Hydra stats failed with status {}: {}",
+            status, err_text
+        ));
+    }
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Hydra stats parse error: {}", e))
+}

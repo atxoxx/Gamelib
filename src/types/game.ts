@@ -324,6 +324,19 @@ export interface HydraAnswersResult {
   totalCount: number;
 }
 
+/** Aggregate Hydra community stats for a game
+ *  (`GET /games/stats?objectId={appid}&shop=steam`). */
+export interface HydraGameStats {
+  /** Players currently in-game per Hydra launcher telemetry. */
+  playerCount: number;
+  /** Total community downloads recorded by Hydra. */
+  downloadCount: number;
+  /** Average Hydra user-review score, 1–5 stars (0 when unreviewed). */
+  averageScore: number;
+  /** Number of Hydra user reviews backing `averageScore`. */
+  reviewCount: number;
+}
+
 /** Sort options accepted by the Hydra reviews endpoint (`sortBy=`). */
 export type HydraSortOption = "newest" | "oldest" | "score_high" | "score_low" | "most_voted";
 

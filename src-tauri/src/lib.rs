@@ -1217,6 +1217,64 @@ async fn fetch_hydra_review_replies(
     .await
 }
 
+/// In-memory TTL cache for Hydra community game stats, mirroring
+/// `PlayerCountCache`: one entry per Steam appid, refreshed at most
+/// once per `HYDRA_STATS_CACHE_TTL`. Failures are cached as `None`
+/// so a 404-ing appid doesn't hammer the Hydra API on every 60s poll.
+struct HydraStatsCache {
+    cache: std::sync::Mutex<HashMap<u64, (Option<game_scraper::HydraGameStats>, Instant)>>,
+}
+
+impl Default for HydraStatsCache {
+    fn default() -> Self {
+        Self {
+            cache: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Keep in lockstep with the frontend polling interval in
+/// `src/hooks/useHydraGameStats.ts` (60s) so the UI never re-fetches
+/// before the backend cache has expired anyway.
+const HYDRA_STATS_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Fetch Hydra community stats (active players, community downloads,
+/// average review score) for a Steam appid, with a 60s per-appid cache.
+///
+/// Returns `Ok(None)` when Hydra has no data for the appid (or the API
+/// errored) so the frontend badge hides silently.
+#[tauri::command]
+async fn get_hydra_game_stats(
+    app: tauri::AppHandle,
+    app_id: u64,
+) -> Result<Option<game_scraper::HydraGameStats>, String> {
+    let state: tauri::State<'_, HydraStatsCache> = app.state();
+
+    {
+        let cache = state.cache.lock().map_err(|e| e.to_string())?;
+        if let Some((stats, fetched_at)) = cache.get(&app_id) {
+            if fetched_at.elapsed() < HYDRA_STATS_CACHE_TTL {
+                return Ok(stats.clone());
+            }
+        }
+    }
+
+    let stats = match game_scraper::fetch_hydra_game_stats(app_id).await {
+        Ok(stats) => Some(stats),
+        Err(err) => {
+            eprintln!("[hydra-stats] appid {}: {}", app_id, err);
+            None
+        }
+    };
+
+    {
+        let mut cache = state.cache.lock().map_err(|e| e.to_string())?;
+        cache.insert(app_id, (stats.clone(), Instant::now()));
+    }
+
+    Ok(stats)
+}
+
 /// Fetch the rich "About" payload for a game. Prefers Steam's
 /// `about_the_game` (HTML with embedded GIFs/images) + `movies[]`
 /// (Steam CDN .webm/.mp4 trailers); falls back to IGDB's
@@ -2558,7 +2616,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, load_sessions, get_sessions, delete_session, insert_session, debug_mahm_entries, get_system_ram_gb, get_system_info, get_metrics_config, set_metrics_config, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, move_game_install, uninstall_game, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, fetch_hydra_reviews, fetch_hydra_review_replies, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, get_last_session_for_game, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
+        .invoke_handler(tauri::generate_handler![scan_folder_for_exes, launch_game, force_close_game, save_games, load_games, update_game_last_played, read_cover_image, search_game_metadata, fetch_game_images, download_image, spider_extract, spider_fetch_page, search_launchbox_images, detect_gpus, list_image_files, list_media_files, save_screenshot, save_text_file, load_sessions, get_sessions, delete_session, insert_session, debug_mahm_entries, get_system_ram_gb, get_system_info, get_metrics_config, set_metrics_config, resolve_steam_exe, detect_game_size, check_paths_exist, open_folder, disk_usage, move_game_install, uninstall_game, detect_steam_screenshot_folders, detect_system_screenshot_folders, save_store_cache, load_store_cache, fetch_store_games, search_store_games,            get_store_game_detail, get_collection_games,            fetch_game_reviews, fetch_external_reviews, fetch_hydra_reviews, fetch_hydra_review_replies, get_hydra_game_stats, get_about_section, get_recommended_config, save_wishlist, load_wishlist, list_recent_sessions, get_last_session_for_game, deals::fetch_gamepass_catalog, deals::fetch_isthereanydeal_deals, deals::fetch_giveaways, deals::open_deal_url,            steam_sync_games,
             steam_connect, steam_is_authenticated, steam_logout, steam_get_session,
             epic_start_login, epic_finish_login, epic_login_with_refresh_token, epic_sync_library, epic_get_filters, epic_is_authenticated, epic_logout,
             gog_start_login, gog_sync_library, gog_is_authenticated, gog_logout,
@@ -2781,6 +2839,7 @@ pub fn run() {
             // few hundred, and skipping the cleanup avoids dropping
             // a user's just-fetched count behind their back.
             app.manage(PlayerCountCache::default());
+            app.manage(HydraStatsCache::default());
 
             // Steam game-stats cache (appdetails + appreviews, used by
             // the player-count popover). Same growth model as

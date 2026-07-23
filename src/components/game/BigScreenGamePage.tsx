@@ -47,6 +47,7 @@ import { useGamepad } from "../../hooks/GamepadProvider";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
 import SteamPlayerCount from "../SteamPlayerCount";
+import HydraPlayerCount from "../HydraPlayerCount";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import DownloadModal from "../DownloadModal";
 import BigScreenHeroBackground from "./BigScreenHeroBackground";
@@ -328,6 +329,11 @@ export default function BigScreenGamePage({
               {resolvedSteamAppId != null && (
                 <BigScreenPill tone="muted" size="sm">
                   <SteamPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Steam
+                </BigScreenPill>
+              )}
+              {resolvedSteamAppId != null && (
+                <BigScreenPill tone="muted" size="sm">
+                  <HydraPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Hydra
                 </BigScreenPill>
               )}
               {rating != null && rating > 0 && (

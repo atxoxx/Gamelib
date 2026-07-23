@@ -4,6 +4,7 @@ import { type Game, PLAY_STATUS_DETAILS } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useGameAccent } from "../../hooks/useGameAccent";
 import SteamPlayerCount from "../SteamPlayerCount";
+import HydraPlayerCount from "../HydraPlayerCount";
 import GameStatusDropdown from "./GameStatusDropdown";
 import GameLaunchActions from "./GameLaunchActions";
 import HeroTrailer from "../hero/HeroTrailer";
@@ -221,6 +222,16 @@ export default function GameHero({
               label="Players Now"
               icon={<IconUsers size={12} />}
               value={<SteamPlayerCount appId={steamAppId} />}
+              intent="accent"
+            />
+          )}
+          {steamAppId != null && (
+            <KpiTile
+              glass
+              size="sm"
+              label="Hydra"
+              icon={<IconUsers size={12} />}
+              value={<HydraPlayerCount appId={steamAppId} />}
               intent="accent"
             />
           )}

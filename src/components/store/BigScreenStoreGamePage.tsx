@@ -6,6 +6,7 @@ import { useFocusable } from "../../hooks/useFocusable";
 import { useGamepad } from "../../hooks/GamepadProvider";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import SteamPlayerCount from "../SteamPlayerCount";
+import HydraPlayerCount from "../HydraPlayerCount";
 import DownloadModal from "../DownloadModal";
 import BigScreenHeroBackground from "../game/BigScreenHeroBackground";
 import SpecsCard from "../game/SpecsCard";
@@ -227,6 +228,11 @@ export default function BigScreenStoreGamePage({
         {resolvedSteamAppId != null && (
           <BigScreenPill tone="muted" size="md">
             <SteamPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Steam
+          </BigScreenPill>
+        )}
+        {resolvedSteamAppId != null && (
+          <BigScreenPill tone="muted" size="md">
+            <HydraPlayerCount appId={resolvedSteamAppId} className="bigscreen-steam-players" /> on Hydra
           </BigScreenPill>
         )}
         {rating != null && rating > 0 && (

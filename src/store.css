@@ -1330,6 +1330,12 @@
   right: var(--space-md);
   z-index: 4;
   pointer-events: none;
+  /* Two badges side by side (Steam + Hydra); wraps on narrow heroes. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .store-hero-player-count .steam-player-count {
@@ -1342,6 +1348,101 @@
     transform: scale(1);
     box-shadow: 0 0 6px var(--color-success);
   }
+}
+
+/* ===========================================================================
+   Hydra community stats badge + popover accents
+
+   - .hydra-player-count      : modifier on .steam-player-count that swaps
+                                 the green Steam accent for Hydra purple
+   - .hydra-player-count-dot  : purple pulsing dot (own keyframes because
+                                 the Steam ones hardcode --color-success
+                                 in their box-shadow frames)
+   - .hydra-stats-popover     : modifier on .steam-stats-popover (layout
+                                 is 100% shared; only accents differ)
+   - .hydra-stats-badge       : purple-tinted section badge
+   - .hydra-stats-stars       : layered ★★★★★ row with a width-clipped
+                                 fill layer for fractional scores
+   ============================================================================ */
+
+.hydra-player-count {
+  --hydra-accent: #a78bfa;
+  border-color: color-mix(in srgb, var(--hydra-accent) 30%, var(--color-border));
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    0 0 10px color-mix(in srgb, var(--hydra-accent) 18%, transparent);
+}
+
+.hydra-player-count.steam-player-count--clickable:hover {
+  border-color: color-mix(in srgb, var(--hydra-accent) 50%, var(--color-border));
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 0 14px color-mix(in srgb, var(--hydra-accent) 28%, transparent);
+}
+
+.hydra-player-count-dot {
+  --hydra-accent: #a78bfa;
+  background-color: var(--hydra-accent);
+  box-shadow: 0 0 6px var(--hydra-accent);
+  animation-name: hydra-player-dot-pulse;
+}
+
+@keyframes hydra-player-dot-pulse {
+  0%   { transform: scale(0.92); opacity: 0.85; box-shadow: 0 0 4px var(--hydra-accent); }
+  50%  { transform: scale(1.18); opacity: 1;    box-shadow: 0 0 10px var(--hydra-accent); }
+  100% { transform: scale(0.92); opacity: 0.85; box-shadow: 0 0 4px var(--hydra-accent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hydra-player-count-dot {
+    animation: none;
+    transform: scale(1);
+    box-shadow: 0 0 6px var(--hydra-accent);
+  }
+}
+
+.hydra-stats-popover {
+  --hydra-accent: #a78bfa;
+}
+
+.hydra-stats-popover .steam-stats-popover-header-dot {
+  background-color: var(--hydra-accent);
+  box-shadow: 0 0 6px var(--hydra-accent);
+}
+
+.hydra-stats-badge {
+  color: var(--hydra-accent, #a78bfa);
+  background: color-mix(in srgb, var(--hydra-accent, #a78bfa) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hydra-accent, #a78bfa) 30%, transparent);
+}
+
+.hydra-stats-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hydra-stats-stars {
+  position: relative;
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.hydra-stats-stars-base {
+  color: color-mix(in srgb, var(--color-text-primary) 22%, transparent);
+}
+
+.hydra-stats-stars-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--hydra-accent, #a78bfa);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--hydra-accent, #a78bfa) 45%, transparent);
 }
 
 /* ===========================================================================
