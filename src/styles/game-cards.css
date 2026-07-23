@@ -384,7 +384,7 @@
 
 .ttb-row__fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-accent), #818cf8);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
   border-radius: var(--radius-full);
   transition: width 600ms var(--ease-standard);
   box-shadow: 0 0 6px var(--color-accent-glow);

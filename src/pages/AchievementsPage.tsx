@@ -387,7 +387,7 @@ function GameAchievementRow({
                   width: `${pct}%`,
                   background: pct >= 100
                     ? "linear-gradient(90deg, #10b981, #059669)"
-                    : "linear-gradient(90deg, var(--color-accent), #818cf8)",
+                    : "linear-gradient(90deg, var(--color-accent), var(--color-accent-hover))",
                 }}
               />
             </div>
