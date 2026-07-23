@@ -864,3 +864,279 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ── Selection checkbox + batch toolbar ─────────────────────────────── */
+
+/* When in select mode, the summary row gains a leading checkbox column. */
+.storage__row-summary--select {
+  grid-template-columns: 22px 36px minmax(140px, 1.5fr) minmax(70px, 0.6fr) minmax(110px, 0.8fr) minmax(100px, 0.7fr) 20px;
+  padding-left: 12px;
+}
+
+.storage__row.density-compact .storage__row-summary--select {
+  grid-template-columns: 22px 0px minmax(120px, 1.5fr) minmax(60px, 0.6fr) minmax(100px, 0.8fr) minmax(80px, 0.7fr) 20px;
+}
+
+.storage__row.density-cinematic .storage__row-summary--select {
+  grid-template-columns: 22px 48px minmax(160px, 1.5fr) minmax(80px, 0.6fr) minmax(120px, 0.8fr) minmax(110px, 0.7fr) 24px;
+}
+
+.storage__row-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.storage__row-select input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.storage__row--selected {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+
+.storage__batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: var(--space-sm) var(--space-lg);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  border-radius: var(--radius-lg);
+  position: sticky;
+  top: var(--space-sm);
+  z-index: 6;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.storage__batch-count {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.storage__batch-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+/* ── Drive filter chip (active bucket) ──────────────────────────────── */
+
+.storage__filter-chip--drive {
+  gap: 6px;
+}
+
+.storage__filter-chip-clear {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.storage__filter-chip-clear:hover {
+  opacity: 1;
+}
+
+/* ── Clickable "By drive" rows ──────────────────────────────────────── */
+
+.storage__breakdown-row--clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.storage__breakdown-row--clickable:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.storage__breakdown-row--clickable:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.storage__breakdown-row--active {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.storage__breakdown-row--active .storage__breakdown-label {
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* ── Move dialog ────────────────────────────────────────────────────── */
+
+.move-dialog {
+  max-width: 460px;
+  width: calc(100% - 32px);
+}
+
+.move-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.move-dialog-lead {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.move-dialog-dest {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px dashed color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.move-dialog-dest:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-tertiary));
+}
+
+.move-dialog-dest svg {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.move-dialog-dest-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono);
+}
+
+.move-dialog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs);
+}
+
+.move-dialog-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.move-dialog-list-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-dialog-list-size {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.move-dialog-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.move-dialog-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.move-dialog-progress-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+}
+
+.move-dialog-progress-track {
+  position: relative;
+  height: 8px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.move-dialog-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+  border-radius: inherit;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.move-dialog-progress-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.move-dialog-progress-bytes {
+  font-variant-numeric: tabular-nums;
+}
+
+.move-dialog-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.move-dialog-errors-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-stale);
+}
+
+.move-dialog-errors ul {
+  margin: 0;
+  padding-left: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}

@@ -132,3 +132,36 @@ export function sizeCoverage(games: Game[]): { sized: number; unsized: number } 
   }
   return { sized, unsized };
 }
+
+// ─── Path relocation ───────────────────────────────────────────────────────
+
+/** Recompute an executable's path after its install folder has moved.
+ *
+ *  `oldExe` is the previous `game.path` (e.g. `D:\Games\Foo\Bin\foo.exe`),
+ *  `oldRoot` is the previously-measured install folder (`sizeRootPath`,
+ *  e.g. `D:\Games\Foo`), and `newRoot` is where that folder was copied to
+ *  (e.g. `E:\Library\Foo`). We keep the relative structure under the new
+ *  root so the launcher still finds the exe.
+ *
+ *  Falls back to just the file name when `oldExe` doesn't sit beneath
+ *  `oldRoot` (defensive — should not happen for a correctly measured game). */
+export function relocateExe(
+  oldExe: string | undefined,
+  oldRoot: string,
+  newRoot: string
+): string {
+  if (!oldExe) return newRoot;
+  const norm = (p: string) => p.replace(/\\/g, "/");
+  const e = norm(oldExe);
+  const r = norm(oldRoot);
+  let rel = e;
+  if (r && e.startsWith(r)) {
+    rel = e.slice(r.length);
+  } else {
+    rel = e.split("/").pop() ?? "";
+  }
+  rel = rel.replace(/^\/+/, "");
+  const sep = newRoot.includes("\\") ? "\\" : "/";
+  const base = newRoot.endsWith(sep) ? newRoot : newRoot + sep;
+  return base + rel;
+}

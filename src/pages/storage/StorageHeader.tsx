@@ -17,6 +17,11 @@ interface Props {
    *  disk. Surfaced in the totals card meta line so the user can see
    *  the staleness coverage at a glance. */
   staleCount?: number;
+  /** The drive label currently filtering the list, if any. The matching
+   *  "By drive" row is highlighted so the active filter reads clearly. */
+  activeDrive?: string | null;
+  /** Click a "By drive" row to filter the Storage list to that volume. */
+  onDriveClick?: (label: string) => void;
 }
 
 /** Phase-5 Storage header — totals card + per-platform + per-drive
@@ -25,7 +30,12 @@ interface Props {
  *
  *  Note: the page title/subtitle are rendered by StoragePage itself
  *  so this component just produces the three breakdown cards. */
-export function StorageHeader({ games, staleCount = 0 }: Props) {
+export function StorageHeader({
+  games,
+  staleCount = 0,
+  activeDrive = null,
+  onDriveClick,
+}: Props) {
   const { unit } = useSizeUnit();
   const total = useMemo(() => totalBytes(games), [games]);
   const coverage = useMemo(() => sizeCoverage(games), [games]);
@@ -56,7 +66,15 @@ export function StorageHeader({ games, staleCount = 0 }: Props) {
         </section>
 
         <BreakdownCard title="By platform" buckets={platforms} total={total} unit={unit} />
-        <BreakdownCard title="By drive" buckets={drives} total={total} unit={unit} usage={driveUsage} />
+        <BreakdownCard
+          title="By drive"
+          buckets={drives}
+          total={total}
+          unit={unit}
+          usage={driveUsage}
+          activeKey={activeDrive}
+          onRowClick={onDriveClick}
+        />
     </div>
   );
 }
@@ -75,6 +93,8 @@ function BreakdownCard({
   total,
   unit,
   usage,
+  activeKey,
+  onRowClick,
 }: {
   title: string;
   buckets: StorageBucket[];
@@ -83,7 +103,13 @@ function BreakdownCard({
   /** Optional per-drive capacity map (only the "By drive" card passes
    *  this). Keyed by the same label `driveBuckets` produces. */
   usage?: Map<string, { total: number; free: number; available: number }>;
+  /** Highlighted row label (drive filter is active). */
+  activeKey?: string | null;
+  /** Click handler for a row (drive filter). Only the "By drive" card
+   *  passes one. */
+  onRowClick?: (label: string) => void;
 }) {
+  const interactive = !!onRowClick;
   return (
     <section className="storage__card storage__card--breakdown">
       <span className="storage__card-label">{title}</span>
@@ -96,16 +122,41 @@ function BreakdownCard({
             const u = usage?.get(b.label);
             const usedPct =
               u && u.total > 0 ? (b.bytes / u.total) * 100 : 0;
+            const isActive = interactive && activeKey === b.label;
+            const classes = [
+              "storage__breakdown-row",
+              interactive ? "storage__breakdown-row--clickable" : "",
+              isActive ? "storage__breakdown-row--active" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
-                <li
+              <li
                 key={b.label}
-                className="storage__breakdown-row"
-                role="meter"
-                aria-valuenow={Math.round(pct)}
-                aria-valuemin={0}
-                aria-valuemax={100}
+                className={classes}
+                role={interactive ? "button" : "meter"}
+                aria-valuenow={interactive ? undefined : Math.round(pct)}
+                aria-valuemin={interactive ? undefined : 0}
+                aria-valuemax={interactive ? undefined : 100}
+                aria-pressed={interactive ? isActive : undefined}
                 aria-label={`${b.label}: ${formatSize(b.bytes, unit)} across ${b.count} game${b.count === 1 ? "" : "s"}`}
-                title={`${b.label}: ${formatSize(b.bytes, unit)} across ${b.count} game${b.count === 1 ? "" : "s"}`}
+                title={
+                  interactive
+                    ? `Filter by ${b.label}`
+                    : `${b.label}: ${formatSize(b.bytes, unit)} across ${b.count} game${b.count === 1 ? "" : "s"}`
+                }
+                onClick={interactive ? () => onRowClick?.(b.label) : undefined}
+                tabIndex={interactive ? 0 : undefined}
+                onKeyDown={
+                  interactive
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowClick?.(b.label);
+                        }
+                      }
+                    : undefined
+                }
               >
                 <span className="storage__breakdown-label">{b.label}</span>
                 <div className="storage__breakdown-track">

@@ -32,6 +32,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 
 /// Result returned to the frontend after a successful size detection.
@@ -375,6 +378,212 @@ fn disk_usage_inner(path: Option<&str>) -> Result<DiskUsage, String> {
         total,
         free,
         available,
+    })
+}
+
+// ─── Install management (move / uninstall) ────────────────────────────────
+//
+// These two commands turn the Storage tab from a read-only dashboard into a
+// real *game manager*: the user can relocate an install to another drive
+// (e.g. to free up space on an SSD) or uninstall it entirely. Both are
+// intentionally conservative — moves verify the copy before deleting the
+// source, and uninstalls only ever touch the single measured folder.
+
+/// Progress tick emitted while a move is in flight. The frontend listens on
+/// `game-move-progress` and renders a per-game progress bar. `phase` is one
+/// of `"copying"` / `"verifying"` / `"cleaning"`.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveProgress {
+    pub game_id: String,
+    pub copied_bytes: u64,
+    pub total_bytes: u64,
+    pub phase: String,
+}
+
+/// Final result of a successful move. `to_path` is the new install root the
+/// frontend should persist as `sizeRootPath` (and re-derive `path` from).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveGameResult {
+    pub to_path: String,
+    pub size_bytes: u64,
+}
+
+/// Emitted once a move fully completes (copy verified + source removed).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveDoneEvent {
+    pub game_id: String,
+    pub to_path: String,
+}
+
+/// Result of an uninstall. `deleted_bytes` lets the header re-total instantly
+/// without a round-trip; `path` echoes the removed folder for logging.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallResult {
+    pub deleted_bytes: u64,
+    pub path: String,
+}
+
+/// Emit a `game-move-progress` tick. Kept as a free function (rather than a
+/// closure) so the Tauri command macro never has to infer a `!` type from a
+/// `&dyn Fn` argument — passing a closure into the recursive walker tripped
+/// the never-type-fallback lint under edition-2024 compatibility.
+fn emit_move_progress(
+    app: &tauri::AppHandle,
+    game_id: &str,
+    copied: u64,
+    total: u64,
+    phase: &str,
+) {
+    let _ = app.emit(
+        "game-move-progress",
+        MoveProgress {
+            game_id: game_id.to_string(),
+            copied_bytes: copied,
+            total_bytes: total,
+            phase: phase.to_string(),
+        },
+    );
+}
+
+/// Recursively copy `from` → `to`, accumulating `copied` bytes and emitting a
+/// progress tick after each file. Symlinks are skipped (mirrors
+/// `walk_and_sum`): following them across volumes would both loop and
+/// double-count. Per-directory failures are non-fatal — we log and continue
+/// so one unreadable folder can't abort the whole move.
+fn copy_dir_with_progress(
+    from: &Path,
+    to: &Path,
+    copied: &Arc<AtomicU64>,
+    app: &tauri::AppHandle,
+    game_id: &str,
+    total: u64,
+) -> Result<(), String> {
+    std::fs::create_dir_all(to)
+        .map_err(|e| format!("create_dir {} failed: {}", to.display(), e))?;
+    let entries = std::fs::read_dir(from)
+        .map_err(|e| format!("read_dir {} failed: {}", from.display(), e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[size] move: stat {} failed: {e}", path.display());
+                continue;
+            }
+        };
+        let dest = to.join(entry.file_name());
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            copy_dir_with_progress(&path, &dest, copied, app, game_id, total)?;
+        } else if meta.is_file() {
+            if let Err(e) = std::fs::copy(&path, &dest) {
+                return Err(format!("copy {} → {} failed: {e}", path.display(), dest.display()));
+            }
+            let c = copied.fetch_add(meta.len(), Ordering::SeqCst) + meta.len();
+            emit_move_progress(app, game_id, c, total, "copying");
+        }
+    }
+    Ok(())
+}
+
+/// Relocate a game's install folder to a new parent directory.
+///
+/// `from_root` is the currently-measured install folder (`sizeRootPath`). The
+/// folder keeps its own name, so moving `D:\Games\Foo` into `E:\Library`
+/// produces `E:\Library\Foo`. The source is only deleted after the copy is
+/// verified byte-for-byte (total size match), so an interrupted move never
+/// destroys the user's game — at worst it leaves a partial copy behind.
+///
+/// Progress is streamed via `game-move-progress`; completion via
+/// `game-move-done`. The frontend is responsible for rewriting `path` /
+/// `sizeRootPath` on the game record.
+#[tauri::command]
+pub fn move_game_install(
+    app: tauri::AppHandle,
+    game_id: String,
+    from_root: String,
+    dest_dir: String,
+) -> Result<MoveGameResult, String> {
+    let from = Path::new(&from_root);
+    if !from.exists() || !from.is_dir() {
+        return Err(format!("Source folder does not exist: {from_root}"));
+    }
+    let dest = Path::new(&dest_dir);
+    if !dest.exists() || !dest.is_dir() {
+        return Err(format!("Destination does not exist: {dest_dir}"));
+    }
+    let folder_name = from
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Could not determine the source folder name")?;
+    let new_root = dest.join(folder_name);
+    if new_root == from {
+        return Err("Source and destination are the same folder".into());
+    }
+    if new_root.exists() {
+        return Err(format!(
+            "Destination already exists: {}",
+            new_root.display()
+        ));
+    }
+
+    // Pre-compute the total so the progress bar has a denominator. Reuses the
+    // cycle-guarded walker so symlinked/junction trees don't hang.
+    let total = sum_folder_size(from).map(|r| r.size_bytes).unwrap_or(0);
+    let copied = Arc::new(AtomicU64::new(0));
+    emit_move_progress(&app, &game_id, 0, total, "copying");
+
+    copy_dir_with_progress(from, &new_root, &copied, &app, &game_id, total)?;
+
+    emit_move_progress(&app, &game_id, total, total, "verifying");
+    let new_size = sum_folder_size(&new_root)
+        .map(|r| r.size_bytes)
+        .unwrap_or(0);
+    if total > 0 && new_size < total {
+        // Verification failed — remove the partial copy and bail. The source
+        // folder is intentionally left untouched.
+        let _ = std::fs::remove_dir_all(&new_root);
+        return Err("Move failed verification — source folder is untouched".into());
+    }
+
+    emit_move_progress(&app, &game_id, total, total, "cleaning");
+    std::fs::remove_dir_all(from)
+        .map_err(|e| format!("Failed to remove old install: {e}"))?;
+
+    let _ = app.emit(
+        "game-move-done",
+        MoveDoneEvent {
+            game_id: game_id.clone(),
+            to_path: new_root.to_string_lossy().to_string(),
+        },
+    );
+
+    Ok(MoveGameResult {
+        to_path: new_root.to_string_lossy().to_string(),
+        size_bytes: new_size,
+    })
+}
+
+/// Delete a game's install folder entirely. `root_path` is the measured
+/// install folder (`sizeRootPath`); we never delete anything broader. Returns
+/// the number of bytes freed so the Storage header can re-total immediately.
+#[tauri::command]
+pub fn uninstall_game(root_path: String) -> Result<UninstallResult, String> {
+    let p = Path::new(&root_path);
+    if !p.exists() {
+        return Err(format!("Folder does not exist: {root_path}"));
+    }
+    let deleted = sum_folder_size(p).map(|r| r.size_bytes).unwrap_or(0);
+    std::fs::remove_dir_all(p).map_err(|e| format!("Failed to delete: {e}"))?;
+    Ok(UninstallResult {
+        deleted_bytes: deleted,
+        path: root_path,
     })
 }
 

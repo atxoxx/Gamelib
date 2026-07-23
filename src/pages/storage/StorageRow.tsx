@@ -23,6 +23,17 @@ interface Props {
    *  StoragePage owns the `invoke("open_folder", ...)` call (and toast
    *  surfacing) so a single failure path is shared across every row. */
   onOpenFolder?: () => void;
+  /** Selection mode: renders a checkbox in the row summary and switches
+   *  the expanded action set to include management actions. */
+  selectMode?: boolean;
+  /** Whether this row is currently selected (only meaningful in selectMode). */
+  selected?: boolean;
+  /** Toggle this row's selection. */
+  onToggleSelect?: () => void;
+  /** Open the move/relocate dialog for this single game. */
+  onMove?: () => void;
+  /** Open the uninstall confirmation for this single game. */
+  onUninstall?: () => void;
 }
 
 interface SizeDetectionResult {
@@ -38,7 +49,7 @@ interface SizeDetectionResult {
  *  Tauri command convention from earlier work -- args are camelCase on
  *  the JS side (`exePath`, `gameName`, `rootOverride`) and map to the
  *  snake_case Rust parameters via Tauri's default rename behavior. */
-export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdated, onOpenFolder }: Props) {
+export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdated, onOpenFolder, selectMode = false, selected = false, onToggleSelect, onMove, onUninstall }: Props) {
   const { updateGame } = useGames();
   const { showToast } = useToast();
   const { unit } = useSizeUnit();
@@ -95,14 +106,14 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
 
   return (
     <li
-      className={`storage__row density-${density}${expanded ? " storage__row--expanded" : ""}${stale ? " storage__row--stale" : ""}`}
+      className={`storage__row density-${density}${expanded ? " storage__row--expanded" : ""}${stale ? " storage__row--stale" : ""}${selected ? " storage__row--selected" : ""}`}
       data-game-id={game.id}
     >
       {/* Collapsed row summary */}
       <div
         role="button"
         tabIndex={0}
-        className="storage__row-summary"
+        className={`storage__row-summary${selectMode ? " storage__row-summary--select" : ""}`}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           // Only react when the row summary itself (or a non-button
@@ -118,6 +129,20 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
         }}
         aria-expanded={expanded}
       >
+        {/* Selection checkbox (only in select mode) */}
+        {selectMode && (
+          <label
+            className="storage__row-select"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect?.()}
+              aria-label={`Select ${game.name}`}
+            />
+          </label>
+        )}
         {/* Game cover thumbnail */}
         <div className="storage__row-thumb">
           {game.coverArtUrl || game.iconUrl ? (
@@ -237,6 +262,26 @@ export function StorageRow({ game, stale = false, density = "cozy", onSizeUpdate
                 title="Open this game's folder in your file manager"
               >
                 Open folder
+              </Button>
+            )}
+            {onMove && game.sizeRootPath && (
+              <Button
+                variant="ghost"
+                onClick={() => onMove()}
+                disabled={detecting}
+                title="Move this install to another drive"
+              >
+                Move
+              </Button>
+            )}
+            {onUninstall && (game.sizeRootPath || game.path) && (
+              <Button
+                variant="danger"
+                onClick={() => onUninstall()}
+                disabled={detecting}
+                title="Uninstall and delete this game's folder"
+              >
+                Uninstall
               </Button>
             )}
             <span className="storage__row-spacer" />
