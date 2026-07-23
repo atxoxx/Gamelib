@@ -1296,7 +1296,13 @@
   background-color: var(--color-success);
   box-shadow: 0 0 6px var(--color-success);
   flex-shrink: 0;
-  animation: steam-player-dot-pulse 2.4s ease-in-out infinite;
+}
+
+/* The pulse only plays while the badge is interacted with, so the
+ * resting state stays calm instead of a perpetually throbbing dot. */
+.steam-player-count--clickable:hover .steam-player-count-dot,
+.steam-player-count--clickable:focus-visible .steam-player-count-dot {
+  animation: steam-player-dot-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes steam-player-dot-pulse {
@@ -1384,7 +1390,11 @@
   --hydra-accent: #a78bfa;
   background-color: var(--hydra-accent);
   box-shadow: 0 0 6px var(--hydra-accent);
-  animation-name: hydra-player-dot-pulse;
+}
+
+.hydra-player-count.steam-player-count--clickable:hover .hydra-player-count-dot,
+.hydra-player-count.steam-player-count--clickable:focus-visible .hydra-player-count-dot {
+  animation: hydra-player-dot-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes hydra-player-dot-pulse {
@@ -2108,4 +2118,135 @@
 .steam-stats-popover-footer-link:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+}
+
+/* ── Player Activity (historical line chart) ───────────────────────────────
+ * Replaces the 24h compact sparkline inside the Steam stats popover with a
+ * long-range concurrent-player graph (steamcharts.com feed). The chart
+ * itself is the shared <LineChart>; these classes own the header, the
+ * range toggle, the summary stat strip, and the loading/empty states.
+ */
+.steam-history-chart {
+  padding: 2px 0 4px;
+}
+
+.steam-history-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.player-history-range-toggle {
+  display: inline-flex;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 70%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.player-history-range-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  padding: 3px 7px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  letter-spacing: 0.2px;
+}
+
+.player-history-range-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+.player-history-range-btn.is-active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.player-history-range-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.steam-history-chart-plot {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.steam-history-chart-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.steam-history-chart-skeleton-bar {
+  height: 120px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-bg-tertiary) 40%, transparent) 25%,
+    color-mix(in srgb, var(--color-bg-tertiary) 70%, transparent) 37%,
+    color-mix(in srgb, var(--color-bg-tertiary) 40%, transparent) 63%
+  );
+  background-size: 400% 100%;
+  animation: steam-stats-popover-skeleton 1.4s ease infinite;
+}
+
+.steam-history-chart-skeleton-tiles {
+  display: flex;
+  gap: 8px;
+}
+
+.steam-history-chart-skeleton-tiles .steam-stats-popover-skeleton-pill {
+  flex: 1;
+  height: 22px;
+}
+
+.steam-history-chart-stats {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.steam-history-chart-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 4px;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 45%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.steam-history-chart-stat-value {
+  font-size: 13px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.steam-history-chart-stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+
+.steam-history-chart-footnote {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
 }

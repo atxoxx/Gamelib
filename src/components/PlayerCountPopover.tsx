@@ -123,11 +123,22 @@ export default function PlayerCountPopover({
         Math.min(left, vw - popWidth - VIEWPORT_MARGIN)
       );
 
-      let top = rect.top;
-      if (top + popHeight + VIEWPORT_MARGIN > vh) {
+      // Vertical: open below the anchor (top-aligned) when there's
+      // room; otherwise flip above (bottom-aligned to the anchor's
+      // top) so the popover never gets clipped by the viewport
+      // bottom. Matters now that the historical chart can make the
+      // card tall.
+      const spaceBelow = vh - rect.bottom - VIEWPORT_MARGIN;
+      const spaceAbove = rect.top - VIEWPORT_MARGIN;
+      let top: number;
+      if (popHeight <= spaceBelow) {
+        top = rect.top;
+      } else if (popHeight <= spaceAbove) {
+        top = rect.top - popHeight;
+      } else {
+        // Doesn't fit either side — pin to the bottom edge, best effort.
         top = Math.max(VIEWPORT_MARGIN, vh - popHeight - VIEWPORT_MARGIN);
       }
-      if (top < VIEWPORT_MARGIN) top = VIEWPORT_MARGIN;
 
       setPosition({ top, left, growFromLeft });
     }
@@ -135,9 +146,15 @@ export default function PlayerCountPopover({
     recompute();
     window.addEventListener("resize", recompute);
     window.addEventListener("scroll", recompute, true);
+    // The chart fetches asynchronously and grows the popover after
+    // mount; re-clamp whenever its measured height changes so it never
+    // ends up clipped at the bottom.
+    const ro = new ResizeObserver(recompute);
+    if (popoverRef.current) ro.observe(popoverRef.current);
     return () => {
       window.removeEventListener("resize", recompute);
       window.removeEventListener("scroll", recompute, true);
+      ro.disconnect();
     };
     // anchorRef is a stable ref object — intentionally excluded.
     // `tab` included so switching tabs (content height changes)

@@ -9,7 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import type { SteamGameReviews } from "../types/game";
 import { useSteamGameStats } from "../hooks/useSteamGameStats";
-import SteamPlayerActivityCompact from "./SteamPlayerActivityCompact";
+import SteamPlayerHistoryChart from "./SteamPlayerHistoryChart";
 
 /**
  * SteamPlayerCountPopover
@@ -205,10 +205,11 @@ export function SteamStatsPopoverBody({
 
         <div className="steam-stats-popover-divider" />
 
-        {/* Player activity (24h) — compact sparkline + Peak / Avg /
-            Samples summary. Owns its own polling via
-            `usePlayerCountHistory`. */}
-        <SteamPlayerActivityCompact appId={appId} />
+        {/* Player activity — long-range historical line chart
+            (steamcharts.com CCU feed) with a 30/90/180/All range
+            toggle, defaulting to 90d. Replaces the old 24h compact
+            sparkline; the `LineChart` handles hover tooltips. */}
+        <SteamPlayerHistoryChart appId={appId} />
 
         {/* If the whole fetch failed (e.g. offline), surface a single
             inline message instead of three "—" placeholders. */}
@@ -318,14 +319,22 @@ export default function SteamPlayerCountPopover({
         Math.min(left, vw - popWidth - VIEWPORT_MARGIN)
       );
 
-      // Vertical: align top with the anchor's top by default. If
-      // the popover would extend past the bottom of the viewport,
-      // shift it up so the footer stays visible.
-      let top = rect.top;
-      if (top + popHeight + VIEWPORT_MARGIN > vh) {
+      // Vertical: open below the anchor (top-aligned) when there's
+      // room; otherwise flip above (bottom-aligned to the anchor's
+      // top) so the popover never gets clipped by the viewport
+      // bottom. Matters now that the historical chart can make the
+      // card tall.
+      const spaceBelow = vh - rect.bottom - VIEWPORT_MARGIN;
+      const spaceAbove = rect.top - VIEWPORT_MARGIN;
+      let top: number;
+      if (popHeight <= spaceBelow) {
+        top = rect.top;
+      } else if (popHeight <= spaceAbove) {
+        top = rect.top - popHeight;
+      } else {
+        // Doesn't fit either side — pin to the bottom edge, best effort.
         top = Math.max(VIEWPORT_MARGIN, vh - popHeight - VIEWPORT_MARGIN);
       }
-      if (top < VIEWPORT_MARGIN) top = VIEWPORT_MARGIN;
 
       setPosition({ top, left, growFromLeft });
     }
@@ -333,9 +342,15 @@ export default function SteamPlayerCountPopover({
     recompute();
     window.addEventListener("resize", recompute);
     window.addEventListener("scroll", recompute, true);
+    // The chart fetches asynchronously and grows the popover after
+    // mount; re-clamp whenever its measured height changes so it never
+    // ends up clipped at the bottom.
+    const ro = new ResizeObserver(recompute);
+    if (popoverRef.current) ro.observe(popoverRef.current);
     return () => {
       window.removeEventListener("resize", recompute);
       window.removeEventListener("scroll", recompute, true);
+      ro.disconnect();
     };
     // anchorRef is a stable ref object — intentionally excluded.
   }, [anchorRef]);

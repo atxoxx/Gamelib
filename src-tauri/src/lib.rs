@@ -2127,6 +2127,228 @@ async fn get_player_count_history(
     })
 }
 
+// === Steam Historical Player Count (steamcharts.com) ========================
+//
+// Long-range concurrent-player history for the hover popover's line chart.
+//
+// Source: `https://steamcharts.com/app/{appid}/chart-data.json` — a free,
+// key-less JSON feed of `[unix_ms, count]` samples. This is the same Steam
+// CCU data SteamDB's own charts display (SteamDB's API requires a paid key;
+// the underlying feed does not), so we read it directly instead of paying
+// for a SteamDB key.
+//
+// Caching strategy
+// ────────────────
+// The *full* series is fetched once per appid and cached in-memory with a
+// 6h TTL. Per-range filtering + downsampling (to ≤180 points so the SVG
+// line chart stays smooth) happens in-memory on every call — cheap and
+// network-free, so switching between 30d / 90d / 180d / All never hits the
+// network twice for the same appid within the TTL.
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct SteamPlayerHistoryPoint {
+    /// Unix-millisecond timestamp of the sample.
+    timestamp: u64,
+    /// Concurrent players at that timestamp.
+    count: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct SteamPlayerHistory {
+    app_id: u32,
+    /// Downsampled series, oldest first, ready to plot.
+    points: Vec<SteamPlayerHistoryPoint>,
+    /// Most recent reading in the (filtered) series.
+    current: u64,
+    /// Peak across the requested range.
+    peak_in_range: u64,
+    /// Peak across the entire steamcharts history (all-time).
+    peak_all_time: u64,
+    /// Arithmetic mean across the requested range.
+    average_in_range: f64,
+    /// Number of points in the returned (downsampled) series.
+    sample_count: u32,
+    /// True when `points` was downsampled from a denser series, so the
+    /// frontend can hint "sampled" if it wants to.
+    downsampled: bool,
+}
+
+struct SteamPlayerHistoryCache {
+    /// appid -> (full `[unix_ms, count]` series, fetched_at). The full
+    /// series is cached once per appid (6h TTL); per-range filtering +
+    /// downsampling happens in-memory on every call (cheap, no network).
+    raw: std::sync::Mutex<HashMap<u32, (Vec<(u64, u64)>, Instant)>>,
+}
+
+impl Default for SteamPlayerHistoryCache {
+    fn default() -> Self {
+        Self {
+            raw: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+const STEAM_HISTORY_TTL: Duration = Duration::from_secs(6 * 60 * 60); // 6h
+const STEAM_HISTORY_MAX_POINTS: usize = 180;
+
+#[tauri::command]
+async fn get_steam_player_history(
+    app: tauri::AppHandle,
+    app_id: u32,
+    // 0 = all-time (no filter). Otherwise the trailing N days.
+    range_days: u32,
+) -> Result<SteamPlayerHistory, String> {
+    let cache: tauri::State<'_, SteamPlayerHistoryCache> = app.state();
+
+    // ── 1. Raw full series (cached per appid, 6h TTL) ───────────────
+    let series: Vec<(u64, u64)> = {
+        let map = cache.raw.lock().map_err(|e| e.to_string())?;
+        if let Some((s, fetched_at)) = map.get(&app_id) {
+            if fetched_at.elapsed() < STEAM_HISTORY_TTL {
+                s.clone()
+            } else {
+                Vec::new() // stale → refetch below
+            }
+        } else {
+            Vec::new()
+        }
+    };
+
+    let series = if series.is_empty() {
+        let url = format!("https://steamcharts.com/app/{}/chart-data.json", app_id);
+        let client = shared_steam_client();
+        let resp = client
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0 (compatible; GameLib/0.1)")
+            .send()
+            .await
+            .map_err(|e| format!("steamcharts request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!(
+                "steamcharts returned HTTP {} for appid {}",
+                resp.status(),
+                app_id
+            ));
+        }
+
+        let raw: Vec<(u64, u64)> = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse steamcharts JSON: {}", e))?;
+
+        if raw.is_empty() {
+            return Err(format!("No player-history data for appid {}", app_id));
+        }
+
+        // steamcharts is already ascending, but sort defensively so the
+        // range filter + downsample below can't be fooled by a stray
+        // out-of-order sample.
+        let mut s = raw;
+        s.sort_by_key(|&(ts, _)| ts);
+
+        let mut map = cache.raw.lock().map_err(|e| e.to_string())?;
+        map.insert(app_id, (s.clone(), Instant::now()));
+        s
+    } else {
+        series
+    };
+
+    // ── 2. All-time peak + range filter ─────────────────────────────
+    let peak_all_time = series.iter().map(|&(_, c)| c).max().unwrap_or(0);
+
+    let cutoff_ms: u64 = if range_days == 0 {
+        0
+    } else {
+        let now_ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        now_ms.saturating_sub(range_days as u64 * 24 * 60 * 60 * 1000)
+    };
+
+    let in_range: Vec<(u64, u64)> = if cutoff_ms == 0 {
+        series.clone()
+    } else {
+        series
+            .iter()
+            .filter(|&&(ts, _)| ts >= cutoff_ms)
+            .cloned()
+            .collect()
+    };
+    // A brand-new game with no samples inside the window shouldn't
+    // produce an empty chart — fall back to the full series.
+    let in_range = if in_range.is_empty() {
+        series.clone()
+    } else {
+        in_range
+    };
+
+    // ── 3. Downsample to ≤ MAX_POINTS (bucket average; keep last) ────
+    let downsampled = in_range.len() > STEAM_HISTORY_MAX_POINTS;
+    let points: Vec<SteamPlayerHistoryPoint> = if downsampled {
+        let n = in_range.len();
+        let bucket = (n as f64 / STEAM_HISTORY_MAX_POINTS as f64).ceil() as usize;
+        let bucket = bucket.max(1);
+        let mut out: Vec<SteamPlayerHistoryPoint> = Vec::new();
+        let mut i = 0;
+        while i < n {
+            let end = (i + bucket).min(n);
+            let slice = &in_range[i..end];
+            let sum: u64 = slice.iter().map(|&(_, c)| c).sum();
+            let avg = sum as f64 / slice.len() as f64;
+            // Mid-bucket timestamp keeps the x-axis evenly spaced by
+            // time even though buckets cover unequal wall-clock spans.
+            let ts = slice[slice.len() / 2].0;
+            out.push(SteamPlayerHistoryPoint {
+                timestamp: ts,
+                count: avg.round() as u64,
+            });
+            i = end;
+        }
+        // Guarantee the most-recent sample is always present so the
+        // "current" marker lands on the right edge.
+        if let Some(last) = in_range.last() {
+            if out.last().map(|p| p.timestamp) != Some(last.0) {
+                out.push(SteamPlayerHistoryPoint {
+                    timestamp: last.0,
+                    count: last.1,
+                });
+            }
+        }
+        out
+    } else {
+        in_range
+            .iter()
+            .map(|&(ts, c)| SteamPlayerHistoryPoint { timestamp: ts, count: c })
+            .collect()
+    };
+
+    // ── 4. Aggregates + return ──────────────────────────────────────
+    let count = points.len() as u32;
+    let current = points.last().map(|p| p.count).unwrap_or(0);
+    let peak_in_range = points.iter().map(|p| p.count).max().unwrap_or(0);
+    let total: u64 = points.iter().map(|p| p.count).sum();
+    let average_in_range = if count > 0 {
+        total as f64 / count as f64
+    } else {
+        0.0
+    };
+
+    Ok(SteamPlayerHistory {
+        app_id,
+        points,
+        current,
+        peak_in_range,
+        peak_all_time,
+        average_in_range,
+        sample_count: count,
+        downsampled,
+    })
+}
+
 // === Steam Game Stats (popover payload) =====================================
 //
 // The player-count popover (click the badge to expand) needs a small bundle
@@ -2688,9 +2910,13 @@ pub fn run() {
             get_steam_game_stats,
             // Per-appid history ring buffer of concurrent-player
             // counts, with server-computed peak/average. Powers the
-            // activity-tab sparkline â€” see PlayerCountHistoryCache
+            // activity-tab sparkline — see PlayerCountHistoryCache
             // above for the 24h cap + 5s dedupe policy.
             get_player_count_history,
+            // Long-range concurrent-player history from steamcharts.com
+            // (free CCU feed, same data SteamDB charts show). Powers the
+            // hover popover's historical line chart.
+            get_steam_player_history,
             // New launcher settings â€” close-to-tray (L2), minimize
             // on launch (L3), disable UAC elevation prompts (L5),
             // and OS auto-launch on boot (L4 via tauri-plugin-autostart).
@@ -2853,6 +3079,12 @@ pub fn run() {
             // sibling caches: 0 entries on startup, grows on first
             // successful fetch per appid.
             app.manage(PlayerCountHistoryCache::default());
+
+            // Long-range concurrent-player history cache
+            // (steamcharts.com feed, 6h TTL). Grows on first fetch per
+            // appid; see SteamPlayerHistoryCache above for the
+            // fetch-once / filter-in-memory policy.
+            app.manage(SteamPlayerHistoryCache::default());
 
 
             // Spin the torrent engine up on the async runtime.

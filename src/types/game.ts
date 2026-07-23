@@ -864,6 +864,45 @@ export interface PlayerCountHistory {
   windowEndMs: number;
 }
 
+// ─── Steam Player History (hover popover line chart) ──────────────────────────
+
+/**
+ * One sample in the long-range concurrent-player history returned by
+ * `get_steam_player_history` (sourced from the free steamcharts.com CCU
+ * feed — the same data SteamDB's charts display). Already downsampled by
+ * the backend to ≤180 points, so it plots directly.
+ */
+export interface SteamPlayerHistoryPoint {
+  /** Unix-millisecond timestamp of the sample. */
+  timestamp: number;
+  /** Concurrent players at sample time. */
+  count: number;
+}
+
+/**
+ * Long-range concurrent-player history for a single Steam appid, returned
+ * by `get_steam_player_history`. The `points` series is oldest-first and
+ * pre-downsampled; the aggregates let the popover render a summary strip
+ * (Current / Peak / Avg) without re-iterating the array.
+ */
+export interface SteamPlayerHistory {
+  appId: number;
+  /** Downsampled time-series, oldest first. */
+  points: SteamPlayerHistoryPoint[];
+  /** Most recent reading in the (filtered) series. */
+  current: number;
+  /** Peak across the requested range. */
+  peakInRange: number;
+  /** Peak across the entire steamcharts history (all-time). */
+  peakAllTime: number;
+  /** Arithmetic mean across the requested range. */
+  averageInRange: number;
+  /** Number of points in the returned (downsampled) series. */
+  sampleCount: number;
+  /** True when `points` was downsampled from a denser series. */
+  downsampled: boolean;
+}
+
 // ─── View Density ──────────────────────────────────────────────────────────────
 
 /**

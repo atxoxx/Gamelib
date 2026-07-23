@@ -47,6 +47,8 @@ export default function PlayerCountBadge({
   const steamCount = useSteamPlayerCount(appId);
   const hydraStats = useHydraGameStats(appId);
 
+  // Open on click only (per product decision). The popover closes via
+  // its own click-outside / Escape / X handlers.
   const [popoverOpen, setPopoverOpen] = useState(false);
 
   // Anchor + click-outside exclusion for the popover, same contract

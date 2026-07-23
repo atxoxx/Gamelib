@@ -195,16 +195,15 @@ export default function LineChart({
       const scaleX = effectiveWidth / rect.width;
       const mouseX = (e.clientX - rect.left) * scaleX;
 
-      // Only track within chart area
-      if (mouseX < padding.left || mouseX > padding.left + chartW) {
-        setHoverIndex(null);
-        return;
-      }
-
-      // Find nearest data point based on X position
+      // Find nearest data point based on X position. Hovering anywhere
+      // in the chart (including the axis gutters) snaps to the nearest
+      // endpoint, so the first/last points aren't dead zones.
       const dataLen = series[0]?.data.length ?? 0;
       if (dataLen === 0) return;
-      const idx = Math.round(((mouseX - padding.left) / chartW) * (dataLen - 1));
+      let idx: number;
+      if (mouseX <= padding.left) idx = 0;
+      else if (mouseX >= padding.left + chartW) idx = dataLen - 1;
+      else idx = Math.round(((mouseX - padding.left) / chartW) * (dataLen - 1));
       const clampedIdx = Math.max(0, Math.min(dataLen - 1, idx));
 
       setHoverIndex(clampedIdx);
@@ -498,7 +497,18 @@ export default function LineChart({
           className="chart-tooltip-card"
           style={{
             position: "absolute",
-            left: crosshairX !== null ? `${((crosshairX + (crosshairX > effectiveWidth * 0.6 ? -160 : 20)) / effectiveWidth) * 100}%` : "0%",
+            // Clamp horizontally so the card never spills past the
+            // chart edges (the first point's tooltip used to get
+            // pushed off-screen on the left).
+            left:
+              crosshairX !== null
+                ? `clamp(4px, ${
+                    ((crosshairX +
+                      (crosshairX > effectiveWidth * 0.6 ? -176 : 8)) /
+                      effectiveWidth) *
+                    100
+                  }%, calc(100% - 180px))`
+                : "0%",
             top: "8px",
             pointerEvents: "none",
             zIndex: 20,
