@@ -49,24 +49,18 @@
   --color-info: #5ab7ff;
   --color-stale: #f5b76b;
 
-  /* Brand gradient identity — the bold, poster-like "GameLib" signature.
-     A consistent violet → cyan → magenta mesh that recurs on the logo glow,
-     hero backdrops, primary actions, and active states so the app reads as
-     one recognizable product across every surface. */
-  --brand-1: #7c66ff;
-  --brand-2: #22d3ee;
-  --brand-3: #ff5c9d;
-  --brand-gradient: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 100%);
-  --brand-gradient-strong: linear-gradient(
-    135deg,
-    var(--brand-3) 0%,
-    var(--brand-1) 50%,
-    var(--brand-2) 100%
-  );
+  /* Brand identity now derives from the theme accent so the "GameLib"
+      mark, hero washes, and active states all follow the accent color
+      override instead of a fixed violet → cyan → magenta gradient. */
+  --brand-1: var(--color-accent);
+  --brand-2: var(--color-accent-hover);
+  --brand-3: var(--color-accent-hover);
+  --brand-gradient: var(--color-accent);
+  --brand-gradient-strong: var(--color-accent);
   --mesh-gradient:
-    radial-gradient(circle at 12% 18%, rgba(124, 102, 255, 0.18) 0%, transparent 42%),
-    radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.14) 0%, transparent 40%),
-    radial-gradient(circle at 75% 88%, rgba(255, 92, 157, 0.12) 0%, transparent 44%);
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--color-accent) 18%, transparent) 0%, transparent 42%),
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--color-accent-hover) 14%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 75% 88%, color-mix(in srgb, var(--color-accent) 12%, transparent) 0%, transparent 44%);
 
   /* ── Spacing Scale ──────────────────────────────────────────────── */
   --space-3xs: 2px;
@@ -804,19 +798,19 @@
   --color-accent-active: #7a4cf0;
   --color-accent-glow: rgba(154, 107, 255, 0.55);
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 16%, var(--color-bg-secondary));
-  --accent-gradient: linear-gradient(135deg, #9a6bff, #22d3ee);
+  --accent-gradient: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
 
-  /* ── Brand palette (aurora flavor: + green hint) ── */
-  --brand-1: #9a6bff;
-  --brand-2: #22d3ee;
-  --brand-3: #ff5c9d;
-  --brand-4: #4dffb0;
-  --brand-gradient: linear-gradient(135deg, #9a6bff 0%, #22d3ee 100%);
-  --brand-gradient-strong: linear-gradient(135deg, #4dffb0 0%, #9a6bff 45%, #ff5c9d 100%);
+  /* ── Brand palette (derived from the theme accent override) ── */
+  --brand-1: var(--color-accent);
+  --brand-2: var(--color-accent-hover);
+  --brand-3: var(--color-accent-hover);
+  --brand-4: var(--color-accent);
+  --brand-gradient: var(--color-accent);
+  --brand-gradient-strong: var(--color-accent);
   --mesh-gradient:
-    radial-gradient(circle at 15% 12%, rgba(154, 107, 255, 0.30) 0%, transparent 45%),
-    radial-gradient(circle at 88% 88%, rgba(34, 211, 238, 0.24) 0%, transparent 45%),
-    radial-gradient(circle at 70% 55%, rgba(255, 92, 157, 0.18) 0%, transparent 50%);
+    radial-gradient(circle at 15% 12%, color-mix(in srgb, var(--color-accent) 30%, transparent) 0%, transparent 45%),
+    radial-gradient(circle at 88% 88%, color-mix(in srgb, var(--color-accent-hover) 24%, transparent) 0%, transparent 45%),
+    radial-gradient(circle at 70% 55%, color-mix(in srgb, var(--color-accent) 18%, transparent) 0%, transparent 50%);
 
   /* ── Depth: brand-tinted glow so every raised panel reads as aurora ── */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.45);

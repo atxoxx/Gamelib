@@ -471,14 +471,14 @@
 .bigscreen-widget-progress-fill,
 .dl-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-accent, #3b82f6) 0%, #60a5fa 100%);
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+  background: linear-gradient(90deg, var(--color-accent, #3b82f6) 0%, var(--color-accent-hover, #60a5fa) 100%);
+  box-shadow: 0 0 10px var(--color-accent-glow, rgba(59, 130, 246, 0.5));
   border-radius: 4px;
 }
 
 .storage-fill {
-  background: linear-gradient(90deg, #10b981 0%, #34d399 100%) !important;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5) !important;
+  background: var(--color-accent) !important;
+  box-shadow: 0 0 10px var(--color-accent-glow) !important;
 }
 
 .bigscreen-widget-progress-percent,

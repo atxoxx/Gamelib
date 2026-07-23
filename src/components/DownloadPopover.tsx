@@ -129,7 +129,7 @@ const DownloadCard = React.memo(({
         <span className="dl-progress-card-name" title={download.name}>
           {download.name}
           {download.id.startsWith("dd_") && (
-            <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(124, 102, 255, 0.15)", color: "var(--color-accent)", borderRadius: "3px", fontWeight: "bold" }}>DIRECT</span>
+            <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "color-mix(in srgb, var(--color-accent) 15%, transparent)", color: "var(--color-accent)", borderRadius: "3px", fontWeight: "bold" }}>DIRECT</span>
           )}
           {download.id.startsWith("db_") && (
             <span style={{ marginLeft: "6px", fontSize: "9px", padding: "2px 4px", background: "rgba(0, 240, 255, 0.15)", color: "#00f0ff", borderRadius: "3px", fontWeight: "bold" }}>DEBRID</span>
