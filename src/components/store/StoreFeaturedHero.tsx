@@ -68,6 +68,7 @@ export default function StoreFeaturedHero({ onPickGame }: StoreFeaturedHeroProps
   const [tab, setTab] = useState<HeroCategory>("hot");
   const [games, setGames] = useState<StoreGameSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [surprising, setSurprising] = useState(false);
   const cacheRef = useRef<Partial<Record<HeroCategory, StoreGameSummary[]>>>({});
   const reqRef = useRef(0);
 
@@ -94,10 +95,23 @@ export default function StoreFeaturedHero({ onPickGame }: StoreFeaturedHeroProps
       });
   }, [tab]);
 
-  const handleSurprise = () => {
-    if (games.length === 0) return;
-    const game = games[Math.floor(Math.random() * games.length)];
-    onPickGame(game);
+  const handleSurprise = async () => {
+    if (surprising) return;
+    // Fetch a genuinely random game from the whole catalogue (the same
+    // "surprise me" behaviour as Hydra Launcher) rather than just
+    // picking from the cards currently on screen.
+    setSurprising(true);
+    try {
+      const game = await invoke<StoreGameSummary>("get_random_store_game");
+      onPickGame(game);
+    } catch {
+      // Fallback: pick a random card from the visible rail.
+      if (games.length > 0) {
+        onPickGame(games[Math.floor(Math.random() * games.length)]);
+      }
+    } finally {
+      setSurprising(false);
+    }
   };
 
   return (
@@ -123,10 +137,10 @@ export default function StoreFeaturedHero({ onPickGame }: StoreFeaturedHeroProps
 
         <button
           type="button"
-          className="store-featured-surprise"
+          className={`store-featured-surprise${surprising ? " is-spinning" : ""}`}
           onClick={handleSurprise}
           title="Jump to a random game"
-          disabled={games.length === 0}
+          disabled={surprising}
         >
           <svg
             viewBox="0 0 24 24"

@@ -3472,6 +3472,64 @@ pub async fn search_store_games(
     Ok(summaries)
 }
 
+/// Return a single genuinely-random IGDB store game — used by the
+/// store's "Surprise me" button.
+///
+/// Unlike the category rails, this does NOT pick from whatever is
+/// already on screen. It queries IGDB at a random offset so every click
+/// is a fresh surprise, mirroring Hydra Launcher's `getRandomGame()`.
+pub async fn get_random_store_game() -> Result<StoreGameSummary, String> {
+    let token = get_twitch_token().await?;
+    let client = http_client();
+    let client_id = crate::config::get_twitch_client_id();
+
+    // Random offset up to ~8000, staying within IGDB's pagination ceiling.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(1);
+    let offset = (seed % 8000) as u32;
+
+    let body = format!(
+        "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,websites.url; where cover != null & first_release_date != null; sort total_rating_count desc; limit 50; offset {};",
+        offset
+    );
+
+    let _guard = igdb_acquire().await;
+    let resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB random game request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "IGDB random game failed with status {}: {}",
+            status.as_u16(),
+            err
+        ));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB random game response: {}", e))?;
+    let games: Vec<IgdbGameSummary> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB random game parse error: {}", e))?;
+
+    if games.is_empty() {
+        return Err("No random game found at this offset".to_string());
+    }
+
+    let idx = ((seed / 7) % games.len() as u128) as usize % games.len();
+    Ok(map_igdb_summary(games.into_iter().nth(idx).unwrap()))
+}
+
 /// Fetch full metadata for a single IGDB game by its slug.
 /// Returns the same rich GameMetadataResult used by the library detail page.
 pub async fn get_store_game_detail(slug: &str) -> Option<GameMetadataResult> {

@@ -263,6 +263,16 @@
   color: var(--brand-1);
 }
 
+.store-featured-surprise.is-spinning svg {
+  animation: store-surprise-spin 0.7s linear infinite;
+}
+
+@keyframes store-surprise-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .store-featured-surprise:hover:not(:disabled) {
   background: color-mix(in srgb, var(--brand-1) 14%, transparent);
   border-color: var(--brand-1);

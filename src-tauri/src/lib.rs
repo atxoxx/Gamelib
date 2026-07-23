@@ -1141,6 +1141,12 @@ async fn get_store_game_detail(slug: String) -> Option<GameMetadataResult> {
     game_scraper::get_store_game_detail(&slug).await
 }
 
+/// Return a single genuinely-random store game for the "Surprise me" button.
+#[tauri::command]
+async fn get_random_store_game() -> Result<StoreGameSummary, String> {
+    game_scraper::get_random_store_game().await
+}
+
 /// Fetch every game that belongs to a given IGDB collection, sorted
 /// by release date ascending. Used by the frontend Game Relations
 /// card to populate the "Other in Collection" group on the Store
@@ -2890,6 +2896,7 @@ pub fn run() {
             source_manager::sources_refresh_all,
             source_manager::sources_search_game,
             source_manager::fetch_hydra_featured,
+            get_random_store_game,
             store_checker::check_ownership,
             store_checker::check_ownership_for_ids,
             store_checker::set_steam_owned,
