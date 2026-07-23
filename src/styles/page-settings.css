@@ -6,7 +6,6 @@
   width: 100%;
   border-radius: var(--radius-full, 9999px);
   background: var(--brand-gradient);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--brand-1) 45%, transparent);
   margin-bottom: var(--space-md);
 }
 
@@ -26,5 +25,4 @@
 
 .settings-title-icon {
   color: color-mix(in srgb, var(--brand-1) 85%, var(--color-text));
-  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent));
 }

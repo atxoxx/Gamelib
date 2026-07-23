@@ -18,7 +18,6 @@
 
 .achievements-page-title svg {
   color: var(--brand-1);
-  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent));
 }
 
 /* Summary stat cards — layered depth + brand-tinted glow */
@@ -32,12 +31,12 @@
 
 .achievements-summary-card:hover {
   transform: translateY(-2px);
-  box-shadow: var(--depth-2), var(--shadow-brand);
+  box-shadow: var(--depth-2);
 }
 
 .achievements-summary-perfect {
   border-color: color-mix(in srgb, var(--brand-3) 45%, var(--color-border));
-  box-shadow: var(--depth-1), 0 6px 20px color-mix(in srgb, var(--brand-3) 22%, transparent);
+  box-shadow: var(--depth-1);
 }
 
 .achievements-summary-value {
@@ -61,11 +60,7 @@
 .achievements-game-row:hover {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--brand-1) 45%, var(--color-border));
-  box-shadow: var(--depth-2), var(--shadow-brand);
-}
-
-.achievements-game-progress-fill {
-  box-shadow: 0 0 12px color-mix(in srgb, var(--brand-2) 45%, transparent);
+  box-shadow: var(--depth-2);
 }
 
 /* Branded empty state */

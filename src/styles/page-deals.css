@@ -63,7 +63,7 @@
 .deals-deal-card:hover,
 .deals-giveaway-card:hover {
   transform: translateY(-4px);
-  box-shadow: var(--shadow-brand), var(--depth-3);
+  box-shadow: var(--depth-3);
 }
 
 /* Discount corner badge leans into the brand gradient. */
@@ -71,7 +71,6 @@
   background: var(--brand-gradient);
   color: #0b0b14;
   font-weight: var(--font-weight-bold);
-  box-shadow: var(--shadow-brand);
 }
 
 .deals-deal-card-discount-corner.large {
@@ -80,7 +79,6 @@
 
 .deals-deal-card-discount-corner.mega {
   background: var(--brand-gradient-strong);
-  box-shadow: 0 0 24px color-mix(in srgb, var(--brand-3) 55%, transparent);
 }
 
 /* FREE badge on giveaways carries the brand, not a generic semantic color. */
@@ -88,7 +86,6 @@
   background: var(--brand-gradient-strong);
   color: #0b0b14;
   font-weight: var(--font-weight-bold);
-  box-shadow: var(--shadow-brand);
 }
 
 /* Branded empty state with low-opacity mesh wash. */

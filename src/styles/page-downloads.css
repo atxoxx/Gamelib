@@ -15,7 +15,7 @@
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-brand), var(--depth-1);
+  box-shadow: var(--depth-1);
 }
 
 .dl-page .dl-row {
@@ -24,7 +24,7 @@
 }
 
 .dl-page .dl-row:hover {
-  box-shadow: var(--shadow-brand), var(--depth-2);
+  box-shadow: var(--depth-2);
   border-color: color-mix(in srgb, var(--brand-2) 45%, var(--color-border));
   background: color-mix(in srgb, var(--brand-1) 6%, var(--color-bg-primary));
 }
@@ -47,7 +47,6 @@
   height: 1.1em;
   border-radius: var(--radius-full);
   background: var(--brand-gradient);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--brand-1) 55%, transparent);
 }
 
 /* ── Branded empty states (low-opacity mesh wash) ───────────────── */

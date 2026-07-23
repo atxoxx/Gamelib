@@ -18,7 +18,6 @@
 
 .storage-page .storage__page-header-icon svg {
   color: var(--brand-2);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-2) 70%, transparent));
 }
 
 /* ── Elevate the dashboard / drive / usage panels ──────────────── */

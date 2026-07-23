@@ -41,17 +41,14 @@
   color: color-mix(in srgb, var(--color-text-secondary) 65%, var(--brand-2));
   background: color-mix(in srgb, var(--brand-1) 16%, transparent);
   border-color: color-mix(in srgb, var(--brand-1) 40%, transparent);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--brand-1) 28%, transparent);
 }
 .store-page .store-hero-cta {
   background: var(--brand-gradient);
   border-color: transparent;
-  box-shadow: 0 0 24px color-mix(in srgb, var(--brand-1) 45%, transparent);
 }
 .store-page .store-hero-cta:hover {
   background: var(--brand-gradient-strong);
   border-color: transparent;
-  box-shadow: 0 0 32px color-mix(in srgb, var(--brand-2) 55%, transparent);
 }
 
 /* ── Brand-tint the "Browse" (See all) CTA on rails ─────────────── */
@@ -59,7 +56,6 @@
   background: var(--brand-gradient);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 0 20px color-mix(in srgb, var(--brand-1) 40%, transparent);
 }
 
 /* ── Depth + brand glow on store rail/grid cards ────────────────── */
@@ -67,7 +63,7 @@
   box-shadow: var(--depth-1);
 }
 .store-page .store-game-card:hover {
-  box-shadow: var(--shadow-brand), var(--depth-2);
+  box-shadow: var(--depth-2);
 }
 
 /* ── Detail-page primary "Add to Library" CTA tinted brand ──────── */
@@ -75,9 +71,7 @@
   background: var(--brand-gradient);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 0 22px color-mix(in srgb, var(--brand-1) 42%, transparent);
 }
 .game-page .store-add-btn:hover:not(:disabled) {
   background: var(--brand-gradient-strong);
-  box-shadow: 0 0 30px color-mix(in srgb, var(--brand-2) 52%, transparent);
 }
