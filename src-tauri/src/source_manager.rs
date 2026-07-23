@@ -45,6 +45,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::db::{self, Db};
+use crate::game_scraper::{self, StoreGameSummary};
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -186,6 +187,32 @@ pub struct SourceLink {
     /// Number of download entries in the most recent successful
     /// fetch.
     pub game_count: usize,
+}
+
+/// A single game returned by Hydra's `/catalogue/{category}` endpoint
+/// (the same endpoint Hydra Launcher's own home page calls). Only the
+/// fields Gamelib needs are deserialized; everything else is ignored.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HydraCatalogueGame {
+    #[serde(default)]
+    object_id: String,
+    #[serde(default)]
+    shop: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    cover_image_url: Option<String>,
+    #[serde(default)]
+    icon_url: Option<String>,
+    #[serde(default)]
+    library_image_url: Option<String>,
+    #[serde(default)]
+    library_hero_image_url: Option<String>,
+    #[serde(default)]
+    logo_image_url: Option<String>,
+    #[serde(default)]
+    download_sources: Vec<String>,
 }
 
 /// Cached source payload. Persisted to the `sources_cache`
@@ -627,6 +654,176 @@ impl SourceManager {
         }
 
         Ok(self.search(q))
+    }
+
+    // ── Hydra-curated featured rails (same method as Hydra Launcher) ──
+    //
+    // Hydra's home/store page calls `GET /catalogue/{category}` on its
+    // own API, passing the user's enabled download-source ids so the
+    // listing is curated to what they can actually download. This is
+    // the exact method we mirror here for GameLib's featured rail.
+    //
+    // Hydra identifies each game by its Steam `objectId` + `shop`. To
+    // keep GameLib's IGDB-backed store (detail pages, covers, ratings)
+    // working unchanged, we resolve Steam appids to IGDB ids via
+    // `external_games` and fetch full `StoreGameSummary`s, preserving
+    // Hydra's curated order. Games that can't be resolved (non-Steam or
+    // not on IGDB) fall back to a synthesized summary using Hydra's own
+    // cover art so they still render. If the user has no sources (or the
+    // call returns nothing), we degrade gracefully to IGDB-curated
+    // categories so the rail is never empty.
+
+    /// Map a Hydra catalogue category slug to the IGDB category used as
+    /// a fallback when the Hydra call yields no games (e.g. no download
+    /// sources configured yet).
+    fn hydra_category_fallback(category: &str) -> &'static str {
+        match category {
+            "weekly" => "popular",
+            "achievements" => "top",
+            _ => "trending",
+        }
+    }
+
+    fn synthesize_from_hydra(game: &HydraCatalogueGame) -> StoreGameSummary {
+        let cover = game.cover_image_url.as_ref().map(|u| {
+            if u.starts_with("//") {
+                format!("https:{}", u)
+            } else {
+                u.clone()
+            }
+        });
+        let id = game
+            .object_id
+            .parse::<u64>()
+            .unwrap_or_else(|_| {
+                let mut h = 0u64;
+                for b in game.object_id.bytes() {
+                    h = h.wrapping_mul(31).wrapping_add(b as u64);
+                }
+                h
+            });
+        StoreGameSummary {
+            id,
+            name: game.title.clone(),
+            slug: game.object_id.clone(),
+            summary: None,
+            rating: None,
+            aggregated_rating: None,
+            cover_url: cover,
+            logo_url: None,
+            genres: Vec::new(),
+            platforms: Vec::new(),
+            first_release_date: None,
+            total_rating_count: 0,
+            hypes: 0,
+            websites: None,
+        }
+    }
+
+    pub async fn fetch_hydra_featured(
+        &self,
+        category: &str,
+    ) -> Result<Vec<StoreGameSummary>, String> {
+        // Gather the user's enabled Hydra source ids — exactly what
+        // Hydra's home page sends as `downloadSourceIds`.
+        let sources = db::sources::list_sources(&self.db).map_err(|e| e.to_string())?;
+        let hydra_ids: Vec<String> = sources
+            .into_iter()
+            .filter(|s| s.enabled && !s.hydra_source_id.is_empty())
+            .map(|s| s.hydra_source_id)
+            .collect();
+
+        let url = format!("{}/catalogue/{}", HYDRA_API_BASE, category);
+        let mut params: Vec<(String, String)> = vec![
+            ("take".to_string(), "12".to_string()),
+            ("skip".to_string(), "0".to_string()),
+        ];
+        for id in &hydra_ids {
+            params.push(("downloadSourceIds[]".to_string(), id.clone()));
+        }
+
+        let resp = self
+            .client
+            .get(&url)
+            .query(&params)
+            .send()
+            .await
+            .map_err(|e| format!("Hydra catalogue request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "Hydra catalogue returned HTTP {}: {}",
+                status.as_u16(),
+                body
+            ));
+        }
+
+        let assets: Vec<HydraCatalogueGame> = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse Hydra catalogue: {}", e))?;
+
+        if assets.is_empty() {
+            // No curated games (most likely: no download sources yet).
+            // Gracefully fall back to IGDB-curated categories so the
+            // featured rail still shows something relevant.
+            return game_scraper::fetch_store_games(
+                Self::hydra_category_fallback(category),
+                0,
+                12,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        }
+
+        // Resolve Steam appids -> IGDB ids, then fetch full summaries.
+        let steam_appids: Vec<u32> = assets
+            .iter()
+            .filter(|a| a.shop == "steam")
+            .filter_map(|a| a.object_id.parse::<u32>().ok())
+            .collect();
+
+        let igdb_by_appid =
+            game_scraper::resolve_steam_to_igdb(&steam_appids).await.unwrap_or_default();
+        let igdb_ids: Vec<u64> = igdb_by_appid.values().copied().collect();
+        let summaries_by_id: HashMap<u64, StoreGameSummary> = game_scraper::fetch_store_summaries_by_ids(
+            &igdb_ids,
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| (s.id, s))
+        .collect();
+
+        // Re-associate preserving Hydra's curated order; synthesize for
+        // any game we couldn't resolve to IGDB.
+        let mut out: Vec<StoreGameSummary> = Vec::with_capacity(assets.len());
+        for a in &assets {
+            let resolved = if a.shop == "steam" {
+                a.object_id
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(|appid| {
+                        igdb_by_appid
+                            .get(&appid)
+                            .and_then(|igdb_id| summaries_by_id.get(igdb_id).cloned())
+                    })
+            } else {
+                None
+            };
+            match resolved {
+                Some(s) => out.push(s),
+                None => out.push(Self::synthesize_from_hydra(a)),
+            }
+        }
+        Ok(out)
     }
 
     // ── Refresh helpers (private) ─────────────────────────────────────
@@ -1420,7 +1617,14 @@ pub async fn sources_refresh_all(
 pub async fn sources_search_game(
     state: tauri::State<'_, Arc<SourceManager>>,
     query: String,
-    steam_app_id: Option<u32>,
-) -> Result<Vec<MatchedDownload>, String> {
-    state.search_online(&query, steam_app_id).await
+) -> Result<Vec<crate::source_manager::MatchedDownload>, String> {
+    state.search_online(&query, None).await
+}
+
+#[tauri::command]
+pub async fn fetch_hydra_featured(
+    state: tauri::State<'_, Arc<SourceManager>>,
+    category: String,
+) -> Result<Vec<StoreGameSummary>, String> {
+    state.fetch_hydra_featured(&category).await
 }

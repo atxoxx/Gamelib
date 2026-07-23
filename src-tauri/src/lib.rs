@@ -2889,6 +2889,7 @@ pub fn run() {
             source_manager::sources_refresh,
             source_manager::sources_refresh_all,
             source_manager::sources_search_game,
+            source_manager::fetch_hydra_featured,
             store_checker::check_ownership,
             store_checker::check_ownership_for_ids,
             store_checker::set_steam_owned,

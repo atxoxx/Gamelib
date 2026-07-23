@@ -3156,6 +3156,207 @@ pub async fn fetch_store_games(
     Ok(summaries)
 }
 
+/// Map an internally-parsed `IgdbGameSummary` into the frontend-facing
+/// `StoreGameSummary`, applying the same cover-size upgrade and website
+/// de-dup used by `fetch_store_games` / `get_collection_games`.
+///
+/// Kept as a standalone helper so the Hydra-catalogue enrichment path
+/// (which fetches games by IGDB id) produces bit-for-bit identical
+/// summaries without re-pasting the mapping.
+fn map_igdb_summary(g: IgdbGameSummary) -> StoreGameSummary {
+    let cover_url = g.cover.and_then(|c| c.url).map(|url| {
+        let clean = if url.starts_with("//") {
+            format!("https:{}", url)
+        } else {
+            url
+        };
+        clean.replace("t_thumb", "t_cover_big")
+    });
+
+    let logo_url = g.artworks.and_then(|list| {
+        list.into_iter()
+            .filter(|a| a.url.as_ref().map(|u| u.contains("/t_logo")).unwrap_or(false))
+            .find_map(|a| a.url)
+            .map(|url| {
+                if url.starts_with("//") {
+                    format!("https:{}", url)
+                } else {
+                    url
+                }
+            })
+    });
+
+    let release_date = g.first_release_date.map(format_unix_timestamp);
+
+    let websites = g.websites.and_then(|list| {
+        let mut unique = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for w in list {
+            if let Some(url) = w.url {
+                if seen.insert(url.clone()) {
+                    unique.push(url);
+                }
+            }
+        }
+        if unique.is_empty() {
+            None
+        } else {
+            Some(unique)
+        }
+    });
+
+    StoreGameSummary {
+        id: g.id,
+        name: g.name,
+        slug: g.slug,
+        summary: g.summary,
+        rating: g.rating,
+        aggregated_rating: g.aggregated_rating,
+        cover_url,
+        logo_url,
+        genres: g
+            .genres
+            .unwrap_or_default()
+            .into_iter()
+            .map(|gen| gen.name)
+            .collect(),
+        platforms: g
+            .platforms
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.name)
+            .collect(),
+        first_release_date: release_date,
+        total_rating_count: g.total_rating_count.unwrap_or(0),
+        hypes: g.hypes.unwrap_or(0),
+        websites,
+    }
+}
+
+/// Resolve a batch of Steam appids to IGDB game ids via IGDB's
+/// `external_games` endpoint (category 1 = Steam).
+///
+/// Hydra's `/catalogue/{category}` identifies every game by its Steam
+/// `objectId`. Gamelib's store, however, is IGDB-backed (detail pages,
+/// covers, ratings all key off the IGDB id/slug). This helper is the
+/// bridge: given Steam appids it returns `appid -> igdb_id` so the
+/// catalogue listing can be enriched into `StoreGameSummary`s without
+/// losing any of the existing store behaviour.
+pub async fn resolve_steam_to_igdb(
+    appids: &[u32],
+) -> Result<HashMap<u32, u64>, String> {
+    if appids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let token = get_twitch_token().await?;
+    let client = http_client();
+    let client_id = crate::config::get_twitch_client_id();
+
+    let list: Vec<String> = appids.iter().map(|a| format!("\"{}\"", a)).collect();
+    // NOTE: do NOT add `& category = 1` here — IGDB returns an
+    // empty set when `uid = (...) & category = 1` are combined
+    // (the `category` filter excludes the matching rows). The `uid`
+    // alone already uniquely identifies the Steam appid, so we just
+    // read back the IGDB `game` id it maps to.
+    let body = format!(
+        "fields game; where uid = ({}); limit 500; offset 0;",
+        list.join(",")
+    );
+
+    let _guard = igdb_acquire().await;
+    let resp = client
+        .post("https://api.igdb.com/v4/external_games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB external_games request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "IGDB external_games failed with status {}: {}",
+            status.as_u16(),
+            err
+        ));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB external_games response: {}", e))?;
+
+    #[derive(Deserialize)]
+    struct Eg {
+        game: u64,
+        uid: String,
+    }
+    let rows: Vec<Eg> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB external_games parse error: {}", e))?;
+
+    let mut map = HashMap::new();
+    for r in rows {
+        if let Ok(appid) = r.uid.parse::<u32>() {
+            map.insert(appid, r.game);
+        }
+    }
+    Ok(map)
+}
+
+/// Fetch full `StoreGameSummary` records for a set of IGDB game ids.
+/// Order is NOT preserved — callers re-associate by `id`. Reuses the
+/// exact field set + cover/logo mapping of `fetch_store_games`.
+pub async fn fetch_store_summaries_by_ids(
+    ids: &[u64],
+) -> Result<Vec<StoreGameSummary>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let token = get_twitch_token().await?;
+    let client = http_client();
+    let client_id = crate::config::get_twitch_client_id();
+
+    let body = format!(
+        "fields name,slug,summary,first_release_date,rating,aggregated_rating,cover.url,artworks.url,genres.name,platforms.name,total_rating_count,hypes,websites.url; where id = ({}); limit 500; offset 0;",
+        ids.iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
+    let _guard = igdb_acquire().await;
+    let resp = client
+        .post("https://api.igdb.com/v4/games")
+        .header("Client-ID", &client_id)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/plain")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("IGDB ids request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "IGDB ids request failed with status {}: {}",
+            status.as_u16(),
+            err
+        ));
+    }
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read IGDB ids response: {}", e))?;
+
+    let games: Vec<IgdbGameSummary> =
+        serde_json::from_str(&text).map_err(|e| format!("IGDB ids parse error: {}", e))?;
+
+    Ok(games.into_iter().map(map_igdb_summary).collect())
+}
+
 /// Search IGDB games by name (live search with debounce expected from frontend).
 pub async fn search_store_games(
     query: &str,
@@ -3283,11 +3484,48 @@ pub async fn get_store_game_detail(slug: &str) -> Option<GameMetadataResult> {
     };
 
     let client = http_client();
+    let client_id = crate::config::get_twitch_client_id();
 
-    let escaped_slug = slug.replace('"', "\\\"");
+    // Hydra-catalogue games that couldn't be pre-enriched land in the
+    // store with their Steam `objectId` used as the slug. If the slug
+    // is a numeric Steam appid, resolve it to an IGDB id via
+    // `external_games` so the detail page still loads.
+    let mut detail_id: Option<u64> = None;
+    if let Ok(appid) = slug.parse::<u32>() {
+        let eg_body = format!(
+            "fields game; where uid = (\"{}\"); limit 1;",
+            appid
+        );
+        if let Ok(eg_resp) = client
+            .post("https://api.igdb.com/v4/external_games")
+            .header("Client-ID", &client_id)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "text/plain")
+            .body(eg_body)
+            .send()
+            .await
+        {
+            if eg_resp.status().is_success() {
+                if let Ok(text) = eg_resp.text().await {
+                    #[derive(Deserialize)]
+                    struct EgGame {
+                        game: u64,
+                    }
+                    if let Ok(rows) = serde_json::from_str::<Vec<EgGame>>(&text) {
+                        detail_id = rows.into_iter().next().map(|r| r.game);
+                    }
+                }
+            }
+        }
+    }
+
+    let where_clause = match detail_id {
+        Some(id) => format!("id = {}", id),
+        None => format!("slug = \"{}\"", slug.replace('"', "\\\"")),
+    };
     let body = format!(
-        r#"where slug = "{}";
-fields name, slug, summary, storyline, first_release_date, rating, aggregated_rating,
+        "where {};
+ fields name, slug, summary, storyline, first_release_date, rating, aggregated_rating,
        cover.url, screenshots.url, artworks.url, videos.video_id, videos.name,
        genres.name, themes.name, game_modes.name, player_perspectives.name,
        involved_companies.developer, involved_companies.publisher, involved_companies.company.name,
@@ -3296,11 +3534,10 @@ fields name, slug, summary, storyline, first_release_date, rating, aggregated_ra
        release_dates.platform.name, release_dates.human, release_dates.region,
        game_type, status, collections.id, collections.name, franchises.name, alternative_names.name,
        language_supports.language.name, language_supports.language_support_type.name;
-limit 1;"#,
-        escaped_slug
+ limit 1;",
+        where_clause
     );
 
-    let client_id = crate::config::get_twitch_client_id();
 
     let _guard5 = igdb_acquire().await;
     let resp = match client

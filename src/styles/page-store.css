@@ -165,48 +165,88 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-md);
   flex-wrap: wrap;
 }
 
 .store-featured-tablist {
   display: flex;
-  gap: var(--space-xs);
+  gap: 6px;
   flex-wrap: wrap;
+  padding: 4px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 70%, transparent);
+  border: 1px solid var(--color-border);
 }
 
 .store-featured-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 8px 16px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), transform var(--transition-fast),
+    box-shadow var(--transition-fast);
   font-family: inherit;
+  white-space: nowrap;
+}
+
+.store-featured-tab-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  opacity: 0.75;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.store-featured-tab-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .store-featured-tab:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.store-featured-tab:hover .store-featured-tab-icon {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 .store-featured-tab.active {
   color: #fff;
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: linear-gradient(
+    135deg,
+    var(--color-accent),
+    color-mix(in srgb, var(--color-accent) 65%, #000)
+  );
+  border-color: transparent;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.store-featured-tab.active .store-featured-tab-icon {
+  opacity: 1;
+}
+
+.store-featured-tab:active {
+  transform: translateY(1px);
 }
 
 .store-featured-surprise {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 7px;
+  padding: 9px 18px;
   border-radius: var(--radius-full);
-  border: 1px dashed color-mix(in srgb, var(--brand-1) 50%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--brand-1) 55%, transparent);
   background: transparent;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
@@ -218,13 +258,21 @@
 }
 
 .store-featured-surprise svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  color: var(--brand-1);
 }
 
-.store-featured-surprise:hover {
-  background: color-mix(in srgb, var(--brand-1) 12%, transparent);
+.store-featured-surprise:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand-1) 14%, transparent);
   border-color: var(--brand-1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--brand-1) 30%, transparent);
+}
+
+.store-featured-surprise:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Wide horizontal rail of (up to) 12 cards. */
@@ -232,22 +280,70 @@
   display: flex;
   gap: var(--space-md);
   overflow-x: auto;
-  padding-bottom: var(--space-sm);
+  overflow-y: hidden;
+  padding: 4px 2px var(--space-md);
+  margin: 0 -2px;
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-accent) 55%, transparent)
+    transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Themed, slim scrollbar (WebKit/Chromium). */
+.store-featured-rail::-webkit-scrollbar {
+  height: 8px;
+}
+
+.store-featured-rail::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+  border-radius: var(--radius-full);
+}
+
+.store-featured-rail::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background var(--transition-fast);
+}
+
+.store-featured-rail::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-accent) 85%, transparent);
+  background-clip: padding-box;
+}
+
+.store-featured-rail::-webkit-scrollbar-button {
+  display: none;
 }
 
 .store-featured-rail > .store-game-card {
   flex: 0 0 auto;
-  width: 180px;
+  width: 184px;
+  scroll-snap-align: start;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.store-featured-rail > .store-game-card:hover {
+  transform: translateY(-6px);
+}
+
+.store-game-card-skeleton {
+  flex: 0 0 auto;
+  width: 184px;
   scroll-snap-align: start;
 }
 
 @media (max-width: 768px) {
-  .store-featured-rail > .store-game-card {
-    width: 140px;
+  .store-featured-rail > .store-game-card,
+  .store-game-card-skeleton {
+    width: 144px;
   }
   .store-featured-head {
     justify-content: flex-start;
+  }
+  .store-featured-surprise {
+    width: 100%;
+    justify-content: center;
   }
 }
