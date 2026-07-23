@@ -24,6 +24,7 @@ Unify your Steam, GOG, Epic, Rockstar, Ubisoft, and DRM-free libraries into a si
 ## 📑 Table of Contents
 
 - [✨ Features](#-features)
+- [📸 Screenshots](#-screenshots)
 - [💡 Inspiration](#-inspiration)
 - [🛠️ Tech Stack](#️-tech-stack)
 - [🚀 Getting Started](#-getting-started)
@@ -53,6 +54,68 @@ Unify your Steam, GOG, Epic, Rockstar, Ubisoft, and DRM-free libraries into a si
 | **Theming & Density** | Dark-first design with light mode, a theme gallery (aurora, cyberpunk, catppuccin, tokyonight, …), compact/comfortable layouts, and a custom accent picker. |
 
 > 🚧 **Planned / in progress:** Discord Rich Presence (event hook wired, IPC plugin pending) · Linux + Steam Deck support.
+
+---
+
+## 📸 Screenshots
+
+<p align="center"><sub>Dark-first UI, captured on Windows. Layout adapts to light mode and the controller-friendly Big Picture mode.</sub></p>
+
+### 🏠 Main Page / Library
+
+<p>
+  <img src="Screenshots/Main%20page/1.png" width="49%" alt="Main library view" />
+  <img src="Screenshots/Main%20page/2.png" width="49%" alt="Library detail" />
+</p>
+
+### 🛒 Store
+
+<p>
+  <img src="Screenshots/Store/1.png" width="49%" alt="Store catalogue" />
+  <img src="Screenshots/Store/2.png" width="49%" alt="Store detail" />
+</p>
+
+### 📰 News
+
+<p>
+  <img src="Screenshots/News/1.png" width="49%" alt="News feed" />
+  <img src="Screenshots/News/2.png" width="49%" alt="News article" />
+</p>
+
+### 💰 Deals
+
+<p>
+  <img src="Screenshots/Deals/1.png" width="32%" alt="Deals view 1" />
+  <img src="Screenshots/Deals/2.png" width="32%" alt="Deals view 2" />
+  <img src="Screenshots/Deals/3.png" width="32%" alt="Deals view 3" />
+</p>
+
+### 📥 Downloads
+
+<p>
+  <img src="Screenshots/Downloads/1.png" width="49%" alt="Downloads manager" />
+</p>
+
+### 💾 Storage
+
+<p>
+  <img src="Screenshots/Storage/1.png" width="49%" alt="Storage manager 1" />
+  <img src="Screenshots/Storage/2.png" width="49%" alt="Storage manager 2" />
+</p>
+
+### 🏆 Achievements
+
+<p>
+  <img src="Screenshots/Achievements/1.png" width="49%" alt="Achievements" />
+</p>
+
+### 💜 Wishlist
+
+<p>
+  <img src="Screenshots/Wishlist/1.png" width="49%" alt="Wishlist" />
+</p>
+
+> 📷 More pages (Activity, Friends, Community, Big Picture) coming soon.
 
 ---
 
