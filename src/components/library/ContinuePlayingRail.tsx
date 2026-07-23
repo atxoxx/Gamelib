@@ -147,7 +147,7 @@ function ContinuePlayingCard({
           </div>
         )}
       </div>
-      <div className="lib-rail-body">
+      <div className="lib-rail-card-body">
         <div className="lib-rail-name" title={game.name}>{game.name}</div>
         <div className="lib-rail-meta lib-rail-meta--continue" title={`Last played ${new Date(game.lastPlayed ?? 0).toLocaleString()}`}>
           {formatAgo(game.lastPlayed ?? 0)}

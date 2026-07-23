@@ -1782,7 +1782,7 @@
   z-index: 2;
 }
 
-.lib-rail-body {
+.lib-rail-card-body {
   padding: var(--space-sm) var(--space-md);
   display: flex;
   flex-direction: column;

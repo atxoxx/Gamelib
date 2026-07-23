@@ -95,7 +95,7 @@ export default function RecentlyAddedRail({
                     )}
                     <span className="lib-rail-platform">{game.platform}</span>
                   </div>
-                  <div className="lib-rail-body">
+                  <div className="lib-rail-card-body">
                     <div className="lib-rail-name" title={game.name}>{game.name}</div>
                     <div className="lib-rail-meta">{game.playTime}</div>
                   </div>
