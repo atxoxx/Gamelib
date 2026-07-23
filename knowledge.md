@@ -24,8 +24,9 @@ This file gives Codebuff context about your project: goals, commands, convention
   - `StorePage` (`/store`) + `StoreGameDetail` (`/store/:gameSlug`) — IGDB-backed catalog with rails.
   - `WishlistPage` (`/wishlist`), `NewsPage` (`/news`), `DealsPage` (`/deals`) — discovery surfaces.
   - `ActivityPage` (`/activity`) — dashboard / Gantt / performance / sessions / sparkline sub-tabs in `src/pages/activity/`.
-  - `AchievementsPage` (`/achievements`), `DownloadsPage` (`/downloads`), `StoragePage` (`/storage`).
-  - `CommunityPage` (`/community`), `SettingsPage` (`/settings`), `PluginsPage` (`/plugins`).
+   - `AchievementsPage` (`/achievements`), `DownloadsPage` (`/downloads`), `StoragePage` (`/storage`).
+   - `CommunityPage` (`/community`), `FriendsPage` (`/friends`), `NewsPage` (`/news`), `WishlistPage` (`/wishlist`).
+   - `SettingsPage` (`/settings`). There is **no** `PluginsPage` — the plugin system (todo #28) is not implemented yet.
   - Default redirect on `/` → `/library`.
 - **Components (`src/components/`)** — 20+ files grouped by area: `game/`, `library/`, `store/`, `downloads/`, `news/`, `activity/`, `charts/`, `ui/` (`Card`, `Button`, `Badge`, `KpiTile`, `Skeleton`, `Tooltip`, `ConfirmModal`).
 - **Contexts (`src/context/`)** — one provider per cross-cutting concern: `GameContext` (library CRUD / launch), `ActivityContext`, `AchievementContext`, `WishlistContext`, `DownloadContext` (active downloads + speed limits), `SourceContext` (download sources), `SplashContext`, `ToastContext`, `ThemeContext` (light/dark), `DensityContext` (compact/comfortable).
@@ -76,6 +77,18 @@ Phase 1–4 of a migration that moved every JSON file under `<app_data_dir>` plu
 - **Deals** — `deals.rs` exposes `fetch_gamepass_catalog`, `fetch_isthereanydeal_deals`, `fetch_giveaways`, `open_deal_url` (opens external via opener plugin).
 - **Crackwatch** — `crackwatch::fetch_crackwatch_status(game_name, app_id?)` scrapes gamestatus.info for crack status (Hydra-style: `CrackWatchService` + 24h KV cache keyed by slug+appid, returns `CrackWatchStatus { isCracked, crackDate, crackGroup, protection }` or `null`). Rendered by `CrackWatchCard` (`CrackWatchSection` presentational + skeleton).
 - **Torrents** — `torrent_engine.rs` wraps `librqbit` (see Cargo.toml — `librqbit 8`, `default-tls`, **no** `http-api`). Upload disabled via runtime `SessionOptions`. Cleanup hook (`cleanup_extractions`) registered on the Tauri `RunEvent::Exit`.
+
+### Big Screen Mode
+- **`BigScreenContext`** (`src/context/BigScreenContext.tsx`) toggles a 10-foot TV UI (`BigScreenLayout`) with gamepad navigation (`GamepadProvider` + `useFocusable`). When `isBigScreen` is true, `App.tsx` short-circuits to `<BigScreenLayout />` and pages render their `*BigScreen*` variants (`BigScreenGamePage`, `BigScreenLibrary`, `BigScreenSystem`, `BigScreenStoreGamePage`, `BigScreenGameHub`). Persisted under `gamelib-bigscreen`.
+
+### Hydra integration
+- GameIndex pulls catalog + community stats from the **Hydra** API (`hydra-api-source-spec.md`). Powers `StorePage` rails, `StoreGameDetail`, `HydraStatsPopover` (players/downloads/star score), and `HydraReviewsPanel` (user reviews with replies/votes/sorting). The `CrackWatchContext`/`PriceContext` batch per-card lookups into single backend round-trips (`fetch_crackwatch_status_batch`, `fetch_price_batch`).
+
+### Friends & Community
+- `FriendsPage` (`/friends`) + `CommunityPage` (`/community`) are social surfaces backed by local storage (`friendsStorage.ts`, `communityStorage.ts`). Not in the original roadmap — treat as experimental/self-contained.
+
+### Virtualized library grid
+- `LibraryPage` renders large lists via a local `VirtualGrid` (windowed rendering, co-located in `LibraryPage.tsx`) rather than `react-window`. Long lists stay responsive without an external virtualization dep.
 
 ## Style & UI conventions
 

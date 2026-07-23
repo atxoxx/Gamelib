@@ -31,7 +31,7 @@
 - Add a fallback: if no icon can be extracted from the `.exe`/.ico, generate a placeholder based on the game's first letter or fetch one from a public DB (IGDB, SteamGridDB, Giant Bomb).
 - Cache fetched icons locally in `%APPDATA%/GameLib/icons/` so they survive restarts.
 
-### 4. Fix Activity Page UI Inconsistencies
+### 4. Fix Activity Page UI Inconsistencies — ✅ Done
 - The Activity sub-components (Dashboard, Gantt, Performance, Sessions, Sparkline) may have styling mismatches — check for:
   - Hardcoded colors instead of CSS custom properties (theme breakage in light mode).
   - Spacing/padding drift between tabs.
@@ -39,7 +39,7 @@
   - Scroll behavior inside the activity panel not matching the rest of the app.
 - Ensure all activity charts (`BarChart`, `DonutChart`, `LineChart`) inherit theme variables consistently.
 
-### 5. Import Modal: Rename, Metadata & Image Fetch
+### 5. Import Modal: Rename, Metadata & Image Fetch — ✅ Done
 - When adding a single `.exe` or `.bat` file, show a **new modal** after file selection that lets the user:
   - **Rename** the game (title field, editable, pre-filled with file stem).
   - **Search & fetch metadata** from LaunchBox Games DB / IGDB / SteamGridDB:
@@ -54,14 +54,14 @@
 
 ## 📰 News & Discovery
 
-### 6. News Tab: Xbox Game Pass + IsThereAnyDeal
+### 6. News Tab: Xbox Game Pass + IsThereAnyDeal — ✅ Done
 - Add a **News tab** to the main navigation (TopNav).
 - Integrate two sub-sections:
   - **Xbox Game Pass**: latest additions, leaving-soon titles, upcoming day-one releases. Scrape or use an unofficial RSS/API.
   - **IsThereAnyDeal**: current deals across stores (Steam, GOG, Epic, Humble, Fanatical, Green Man Gaming). Show price, discount %, store, and a link.
 - Each section should have its own card grid with filtering (platform, discount threshold).
 
-### 7. RSS News Page
+### 7. RSS News Page — ✅ Done
 - Add an RSS reader page (or tab within News) where users can subscribe to gaming news feeds.
 - Store feed URLs locally (IndexedDB or a JSON config file).
 - Provide default curated feeds: PC Gamer, Rock Paper Shotgun, Eurogamer, Gematsu, GamingOnLinux.
@@ -72,7 +72,7 @@
 
 ## 🎮 Game Page Enhancements
 
-### 8. Game Page Media (Screenshots, Trailers, Videos)
+### 8. Game Page Media (Screenshots, Trailers, Videos) — ✅ Done
 - Add a **Media** section/tab to the game page:
   - **Screenshots gallery**: grid of thumbnails, click to open lightbox/fullscreen viewer with navigation arrows.
   - **Trailers / gameplay videos**: embedded HTML5 video player with play/pause/volume/seek controls.
@@ -80,21 +80,21 @@
   - Lazy-load thumbnails for performance.
   - Support drag-and-drop to add custom screenshots (store locally in game folder).
 
-### 9. Game Descriptions / Summary
+### 9. Game Descriptions / Summary — ✅ Done
 - Add a rich **Description** section to the game page Overview tab:
   - Pull description/summary text from IGDB, Steam, or LaunchBox DB.
   - Support Markdown or basic HTML rendering (bold, italics, bullet lists).
   - Truncated view with "Read more" expand/collapse.
   - Show source attribution (e.g. "via Steam" or "via IGDB").
 
-### 10. Steam Reviews + Multi-Site Review Aggregation
+### 10. Steam Reviews + Multi-Site Review Aggregation — ✅ Done
 - In the game page's **Reviews** tab, add:
   - **Steam reviews** summary card: overall rating (Very Positive / Mixed / etc.), review count, recent review trend.
   - **Multi-site aggregation**: pull scores from Metacritic, OpenCritic, IGDB, HowLongToBeat.
   - Display each source with its logo/icon, numeric score, and a color-coded badge.
 - Backend: add a Rust scraper/API caller that fetches review metadata for a given game title.
 
-### 11. Overview Tab — Additional Info Cards
+### 11. Overview Tab — Additional Info Cards — ✅ Done
 - Add compact, glanceable cards to the game page **Overview** tab:
   - **Crackwatch** status (cracked / uncracked / denuvo) — scrape or API.
   - **Ratings panel**: Metacritic critic + user scores, OpenCritic score, IGDB rating.
@@ -103,14 +103,14 @@
   - **System requirements**: minimum & recommended (CPU, GPU, RAM, storage).
   - **Release date + developer + publisher** card (if not already present).
 
-### 12. Achievements Tab
+### 12. Achievements Tab — ✅ Done
 - Add an **Achievements** tab to the game page.
 - For Steam games: fetch unlocked/locked achievements via Steam Web API (requires user API key in settings).
 - For emulated / DRM-free games: support RetroAchievements integration.
 - Show a progress bar (% completion), rarity indicators, and last-unlocked date.
 - Nice-to-have: compare achievements with friends (future community feature).
 
-### 13. HowLongToBeat Card
+### 13. HowLongToBeat Card — ✅ Done
 - In the game page **Overview** tab, add a detailed **HowLongToBeat** card showing:
   - Main story time.
   - Main + extras time.
@@ -119,13 +119,13 @@
 - Display as horizontal bar chart with human-readable labels.
 - Pull data from HowLongToBeat scraping or community-maintained dataset.
 
-### 14. Hero Image: Live Steam Player Count
+### 14. Hero Image: Live Steam Player Count — ✅ Done
 - In the game page's hero/banner area, overlay a **live Steam player count** badge.
 - Fetch from Steam Charts / Steam Web API / steamcharts.com scraping.
 - Show current players, 24h peak, and a tiny sparkline if data is available.
 - Update every 60 seconds when the game page is active.
 
-### 15. Web Links with Page Preview
+### 15. Web Links with Page Preview — ✅ Done
 - In the game page, add a **Web Links** section (or tab):
   - Show curated links: official website, wiki, subreddit, PCGamingWiki, Steam Community, Discord.
   - On hover/click, show an **iframe preview** of the linked page (configurable in settings: embed vs. open in browser).
@@ -136,7 +136,7 @@
 
 ## 🛍️ Store & Library Management
 
-### 16. Store Page — Browse & Download
+### 16. Store Page — Browse & Download — ✅ Done
 - Build a full **Store** page that lets users browse a large game catalog.
 - Integrate with a free game database API (IGDB, RAWG, or self-hosted).
 - Features:
@@ -147,7 +147,7 @@
   - Wishlist / watchlist integration (see #22).
 - Note: "download" means opening the store link in the user's browser unless an official DRM-free source is available.
 
-### 17. Multi-Store Import & Sync
+### 17. Multi-Store Import & Sync — ✅ Done
 - Import game libraries from external platforms:
   - **Steam**: parse `steamapps/common` folder + `libraryfolders.vdf` + Steam Web API for metadata.
   - **Epic Games**: parse Epic's manifest files in `ProgramData/Epic/`.
@@ -158,7 +158,7 @@
 - Deduplicate games that appear in multiple launchers (link them under one entry).
 - Show launcher badge icons next to each game in the library.
 
-### 18. Per-Game Options / Context Menu
+### 18. Per-Game Options / Context Menu — ⚠️ Partial
 - Right-click context menu (or settings gear) on any game in the sidebar/game page:
   - **Game-specific launch options**: command-line arguments, custom working directory, environment variables.
   - **Pre-launch / post-launch scripts**: select `.bat`, `.ps1`, `.sh` scripts to run.
@@ -168,7 +168,7 @@
   - **Hide / archive game**: soft-delete from library without removing files.
   - **Tags & collections**: assign user-defined tags.
 
-### 19. Game Manager Tab
+### 19. Game Manager Tab — ✅ Done
 - New **Game Manager** tab in the main layout (alongside Library, Store, etc.).
 - Features:
   - **Storage overview**: total space used, per-drive breakdown, largest games.
@@ -182,14 +182,14 @@
 
 ## 📊 Tabs & Panels
 
-### 20. Deals Tab
+### 20. Deals Tab — ✅ Done
 - A dedicated **Deals** tab in the main navigation.
 - Shows real-time deals from IsThereAnyDeal, Steam sales, GOG sales, Epic freebies.
 - Filters: store, discount %, price, DRM-free only.
 - "Price history" mini-chart per game (from ITAD data).
 - Notification option: alert when a wishlisted game drops below a configurable price threshold.
 
-### 21. Downloads Tab
+### 21. Downloads Tab — ✅ Done
 - A **Downloads** tab showing:
   - Active downloads with progress bars, speed (MB/s), ETA.
   - Download history (completed, failed, cancelled).
@@ -198,7 +198,7 @@
   - Bandwidth limiter (global setting, configurable in Settings).
   - Queue management: reorder, prioritize.
 
-### 22. Statistics Tab
+### 22. Statistics Tab — ✅ Done
 - A **Statistics** tab with personal gaming analytics:
   - **Playtime**: total hours, per-game breakdown, per-week trend, daily average.
   - **Genre distribution**: donut chart of playtime by genre.
@@ -208,7 +208,7 @@
   - **Year in review**: annual summary card (Spotify Wrapped style).
   - Export stats as JSON/CSV.
 
-### 23. Watchlist Tab
+### 23. Watchlist Tab — ✅ Done
 - A **Watchlist** tab where users can save games they're interested in but don't own yet.
 - Add games from the Store page, news articles, or deals.
 - Show current lowest price, price alert threshold (configurable).
@@ -228,7 +228,7 @@
 - Ensure all dates, number formatting, and plurals are locale-aware.
 - Tooling: set up a script to scan for missing translation keys.
 
-### 25. Performance Optimizations
+### 25. Performance Optimizations — ⚠️ Partial
 - **Frontend:**
   - Virtualize long lists (sidebar game list, store results) with `react-window` or `@tanstack/virtual`.
   - Lazy-load page components with `React.lazy` + `Suspense` (code splitting).
@@ -255,7 +255,7 @@
 - Detect Steam Deck and switch to gamepad-friendly UI mode.
 - Flatpak / AppImage packaging.
 
-### 27. Theming System (Phase 2)
+### 27. Theming System (Phase 2) — ⚠️ Partial
 - Expand the CSS custom property theme engine:
   - Theme editor UI in Settings with live preview.
   - Import/export `.json` theme files.
@@ -279,33 +279,35 @@
 
 ## 📋 Task Priority Summary
 
-| Priority | # | Task |
-|----------|---|------|
-| 🔴 High | 3 | Fix game icon fetching |
-| 🔴 High | 4 | Fix activity page UI inconsistencies |
-| 🔴 High | 5 | Import modal with rename & metadata fetch |
-| ✅ Done | 1 | Find a good name for the project (→ GameIndex) |
-| ✅ Done | 2 | Write a complete README |
-| 🟡 Medium | 6 | News tab: Xbox Game Pass + ITAD |
-| 🟡 Medium | 7 | RSS news page |
-| 🟡 Medium | 8 | Game page media (screenshots, trailers) |
-| 🟡 Medium | 9 | Game descriptions / summary |
-| 🟡 Medium | 10 | Steam reviews + multi-site aggregation |
-| 🟡 Medium | 11 | Overview info cards (Crackwatch, ProtonDB, etc.) |
-| 🟡 Medium | 12 | Achievements tab |
-| 🟡 Medium | 13 | HowLongToBeat card |
-| 🟡 Medium | 14 | Live Steam player count |
-| 🟡 Medium | 15 | Web links with page preview |
-| 🟢 Normal | 16 | Store page — browse & download |
-| 🟢 Normal | 17 | Multi-store import & sync |
-| 🟢 Normal | 18 | Per-game options / context menu |
-| 🟢 Normal | 19 | Game manager tab |
-| 🟢 Normal | 20 | Deals tab |
-| 🟢 Normal | 21 | Downloads tab |
-| 🟢 Normal | 22 | Statistics tab |
-| 🟢 Normal | 23 | Watchlist tab |
-| 🟢 Normal | 24 | Translations / i18n |
-| 🟢 Normal | 25 | Performance optimizations |
-| ⚪ Later | 26 | Linux support |
-| ⚪ Later | 27 | Theming system v2 |
-| ⚪ Later | 28 | Plugin system v2 |
+| Priority | # | Task | Status |
+|----------|---|------|--------|
+| 🔴 High | 3 | Fix game icon fetching | ❌ Not done |
+| 🔴 High | 4 | Fix activity page UI inconsistencies | ✅ Done |
+| 🔴 High | 5 | Import modal with rename & metadata fetch | ✅ Done |
+| ✅ Done | 1 | Find a good name for the project (→ GameIndex) | ✅ Done |
+| ✅ Done | 2 | Write a complete README | ✅ Done |
+| 🟡 Medium | 6 | News tab: Xbox Game Pass + ITAD | ✅ Done |
+| 🟡 Medium | 7 | RSS news page | ✅ Done |
+| 🟡 Medium | 8 | Game page media (screenshots, trailers) | ✅ Done |
+| 🟡 Medium | 9 | Game descriptions / summary | ✅ Done |
+| 🟡 Medium | 10 | Steam reviews + multi-site aggregation | ✅ Done |
+| 🟡 Medium | 11 | Overview info cards (Crackwatch, ProtonDB, etc.) | ✅ Done |
+| 🟡 Medium | 12 | Achievements tab | ✅ Done |
+| 🟡 Medium | 13 | HowLongToBeat card | ✅ Done |
+| 🟡 Medium | 14 | Live Steam player count | ✅ Done |
+| 🟡 Medium | 15 | Web links with page preview | ✅ Done |
+| 🟢 Normal | 16 | Store page — browse & download | ✅ Done |
+| 🟢 Normal | 17 | Multi-store import & sync | ✅ Done |
+| 🟢 Normal | 18 | Per-game options / context menu | ⚠️ Partial (basic context menu + edit modal; no launch args/scripts/compatibility yet) |
+| 🟢 Normal | 19 | Game manager tab | ✅ Done |
+| 🟢 Normal | 20 | Deals tab | ✅ Done |
+| 🟢 Normal | 21 | Downloads tab | ✅ Done |
+| 🟢 Normal | 22 | Statistics tab | ✅ Done |
+| 🟢 Normal | 23 | Watchlist tab | ✅ Done |
+| 🟢 Normal | 24 | Translations / i18n | ❌ Not done |
+| 🟢 Normal | 25 | Performance optimizations | ⚠️ Partial (virtualized library grid; no `react-window` elsewhere, no code-splitting yet) |
+| ⚪ Later | 26 | Linux support | ❌ Not done |
+| ⚪ Later | 27 | Theming system v2 | ⚠️ Partial (multiple themes enabled + accent override; no theme editor/import-export yet) |
+| ⚪ Later | 28 | Plugin system v2 | ❌ Not done (no `PluginsPage`) |
+
+> Note: Several surfaces beyond the original roadmap now exist — **Big Screen Mode** (10-foot/gamepad UI), **Hydra** catalog + community stats/reviews integration, **Friends** and **Community** pages. These were added ad-hoc and are not yet tracked above.
