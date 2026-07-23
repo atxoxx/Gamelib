@@ -124,49 +124,83 @@ pub async fn steam_sync_games(
 
     let synced = owned_games.len() as u32;
     let mut playtime_updated: u32 = 0;
-    let mut synced_games: Vec<SyncedGameEntry> = Vec::new();
 
+    // ── Disk work (exe resolution + folder size) ─────────────────────
+    // These are blocking filesystem walks. Running them sequentially for
+    // every installed game is the dominant cost of a sync on large
+    // libraries, so we fan them out across a bounded pool of blocking
+    // tasks (cap ~8 concurrent) and map the results back by appid.
+    let disk_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+    let mut disk_handles: Vec<
+        tokio::task::JoinHandle<(u32, Option<String>, Option<u64>, Option<String>)>,
+    > = Vec::new();
+    for game in &owned_games {
+        if !installed_set.contains(&game.appid) {
+            continue;
+        }
+        let appid = game.appid;
+        let name = game.name.clone();
+        let permit = disk_sem
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| format!("disk semaphore: {e}"))?;
+        let handle = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            // Resolve the install dir from the Steam appmanifest (canonical,
+            // NOT derived from the exe's parent — that would under-count
+            // UE/Unity/Source games where the largest .exe lives in a bin
+            // subfolder). exe_path is then derived from the install dir
+            // via `game_watcher::resolve_steam_game_exe` (PE header +
+            // name scoring + depth), and the size is measured on the
+            // install dir directly.
+            let install_dir = steam_game_watcher::game_install_path(appid);
+            // Use the smart resolver (PE header + name scoring + depth)
+            // instead of the old "largest exe" heuristic.
+            let exe_path = if install_dir.is_some() {
+                game_watcher::resolve_steam_game_exe(appid, &name)
+            } else {
+                None
+            };
+            // Measure the install dir if we have one. Per-game failure
+            // (folder gone, permission denied) just leaves the size
+            // fields None; the sync itself is never aborted.
+            let size_info = install_dir.as_deref().and_then(size::measure_folder_size);
+            (
+                appid,
+                exe_path,
+                size_info.as_ref().map(|s| s.size_bytes),
+                size_info.as_ref().map(|s| s.root_path.clone()),
+            )
+        });
+        disk_handles.push(handle);
+    }
+
+    let mut disk_map: std::collections::HashMap<u32, (Option<String>, Option<u64>, Option<String>)> =
+        std::collections::HashMap::new();
+    for h in disk_handles {
+        if let Ok(res) = h.await {
+            disk_map.insert(res.0, (res.1, res.2, res.3));
+        }
+    }
+
+    // ── Build the synced game list ───────────────────────────────────
+    let mut synced_games: Vec<SyncedGameEntry> = Vec::with_capacity(owned_games.len());
     for game in &owned_games {
         if include_playtime && game.playtime_forever > 0 {
             playtime_updated += 1;
         }
-
-        // Resolve the install dir from the Steam appmanifest (canonical,
-        // NOT derived from the exe's parent — that would under-count
-        // UE/Unity/Source games where the largest .exe lives in a bin
-        // subfolder). exe_path is then derived from the install dir
-        // via `game_watcher::resolve_steam_game_exe` (PE header +
-        // name scoring + depth), and the size is measured on the
-        // install dir directly.
-        let install_dir = if installed_set.contains(&game.appid) {
-            steam_game_watcher::game_install_path(game.appid)
-        } else {
-            None
-        };
-        // Use the smart resolver (PE header + name scoring + depth)
-        // instead of the old "largest exe" heuristic.
-        let exe_path = if install_dir.is_some() {
-            game_watcher::resolve_steam_game_exe(game.appid, &game.name)
-        } else {
-            None
-        };
-
-        // Measure the install dir if we have one. Runs sequentially
-        // inside the for-loop — a 500-game library is fine because the
-        // walk is bounded and skips symlinks. Per-game failure (folder
-        // gone, permission denied) just leaves the size fields None; the
-        // sync itself is never aborted by a measurement error.
-        let size_info = install_dir
-            .as_deref()
-            .and_then(size::measure_folder_size);
-
+        let (exe_path, size_bytes, size_root_path) = disk_map
+            .get(&game.appid)
+            .map(|(e, b, r)| (e.clone(), *b, r.clone()))
+            .unwrap_or((None, None, None));
         synced_games.push(SyncedGameEntry {
             appid: game.appid,
             name: game.name.clone(),
             playtime_forever: game.playtime_forever,
             exe_path,
-            size_bytes: size_info.as_ref().map(|s| s.size_bytes),
-            size_root_path: size_info.as_ref().map(|s| s.root_path.clone()),
+            size_bytes,
+            size_root_path,
             rtime_last_played: if game.rtime_last_played > 0 {
                 Some(game.rtime_last_played)
             } else {
@@ -179,7 +213,12 @@ pub async fn steam_sync_games(
     let mut achievements_synced: u32 = 0;
     if include_achievements {
         if let Ok(mut cache) = crate::achievements::load_cache_internal(&app) {
-            let mut fetched_any = false;
+            // Decide which games actually need a (re)fetch, then run those
+            // fetches concurrently (bounded to ~8 in flight) instead of
+            // one-at-a-time with a 150ms sleep between each. Overlapping the
+            // network latency gives a large speed-up on big libraries while
+            // staying gentle enough not to trip Steam's rate limits.
+            let mut to_fetch: Vec<(String, u32)> = Vec::new();
             for game in &owned_games {
                 let game_key = format!("steam-{}", game.appid);
                 let needs_sync = match cache.games.get(&game_key) {
@@ -201,21 +240,40 @@ pub async fn steam_sync_games(
                         }
                     }
                 };
-
                 if needs_sync {
-                    if fetched_any {
-                        // Rate limit to be gentle with Steam API
-                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                    }
-                    match crate::achievements::fetch_achievements_with_client(
-                        &client,
-                        game.appid,
-                        &session.steam_id,
-                        &session.api_key,
-                    )
-                    .await
-                    {
-                        Ok(mut data) => {
+                    to_fetch.push((game_key, game.appid));
+                }
+            }
+
+            if !to_fetch.is_empty() {
+                let ach_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+                let mut handles = Vec::with_capacity(to_fetch.len());
+                for (game_key, appid) in to_fetch {
+                    let permit = ach_sem
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .map_err(|e| format!("achievement semaphore: {e}"))?;
+                    let client = client.clone();
+                    let steam_id = session.steam_id.clone();
+                    let api_key = session.api_key.clone();
+                    let handle = tokio::spawn(async move {
+                        let _permit = permit;
+                        let res = crate::achievements::fetch_achievements_with_client(
+                            &client,
+                            appid,
+                            &steam_id,
+                            &api_key,
+                        )
+                        .await;
+                        (game_key, res)
+                    });
+                    handles.push(handle);
+                }
+
+                for h in handles {
+                    match h.await {
+                        Ok((game_key, Ok(mut data))) => {
                             let now_ms = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -223,21 +281,23 @@ pub async fn steam_sync_games(
                             data.last_synced = Some(now_ms);
                             cache.games.insert(game_key, data);
                             achievements_synced += 1;
-                            fetched_any = true;
+                        }
+                        Ok((game_key, Err(e))) => {
+                            eprintln!(
+                                "[steam_sync] Failed to fetch achievements for {}: {}",
+                                game_key, e
+                            );
                         }
                         Err(e) => {
-                            eprintln!(
-                                "[steam_sync] Failed to fetch achievements for appid {}: {}",
-                                game.appid, e
-                            );
+                            eprintln!("[steam_sync] achievement task panicked: {}", e);
                         }
                     }
                 }
-            }
 
-            if fetched_any {
-                if let Err(e) = crate::achievements::save_cache_internal(&app, &cache) {
-                    eprintln!("[steam_sync] Failed to save achievements cache: {}", e);
+                if achievements_synced > 0 {
+                    if let Err(e) = crate::achievements::save_cache_internal(&app, &cache) {
+                        eprintln!("[steam_sync] Failed to save achievements cache: {}", e);
+                    }
                 }
             }
         }

@@ -683,7 +683,10 @@ export default function SettingsPage() {
       // in a heavy sync the user didn't ask for — they can
       // click Sync Library manually for fresh data.
       if (autoSync) {
-        await handleSyncNow(session);
+        // Run the library sync in the background so the "Connecting…"
+        // spinner clears as soon as the key validates. The sync keeps
+        // its own `isSyncing` state + progress UI.
+        void handleSyncNow(session);
       }
     } catch (err) {
       showToast(`Steam connection failed: ${err}`, "error");
