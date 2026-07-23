@@ -81,6 +81,173 @@ interface SteamPlayerCountPopoverProps {
   onClose: () => void;
 }
 
+/**
+ * SteamStatsPopoverBody
+ * ─────────────────────
+ * The Steam sections of the popover (live count, review breakdown,
+ * 24h activity sparkline, "View on Steam" footer link), extracted so
+ * the combined Steam + Hydra `PlayerCountPopover` can render them as
+ * its Steam tab without duplicating the fetch/derive logic. Owns its
+ * own `useSteamGameStats` call — the hook + Rust cache dedupe repeat
+ * fetches, so embedding is free.
+ */
+export function SteamStatsPopoverBody({
+  appId,
+  currentCount,
+}: {
+  appId: number;
+  /** Live Steam count from the parent badge (0 when Steam has none). */
+  currentCount: number;
+}) {
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: fetchError,
+  } = useSteamGameStats(appId);
+
+  const reviewsLoading = statsLoading;
+
+  // Memoize the positive-percent so the bar fill doesn't recompute on
+  // every render (it's just a division, but the bar transition is
+  // smoother when the value's identity is stable).
+  const reviewPositivePct = useMemo(() => {
+    if (!stats?.reviews) return null;
+    const total = stats.reviews.totalReviews;
+    if (total <= 0) return null;
+    return Math.round((stats.reviews.totalPositive / total) * 100);
+  }, [stats?.reviews]);
+
+  // Review score is Steam's 1-9 bucket; map to a color tier so the
+  // bar reads as a quick visual signal. 7+ = green, 5-6 = amber, ≤4
+  // = red. Bucket 0 means Steam hasn't assigned one yet.
+  const reviewTone = useMemo<"good" | "mid" | "bad" | "none">(() => {
+    const s = stats?.reviews?.score;
+    if (s == null || s === 0) return "none";
+    if (s >= 7) return "good";
+    if (s >= 5) return "mid";
+    return "bad";
+  }, [stats?.reviews?.score]);
+
+  const reviewSummary: SteamGameReviews | null = stats?.reviews ?? null;
+
+  return (
+    <>
+      <div className="steam-stats-popover-body">
+        {/* Live current players — reuses the parent badge's count so
+            the two agree at the moment of click. */}
+        <div className="steam-stats-popover-stat steam-stats-popover-stat--current">
+          <div
+            className="steam-stats-popover-stat-value"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {currentCount.toLocaleString()}
+          </div>
+          <div className="steam-stats-popover-stat-label">
+            playing on Steam right now
+          </div>
+        </div>
+
+        <div className="steam-stats-popover-divider" />
+
+        {/* Reviews — aggregate only (the per-review list is hidden in
+            the backend to keep the response small). */}
+        <section className="steam-stats-popover-section">
+          <div className="steam-stats-popover-section-header">
+            <span className="steam-stats-popover-section-title">Reviews</span>
+            {reviewsLoading ? (
+              <span className="steam-stats-popover-skeleton-pill" />
+            ) : reviewSummary ? (
+              <span
+                className={`steam-stats-popover-section-badge steam-stats-popover-tone-${reviewTone}`}
+              >
+                {reviewSummary.scoreDesc ?? "Unrated"}
+              </span>
+            ) : (
+              <span className="steam-stats-popover-section-empty">—</span>
+            )}
+          </div>
+          {reviewsLoading ? (
+            <>
+              <div className="steam-stats-popover-skeleton-bar" />
+              <div className="steam-stats-popover-skeleton-line short" />
+            </>
+          ) : reviewSummary ? (
+            <>
+              <div
+                className={`steam-stats-popover-reviews-bar steam-stats-popover-tone-${reviewTone}`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={reviewPositivePct ?? 0}
+                aria-label={`${reviewPositivePct ?? 0}% positive reviews`}
+              >
+                <div
+                  className="steam-stats-popover-reviews-bar-fill"
+                  style={{ width: `${reviewPositivePct ?? 0}%` }}
+                />
+              </div>
+              <div className="steam-stats-popover-reviews-count">
+                <strong>{reviewSummary.totalPositive.toLocaleString()}</strong>{" "}
+                positive
+                <span className="steam-stats-popover-reviews-count-sep">·</span>
+                {reviewSummary.totalNegative.toLocaleString()} negative
+                <span className="steam-stats-popover-reviews-count-sep">·</span>
+                {reviewSummary.totalReviews.toLocaleString()} total
+              </div>
+            </>
+          ) : (
+            <div className="steam-stats-popover-section-error">
+              {stats?.reviewsError ?? "No review data"}
+            </div>
+          )}
+        </section>
+
+        <div className="steam-stats-popover-divider" />
+
+        {/* Player activity (24h) — compact sparkline + Peak / Avg /
+            Samples summary. Owns its own polling via
+            `usePlayerCountHistory`. */}
+        <SteamPlayerActivityCompact appId={appId} />
+
+        {/* If the whole fetch failed (e.g. offline), surface a single
+            inline message instead of three "—" placeholders. */}
+        {fetchError && !stats && (
+          <div className="steam-stats-popover-fetch-error" role="alert">
+            Couldn't reach Steam. Check your connection and try again.
+          </div>
+        )}
+      </div>
+
+      <footer className="steam-stats-popover-footer">
+        <a
+          href={`https://store.steampowered.com/app/${appId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="steam-stats-popover-footer-link"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+          View on Steam
+        </a>
+      </footer>
+    </>
+  );
+}
+
 const VIEWPORT_MARGIN = 12;
 /** Fallback width for the layout-effect position recalc on first
  *  paint, used only when the browser has not yet measured the
@@ -104,18 +271,6 @@ export default function SteamPlayerCountPopover({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
-
-  // ── Stats fetch ─────────────────────────────────────────────────
-  // Delegates to the shared hook so the same `appdetails` / review
-  // payload can drive multiple consumers (e.g. the InfoKpiCard's
-  // price tile) without each one issuing its own IPC call. The Rust
-  // backend caches `appdetails` for 24h, so duplicate concurrent
-  // fetches are cheap.
-  const {
-    data: stats,
-    isLoading: statsLoading,
-    error: fetchError,
-  } = useSteamGameStats(appId);
 
   // ── Position state ─────────────────────────────────────────────────
   // Stored in state (not derived in render) so the JSX stays pure and
@@ -224,39 +379,6 @@ export default function SteamPlayerCountPopover({
     // anchorRef intentionally excluded (stable ref).
   }, [anchorRef]);
 
-  // ── Derived values ──────────────────────────────────────────────────
-  // First-fetch loading state from the shared hook (true only on the
-  // initial IPC round-trip; false on subsequent re-renders). Using the
-  // hook's own flag keeps the source of truth in one place rather
-  // than re-deriving it from `!stats && !fetchError` here.
-  const reviewsLoading = statsLoading;
-
-  // Memoize the positive-percent so the bar fill doesn't recompute on
-  // every render (it's just a division, but the bar transition is
-  // smoother when the value's identity is stable).
-  const reviewPositivePct = useMemo(() => {
-    if (!stats?.reviews) return null;
-    const total = stats.reviews.totalReviews;
-    if (total <= 0) return null;
-    return Math.round((stats.reviews.totalPositive / total) * 100);
-  }, [stats?.reviews]);
-
-  // Review score is Steam's 1-9 bucket; map to a color tier so the
-  // bar reads as a quick visual signal. 7+ = green, 5-6 = amber, ≤4
-  // = red. Bucket 0 means Steam hasn't assigned one yet.
-  const reviewTone = useMemo<"good" | "mid" | "bad" | "none">(() => {
-    const s = stats?.reviews?.score;
-    if (s == null || s === 0) return "none";
-    if (s >= 7) return "good";
-    if (s >= 5) return "mid";
-    return "bad";
-  }, [stats?.reviews?.score]);
-
-  // The reviews summary may be undefined when Steam hasn't returned
-  // one yet; the section handles each shape explicitly. This just
-  // narrows the access for the positive-pct label.
-  const reviewSummary: SteamGameReviews | null = stats?.reviews ?? null;
-
   return createPortal(
     <div
       ref={popoverRef}
@@ -272,10 +394,10 @@ export default function SteamPlayerCountPopover({
           <span className="steam-stats-popover-header-dot" />
         </div>
         <div className="steam-stats-popover-header-body">
-          <div className="steam-stats-popover-header-title">
-            {stats?.details?.name ?? "Steam"}
+          <div className="steam-stats-popover-header-title">Steam</div>
+          <div className="steam-stats-popover-header-subtitle">
+            Live player stats
           </div>
-          <div className="steam-stats-popover-header-subtitle">Steam</div>
         </div>
         <button
           type="button"
@@ -300,125 +422,9 @@ export default function SteamPlayerCountPopover({
         </button>
       </header>
 
-      {/* ── Body ───────────────────────────────────────────────────── */}
-      <div className="steam-stats-popover-body">
-        {/* Live current players — the headline number. Reuses the
-            parent's count so the badge and the popover agree at the
-            moment of click. `aria-live="polite"` so the screen reader
-            announces the count without interrupting. */}
-        <div className="steam-stats-popover-stat steam-stats-popover-stat--current">
-          <div
-            className="steam-stats-popover-stat-value"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            {currentCount.toLocaleString()}
-          </div>
-          <div className="steam-stats-popover-stat-label">
-            playing right now
-          </div>
-        </div>
-
-        <div className="steam-stats-popover-divider" />
-
-        {/* Reviews — aggregate only (the per-review list is hidden in
-            the backend to keep the response small). */}
-        <section className="steam-stats-popover-section">
-          <div className="steam-stats-popover-section-header">
-            <span className="steam-stats-popover-section-title">Reviews</span>
-            {reviewsLoading ? (
-              <span className="steam-stats-popover-skeleton-pill" />
-            ) : reviewSummary ? (
-              <span
-                className={`steam-stats-popover-section-badge steam-stats-popover-tone-${reviewTone}`}
-              >
-                {reviewSummary.scoreDesc ?? "Unrated"}
-              </span>
-            ) : (
-              <span className="steam-stats-popover-section-empty">—</span>
-            )}
-          </div>
-          {reviewsLoading ? (
-            <>
-              <div className="steam-stats-popover-skeleton-bar" />
-              <div className="steam-stats-popover-skeleton-line short" />
-            </>
-          ) : reviewSummary ? (
-            <>
-              <div
-                className={`steam-stats-popover-reviews-bar steam-stats-popover-tone-${reviewTone}`}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={reviewPositivePct ?? 0}
-                aria-label={`${reviewPositivePct ?? 0}% positive reviews`}
-              >
-                <div
-                  className="steam-stats-popover-reviews-bar-fill"
-                  style={{ width: `${reviewPositivePct ?? 0}%` }}
-                />
-              </div>
-              <div className="steam-stats-popover-reviews-count">
-                <strong>{reviewSummary.totalPositive.toLocaleString()}</strong>{" "}
-                positive
-                <span className="steam-stats-popover-reviews-count-sep">·</span>
-                {reviewSummary.totalNegative.toLocaleString()} negative
-                <span className="steam-stats-popover-reviews-count-sep">·</span>
-                {reviewSummary.totalReviews.toLocaleString()} total
-              </div>
-            </>
-          ) : (
-            <div className="steam-stats-popover-section-error">
-              {stats?.reviewsError ?? "No review data"}
-            </div>
-          )}
-        </section>
-
-        <div className="steam-stats-popover-divider" />
-
-        {/* Player activity (24h) — compact sparkline + Peak / Avg /
-            Samples summary. Owns its own polling via
-            `usePlayerCountHistory` (60s + focus refresh), so the
-            popover's stats hook and the activity hook share nothing
-            beyond the cached backend responses. The compact
-            component handles its own loading / empty / error states. */}
-        <SteamPlayerActivityCompact appId={appId} />
-
-        {/* If the whole fetch failed (e.g. offline), surface a single
-            inline message instead of three "—" placeholders. */}
-        {fetchError && !stats && (
-          <div className="steam-stats-popover-fetch-error" role="alert">
-            Couldn't reach Steam. Check your connection and try again.
-          </div>
-        )}
-      </div>
-
-      {/* ── Footer ─────────────────────────────────────────────────── */}
-      <footer className="steam-stats-popover-footer">
-        <a
-          href={`https://store.steampowered.com/app/${appId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="steam-stats-popover-footer-link"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="13"
-            height="13"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-          View on Steam
-        </a>
-      </footer>
+      {/* ── Body + footer — shared with the combined popover's Steam
+          tab (see PlayerCountPopover.tsx). */}
+      <SteamStatsPopoverBody appId={appId} currentCount={currentCount} />
     </div>,
     document.body
   );

@@ -2,7 +2,7 @@ import { useMemo, useState, type ComponentProps } from "react";
 import LineChart from "../../components/charts/LineChart";
 import { ActivitySparkline } from "./ActivitySparkline";
 import { GameThumbnail } from "./GameThumbnail";
-import SteamPlayerCount from "../../components/SteamPlayerCount";
+import PlayerCountBadge from "../../components/PlayerCountBadge";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 import { useSettings } from "../../context/SettingsContext";
 import { useActivity } from "../../context/ActivityContext";
@@ -233,7 +233,7 @@ function ActivitySessionItem({ session, game, onDelete }: SessionItemProps) {
                 className="activity-session-item__player-chip"
                 aria-hidden={false}
               >
-                <SteamPlayerCount
+                <PlayerCountBadge
                   appId={steamAppId}
                   className="activity-session-item__player-chip-badge"
                 />

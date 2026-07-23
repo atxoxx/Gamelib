@@ -30,7 +30,7 @@ import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { useFocusable } from "../../hooks/useFocusable";
 import { PLAY_STATUS_DETAILS } from "../../types/game";
-import SteamPlayerCount from "../SteamPlayerCount";
+import PlayerCountBadge from "../PlayerCountBadge";
 import BigScreenPill from "../bigscreen/BigScreenPill";
 import BigScreenCover from "../bigscreen/BigScreenCover";
 import {
@@ -175,7 +175,7 @@ export default function BigScreenSpotlight({
           </BigScreenPill>
           {resolvedSteamAppId != null && (
             <BigScreenPill tone="info" size="sm">
-              <SteamPlayerCount appId={resolvedSteamAppId} />
+              <PlayerCountBadge appId={resolvedSteamAppId} />
             </BigScreenPill>
           )}
           {releaseYear != null && (

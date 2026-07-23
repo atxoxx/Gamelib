@@ -4,7 +4,7 @@ import type { Game } from "../../types/game";
 import { useGames } from "../../context/GameContext";
 import { Card } from "../ui";
 import { useCollapsedState } from "../../hooks/useCollapsedState";
-import SteamPlayerCount from "../SteamPlayerCount";
+import PlayerCountBadge from "../PlayerCountBadge";
 import { useSteamAppId } from "../../hooks/useSteamAppId";
 
 interface ContinuePlayingRailProps {
@@ -143,7 +143,7 @@ function ContinuePlayingCard({
         <span className="lib-rail-platform">{game.platform}</span>
         {steamAppId != null && (
           <div className="lib-rail-player-chip">
-            <SteamPlayerCount appId={steamAppId} className="lib-rail-player-chip-badge" />
+            <PlayerCountBadge appId={steamAppId} className="lib-rail-player-chip-badge" />
           </div>
         )}
       </div>

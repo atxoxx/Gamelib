@@ -1446,6 +1446,89 @@
 }
 
 /* ===========================================================================
+   Combined player-count popover — Steam / Hydra source tabs
+
+   The combined `<PlayerCountBadge>` sums both sources; its popover
+   (`PlayerCountPopover`) splits the detail into two sub-tabs. The tab
+   strip sits between the shared popover header and the tab panel
+   (which reuses the .steam-stats-popover-body skeleton untouched).
+
+   - .player-stats-tabs        : the strip (2-up grid, hairline below)
+   - .player-stats-tab         : one tab button; source dot + label
+   - .player-stats-tab--steam  : green dot / green active underline
+   - .player-stats-tab--hydra  : purple dot / purple active underline
+   - .is-active                : selected state (brighter text + tinted
+                                  underline via box-shadow inset)
+   ============================================================================ */
+
+.player-stats-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.player-stats-tab {
+  --tab-accent: var(--color-success);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color var(--transition-fast),
+              border-color var(--transition-fast),
+              background var(--transition-fast);
+}
+
+.player-stats-tab--hydra {
+  --tab-accent: #a78bfa;
+}
+
+.player-stats-tab:hover {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--tab-accent) 6%, transparent);
+}
+
+.player-stats-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.player-stats-tab.is-active {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--tab-accent);
+  background: color-mix(in srgb, var(--tab-accent) 8%, transparent);
+}
+
+.player-stats-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--tab-accent);
+  box-shadow: 0 0 5px var(--tab-accent);
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: opacity var(--transition-fast);
+}
+
+.player-stats-tab.is-active .player-stats-tab-dot {
+  opacity: 1;
+}
+
+/* Second dot in the combined badge sits flush against the first —
+   tighten the pill's default 8px gap between the two dots only. */
+.steam-player-count .steam-player-count-dot + .steam-player-count-dot {
+  margin-left: -4px;
+}
+
+/* ===========================================================================
    Steam player-count click-to-expand popover
 
    - .steam-player-count--clickable : the badge gains cursor:pointer + a

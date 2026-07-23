@@ -7,41 +7,48 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { HydraGameStats } from "../types/game";
-import { formatCompactPlayerCount } from "./SteamPlayerCount";
+import { SteamStatsPopoverBody } from "./SteamPlayerCountPopover";
+import { HydraStatsPopoverBody } from "./HydraStatsPopover";
 
 /**
- * HydraStatsPopover
+ * PlayerCountPopover
  *
- *  Click-to-expand companion to `<HydraPlayerCount>`. Renders a compact
- *  anchored card next to the badge with the Hydra launcher's community
- *  stats for the game:
+ *  Click-to-expand companion to the combined `<PlayerCountBadge>`.
+ *  One anchored card, two sub-tabs:
  *
- *   1. **Active players** — Hydra users currently in-game.
- *   2. **Community downloads** — total downloads recorded by Hydra
- *      across community sources.
- *   3. **Community score** — average 1–5 star score from Hydra user
- *      reviews (the same reviews shown in the Reviews → Hydra tab),
- *      rendered as a fractional star row + review count.
+ *   - **Steam** — live count, aggregate review breakdown, 24h player
+ *     activity sparkline, "View on Steam" link
+ *     (`SteamStatsPopoverBody`, shared with the legacy Steam-only
+ *     popover).
+ *   - **Hydra** — active Hydra players, total community downloads,
+ *     and the 1–5 star community score (`HydraStatsPopoverBody`).
  *
- *  The stats object is passed in by the parent badge (already fetched
- *  and polling via `useHydraGameStats`), so opening the popover costs
- *  zero extra IPC/HTTP round-trips.
+ *  The header shows the combined total so the badge and popover agree
+ *  at click time; the tab strip underneath splits it per source. The
+ *  default tab is whichever source contributes more players, so the
+ *  most relevant detail is one click away, not two.
  *
  *  Positioning, dismissal, and accessibility mirror
  *  `SteamPlayerCountPopover` exactly (portal into body, anchor-flip +
  *  viewport clamp, Escape / click-outside / X to close, dialog
- *  semantics, focus restore). Shares the `steam-stats-popover` CSS
- *  skeleton with a `hydra-stats-popover` modifier for the purple
- *  accent.
+ *  semantics, focus restore). Reuses the `steam-stats-popover` CSS
+ *  skeleton; the tab strip is the only new block.
  */
 
-interface HydraStatsPopoverProps {
-  /** Already-fetched Hydra stats from the parent badge's hook. */
-  stats: HydraGameStats;
+interface PlayerCountPopoverProps {
+  appId: number;
   /** Ref to the badge element the popover anchors to. */
   anchorRef: RefObject<HTMLElement | null>;
+  /** Live Steam count captured from the badge (0 when none). */
+  steamCount: number;
+  /** Already-fetched Hydra stats from the badge's hook (null when
+   *  Hydra has no data for this appid — the tab shows an empty
+   *  state instead of refetching). */
+  hydraStats: HydraGameStats | null;
   onClose: () => void;
 }
+
+type StatsTab = "steam" | "hydra";
 
 const VIEWPORT_MARGIN = 12;
 /** Fallback width for the first-paint position pass, before the
@@ -49,118 +56,13 @@ const VIEWPORT_MARGIN = 12;
  *  in `store.css` on `.steam-stats-popover`). */
 const FALLBACK_WIDTH_PX = 360;
 
-/** Fractional 1–5 star row: a dimmed base layer of five stars with a
- *  filled overlay clipped to `score / 5` width. Pure CSS clip — no
- *  per-star SVG math. */
-function StarRow({ score }: { score: number }) {
-  const pct = Math.max(0, Math.min(100, (score / 5) * 100));
-  const stars = "★★★★★";
-  return (
-    <span
-      className="hydra-stats-stars"
-      role="img"
-      aria-label={`${score.toFixed(1)} out of 5 stars`}
-    >
-      <span className="hydra-stats-stars-base" aria-hidden="true">
-        {stars}
-      </span>
-      <span
-        className="hydra-stats-stars-fill"
-        style={{ width: `${pct}%` }}
-        aria-hidden="true"
-      >
-        {stars}
-      </span>
-    </span>
-  );
-}
-
-/**
- * HydraStatsPopoverBody
- * ─────────────────────
- * The Hydra sections of the popover (active players, community
- * downloads, 1–5 star community score), extracted so the combined
- * Steam + Hydra `PlayerCountPopover` can render them as its Hydra tab
- * without duplicating the markup.
- */
-export function HydraStatsPopoverBody({ stats }: { stats: HydraGameStats }) {
-  const hasScore = stats.reviewCount > 0 && stats.averageScore > 0;
-
-  return (
-    <div className="steam-stats-popover-body">
-      {/* Active players — headline number, same slot as the Steam
-          popover's "playing right now". */}
-      <div className="steam-stats-popover-stat steam-stats-popover-stat--current">
-        <div
-          className="steam-stats-popover-stat-value"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {stats.playerCount.toLocaleString()}
-        </div>
-        <div className="steam-stats-popover-stat-label">
-          playing on Hydra right now
-        </div>
-      </div>
-
-      <div className="steam-stats-popover-divider" />
-
-      {/* Community downloads. */}
-      <section className="steam-stats-popover-section">
-        <div className="steam-stats-popover-section-header">
-          <span className="steam-stats-popover-section-title">
-            Community downloads
-          </span>
-          <span className="steam-stats-popover-section-badge hydra-stats-badge">
-            {formatCompactPlayerCount(stats.downloadCount)}
-          </span>
-        </div>
-        <div className="steam-stats-popover-reviews-count">
-          <strong>{stats.downloadCount.toLocaleString()}</strong> downloads
-          across community sources
-        </div>
-      </section>
-
-      <div className="steam-stats-popover-divider" />
-
-      {/* Community score — 1-5 stars from Hydra user reviews (the
-          same reviews listed in the Reviews → Hydra tab). */}
-      <section className="steam-stats-popover-section">
-        <div className="steam-stats-popover-section-header">
-          <span className="steam-stats-popover-section-title">
-            Community score
-          </span>
-          {hasScore ? (
-            <span className="steam-stats-popover-section-badge hydra-stats-badge">
-              {stats.averageScore.toFixed(1)} / 5
-            </span>
-          ) : (
-            <span className="steam-stats-popover-section-empty">—</span>
-          )}
-        </div>
-        {hasScore ? (
-          <div className="hydra-stats-score-row">
-            <StarRow score={stats.averageScore} />
-            <span className="steam-stats-popover-reviews-count">
-              {stats.reviewCount.toLocaleString()}{" "}
-              {stats.reviewCount === 1 ? "review" : "reviews"}
-            </span>
-          </div>
-        ) : (
-          <div className="steam-stats-popover-section-error">
-            No Hydra reviews yet
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-export default function HydraStatsPopover({
-  stats,
+export default function PlayerCountPopover({
+  appId,
   anchorRef,
+  steamCount,
+  hydraStats,
   onClose,
-}: HydraStatsPopoverProps) {
+}: PlayerCountPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   // Keep the latest onClose in a ref so the global keydown / mousedown
@@ -169,6 +71,15 @@ export default function HydraStatsPopover({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  const hydraCount = hydraStats?.playerCount ?? 0;
+  const total = steamCount + hydraCount;
+
+  // Land on the tab with more players — usually the one the user is
+  // curious about. Steam wins ties (richer content: reviews + chart).
+  const [tab, setTab] = useState<StatsTab>(
+    hydraCount > steamCount ? "hydra" : "steam"
+  );
 
   // ── Position state ──────────────────────────────────────────────
   // Same anchor-flip + viewport-clamp math as SteamPlayerCountPopover.
@@ -229,7 +140,9 @@ export default function HydraStatsPopover({
       window.removeEventListener("scroll", recompute, true);
     };
     // anchorRef is a stable ref object — intentionally excluded.
-  }, [anchorRef]);
+    // `tab` included so switching tabs (content height changes)
+    // re-clamps against the bottom of the viewport.
+  }, [anchorRef, tab]);
 
   // ── Focus capture + global dismissal ────────────────────────────
   useEffect(() => {
@@ -269,30 +182,31 @@ export default function HydraStatsPopover({
   return createPortal(
     <div
       ref={popoverRef}
-      className={`steam-stats-popover hydra-stats-popover ${position.growFromLeft ? "from-left" : "from-right"}`}
+      className={`steam-stats-popover ${tab === "hydra" ? "hydra-stats-popover" : ""} ${position.growFromLeft ? "from-left" : "from-right"}`.trim()}
       style={{ top: position.top, left: position.left }}
       role="dialog"
       aria-modal="true"
-      aria-label="Hydra community stats"
+      aria-label="Player stats"
     >
-      {/* ── Header ──────────────────────────────────────────────── */}
+      {/* ── Header — combined total, agrees with the badge. ──────── */}
       <header className="steam-stats-popover-header">
         <div className="steam-stats-popover-header-icon" aria-hidden="true">
-          <span className="steam-stats-popover-header-dot hydra-player-count-dot" />
+          <span className="steam-stats-popover-header-dot" />
         </div>
         <div className="steam-stats-popover-header-body">
           <div className="steam-stats-popover-header-title">
-            Hydra Community
+            {total.toLocaleString()} playing now
           </div>
           <div className="steam-stats-popover-header-subtitle">
-            Hydra Launcher
+            {steamCount.toLocaleString()} Steam ·{" "}
+            {hydraCount.toLocaleString()} Hydra
           </div>
         </div>
         <button
           type="button"
           className="steam-stats-popover-close"
           onClick={onClose}
-          aria-label="Close Hydra stats"
+          aria-label="Close stats"
           title="Close"
         >
           <svg
@@ -311,9 +225,61 @@ export default function HydraStatsPopover({
         </button>
       </header>
 
-      {/* ── Body — shared with the combined popover's Hydra tab (see
-          PlayerCountPopover.tsx). */}
-      <HydraStatsPopoverBody stats={stats} />
+      {/* ── Source tabs ───────────────────────────────────────────── */}
+      <div className="player-stats-tabs" role="tablist" aria-label="Stats source">
+        <button
+          type="button"
+          role="tab"
+          id="player-stats-tab-steam"
+          aria-selected={tab === "steam"}
+          aria-controls="player-stats-panel-steam"
+          className={`player-stats-tab player-stats-tab--steam ${tab === "steam" ? "is-active" : ""}`.trim()}
+          onClick={() => setTab("steam")}
+        >
+          <span className="player-stats-tab-dot" aria-hidden="true" />
+          Steam
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="player-stats-tab-hydra"
+          aria-selected={tab === "hydra"}
+          aria-controls="player-stats-panel-hydra"
+          className={`player-stats-tab player-stats-tab--hydra ${tab === "hydra" ? "is-active" : ""}`.trim()}
+          onClick={() => setTab("hydra")}
+        >
+          <span className="player-stats-tab-dot" aria-hidden="true" />
+          Hydra
+        </button>
+      </div>
+
+      {/* ── Tab panels — bodies shared with the single-source
+          popovers, so content and styling stay in lockstep. ──────── */}
+      {tab === "steam" ? (
+        <div
+          role="tabpanel"
+          id="player-stats-panel-steam"
+          aria-labelledby="player-stats-tab-steam"
+        >
+          <SteamStatsPopoverBody appId={appId} currentCount={steamCount} />
+        </div>
+      ) : (
+        <div
+          role="tabpanel"
+          id="player-stats-panel-hydra"
+          aria-labelledby="player-stats-tab-hydra"
+        >
+          {hydraStats ? (
+            <HydraStatsPopoverBody stats={hydraStats} />
+          ) : (
+            <div className="steam-stats-popover-body">
+              <div className="steam-stats-popover-section-error">
+                No Hydra community data for this game yet.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>,
     document.body
   );

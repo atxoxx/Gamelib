@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useRef, useState } from "react";
+import useSteamPlayerCount from "../hooks/useSteamPlayerCount";
 import SteamPlayerCountPopover from "./SteamPlayerCountPopover";
 
 /**
@@ -48,22 +48,15 @@ export function formatCompactPlayerCount(num: number): string {
   return (num / 1_000_000).toFixed(num % 1_000_000 === 0 ? 0 : 1).replace(/\.0$/, "") + "M";
 }
 
-/** Refresh window in milliseconds. Mirrors the Rust `PLAYER_COUNT_CACHE_TTL`
- *  in `src-tauri/src/lib.rs` — keeping the two in lockstep means we
- *  never burn a Steam API call before the backend cache has expired. */
-const REFRESH_INTERVAL_MS = 60_000;
-
 export default function SteamPlayerCount({
   appId,
   className = "",
 }: SteamPlayerCountProps) {
-  // Three-state model:
-  //   `null`   → not yet fetched OR the fetch errored (hide)
-  //   `0`      → Steam confirmed nobody is playing right now (hide)
-  //   `>0`     → render the badge with that count
-  // The boolean second arg tracks "is this a real zero or just nothing?";
-  // we only render the badge after a successful fetch.
-  const [count, setCount] = useState<number | null>(null);
+  // Polling (60s + focus refresh) lives in the shared hook so the
+  // combined Steam + Hydra badge (`PlayerCountBadge`) reuses the
+  // exact same behavior. `null` covers "no data / errored / zero
+  // players" — the badge hides for all of them.
+  const count = useSteamPlayerCount(appId);
 
   // Popover open/close state. Clicking the badge toggles it; the
   // popover itself dismisses on Escape / click-outside / X and
@@ -76,64 +69,6 @@ export default function SteamPlayerCount({
   // "outside click" (would also close, but only after the toggle
   // fires and only by accident).
   const badgeRef = useRef<HTMLDivElement>(null);
-
-  // Stable ref so the polling / focus handlers always see the latest
-  // `appId` without forcing a re-register of window listeners.
-  const appIdRef = useRef(appId);
-  appIdRef.current = appId;
-
-  const fetchNow = useCallback(async () => {
-    const id = appIdRef.current;
-    if (!id) {
-      setCount(null);
-      return;
-    }
-    try {
-      const result = await invoke<number | null>("get_steam_player_count", {
-        appId: id,
-      });
-      // The Rust command returns `Ok(None)` for `result != 1`, and
-      // `Ok(Some(0))` is a real "nobody is playing" reading. Either way
-      // the badge should hide — we don't want a misleading "0 playing"
-      // label sitting on the banner.
-      setCount(result && result > 0 ? result : null);
-    } catch (err) {
-      // Quietly fall through to `null` so the badge hides. Logging once
-      // per error is enough; spamming the console on every 60s tick would
-      // drown out real warnings.
-      console.warn(
-        `[SteamPlayerCount] fetch failed for appid ${id}:`,
-        err
-      );
-      setCount(null);
-    }
-  }, []);
-
-  // Polling + focus refresh. Both gated on a truthy `appId` so a
-  // banner that briefly unmounts a component (Store Hero rotation can
-  // swing from "has appid" → "missing appid" → "has appid") doesn't
-  // keep firing with the stale value.
-  useEffect(() => {
-    if (!appId) {
-      setCount(null);
-      return;
-    }
-
-    // Kick off an immediate fetch on mount / appId change so the badge
-    // is populated as fast as the first network round-trip completes.
-    fetchNow();
-
-    const interval = window.setInterval(fetchNow, REFRESH_INTERVAL_MS);
-    const onFocus = () => {
-      fetchNow();
-    };
-    window.addEventListener("focus", onFocus);
-
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [appId, fetchNow]);
 
   if (count === null) return null;
 
