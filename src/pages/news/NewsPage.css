@@ -3,51 +3,10 @@
    ============================== */
 
 .news-page {
-  padding: var(--space-xl) var(--space-2xl);
   min-height: 100%;
-  display: flex;
-  flex-direction: column;
 }
 
 /* ── News Header ─────────────────────────────────────────────────────── */
-
-.news-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  margin-bottom: var(--space-lg);
-  flex-wrap: wrap;
-}
-
-.news-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.news-header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.news-title {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.news-title svg {
-  width: 22px;
-  height: 22px;
-  color: var(--color-accent);
-  filter: drop-shadow(0 0 6px var(--color-accent-glow));
-}
 
 .news-settings-btn {
   display: inline-flex;

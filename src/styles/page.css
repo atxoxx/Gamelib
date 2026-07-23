@@ -1,0 +1,109 @@
+/* ============================================================================
+   Page shell + header — shared across every desktop route.
+   Establishes one consistent vertical rhythm, a single header treatment,
+   and a theme-safe entrance motion. Use <div className="page"> as the
+   page root and <PageHeader /> for the title block.
+   ============================================================================ */
+
+/* ── Page shell ─────────────────────────────────────────────────────────── */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--space-lg) var(--space-2xl) var(--space-3xl);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.page-header__main {
+  min-width: 0;
+}
+
+.page-header__eyebrow {
+  display: block;
+  margin: 0 0 var(--space-sm);
+}
+
+.page-header__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-3xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+}
+
+.page-header__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-accent);
+}
+
+.page-header__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.page-header__description {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-secondary);
+  max-width: 64ch;
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ── Section rhythm ─────────────────────────────────────────────────────── */
+.page-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* ── Entrance motion ───────────────────────────────────────────────────────
+   Subtle fade + lift. Staggered via the inline `--d` delay custom property.
+   Global prefers-reduced-motion block in index.css neutralizes this. */
+.fade-up {
+  opacity: 0;
+  animation: fadeUp var(--duration-slow) var(--ease-standard) both;
+  animation-delay: var(--d, 0ms);
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

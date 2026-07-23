@@ -9,7 +9,7 @@ import { useSettings } from "../context/SettingsContext";
 
 import DonutChart from "../components/charts/DonutChart";
 import BarChart from "../components/charts/BarChart";
-import { Card, KpiTile, Button } from "../components/ui";
+import { Card, KpiTile, Button, PageHeader } from "../components/ui";
 import {
   buildHeatmap,
   computeStreaks,
@@ -332,23 +332,23 @@ function ProfileSection() {
   }, [stats, games.length, streak.current, goalMin, monthToDate, showToast]);
 
   return (
-    <div className="community-profile">
+    <div className="community-profile page">
       {/* ── Profile header / share ─────────────────────────────────── */}
-      <div className="community-profile-header">
-        <div className="community-profile-heading">
-          <span className="brand-eyebrow">Your gaming identity</span>
-          <h2 className="community-profile-title"><span className="brand-text">Player Profile</span></h2>
-        </div>
-        <Button variant="ghost" size="sm" onClick={handleShareProfile} leftIcon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-          </svg>
-        }>Share Profile</Button>
-      </div>
+      <PageHeader
+        eyebrow="Your gaming identity"
+        title="Player Profile"
+        actions={
+          <Button variant="ghost" size="sm" onClick={handleShareProfile} leftIcon={
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          }>Share Profile</Button>
+        }
+      />
 
       {/* ── KPI Tile Row ─────────────────────────────────────────────── */}
       <div className="community-kpi-grid">

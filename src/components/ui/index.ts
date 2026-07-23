@@ -18,3 +18,6 @@ export type { ConfirmModalProps } from "./ConfirmModal";
 
 export { KpiTile } from "./KpiTile";
 export type { KpiTileProps } from "./KpiTile";
+
+export { PageHeader } from "./PageHeader";
+export type { PageHeaderProps } from "./PageHeader";

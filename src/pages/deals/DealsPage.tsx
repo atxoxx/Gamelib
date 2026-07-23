@@ -9,7 +9,7 @@ import type {
   GamePassGame,
   Giveaway,
 } from "../../types/deals";
-import { Button } from "../../components/ui";
+import { Button, PageHeader } from "../../components/ui";
 import "./DealsPage.css";
 import "../../styles/page-deals.css";
 
@@ -322,34 +322,28 @@ export default function DealsPage() {
   };
 
   return (
-    <div className="deals-page">
-      <header className="deals-page-header" style={{ background: "var(--mesh-gradient)" }}>
-        <span className="brand-eyebrow">Savings &amp; free games</span>
-        <h1 className="deals-page-title">
-          <span className="deals-page-title-icon" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 7h-3a2 2 0 0 1-2-2V3" />
-              <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3" />
-              <path d="M9 7H4a2 2 0 0 0-2 2v1" />
-              <path d="M14 14l-3 3-3-3" />
-              <path d="M11 17V7" />
-            </svg>
-          </span>
-          <span className="brand-text">Deals</span>
-        </h1>
-        <p className="deals-page-subtitle">
-          Browse the Xbox GamePass catalog, the best current deals across PC
-          stores, and free game giveaways — all in one place. Click any
-          card to jump straight to its source.
-        </p>
-      </header>
+    <div className="deals-page page">
+      <PageHeader
+        eyebrow="Savings & free games"
+        title="Deals"
+        description="Browse the Xbox GamePass catalog, the best current deals across PC stores, and free game giveaways — all in one place. Click any card to jump straight to its source."
+        icon={
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20 7h-3a2 2 0 0 1-2-2V3" />
+            <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3" />
+            <path d="M9 7H4a2 2 0 0 0-2 2v1" />
+            <path d="M14 14l-3 3-3-3" />
+            <path d="M11 17V7" />
+          </svg>
+        }
+      />
 
       <div className="deals-subtabs" role="tablist">
         <button

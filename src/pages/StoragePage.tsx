@@ -5,7 +5,7 @@ import { useDensityContext } from "../context/DensityContext";
 import { useToast } from "../context/ToastContext";
 import DensityToggle from "../components/DensityToggle";
 import { DEFAULT_SORT, sortGames, type SortKey } from "./storage/utils";
-import { Button } from "../components/ui";
+import { Button, PageHeader } from "../components/ui";
 import { BulkRecalcBar } from "./storage/BulkRecalcBar";
 import { StorageHeader } from "./storage/StorageHeader";
 import { StorageSortSelect } from "./storage/StorageSortSelect";
@@ -139,10 +139,13 @@ export default function StoragePage() {
   );
 
   return (
-    <div className="storage-page">
+    <div className="storage-page page">
       {/* ── Page header ──────────────────────────────────────── */}
-      <header className="storage__page-header">
-        <div className="storage__page-header-icon" aria-hidden="true">
+      <PageHeader
+        eyebrow="Disk & Library"
+        title="Storage"
+        description="Disk usage across every installed game, broken down by platform and drive."
+        icon={
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="2" width="20" height="20" rx="2" />
             <circle cx="8.5" cy="8.5" r="1.5" />
@@ -150,15 +153,8 @@ export default function StoragePage() {
             <line x1="12" y1="6" x2="18" y2="6" />
             <line x1="12" y1="10" x2="15" y2="10" />
           </svg>
-        </div>
-        <div className="storage__page-header-text">
-          <span className="brand-eyebrow">Disk &amp; Library</span>
-          <h1 className="storage__page-title brand-text">Storage</h1>
-          <p className="storage__page-subtitle">
-            Disk usage across every installed game, broken down by platform and drive.
-          </p>
-        </div>
-      </header>
+        }
+      />
 
       {/* ── Dashboard cards ──────────────────────────────────── */}
       <StorageHeader games={installedGames} staleCount={staleCount} />

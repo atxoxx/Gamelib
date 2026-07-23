@@ -17,6 +17,15 @@
   overflow-y: auto;
   padding: calc(var(--spacing-unit) * 3);
   box-sizing: border-box;
+  gap: var(--space-lg);
+}
+
+.activity__toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-unit);
+  flex-wrap: wrap;
 }
 
 .activity__content {
@@ -25,30 +34,6 @@
   gap: calc(var(--spacing-unit) * 3);
   width: 100%;
   margin: 0 auto;
-}
-
-.activity__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--spacing-unit);
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: calc(var(--spacing-unit) * 2);
-}
-
-.activity__header-left {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing-unit) * 3);
-  flex-wrap: wrap;
-}
-
-.activity__title {
-  color: var(--color-text-primary);
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0;
 }
 
 .activity__tabs {
@@ -88,13 +73,6 @@
 .activity__tab-btn--active:hover {
   color: #fff;
   background: var(--color-brand-teal);
-}
-
-.activity__header-right {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing-unit) * 1.5);
-  flex-wrap: wrap;
 }
 
 /* ── Export Actions ── */

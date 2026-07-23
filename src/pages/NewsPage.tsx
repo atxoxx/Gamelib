@@ -13,6 +13,7 @@ import {
 } from "../pages/communityStorage";
 import "./news/NewsPage.css";
 import "../styles/page-news.css";
+import { PageHeader } from "../components/ui";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -132,22 +133,21 @@ export default function NewsPage() {
   }, []);
 
   return (
-    <div className="news-page">
+    <div className="news-page page">
       {/* Header */}
-      <div className="news-header">
-        <div className="news-header-left">
-          <span className="brand-eyebrow">Stay in the loop</span>
-          <h1 className="news-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 11a9 9 0 0 1 9 9" />
-              <path d="M4 4a16 16 0 0 1 16 16" />
-              <circle cx="5" cy="19" r="1" />
-            </svg>
-            <span className="brand-text">News</span>
-          </h1>
-        </div>
-
-        <div className="news-header-right">
+      <PageHeader
+        eyebrow="Stay in the loop"
+        title="News"
+        icon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 11a9 9 0 0 1 9 9" />
+            <path d="M4 4a16 16 0 0 1 16 16" />
+            <circle cx="5" cy="19" r="1" />
+          </svg>
+        }
+        actions={
+          <>
+            <DensityToggle density={density} onChange={setDensity} />
           <DensityToggle density={density} onChange={setDensity} />
           {unreadCount < articles.length && articles.length > 0 && (
             <button
@@ -215,8 +215,9 @@ export default function NewsPage() {
             </svg>
             Feeds
           </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Source filter pills */}
       <NewsSourcePills

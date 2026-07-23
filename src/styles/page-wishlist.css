@@ -1,25 +1,5 @@
 /* Page-level brand styling for wishlist (gradient + depth design language). */
 
-/* ── Header ─────────────────────────────────────────────────────────── */
-.wishlist-page-header--brand {
-  position: relative;
-}
-
-.wishlist-page-eyebrow {
-  display: inline-block;
-  margin-bottom: var(--space-2);
-}
-
-.wishlist-page-header--brand .wishlist-page-title {
-  font-weight: var(--font-weight-bold, 700);
-  letter-spacing: -0.02em;
-}
-
-.wishlist-page-header--brand .wishlist-page-icon {
-  color: var(--brand-1);
-  filter: drop-shadow(var(--shadow-brand));
-}
-
 /* ── Cards / rows depth ─────────────────────────────────────────────── */
 .wishlist-card-wrap--brand {
   position: relative;

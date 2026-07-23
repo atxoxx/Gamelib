@@ -6,47 +6,11 @@
  ============================================================================ */
 
 .deals-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: var(--space-2xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-xl);
   min-height: 100%;
   animation: importMenuIn 200ms ease;
-}
-
-.deals-page-header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.deals-page-title {
-  margin: 0;
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.deals-page-title-icon {
-  width: 28px;
-  height: 28px;
-  color: var(--color-accent);
-}
-
-.deals-page-subtitle {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  max-width: 640px;
-  line-height: 1.5;
 }
 
 /* Sub-tabs */
@@ -164,12 +128,6 @@
   box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
 
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  transition: background var(--transition-fast), transform var(--transition-fast);
-  align-self: flex-end;
-  height: 36px;
-}
 /* Category chips */
 .deals-category-chips {
   display: flex;
@@ -787,6 +745,7 @@
     align-items: stretch;
   }
 
+  .deals-filter-group {
     width: 100%;
     justify-content: center;
   }

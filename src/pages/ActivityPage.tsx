@@ -13,6 +13,7 @@ import { ActivityGantt } from "./activity/ActivityGantt";
 import { ActivitySessions } from "./activity/ActivitySessions";
 import { ActivityPerformance } from "./activity/ActivityPerformance";
 import * as Icons from "./activity/Icons";
+import { PageHeader } from "../components/ui";
 import "./activity/ActivityPage.css";
 
 type TabType = "dashboard" | "timeline" | "sessions" | "performance";
@@ -187,10 +188,32 @@ export default function ActivityPage() {
 
   return (
     <div className="activity__container">
-      {/* Page Header */}
-      <header className="activity__header">
-        <div className="activity__header-left">
-          <h1 className="activity__title">Activity Page</h1>
+      <PageHeader
+        eyebrow="Your play history"
+        title="Activity"
+        actions={
+          <div className="activity__export-actions">
+            <button
+              type="button"
+              className="activity__icon-btn"
+              onClick={handleCaptureScreenshot}
+              title="Capture screenshot / Print"
+            >
+              <Icons.Camera size={13} />
+            </button>
+            <button
+              type="button"
+              className="activity__icon-btn"
+              onClick={handleExportCSV}
+              title="Export CSV"
+            >
+              <Icons.Download size={13} />
+            </button>
+          </div>
+        }
+      />
+
+      <div className="activity__toolbar-row">
           
           {/* Main Navigation Tabs */}
           <nav className="activity__tabs">
@@ -227,11 +250,9 @@ export default function ActivityPage() {
               Performance
             </button>
           </nav>
-        </div>
 
         {/* Global Toolbar Filters */}
-        <div className="activity__header-right">
-          <div className="activity-toolbar">
+        <div className="activity-toolbar">
             {/* Timeframe Presets */}
             <div className="activity-toolbar__group activity-toolbar__date-range">
               {(["7d", "30d", "90d", "all"] as const).map((preset) => (
@@ -319,31 +340,10 @@ export default function ActivityPage() {
               </>
             )}
           </div>
-
-          {/* Action Actions */}
-          <div className="activity__export-actions">
-            <button
-              type="button"
-              className="activity__icon-btn"
-              onClick={handleCaptureScreenshot}
-              title="Capture screenshot / Print"
-            >
-              <Icons.Camera size={13} />
-            </button>
-            <button
-              type="button"
-              className="activity__icon-btn"
-              onClick={handleExportCSV}
-              title="Export CSV"
-            >
-              <Icons.Download size={13} />
-            </button>
-          </div>
-        </div>
-      </header>
+      </div>
 
       {/* Tab Router Content Panels */}
-      <main style={{ marginTop: "20px", flex: 1, minHeight: 0 }}>
+      <main style={{ flex: 1, minHeight: 0 }}>
         {activeTab === "dashboard" && (
           <ActivityDashboard
             sessions={sessions}

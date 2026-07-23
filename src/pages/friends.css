@@ -1933,7 +1933,6 @@
 
 .rec-filter-chips {
   margin-bottom: var(--space-md);
-}
   display: flex;
   gap: var(--space-sm);
 }

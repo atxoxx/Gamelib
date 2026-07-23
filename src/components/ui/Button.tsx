@@ -7,6 +7,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   isLoading?: boolean;
+  active?: boolean;
   leftIcon?: ReactNode;
   rightIcon?: ReactNode;
 }
@@ -30,6 +31,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       variant = "primary",
       size = "md",
       isLoading,
+      active,
       leftIcon,
       rightIcon,
       className,
@@ -46,6 +48,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           "ui-btn",
           variantClasses[variant],
           sizeClasses[size],
+          active ? "ui-btn--active" : "",
           className ?? "",
         ]
           .filter(Boolean)

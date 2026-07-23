@@ -59,6 +59,7 @@ import {
 } from "./friendsStorage";
 import "./friends.css";
 import "../styles/page-friends.css";
+import { PageHeader, Button } from "../components/ui";
 
 // SVG Icons
 function UsersIcon() {
@@ -2923,7 +2924,7 @@ export default function FriendsPage() {
   }
 
   return (
-    <div className="friends-page">
+    <div className="friends-page page">
       {/* Tab bar and Sync controller row */}
       <div className="friends-tab-bar-container">
         <div className="friends-tab-bar" role="tablist" aria-label="Friends sections">
@@ -3068,45 +3069,38 @@ export default function FriendsPage() {
               </div>
             )}
 
-            <div className="friends-list-header">
-              <div className="friends-list-heading">
-                <span className="brand-eyebrow">Your crew</span>
-                <h2 className="friends-list-title"><span className="brand-text">My Friends ({friends.length})</span></h2>
-              </div>
-              <div className="friends-list-header-actions">
-                <button
-                  type="button"
-                  className={`btn btn-secondary${selectMode ? " active" : ""}`}
-                  onClick={() => {
-                    setSelectMode((v) => !v);
-                    setSelectedFriendIds([]);
-                  }}
-                  disabled={friends.length === 0}
-                  title="Select multiple friends for bulk actions"
-                >
-                  {selectMode ? "Cancel" : "Select"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    const next = friendDensity === "grid" ? "list" : "grid";
-                    setFriendDensity(next);
-                    localStorage.setItem("gamelib.friends.density", next);
-                  }}
-                  title="Toggle grid / list view"
-                >
-                  {friendDensity === "grid" ? "List view" : "Grid view"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setShowAddModal(true)}
-                >
-                  Add Friend
-                </button>
-              </div>
-            </div>
+            <PageHeader
+              eyebrow="Your crew"
+              title={`My Friends (${friends.length})`}
+              actions={
+                <>
+                  <Button
+                    variant="secondary"
+                    active={selectMode}
+                    onClick={() => {
+                      setSelectMode((v) => !v);
+                      setSelectedFriendIds([]);
+                    }}
+                    disabled={friends.length === 0}
+                  >
+                    {selectMode ? "Cancel" : "Select"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const next = friendDensity === "grid" ? "list" : "grid";
+                      setFriendDensity(next);
+                      localStorage.setItem("gamelib.friends.density", next);
+                    }}
+                  >
+                    {friendDensity === "grid" ? "List view" : "Grid view"}
+                  </Button>
+                  <Button variant="primary" onClick={() => setShowAddModal(true)}>
+                    Add Friend
+                  </Button>
+                </>
+              }
+            />
 
             {selectMode && (
               <div className="friends-bulk-bar">

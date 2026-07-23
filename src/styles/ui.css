@@ -93,6 +93,18 @@
   transform: scale(0.96) translateY(0);
 }
 
+/* Active (toggle/pressed) state — used for selected filter/toggle buttons. */
+.ui-btn--active {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-bg-tertiary));
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  color: var(--color-text-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.ui-btn--active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 24%, var(--color-bg-tertiary));
+}
+
 .ui-btn--ghost {
   background: transparent;
   color: var(--color-text-secondary);

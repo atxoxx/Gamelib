@@ -40,6 +40,7 @@ import { LandingRedirect } from "./components/LandingRedirect";
 import Splashscreen from "./components/Splashscreen";
 import "./App.css";
 import "./store.css";
+import "./styles/page.css";
 
 function AppLayout() {
   const { isBigScreen } = useBigScreen();

@@ -8,57 +8,10 @@
    ============================================================================ */
 
 .wishlist-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: var(--space-2xl);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xl);
   min-height: 100%;
 }
 
-/* ── Header ────────────────────────────────────────────────────────────── */
-
-.wishlist-page-header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.wishlist-page-title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.wishlist-page-icon {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-radius: var(--radius-md);
-  color: var(--color-accent);
-  flex-shrink: 0;
-}
-
-.wishlist-page-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.wishlist-page-title {
-  margin: 0;
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-}
+/* ── Header count chip (used in PageHeader actions) ─────────────────────── */
 
 .wishlist-page-count {
   padding: 4px 12px;
@@ -69,14 +22,6 @@
   font-weight: var(--font-weight-medium);
   border: 1px solid var(--color-border);
   white-space: nowrap;
-}
-
-.wishlist-page-subtitle {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  max-width: 720px;
-  line-height: 1.55;
 }
 
 /* ── Card grid ─────────────────────────────────────────────────────────── */

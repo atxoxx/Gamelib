@@ -1330,42 +1330,7 @@
  *     feedback without feeling laggy.
  * ========================================================================== */
 
-.dl-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  padding: var(--space-lg);
-  max-width: 1280px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.dl-page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  flex-wrap: wrap;
-}
-
-.dl-page-title-block {
-  flex: 1;
-  min-width: 240px;
-}
-
-.dl-page-title {
-  margin: 0;
-  font-size: var(--font-size-2xl, 24px);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.dl-page-subtitle {
-  margin: 4px 0 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
+/* .dl-page root is styled via the shared `.page` shell (see styles/page.css). */
 
 /* Magnet quick-add bar (right side of the page header). */
 .dl-magnet-bar {
