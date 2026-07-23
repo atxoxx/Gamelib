@@ -2974,9 +2974,12 @@ pub async fn fetch_store_games(
     let base_sort = match sort.as_deref() {
         Some("popularity") => "total_rating_count desc".to_string(),
         Some("rating") => "aggregated_rating desc".to_string(),
+        Some("trending") => "hypes desc".to_string(),
+        Some("follows") => "follows desc".to_string(),
         Some("release_new") => "first_release_date desc".to_string(),
         Some("release_old") => "first_release_date asc".to_string(),
         Some("name") => "name asc".to_string(),
+        Some("name_desc") => "name desc".to_string(),
         // "default", None, or any unknown value: keep category ranking.
         _ => category_sort,
     };

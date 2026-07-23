@@ -2,52 +2,48 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { StoreGameSummary } from "../types/game";
 
-const SUGGEST_DEBOUNCE_MS = 220;
-const SUGGEST_LIMIT = 5;
+const DEBOUNCE_MS = 250;
 
 /**
- * useSearchSuggestions: debounced mini-search that returns the top few
- * IGDB matches for the current query, for the live suggestion dropdown.
- *
- * Reuses `search_store_games` with a small `limit` so no new backend
- * command is needed. In-flight requests are superseded by newer input via
- * a monotonically increasing request id.
+ * Debounced live search suggestions for the store search bar. Returns up
+ * to `limit` IGDB matches (cover + name + release year) so the bar can
+ * show a Hydra-style dropdown as the user types. Only fires when
+ * `enabled` (the search field is focused / active) and the query is at
+ * least 2 characters, minimizing IGDB traffic.
  */
-export function useSearchSuggestions(query: string) {
+export function useSearchSuggestions(query: string, enabled = true, limit = 5) {
   const [suggestions, setSuggestions] = useState<StoreGameSummary[]>([]);
   const [loading, setLoading] = useState(false);
-  const reqIdRef = useRef(0);
+  const reqId = useRef(0);
 
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
+    if (!enabled || q.length < 2) {
       setSuggestions([]);
       setLoading(false);
       return;
     }
-
+    const id = ++reqId.current;
     setLoading(true);
-    const reqId = ++reqIdRef.current;
-    const timer = setTimeout(() => {
+    const t = setTimeout(() => {
       invoke<StoreGameSummary[]>("search_store_games", {
         query: q,
         offset: 0,
-        limit: SUGGEST_LIMIT,
+        limit,
       })
-        .then((results) => {
-          if (reqId !== reqIdRef.current) return;
-          setSuggestions(results);
+        .then((res) => {
+          if (id !== reqId.current) return;
+          setSuggestions(res.slice(0, limit));
           setLoading(false);
         })
         .catch(() => {
-          if (reqId !== reqIdRef.current) return;
+          if (id !== reqId.current) return;
           setSuggestions([]);
           setLoading(false);
         });
-    }, SUGGEST_DEBOUNCE_MS);
-
-    return () => clearTimeout(timer);
-  }, [query]);
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query, enabled, limit]);
 
   return { suggestions, loading };
 }

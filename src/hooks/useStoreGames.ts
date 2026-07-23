@@ -63,7 +63,7 @@ export function useStoreGames() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [category, setCategoryState] = useState<StoreCategory>("trending");
+  const [category, setCategoryState] = useState<StoreCategory>("all");
   const [searchQuery, setSearchQueryRaw] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [sort, setSortState] = useState<StoreSort>("default");
@@ -72,7 +72,7 @@ export function useStoreGames() {
   const offsetRef = useRef(0);
   const requestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeCategoryRef = useRef<StoreCategory>("trending");
+  const activeCategoryRef = useRef<StoreCategory>("all");
   const mountedRef = useRef(true);
   const gamesRef = useRef<StoreGameSummary[]>([]);
   const sortRef = useRef<StoreSort>("default");
@@ -269,7 +269,7 @@ export function useStoreGames() {
 
   // ── Initial load on mount ──────────────────────────────────────────────
   useEffect(() => {
-    const cached = getCategoryCache("trending");
+    const cached = getCategoryCache("all");
     if (cached) {
       setGames(cached);
       offsetRef.current = cached.length;
@@ -277,7 +277,7 @@ export function useStoreGames() {
       setLoading(false);
     } else {
       const reqId = ++requestIdRef.current;
-      performFetch(reqId, "trending", "", 0, false);
+      performFetch(reqId, "all", "", 0, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

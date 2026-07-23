@@ -1050,18 +1050,24 @@ export type StoreSort =
   | "default"
   | "popularity"
   | "rating"
+  | "trending"
+  | "follows"
   | "release_new"
   | "release_old"
-  | "name";
+  | "name"
+  | "name_desc";
 
 /** Human-readable labels for the sort dropdown. */
 export const STORE_SORT_LABELS: Record<StoreSort, string> = {
   default: "Relevance",
   popularity: "Popularity",
-  rating: "Rating",
+  rating: "Top Rated",
+  trending: "Trending",
+  follows: "Most Followed",
   release_new: "Release (newest)",
   release_old: "Release (oldest)",
   name: "Name (A–Z)",
+  name_desc: "Name (Z–A)",
 };
 
 /** Ordered list of sort options for rendering the dropdown. */
@@ -1069,9 +1075,12 @@ export const STORE_SORTS: readonly StoreSort[] = [
   "default",
   "popularity",
   "rating",
+  "trending",
+  "follows",
   "release_new",
   "release_old",
   "name",
+  "name_desc",
 ] as const;
 
 // ─── Store: Recently Viewed / Hidden / Presets (localStorage) ────────────────

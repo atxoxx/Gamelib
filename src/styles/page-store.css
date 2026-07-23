@@ -68,3 +68,186 @@
 .game-page .store-add-btn:hover:not(:disabled) {
   background: var(--brand-gradient-strong);
 }
+
+/* ── Hydra-style Store header (prominent search + sort + actions) ── */
+.store-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--color-bg-primary) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.store-header-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.store-header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.store-header-brand .brand-text {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.store-header-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.store-header-search .store-search-bar-wrap {
+  flex: 1;
+}
+
+.store-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── Card reveal stagger (cheap delight, see StoreGameGrid inline delay) ── */
+@keyframes storeCardReveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.store-game-cell {
+  animation: storeCardReveal 0.36s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .store-game-cell {
+    animation: none !important;
+  }
+}
+
+/* ── Compact header on narrow viewports: stack search above actions ── */
+@media (max-width: 768px) {
+  .store-header-top {
+    flex-wrap: wrap;
+  }
+  .store-header-search {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+
+/* ── Hydra-style Store featured rail (wide 12-card banner) ──────── */
+.store-featured-section {
+  margin-bottom: var(--space-lg);
+}
+
+.store-featured-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.store-featured-tablist {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.store-featured-tab {
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.store-featured-tab:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.store-featured-tab.active {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.store-featured-surprise {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  border: 1px dashed color-mix(in srgb, var(--brand-1) 50%, transparent);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.store-featured-surprise svg {
+  width: 15px;
+  height: 15px;
+}
+
+.store-featured-surprise:hover {
+  background: color-mix(in srgb, var(--brand-1) 12%, transparent);
+  border-color: var(--brand-1);
+}
+
+/* Wide horizontal rail of (up to) 12 cards. */
+.store-featured-rail {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  padding-bottom: var(--space-sm);
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+
+.store-featured-rail > .store-game-card {
+  flex: 0 0 auto;
+  width: 180px;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 768px) {
+  .store-featured-rail > .store-game-card {
+    width: 140px;
+  }
+  .store-featured-head {
+    justify-content: flex-start;
+  }
+}
