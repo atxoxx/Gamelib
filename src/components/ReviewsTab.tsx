@@ -8,33 +8,20 @@ import {
   type IgdbReview,
   type ReviewFetchResult,
   type SteamReaction,
+  type SteamHardware,
   extractSteamAppId,
   resolveSteamAppId,
   STEAM_LANGUAGES,
   STEAM_REACTIONS,
   formatPlayTime,
+  reactionImagePath,
 } from "../types/game";
 import { useGames } from "../context/GameContext";
 import { useToast } from "../context/ToastContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type RatingFilter = "all" | "positive" | "negative";
-/** Sort modes mapped to Steam's `filter` query param:
- *  - "featured"   → filter=all       (Steam's default "most helpful")
- *  - "recent"     → filter=updated   (sorted by last update)
- *  - "funny"      → filter=funny     (reactions > votes funny)
- *  - "highest"    → client-side sort by rating (Steam has no "highest" param)
- *  - "longest"    → client-side sort by review length
- */
-type SortOrder = "featured" | "recent" | "funny" | "highest" | "longest";
 type SourceFilter = "all" | "steam" | "you" | "metacritic" | "opencritic" | "rawg";
-/** Steam review purchase_type param. Maps 1:1 to the query value. */
-type PurchaseTypeFilter = "all" | "steam" | "other";
-/** Playtime filter. "over_1h" / "over_10h" map to Steam's
- *  `playtime_filter_min_<hours>` query params. "custom" applies
- *  client-side (Steam only supports a single min threshold). */
-type PlaytimeFilter = "none" | "over_1h" | "over_10h" | "custom";
 
 /** A normalized review record we render. Combines local + Steam-fetched data. */
 interface ReviewItem {
@@ -80,9 +67,9 @@ interface ReviewItem {
   steamPurchase?: boolean;
   /** Steam: reviewer's SteamID64 — used for the deep-link button. */
   authorSteamId?: string;
-  /** Steam: raw hardware JSON string. Parsed client-side by
-   *  `parseSteamHardware` since the schema is unstable. */
-  hw?: string;
+  /** Steam: reviewer hardware (pre-parsed by backend or raw JSON string
+   *  fallback for backward compat). */
+  hw?: SteamHardware | string;
   /** True when `reviewLength` is in bytes rather than characters.
    *  The byte length is what Steam actually returns; we keep both
    *  for display but use the byte count for sort. */
@@ -94,32 +81,24 @@ interface ReviewItem {
 /** Parsed Steam `hw` payload. The schema is unstable across API
  *  versions so every field is optional; the renderer only shows
  *  lines whose value is non-null. */
-interface SteamHardware {
-  os?: string;
-  cpuName?: string;
-  gpuName?: string;
-  /** RAM in MB (Steam returns the value as a string; we coerce). */
-  systemRamMb?: number;
-  /** VRAM in MB. */
-  vramSize?: number;
-}
+// Re-using the imported `SteamHardware` type from game.ts.
 
-function parseSteamHardware(raw: string | undefined): SteamHardware | null {
+function parseSteamHardware(raw: SteamHardware | string | undefined): SteamHardware | null {
   if (!raw) return null;
+  // Backend now sends a structured object directly.
+  if (typeof raw === "object") {
+    return raw as SteamHardware;
+  }
+  // Legacy fallback: raw JSON string from older cached reviews.
   try {
-    // Steam's hw field is itself a JSON string in some API responses.
-    // Try parsing once; if that fails, the value might be already-
-    // parsed (an object passed through some intermediate layer).
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // `os` and `cpuName` are sometimes nested under different keys
-    // across API versions; check both.
     const os = pickString(parsed, ["os", "OS"]);
     const cpuName = pickString(parsed, ["cpuName", "cpu", "processorName"]);
     const gpuName = pickString(parsed, ["adapterDescription", "gpu", "gpuName"]);
     const systemRamMb = pickNumber(parsed, ["systemRam", "ram", "totalMemoryMB"]);
-    const vramSize = pickNumber(parsed, ["vramSize", "vram", "videoMemoryMB"]);
-    if (!os && !cpuName && !gpuName && !systemRamMb && !vramSize) return null;
-    return { os, cpuName, gpuName, systemRamMb, vramSize };
+    const vramSizeMb = pickNumber(parsed, ["vramSizeMb", "vramSize", "vram", "videoMemoryMB"]);
+    if (!os && !cpuName && !gpuName && !systemRamMb && !vramSizeMb) return null;
+    return { os, cpuName, gpuName, systemRamMb, vramSizeMb };
   } catch {
     return null;
   }
@@ -157,6 +136,11 @@ function formatRam(mb: number | undefined): string | null {
 function formatVram(mb: number | undefined): string | null {
   if (mb === undefined || mb <= 0) return null;
   return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** Pluralize a count. */
+function plural(count: number, singular: string, plural_: string = singular + "s"): string {
+  return `${count} ${count === 1 ? singular : plural_}`;
 }
 
 // ─── BB code renderer ──────────────────────────────────────────────────────
@@ -481,11 +465,6 @@ function BbCodeRenderer({ text }: { text: string }) {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function languageCodeToFriendly(code?: string): string {
-  const found = STEAM_LANGUAGES.find((l) => l.code === code);
-  return found ? `${found.flag} ${found.label}` : code || "Unknown";
-}
-
 function buildExternalUrl(game: Game, site: "metacritic" | "opencritic" | "rawg"): string {
   const q = encodeURIComponent(game.name);
   switch (site) {
@@ -573,53 +552,66 @@ function StarRow({ score, size = 14, overrideStars }: { score?: number; size?: n
   );
 }
 
-function RecommendationIndicator({
-  source,
-  sentiment,
-  rating,
+// ─── Dropdown popover (click-to-open, click-outside-close) ─────────────
+
+interface DropdownItem {
+  value: string;
+  label: string;
+}
+
+function Dropdown({
+  label,
+  items,
+  value,
+  onChange,
 }: {
-  source: ReviewItem["source"];
-  sentiment: ReviewItem["sentiment"];
-  rating: number | null;
+  label: string;
+  items: DropdownItem[];
+  value: string;
+  onChange: (value: string) => void;
 }) {
-  if (source === "you") {
-    const score = rating ?? 0;
-    return (
-      <div className="rv-recommendation rv-recommendation-you" aria-label={`${score} out of 100`}>
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-        <div className="rv-recommendation-score">{Math.round(score)}</div>
-      </div>
-    );
-  }
-  if (sentiment === "positive") {
-    return (
-      <div className="rv-recommendation rv-recommendation-pos" aria-label="Recommended">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: "rotate(-10deg)" }}>
-          <path d="M7 10v12" />
-          <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h3" />
-        </svg>
-        <div className="rv-recommendation-label">Rec</div>
-      </div>
-    );
-  }
-  if (sentiment === "negative") {
-    return (
-      <div className="rv-recommendation rv-recommendation-neg" aria-label="Not Recommended">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: "rotate(10deg)" }}>
-          <path d="M17 14V2" />
-          <path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3" />
-        </svg>
-        <div className="rv-recommendation-label">Not</div>
-      </div>
-    );
-  }
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+  const selected = items.find((i) => i.value === value);
   return (
-    <div className="rv-recommendation rv-recommendation-none" aria-label="No rating">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" />
-      </svg>
+    <div className="rv-dd" ref={ref}>
+      <button
+        type="button"
+        className={`rv-dd-trigger${open ? " active" : ""}`}
+        onClick={() => setOpen((p) => !p)}
+      >
+        <span>{selected?.label ?? label}</span>
+        <svg className="rv-dd-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div className="rv-dd-menu">
+          {items.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`rv-dd-opt${item.value === value ? " active" : ""}`}
+              onClick={() => {
+                onChange(item.value);
+                setOpen(false);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -728,7 +720,7 @@ function ContextBadgesRow({ review }: { review: ReviewItem }) {
   return <div className="rv-context-badges">{badges}</div>;
 }
 
-function HardwareSpecs({ hw }: { hw: string | undefined }) {
+function HardwareSpecs({ hw }: { hw: SteamHardware | string | undefined }) {
   const parsed = useMemo(() => parseSteamHardware(hw), [hw]);
   if (!parsed) return null;
   const lines: { label: string; value: string }[] = [];
@@ -738,9 +730,9 @@ function HardwareSpecs({ hw }: { hw: string | undefined }) {
     const ram = formatRam(parsed.systemRamMb);
     lines.push({ label: "CPU", value: ram ? `${cpu} • ${ram}` : cpu });
   }
-  if (parsed.gpuName || parsed.vramSize) {
+  if (parsed.gpuName || parsed.vramSizeMb) {
     const gpu = parsed.gpuName ?? "Unknown GPU";
-    const vram = formatVram(parsed.vramSize);
+    const vram = formatVram(parsed.vramSizeMb);
     lines.push({ label: "GPU", value: vram ? `${gpu} • ${vram}` : gpu });
   }
   if (lines.length === 0) return null;
@@ -759,35 +751,33 @@ function HardwareSpecs({ hw }: { hw: string | undefined }) {
   );
 }
 
-function PlaytimeRow({ review }: { review: ReviewItem }) {
-  if (review.authorPlaytimeAtReview === undefined && review.authorPlaytimeForever === undefined) {
-    return null;
-  }
-  return (
-    <div className="rv-playtime-row">
-      {review.authorPlaytimeAtReview !== undefined && (
-        <span className="rv-playtime-pill" title="Playtime on this game at the time the review was written">
-          {formatPlayTime(review.authorPlaytimeAtReview)} on record
-        </span>
-      )}
-      {review.authorPlaytimeForever !== undefined && (
-        <span className="rv-playtime-pill rv-playtime-pill-muted" title="Total playtime across all games">
-          {formatPlayTime(review.authorPlaytimeForever)} total
-        </span>
-      )}
-    </div>
-  );
-}
-
 function ReactionBar({ review }: { review: ReviewItem }) {
   const hasVotesUp = (review.votesUp ?? 0) > 0;
   const hasVotesFunny = (review.votesFunny ?? 0) > 0;
   const reactions = review.reactions ?? [];
   if (!hasVotesUp && !hasVotesFunny && reactions.length === 0) return null;
-  // Sort by count descending and show top 3; reveal the rest on click.
   const sorted = [...reactions].sort((a, b) => b.count - a.count);
+  return <ReactionList reactions={sorted} votesUp={review.votesUp} votesFunny={review.votesFunny} />;
+}
+
+function ReactionBadge({ reactionType, count }: { reactionType: number; count: number }) {
+  const [imgErr, setImgErr] = useState(false);
+  const meta = STEAM_REACTIONS[reactionType] ?? { emoji: "❓", label: `Reaction ${reactionType}`, description: "" };
+  const imgPath = reactionImagePath(reactionType);
   return (
-    <ReactionList reactions={sorted} votesUp={review.votesUp} votesFunny={review.votesFunny} />
+    <span className="rv-reaction-badge" title={`${meta.label}: ${plural(count, "person")}`}>
+      {imgPath && !imgErr ? (
+        <img
+          className="rv-reaction-img"
+          src={imgPath}
+          alt={meta.label}
+          onError={() => setImgErr(true)}
+        />
+      ) : (
+        <span className="rv-reaction-emoji">{meta.emoji}</span>
+      )}
+      <span className="rv-reaction-count">{formatHelpfulFunny(count)}</span>
+    </span>
   );
 }
 
@@ -800,10 +790,6 @@ function ReactionList({
   votesUp?: number;
   votesFunny?: number;
 }) {
-  // Augment with the legacy votes_up/votes_funny if those are > 0
-  // and the corresponding reaction isn't already in the list.
-  // (Steam migrated these to `reactions` in 2024; older reviews
-  // only have the legacy fields.)
   const seen = new Set(reactions.map((r) => r.reactionType));
   const augmented: SteamReaction[] = [...reactions];
   if (votesUp && !seen.has(1)) augmented.push({ reactionType: 1, count: votesUp });
@@ -814,21 +800,11 @@ function ReactionList({
   const visible = expanded ? augmented : augmented.slice(0, 3);
   return (
     <div className="rv-card-reactions">
-      {visible.map((r) => {
-        const meta = STEAM_REACTIONS[r.reactionType] ?? { emoji: "❓", label: `Reaction ${r.reactionType}` };
-        return (
-          <span key={r.reactionType} className="rv-reaction-badge" title={meta.label}>
-            <span className="rv-reaction-emoji">{meta.emoji}</span>
-            <span className="rv-reaction-count">{formatHelpfulFunny(r.count)}</span>
-          </span>
-        );
-      })}
+      {visible.map((r) => (
+        <ReactionBadge key={r.reactionType} reactionType={r.reactionType} count={r.count} />
+      ))}
       {augmented.length > 3 && !expanded && (
-        <button
-          type="button"
-          className="rv-reaction-show-more"
-          onClick={() => setExpanded(true)}
-        >
+        <button type="button" className="rv-reaction-show-more" onClick={() => setExpanded(true)}>
           +{augmented.length - 3} more
         </button>
       )}
@@ -862,68 +838,149 @@ function CommentsLink({
   );
 }
 
-function ReviewCard({ review, appId }: { review: ReviewItem; appId: number | null }) {
-  const { isBigScreen } = useBigScreen();
-  const focusProps = useFocusable(() => {});
+// ─── Thumb badge (plugin-style radial gradient thumbs up/down) ─────
+
+function ThumbBadge({ sentiment }: { sentiment: ReviewItem["sentiment"] }) {
+  if (sentiment !== "positive" && sentiment !== "negative") return null;
+  const isPos = sentiment === "positive";
+  return (
+    <div className={`rv-thumb-badge${isPos ? " rv-thumb-pos" : " rv-thumb-neg"}`}>
+      <svg className="rv-thumb-svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        {isPos ? (
+          <g transform="translate(24 30) scale(0.85)">
+            <path
+              d="M-14-8v12M-6-14l-1 6h6l-7 26h-18a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h4z"
+              fill="currentColor"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity="0.9"
+            />
+          </g>
+        ) : (
+          <g transform="translate(24 18) scale(0.85) rotate(180)">
+            <path
+              d="M-14-8v12M-6-14l-1 6h6l-7 26h-18a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h4z"
+              fill="currentColor"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity="0.9"
+            />
+          </g>
+        )}
+      </svg>
+      <span className="rv-thumb-label">{isPos ? "Recommended" : "Not Recommended"}</span>
+    </div>
+  );
+}
+
+// ─── Review row (plugin-style list item) ────────────────────────────
+
+const STEAM_PROFILE_URL = "https://steamcommunity.com/profiles";
+
+function ReviewRow({ review, appId }: { review: ReviewItem; appId: number | null }) {
   const isYou = review.source === "you";
   const isSteam = review.source === "steam";
   const username = isYou ? "You" : review.username;
-  const showTitle = !!review.title;
-  const sentimentEmoji =
-    review.sentiment === "positive" ? "👍" : review.sentiment === "negative" ? "👎" : isYou ? "⭐" : "💬";
+  const profileUrl =
+    isSteam && review.authorSteamId
+      ? `${STEAM_PROFILE_URL}/${review.authorSteamId}/`
+      : null;
+
   return (
-    <article
-      className={`rv-card rv-source-${review.source}`}
-      {...(isBigScreen ? focusProps : {})}
-    >
-      <div className="rv-card-header-new">
-        <RecommendationIndicator
-          source={review.source}
-          sentiment={review.sentiment}
-          rating={review.rating}
-        />
-        <div className="rv-card-header-content">
-          <div className="rv-card-name-row">
-            <span className="rv-card-emoji" aria-hidden="true">{sentimentEmoji}</span>
-            <span className="rv-card-name-text">{username}</span>
-            {isYou && (
-              <span className="rv-verified-badge">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                Verified Player
-              </span>
+    <article className={`rv-row rv-source-${review.source}`}>
+      {/* ── Row header: thumb + main meta ─────────────────────────────── */}
+      <div className="rv-row-header">
+        <ThumbBadge sentiment={review.sentiment} />
+
+        <div className="rv-row-meta">
+          {/* Name row */}
+          <div className="rv-row-name-row">
+            {profileUrl ? (
+              <a className="rv-row-name" href={profileUrl} target="_blank" rel="noopener noreferrer">
+                {username}
+              </a>
+            ) : (
+              <span className="rv-row-name">{username}</span>
+            )}
+            {isYou && <span className="rv-verified-badge">Verified Player</span>}
+            {review.source !== "steam" && review.source !== "you" && (
+              <ReviewSourceBadge source={review.source} label={review.sourceLabel} />
             )}
           </div>
-          <div className="rv-card-submeta-row">
-            {review.rating !== null && (
-              <span className={`rv-rating-pill rv-rating-pill-${review.source}`}>
-                {Math.round(review.rating)}/100
+
+          {/* Detail row: playtime + date */}
+          <div className="rv-row-details">
+            {review.authorPlaytimeAtReview !== undefined && (
+              <span className="rv-row-pill" title="Playtime on this game at review time">
+                {formatPlayTime(review.authorPlaytimeAtReview)} on record
               </span>
             )}
-            <ReviewSourceBadge source={review.source} label={review.sourceLabel} />
+            {review.authorPlaytimeForever !== undefined && (
+              <span className="rv-row-pill" title="Total playtime across all games">
+                {formatPlayTime(review.authorPlaytimeForever)} total
+              </span>
+            )}
             {isSteam && review.dateAdded && (
-              <span className="rv-card-date">{formatShortDate(review.dateAdded)}</span>
+              <span className="rv-row-date">{formatShortDate(review.dateAdded)}</span>
             )}
-            {review.language && (
-              <span className="rv-card-lang" title={languageCodeToFriendly(review.language)}>
-                {languageCodeToFriendly(review.language)}
+          </div>
+
+          {/* Badges row */}
+          <div className="rv-row-badges">
+            {review.steamPurchase !== undefined && (
+              <span
+                className={`rv-row-icon-btn${review.steamPurchase ? "" : ""}`}
+                title={review.steamPurchase
+                  ? "This review is counted in the overall review score (Steam purchase)"
+                  : "This review is not counted in the overall review score (Steam key / gift / free license)"}
+              >
+                {review.steamPurchase ? "☑" : "☐"}
               </span>
             )}
-            <CommentsLink review={review} appId={appId} />
+            {review.primarilySteamDeck && (
+              <span className="rv-row-icon-btn" title="Played mostly on Steam Deck">
+                🎮
+              </span>
+            )}
+            {review.receivedForFree && (
+              <span className="rv-row-badge-free">Product received for free</span>
+            )}
+            {review.writtenDuringEarlyAccess && (
+              <span className="rv-row-badge-ea">EARLY ACCESS REVIEW</span>
+            )}
+            <ContextBadgesRow review={review} />
           </div>
-          <ContextBadgesRow review={review} />
         </div>
       </div>
-      {showTitle && <h3 className="rv-card-title">{review.title}</h3>}
+
+      {/* ── Review content ───────────────────────────────────────────── */}
+      {review.title && <h3 className="rv-row-title">{review.title}</h3>}
       {review.content && (
-        <div className={`rv-card-content${review.content.length > 280 ? " clamp" : ""}`}>
+        <div className={`rv-row-content${review.content.length > 400 ? " clamp" : ""}`}>
           <BbCodeRenderer text={review.content} />
         </div>
       )}
-      <PlaytimeRow review={review} />
-      <HardwareSpecs hw={review.hw} />
+
+      {/* ── Reactions + helpfulness + comments ───────────────────────── */}
+      <div className="rv-row-footer">
+        <div className="rv-row-helpful">
+          {(review.votesUp ?? 0) > 0 && (
+            <span className="rv-helpful-text">{plural(review.votesUp!, "person")} found this helpful</span>
+          )}
+          {(review.votesFunny ?? 0) > 0 && (
+            <span className="rv-helpful-text">{plural(review.votesFunny!, "person")} found this funny</span>
+          )}
+        </div>
+
+        <CommentsLink review={review} appId={appId} />
+      </div>
+
       <ReactionBar review={review} />
+      <HardwareSpecs hw={review.hw} />
     </article>
   );
 }
@@ -1093,16 +1150,36 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
   const { showToast } = useToast();
   const { updateGame } = useGames();
 
-  // ── Filter state ────────────────────────────────────────────────
-  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("featured");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  // ── Filter state (server-side) ─────────────────────────────────
+  const [display, setDisplay] = useState<"summary" | "all" | "recent" | "funny">("all");
+  const [reviewType, setReviewType] = useState<"all" | "positive" | "negative">("all");
+  const [purchaseType, setPurchaseType] = useState<"all" | "steam" | "other">("all");
   const [languageFilter, setLanguageFilter] = useState("all");
-  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState<PurchaseTypeFilter>("all");
-  const [playtimeFilter, setPlaytimeFilter] = useState<PlaytimeFilter>("none");
+  const [playtimePreset, setPlaytimePreset] = useState<"none" | "over_1h" | "over_10h" | "custom">("none");
   const [playtimeMinHours, setPlaytimeMinHours] = useState(0);
   const [playtimeMaxHours, setPlaytimeMaxHours] = useState(0);
+  const [playtimeDevice, setPlaytimeDevice] = useState<"all" | "deck">("all");
+  const [useHelpfulSystem, setUseHelpfulSystem] = useState(false);
+  // Client-side only
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+
+  // Derive a stable key for server-side filter changes
+  const queryKey = useMemo(
+    () =>
+      JSON.stringify({
+        d: display,
+        rt: reviewType,
+        pt: purchaseType,
+        l: languageFilter,
+        pp: playtimePreset,
+        pmin: playtimeMinHours,
+        pmax: playtimeMaxHours,
+        pd: playtimeDevice,
+        uhs: useHelpfulSystem,
+      }),
+    [display, reviewType, purchaseType, languageFilter, playtimePreset, playtimeMinHours, playtimeMaxHours, playtimeDevice, useHelpfulSystem],
+  );
 
   // ── Auto-fetch reviews ──────────────────────────────────────────
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
@@ -1195,50 +1272,29 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
     }
   }, [sourceFilter, game.id, fetchExternalReviews]);
 
-  // Map the frontend sort mode to a backend filter_type. The
-  // "highest" / "longest" sorts are client-side because Steam's
-  // appreviews endpoint doesn't have native params for them.
-  const backendFilterType = useMemo<string | undefined>(() => {
-    switch (sortOrder) {
-      case "recent": return "recent";
-      case "funny":  return "funny";
-      case "featured": return "all";
-      default: return undefined; // client-side sort
-    }
-  }, [sortOrder]);
-
   const fetchReviews = useCallback(
     async (force = false, cursor: string | null = null, currentLang: string = languageFilter) => {
       if (fetchInFlightRef.current) return;
       const targetGameId = game.id;
-      // Bug fix: track lock ownership locally so a stale fetch's
-      // `finally` block can't release a lock acquired by a concurrent
-      // fetch (e.g. user clicks refresh while a fetch is in flight,
-      // then switches games — the original fetch's finally would
-      // see targetGameId === current and release the new fetch's
-      // lock). Only the fetch that actually acquired the lock can
-      // release it.
       fetchInFlightRef.current = true;
       let acquiredLock = true;
       const isLoadMore = cursor !== null && cursor !== "";
       if (isLoadMore) setIsLoadingMore(true);
       else setIsFetchingReviews(true);
       try {
-        // Bug fix: use `resolveSteamAppId` so the helper prefers
-        // `game.steamAppId` over parsing `game.path`. Previously,
-        // a Steam-synced game with a local exe path (or an EGS
-        // game matched to a Steam listing) would have its reviews
-        // resolve to IGDB fallback, not Steam.
         const steamHint = resolveSteamAppId(game);
         const result = await invoke<ReviewFetchResult>("fetch_game_reviews", {
           gameName: game.name,
           steamAppId: steamHint,
           cursor: cursor || null,
           language: currentLang === "all" ? null : currentLang,
-          filterType: backendFilterType ?? null,
-          purchaseType: purchaseTypeFilter === "all" ? null : purchaseTypeFilter,
-          playtimeMinHours: playtimeFilter === "over_1h" ? 1 : playtimeFilter === "over_10h" ? 10 : playtimeFilter === "custom" ? playtimeMinHours : null,
-          playtimeMaxHours: playtimeFilter === "custom" ? playtimeMaxHours : null,
+          filterType: display === "summary" ? "summary" : display,
+          purchaseType: purchaseType === "all" ? null : purchaseType,
+          playtimeMinHours: playtimePreset === "over_1h" ? 1 : playtimePreset === "over_10h" ? 10 : playtimePreset === "custom" ? playtimeMinHours : null,
+          playtimeMaxHours: playtimePreset === "custom" ? playtimeMaxHours : null,
+          reviewType: reviewType === "all" ? null : reviewType,
+          playtimeDevice: playtimeDevice === "all" ? null : playtimeDevice,
+          useHelpfulSystem: useHelpfulSystem || null,
         });
 
         // Bug fix: if the user switched games while this fetch was
@@ -1314,22 +1370,15 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
       updateGame,
       onReviewsFetched,
       languageFilter,
-      backendFilterType,
-      purchaseTypeFilter,
-      playtimeFilter,
+      display,
+      purchaseType,
+      playtimePreset,
       playtimeMinHours,
       playtimeMaxHours,
+      reviewType,
+      playtimeDevice,
+      useHelpfulSystem,
     ],
-  );
-
-  const handleLanguageChange = useCallback(
-    (newLang: string) => {
-      setLanguageFilter(newLang);
-      setNextCursor(null);
-      setTotalReviewCount(0);
-      fetchReviews(true, null, newLang);
-    },
-    [fetchReviews],
   );
 
   // Reset everything on game change; do an initial auto-fetch.
@@ -1382,6 +1431,16 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
     // are limited to data — the review list + cursor + totals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.id]);
+
+  // ── Server-side query-effect: refetch when filter params change ──
+  const queryKeyRef = useRef(queryKey);
+  useEffect(() => {
+    if (queryKeyRef.current === queryKey) return;
+    queryKeyRef.current = queryKey;
+    setNextCursor(null);
+    fetchReviews(true, null, languageFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey]);
 
   // ── Build the unified list of reviews ───────────────────────────
   const allReviews: ReviewItem[] = useMemo(() => {
@@ -1483,25 +1542,18 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
   }, [game.reviewText, game.rating, game.addedAt, reviewsList, externalReviews]);
 
   // ── Client-side filter pass-through ─────────────────────────────
-  // Backend supports: filter (all/recent/funny), purchase_type, language.
-  // Backend does NOT support: rating filter, source filter, playtime
-  // filter, custom playtime range, search. Those are applied here so
-  // the cursor-based pagination works as expected (no mid-list holes).
+  // Server-side params cover: display order, review type, purchase type,
+  // language, playtime range, playtime device. Client-side only: source filter and search.
   const filteredReviews = useMemo(() => {
     let list = allReviews.slice();
 
     if (sourceFilter !== "all") {
       list = list.filter((r) => r.source === sourceFilter);
     }
+    // Language is also filtered server-side, but we re-apply client-side
+    // for cached reviews that haven't been re-fetched yet.
     if (languageFilter !== "all") {
       list = list.filter((r) => r.language === languageFilter);
-    }
-    if (ratingFilter !== "all") {
-      list = list.filter((r) => {
-        if (ratingFilter === "positive") return r.sentiment === "positive";
-        if (ratingFilter === "negative") return r.sentiment === "negative";
-        return true;
-      });
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -1512,44 +1564,12 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           r.username.toLowerCase().includes(q),
       );
     }
-    // Playtime filter — only applied to Steam reviews (only source
-    // that has `authorPlaytimeAtReview` populated). Non-Steam
-    // reviews are kept (playtime is unknown for them).
-    if (playtimeFilter !== "none") {
-      list = list.filter((r) => {
-        if (r.source !== "steam") return true; // keep unknown
-        const playMinH = r.authorPlaytimeAtReview !== undefined ? r.authorPlaytimeAtReview / 60 : undefined;
-        if (playMinH === undefined) return true;
-        switch (playtimeFilter) {
-          case "over_1h":  return playMinH >= 1;
-          case "over_10h": return playMinH >= 10;
-          case "custom": {
-            const minOk = playtimeMinHours === 0 || playMinH >= playtimeMinHours;
-            const maxOk = playtimeMaxHours === 0 || playMinH <= playtimeMaxHours;
-            return minOk && maxOk;
-          }
-          default: return true;
-        }
-      });
-    }
 
-    // Sort
+    // Sort: "you" first, then server order (sourceIndex).
     list.sort((a, b) => {
       if (a.source === "you" && b.source !== "you") return -1;
       if (b.source === "you" && a.source !== "you") return 1;
-      switch (sortOrder) {
-        case "highest":
-          return (b.rating ?? -1) - (a.rating ?? -1);
-        case "longest":
-          return b.reviewLengthBytes - a.reviewLengthBytes;
-        case "featured":
-        default:
-          // Bug fix: previously used `parseInt(a.id.slice(6))`
-          // which is fragile (depends on the string format). The
-          // stable `sourceIndex` assigned during the build step
-          // preserves Steam's natural order without parseInt.
-          return a.sourceIndex - b.sourceIndex;
-      }
+      return a.sourceIndex - b.sourceIndex;
     });
 
     return list;
@@ -1557,12 +1577,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
     allReviews,
     sourceFilter,
     languageFilter,
-    ratingFilter,
     searchQuery,
-    sortOrder,
-    playtimeFilter,
-    playtimeMinHours,
-    playtimeMaxHours,
   ]);
 
   // External review sources
@@ -1648,23 +1663,18 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         steamTotalNegative={steamTotalNegative}
       />
 
+      {/* ── Refresh button ──────────────────────────────────────────── */}
       <div className="rv-refresh-row">
         <button
           type="button"
           className="rv-refresh-btn"
-          onClick={() => {
-            setNextCursor(null);
-            fetchReviews(true, null);
-          }}
+          onClick={() => { setNextCursor(null); fetchReviews(true, null); }}
           disabled={isFetchingReviews}
           title="Fetch latest reviews from Steam"
           aria-label="Refresh reviews"
         >
           {isFetchingReviews ? (
-            <>
-              <span className="rv-spinner" aria-hidden="true" />
-              Fetching reviews…
-            </>
+            <><span className="rv-spinner" aria-hidden="true" />Fetching reviews…</>
           ) : (
             <>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1679,7 +1689,151 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
       </div>
 
       {totalAll > 0 && (
-        <div className="rv-toolbar">
+        <>
+          {/* ── Toolbar ──────────────────────────────────────────────── */}
+          <div className="rv-toolbar">
+            {/* Review type */}
+            <Dropdown
+              label="Review Type"
+              value={reviewType}
+              onChange={(v) => setReviewType(v as typeof reviewType)}
+              items={[
+                { value: "all", label: "All Reviews" },
+                { value: "positive", label: "Recommended" },
+                { value: "negative", label: "Not Recommended" },
+              ]}
+            />
+
+            {/* Purchase type */}
+            <Dropdown
+              label="Purchase Type"
+              value={purchaseType}
+              onChange={(v) => setPurchaseType(v as typeof purchaseType)}
+              items={[
+                { value: "all", label: "All Purchases" },
+                { value: "steam", label: "Steam Purchasers" },
+                { value: "other", label: "Other Sources" },
+              ]}
+            />
+
+            {/* Language */}
+            <Dropdown
+              label="Language"
+              value={languageFilter}
+              onChange={setLanguageFilter}
+              items={STEAM_LANGUAGES.map((l) => ({ value: l.code, label: `${l.flag} ${l.label}` }))}
+            />
+
+            {/* Playtime */}
+            <Dropdown
+              label="Playtime"
+              value={playtimePreset}
+              onChange={(v) => setPlaytimePreset(v as typeof playtimePreset)}
+              items={[
+                { value: "none", label: "No Minimum" },
+                { value: "over_1h", label: "Over 1 hour" },
+                { value: "over_10h", label: "Over 10 hours" },
+                { value: "custom", label: "Custom…" },
+              ]}
+            />
+            {playtimePreset === "custom" && (
+              <div className="rv-playtime-range">
+                <input type="number" min={0} max={100} className="rv-input" value={playtimeMinHours}
+                  onChange={(e) => setPlaytimeMinHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                  placeholder="Min h" aria-label="Min hours" />
+                <span className="rv-playtime-range-sep">–</span>
+                <input type="number" min={0} max={100} className="rv-input" value={playtimeMaxHours}
+                  onChange={(e) => setPlaytimeMaxHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                  placeholder="Max h" aria-label="Max hours" />
+                <span className="rv-playtime-range-hint">hours</span>
+              </div>
+            )}
+
+            {/* Playtime device */}
+            <Dropdown
+              label="Device"
+              value={playtimeDevice}
+              onChange={(v) => setPlaytimeDevice(v as typeof playtimeDevice)}
+              items={[
+                { value: "all", label: "All Devices" },
+                { value: "deck", label: "Steam Deck" },
+              ]}
+            />
+
+            {/* Display order */}
+            <Dropdown
+              label="Display"
+              value={display}
+              onChange={(v) => setDisplay(v as typeof display)}
+              items={[
+                { value: "summary", label: "Summary" },
+                { value: "all", label: "Most Helpful" },
+                { value: "recent", label: "Recent" },
+                { value: "funny", label: "Funny" },
+              ]}
+            />
+
+            {/* Helpfulness system toggle */}
+            <label className="rv-toggle-label" title="Use new helpfulness system for Summary / Most Helpful">
+              <input type="checkbox" checked={useHelpfulSystem} onChange={(e) => setUseHelpfulSystem(e.target.checked)} />
+              <span>Helpfulness system</span>
+            </label>
+
+            {/* Search */}
+            <div className="rv-search-wrap">
+              <svg className="rv-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input className="rv-search" type="search" value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search reviews…" aria-label="Search reviews" />
+              {searchQuery && (
+                <button type="button" className="rv-search-clear" onClick={() => setSearchQuery("")} aria-label="Clear search">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Filter chips ─────────────────────────────────────── */}
+          <div className="rv-filter-chips">
+            {reviewType !== "all" && (
+              <button className="rv-chip" onClick={() => setReviewType("all")}>
+                {reviewType === "positive" ? "Recommended" : "Not Recommended"} ✕
+              </button>
+            )}
+            {purchaseType !== "all" && (
+              <button className="rv-chip" onClick={() => setPurchaseType("all")}>
+                {purchaseType === "steam" ? "Steam Purchases" : "Other Sources"} ✕
+              </button>
+            )}
+            {playtimePreset !== "none" && (
+              <button className="rv-chip" onClick={() => setPlaytimePreset("none")}>
+                {playtimePreset === "over_1h" ? "Over 1h" : playtimePreset === "over_10h" ? "Over 10h" : "Custom Playtime"} ✕
+              </button>
+            )}
+            {playtimeDevice !== "all" && (
+              <button className="rv-chip" onClick={() => setPlaytimeDevice("all")}>
+                Steam Deck ✕
+              </button>
+            )}
+            {useHelpfulSystem && (
+              <button className="rv-chip" onClick={() => setUseHelpfulSystem(false)}>
+                Helpfulness System ✕
+              </button>
+            )}
+            {languageFilter !== "all" && (
+              <button className="rv-chip" onClick={() => setLanguageFilter("all")}>
+                Language: {STEAM_LANGUAGES.find((l) => l.code === languageFilter)?.label ?? languageFilter} ✕
+              </button>
+            )}
+          </div>
+
+          {/* ── Source tabs ────────────────────────────────────────── */}
           <div className="rv-source-tabs">
             <button type="button" className={`rv-source-tab${sourceFilter === "all" ? " active" : ""}`} onClick={() => setSourceFilter("all")}>
               All Reviews ({totalAll})
@@ -1700,160 +1854,16 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
               </button>
             )}
           </div>
-
-          <div className="rv-filters">
-            <div className="rv-select-wrap">
-              <select
-                className="rv-select"
-                value={ratingFilter}
-                onChange={(e) => setRatingFilter(e.target.value as RatingFilter)}
-                aria-label="Filter by recommendation"
-              >
-                <option value="all">All reviews</option>
-                <option value="positive">Recommended only</option>
-                <option value="negative">Not recommended only</option>
-              </select>
-              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            <div className="rv-select-wrap">
-              <select
-                className="rv-select"
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-                aria-label="Sort order"
-              >
-                <option value="featured">Sort: Featured (Most Helpful)</option>
-                <option value="recent">Sort: Recent</option>
-                <option value="funny">Sort: Funny</option>
-                <option value="highest">Sort: Highest Rated</option>
-                <option value="longest">Sort: Most Detailed</option>
-              </select>
-              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            <div className="rv-select-wrap">
-              <select
-                className="rv-select"
-                value={purchaseTypeFilter}
-                onChange={(e) => {
-                  setPurchaseTypeFilter(e.target.value as PurchaseTypeFilter);
-                  setNextCursor(null);
-                  fetchReviews(true, null);
-                }}
-                aria-label="Filter by purchase source"
-              >
-                <option value="all">All purchasers</option>
-                <option value="steam">Steam purchases only</option>
-                <option value="other">Other sources only</option>
-              </select>
-              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            <div className="rv-select-wrap">
-              <select
-                className="rv-select"
-                value={playtimeFilter}
-                onChange={(e) => setPlaytimeFilter(e.target.value as PlaytimeFilter)}
-                aria-label="Filter by reviewer playtime"
-              >
-                <option value="none">All playtimes</option>
-                <option value="over_1h">Over 1 hour</option>
-                <option value="over_10h">Over 10 hours</option>
-                <option value="custom">Custom range…</option>
-              </select>
-              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            {playtimeFilter === "custom" && (
-              <div className="rv-playtime-range">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  className="rv-input"
-                  value={playtimeMinHours}
-                  onChange={(e) => setPlaytimeMinHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                  placeholder="Min h"
-                  aria-label="Minimum reviewer playtime in hours"
-                />
-                <span className="rv-playtime-range-sep">–</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  className="rv-input"
-                  value={playtimeMaxHours}
-                  onChange={(e) => setPlaytimeMaxHours(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                  placeholder="Max h"
-                  aria-label="Maximum reviewer playtime in hours (0 = no max)"
-                />
-                <span className="rv-playtime-range-hint">hours</span>
-              </div>
-            )}
-
-            <div className="rv-select-wrap">
-              <select
-                className="rv-select"
-                value={languageFilter}
-                onChange={(e) => handleLanguageChange(e.target.value)}
-                aria-label="Filter by language"
-              >
-                {STEAM_LANGUAGES.map((lang) => (
-                  <option key={lang.code} value={lang.code}>
-                    {lang.flag} {lang.label}
-                  </option>
-                ))}
-              </select>
-              <svg className="rv-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            <div className="rv-search-wrap">
-              <svg className="rv-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                className="rv-search"
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search reviews…"
-                aria-label="Search reviews"
-              />
-              {searchQuery && (
-                <button type="button" className="rv-search-clear" onClick={() => setSearchQuery("")} aria-label="Clear search">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        </>
       )}
 
+      {/* ── Content area ──────────────────────────────────────────── */}
       {(externalLoading["metacritic"] || externalLoading["opencritic"] || externalLoading["rawg"]) &&
         (sourceFilter === "metacritic" || sourceFilter === "opencritic" || sourceFilter === "rawg") ? (
         <div className="rv-empty">
-          <div className="rv-empty-icon">
-            <span className="rv-spinner" aria-hidden="true" style={{ width: 28, height: 28, borderWidth: 3 }} />
-          </div>
+          <div className="rv-empty-icon"><span className="rv-spinner" aria-hidden="true" style={{ width: 28, height: 28, borderWidth: 3 }} /></div>
           <h3 className="rv-empty-title">Loading reviews…</h3>
-          <p className="rv-empty-subtitle">
-            Fetching reviews from {sourceFilter === "metacritic" ? "Metacritic" : sourceFilter === "opencritic" ? "OpenCritic" : "RAWG"}…
-          </p>
+          <p className="rv-empty-subtitle">Fetching reviews from {sourceFilter === "metacritic" ? "Metacritic" : sourceFilter === "opencritic" ? "OpenCritic" : "RAWG"}…</p>
         </div>
       ) : totalAll === 0 ? (
         <div className="rv-empty">
@@ -1864,9 +1874,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
             </svg>
           </div>
           <h3 className="rv-empty-title">No community reviews yet</h3>
-          <p className="rv-empty-subtitle">
-            Click <strong>Refresh reviews</strong> to fetch the latest community feedback from Steam and other sources.
-          </p>
+          <p className="rv-empty-subtitle">Click <strong>Refresh reviews</strong> to fetch the latest community feedback from Steam and other sources.</p>
         </div>
       ) : filteredReviews.length === 0 ? (
         <div className="rv-empty rv-empty-small">
@@ -1879,39 +1887,26 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
           </div>
           <h3 className="rv-empty-title">No reviews match your filters</h3>
           <p className="rv-empty-subtitle">Try adjusting the rating, source, language, playtime, or search criteria.</p>
-          <button
-            type="button"
-            className="rv-btn rv-btn-ghost"
-            onClick={() => {
-              setRatingFilter("all");
-              setSourceFilter("all");
-              setPurchaseTypeFilter("all");
-              setPlaytimeFilter("none");
-              setPlaytimeMinHours(0);
-              setPlaytimeMaxHours(0);
-              handleLanguageChange("all");
-              setSearchQuery("");
-            }}
-          >
+          <button type="button" className="rv-btn rv-btn-ghost" onClick={() => {
+            setReviewType("all"); setPurchaseType("all"); setLanguageFilter("all");
+            setPlaytimePreset("none"); setPlaytimeMinHours(0); setPlaytimeMaxHours(0);
+            setPlaytimeDevice("all"); setUseHelpfulSystem(false); setSearchQuery("");
+          }}>
             Reset filters
           </button>
         </div>
       ) : (
         <div className="rv-list">
-          <div className="rv-list-grid">
+          <div className="rv-list-rows">
             {filteredReviews.map((review) => (
-              <ReviewCard key={review.id} review={review} appId={appId} />
+              <ReviewRow key={review.id} review={review} appId={appId} />
             ))}
           </div>
 
           {nextCursor && sourceFilter !== "you" && sourceFilter !== "metacritic" && sourceFilter !== "opencritic" && sourceFilter !== "rawg" && (
             <div className="rv-load-more-row">
-              <button
-                type="button"
-                className="rv-btn rv-btn-ghost rv-btn-large"
-                onClick={() => fetchReviews(false, nextCursor, languageFilter)}
-                disabled={isLoadingMore}
-              >
+              <button type="button" className="rv-btn rv-btn-ghost rv-btn-large"
+                onClick={() => fetchReviews(false, nextCursor, languageFilter)} disabled={isLoadingMore}>
                 {isLoadingMore ? (
                   <><span className="rv-spinner" aria-hidden="true" />Loading more…</>
                 ) : (
@@ -1922,9 +1917,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
                     </svg>
                     Load more reviews
                     {totalReviewCount > 0 && (
-                      <span className="rv-load-more-count">
-                        ({reviewsList.length} of {totalReviewCount} loaded)
-                      </span>
+                      <span className="rv-load-more-count">({reviewsList.length} of {totalReviewCount} loaded)</span>
                     )}
                   </>
                 )}
@@ -1934,6 +1927,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
       )}
 
+      {/* ── External reviews section ─────────────────────────────── */}
       <div className="rv-external-section">
         <div className="rv-external-header">
           <div className="rv-external-header-text">
@@ -1950,12 +1944,7 @@ export default function ReviewsTab({ game, onReviewsFetched }: ReviewsTabProps) 
         </div>
         <div className="rv-external-grid">
           {externalSources.map((src) => (
-            <ExternalReviewButton
-              key={src.id}
-              src={src}
-              openExternal={openExternal}
-              isBigScreen={isBigScreen}
-            />
+            <ExternalReviewButton key={src.id} src={src} openExternal={openExternal} isBigScreen={isBigScreen} />
           ))}
         </div>
       </div>

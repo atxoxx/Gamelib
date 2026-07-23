@@ -228,12 +228,22 @@ export interface IgdbReview {
   /** Steam's recommendation confidence percentage (0-100). */
   weightVoteUpPercentage?: number;
 
-  // ── Reviewer hardware (Steam) ─────────────────────────────────
-  /** Raw JSON-encoded hardware string from the Steam `hw` field.
-   *  Format is unstable across Steam API versions; the frontend
-   *  parses it leniently with `JSON.parse` + per-key try/catch
-   *  rather than relying on a fixed schema. */
-  hw?: string;
+  // ── Reviewer hardware (Steam "computer configuration") ────────
+  /** Normalized reviewer hardware, pre-parsed by the Rust backend
+   *  from Steam's unstable `hardware` block. */
+  hw?: SteamHardware;
+}
+
+/** Normalized reviewer hardware ("computer configuration"). Every field is
+ *  optional — Steam's hardware block is sparse and varies across reviews. */
+export interface SteamHardware {
+  os?: string;
+  cpuName?: string;
+  gpuName?: string;
+  /** System RAM in megabytes. */
+  systemRamMb?: number;
+  /** Video RAM in megabytes. */
+  vramSizeMb?: number;
 }
 
 export interface ReviewFetchResult {
@@ -274,24 +284,73 @@ export interface SteamAchievement {
  *  an emoji + label here so the renderer doesn't need to know
  *  the integer semantics. The label is used in tooltips and the
  *  "Show more" expanded view. */
-export const STEAM_REACTIONS: Record<number, { emoji: string; label: string }> = {
-  1: { emoji: "👍", label: "Helpful" },
-  2: { emoji: "❤️", label: "Love" },
-  3: { emoji: "😂", label: "Funny" },
-  4: { emoji: "😢", label: "Sad" },
-  5: { emoji: "😡", label: "Angry" },
-  6: { emoji: "🤬", label: "Rage" },
-  7: { emoji: "👎", label: "Disagree" },
-  8: { emoji: "🎉", label: "Celebrate" },
-  9: { emoji: "🤩", label: "Star-struck" },
-  10: { emoji: "🤯", label: "Mind-blown" },
-  11: { emoji: "😱", label: "Shocked" },
-  12: { emoji: "🥺", label: "Pleading" },
-  13: { emoji: "💯", label: "100%" },
-  14: { emoji: "🤔", label: "Thinking" },
-  15: { emoji: "👏", label: "Applause" },
-  16: { emoji: "🙌", label: "Praise" },
+/** Steam review reaction table (reaction awards). `label` is the award name,
+ *  `description` the flavour text shown in tooltips, and `emoji` a fallback
+ *  glyph used if the reaction image asset fails to load. The static images
+ *  live in `public/reactions/{type}.png` (mirrored from Steam). */
+export const STEAM_REACTIONS: Record<
+  number,
+  { label: string; description: string; emoji: string }
+> = {
+  1: { label: "Deep Thoughts", description: "Trained dolphins couldn't get to the bottom of this one.", emoji: "🤔" },
+  2: { label: "Heartwarming", description: "Makes you want to go out and show a rainbow to a kitten.", emoji: "🌈" },
+  3: { label: "Hilarious", description: "There's funny, and then there's this absolute gem.", emoji: "😂" },
+  4: { label: "Hot Take", description: "You can't start a fire without a spark, and some gasoline.", emoji: "🔥" },
+  5: { label: "Poetry", description: "Such elegant prose! A literary feast.", emoji: "📜" },
+  6: { label: "Extra Helpful", description: "If this were any more helpful I wouldn't need a brain.", emoji: "🧠" },
+  7: { label: "Gotta Have It", description: "Just hand it over, nice and easy.", emoji: "🤲" },
+  8: { label: "Michelangelo", description: "It belongs in a museum (and my inventory).", emoji: "🎨" },
+  9: { label: "Treasure", description: "We found it! We found the booty!", emoji: "💰" },
+  10: { label: "Mind Blown", description: "Human brains aren't ready for this much awesomeness.", emoji: "🤯" },
+  11: { label: "Golden Unicorn", description: "Shine on Golden Unicorn, shine on.", emoji: "🦄" },
+  12: { label: "Mad Scientist", description: "It's Alive!", emoji: "🧪" },
+  13: { label: "Clever", description: "Gold medal in mental gymnastics.", emoji: "🤸" },
+  14: { label: "Warm Blanket", description: "Oh to be a cozy blob in a blanket.", emoji: "🛌" },
+  15: { label: "Saucy", description: "Sometimes you just need to kick it up a notch.", emoji: "🌶️" },
+  16: { label: "Slow Clap", description: "Every standing ovation starts with a single clap.", emoji: "👏" },
+  17: { label: "Take My Points", description: "Shut up and take my Steam Points!", emoji: "🪙" },
+  18: { label: "Wholesome", description: "Like laying in the grass on a warm sunny day.", emoji: "🌻" },
+  19: { label: "Jester", description: "An important part of any royal court.", emoji: "🃏" },
+  20: { label: "Fancy Pants", description: "Nothing says fancy like a well tailored pair of pants.", emoji: "👖" },
+  21: { label: "Whoa", description: "There are no words.", emoji: "😮" },
+  22: { label: "Super Star", description: "Leaping through the sky, like a tiger defying the laws of gravity.", emoji: "⭐" },
+  23: { label: "Wild", description: "Can't tame this awesomeness.", emoji: "🐯" },
+  24: { label: "Winner", description: "The absolute best! Or first. At least for now.", emoji: "🏆" },
+  25: { label: "Beautiful", description: "Words cannot describe, so this award will have to do.", emoji: "💖" },
+  26: { label: "Helpful", description: "You're a credit to the team.", emoji: "🙌" },
+  27: { label: "Fire", description: "This isn't the first of great works of art, and probably won't be the last.", emoji: "🔥" },
+  28: { label: "Funny", description: "ROFL. Or LOL at the very least.", emoji: "😆" },
+  29: { label: "One Hundred", description: "Totally, absolutely, completely agree.", emoji: "💯" },
+  30: { label: "Life Saver", description: "You've saved me from my tight spot.", emoji: "🛟" },
+  31: { label: "Perfect", description: "Couldn't be more correct or on point.", emoji: "🎯" },
+  32: { label: "Plus One", description: "I agree. I think everyone should know that I agree.", emoji: "➕" },
+  33: { label: "Smart", description: "Ingenuity at its finest.", emoji: "🧠" },
+  34: { label: "Pure Gold", description: "So valuable and shiny I want to put it in a box.", emoji: "🥇" },
+  35: { label: "Wholesome", description: "So cozy, so warm.", emoji: "🤗" },
 };
+
+/** Path to the bundled static reaction image for a Steam reaction type.
+ *  Returns null for unknown types (renderer falls back to the emoji). */
+export function reactionImagePath(reactionType: number): string | null {
+  return STEAM_REACTIONS[reactionType] ? `/reactions/${reactionType}.png` : null;
+}
+
+/** Options controlling a Steam reviews query. Mirrors the params the
+ *  backend forwards to Steam's `appreviews` endpoint. */
+export interface ReviewQueryOptions {
+  /** Display order → Steam `filter`: "summary"|"all"|"recent"|"funny". */
+  display: "summary" | "all" | "recent" | "funny";
+  /** Recommendation → Steam `review_type`: "all"|"positive"|"negative". */
+  reviewType: "all" | "positive" | "negative";
+  /** Purchase source → Steam `purchase_type`: "all"|"steam"|"other". */
+  purchaseType: "all" | "steam" | "other";
+  language: string;
+  playtimePreset: "none" | "over_1h" | "over_10h" | "custom";
+  playtimeMinHours: number;
+  playtimeMaxHours: number;
+  playtimeDevice: "all" | "deck";
+  useHelpfulSystem: boolean;
+}
 
 /** Steam language codes accepted by the appreviews `language=` param.
  *  Each entry is a tuple of (Steam code, display label, flag emoji).

@@ -1140,6 +1140,7 @@ async fn get_collection_games(
 ///   - `playtime_min_hours` â€” minimum author playtime (client-side filter)
 ///   - `playtime_max_hours` â€” maximum author playtime (client-side filter)
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn fetch_game_reviews(
     game_name: String,
     steam_app_id: Option<u64>,
@@ -1149,6 +1150,9 @@ async fn fetch_game_reviews(
     purchase_type: Option<String>,
     playtime_min_hours: Option<u32>,
     playtime_max_hours: Option<u32>,
+    review_type: Option<String>,
+    playtime_device: Option<String>,
+    use_helpful_system: Option<bool>,
 ) -> ReviewFetchResult {
     game_scraper::fetch_game_reviews(
         &game_name,
@@ -1159,6 +1163,9 @@ async fn fetch_game_reviews(
         purchase_type,
         playtime_min_hours,
         playtime_max_hours,
+        review_type,
+        playtime_device,
+        use_helpful_system,
     )
     .await
 }
