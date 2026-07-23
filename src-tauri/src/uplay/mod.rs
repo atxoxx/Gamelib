@@ -41,7 +41,7 @@ pub use sync::{
     uplay_install_game, uplay_launch_game, uplay_open_client, uplay_sync_library,
     uplay_uninstall_game,
 };
-pub use types::{UplaySettings, UplaySyncResult, UplaySyncedGame};
+pub use types::UplaySettings;
 
 use tauri::AppHandle;
 

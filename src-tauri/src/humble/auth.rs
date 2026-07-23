@@ -288,15 +288,6 @@ fn persist_session(app: &AppHandle, session: &HumbleSession) -> Result<(), Strin
     db::kv::set(db_state.inner(), HUMBLE_SESSION_KV_KEY, &json)
 }
 
-/// Load the persisted `HumbleSession` for the Settings tile.
-pub(crate) fn load_session(app: &AppHandle) -> Option<HumbleSession> {
-    let db_state = app.try_state::<db::Db>()?;
-    db::kv::get(db_state.inner(), HUMBLE_SESSION_KV_KEY)
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-}
-
 fn current_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

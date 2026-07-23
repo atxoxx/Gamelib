@@ -524,19 +524,6 @@ struct SteamAppDetail {
     #[allow(dead_code)]
     name: Option<String>,
     short_description: Option<String>,
-    /// Rich "About this game" body the Steam store displays under
-    /// the capsule image. Rendered as HTML with embedded `<img>` tags
-    /// (pointing at Steam CDN URLs) that act as inline GIFs/images.
-    /// Used by the frontend AboutSection for true fidelity — the
-    /// plain-text `short_description` is just a teaser.
-    #[serde(default)]
-    about_the_game: Option<String>,
-    /// Steam store "movies" (trailers + gameplay clips). Both `.webm`
-    /// and `.mp4` URLs are surfaced per resolution slot; the
-    /// frontend `<video>` element picks the best one based on
-    /// browser support.
-    #[serde(default)]
-    movies: Vec<SteamMovie>,
     #[serde(default)]
     developers: Vec<String>,
     #[serde(default)]
@@ -1175,8 +1162,6 @@ async fn fetch_steam_about_cached(app_id: u32) -> Option<RichAboutPayload> {
     struct RichAppDetail {
         #[serde(default)]
         about_the_game: Option<String>,
-        #[serde(default)]
-        short_description: Option<String>,
         #[serde(default)]
         movies: Vec<SteamMovie>,
     }

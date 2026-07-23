@@ -26,6 +26,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const LS_BIG_SCREEN = "gamelib-bigscreen";
 
@@ -46,7 +47,6 @@ function lsSet(key: string, value: string): void {
 
 async function setTauriFullscreen(on: boolean): Promise<void> {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
     // Read the current state first so toggling from a fullscreen
     // window that the user just exited with Escape doesn't make a

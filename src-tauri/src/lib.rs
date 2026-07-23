@@ -2923,6 +2923,7 @@ pub fn run() {
             get_launcher_settings,
             set_close_to_tray_enabled,
             set_minimize_on_launch_enabled,
+            set_disable_elevation_prompts,
             set_autostart_enabled,
             is_autostart_enabled,
             write_sync_file,

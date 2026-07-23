@@ -130,6 +130,7 @@ pub struct HumbleTpkdDict {
 }
 
 /// One third-party-key entry.
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HumbleTpk {
@@ -166,6 +167,7 @@ pub struct HumbleDownload {
 }
 
 /// One concrete download file (used for extras).
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HumbleDownloadStruct {
@@ -180,6 +182,7 @@ pub struct HumbleDownloadStruct {
 // ── Trove catalog DTOs ────────────────────────────────────────────────
 
 /// One entry in `https://humblebundle.com/client/catalog?index=N`.
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HumbleTroveGame {
@@ -196,6 +199,7 @@ pub struct HumbleTroveGame {
 }
 
 /// Generic `{ "publisher_name": … }` shape used by Trove.
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HumbleNamed {
@@ -234,6 +238,7 @@ pub struct HumbleAppGameEntry {
 }
 
 /// One installed game discovered from the Humble App config.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HumbleInstalledGame {
     pub game_id: String,
