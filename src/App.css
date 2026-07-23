@@ -3756,7 +3756,7 @@
   height: 6px;
 }
 .screenshots-carousel::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
+  background: transparent;
   border-radius: var(--radius-sm);
 }
 .screenshots-carousel::-webkit-scrollbar-thumb {

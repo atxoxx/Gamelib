@@ -1388,6 +1388,7 @@
   padding: 2px 2px var(--space-sm) 2px;
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -1487,17 +1488,17 @@
   overflow-x: auto;
   padding-bottom: var(--space-sm);
   scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
 }
 
 .screenshots-carousel::-webkit-scrollbar {
-  height: 8px;
+  height: 6px;
 }
 
 .screenshots-carousel::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
+  background: transparent;
 }
 
 .screenshots-carousel::-webkit-scrollbar-thumb {
