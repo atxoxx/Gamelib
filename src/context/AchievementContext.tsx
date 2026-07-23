@@ -10,6 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useGames } from "./GameContext";
+import { useToast } from "./ToastContext";
 import type {
   Game,
   GameAchievementData,
@@ -25,12 +26,19 @@ export interface AchievementSettings {
   showLockedDescriptions: boolean;
   /** Show toast when a newly unlocked achievement is detected. */
   notifyOnUnlock: boolean;
+  /**
+   * Track achievements for cracked / downloaded (non-Steam) games by
+   * watching local crack/emulator achievement files. Mirrored to the
+   * Rust background watcher.
+   */
+  localAchievementsEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AchievementSettings = {
   autoSyncOnSteamSync: true,
   showLockedDescriptions: true,
   notifyOnUnlock: true,
+  localAchievementsEnabled: true,
 };
 
 const SETTINGS_KEY = "gamelib-achievement-settings";
@@ -58,6 +66,13 @@ interface AchievementContextType {
   getGameAchievements: (gameId: string) => GameAchievementData | null;
   /** Fetch achievements for a single game from Steam and update cache. */
   syncGameAchievements: (gameId: string, steamAppId: number) => Promise<void>;
+  /**
+   * Sync achievements for a single game from local crack/emulator files
+   * (schema from the Hydra API). Works for non-Steam / cracked games.
+   * An optional `steamAppId` override is used when the game row doesn't
+   * yet have one persisted.
+   */
+  syncLocalAchievements: (gameId: string, steamAppId?: number) => Promise<void>;
   /** Bulk-sync achievements for all Steam games in the library. */
   syncAllAchievements: (games: Game[]) => Promise<void>;
   /** Whether a sync operation is in progress. */
@@ -218,11 +233,46 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
     [cache, getSteamSession, persistCache]
   );
 
+  const { showToast } = useToast();
+
+  const syncLocalAchievements = useCallback(
+    async (gameId: string, steamAppId?: number) => {
+      const data: GameAchievementData = await invoke("sync_local_achievements", {
+        gameId,
+        steamAppId: steamAppId ?? null,
+      });
+      data.lastSynced = Date.now();
+      setCache((prev) => {
+        const updated = {
+          ...prev,
+          games: { ...prev.games, [gameId]: data },
+        };
+        persistCache(updated);
+        return updated;
+      });
+    },
+    [persistCache]
+  );
+
   const updateSettings = useCallback(
     (updates: Partial<AchievementSettings>) => {
       setSettings((prev) => {
         const next = { ...prev, ...updates };
         saveSettings(next);
+        // Mirror the local-achievement toggle to the Rust watcher.
+        if (
+          updates.localAchievementsEnabled !== undefined &&
+          updates.localAchievementsEnabled !== prev.localAchievementsEnabled
+        ) {
+          invoke("set_local_achievements_enabled", {
+            enabled: updates.localAchievementsEnabled,
+          }).catch((err) =>
+            console.warn(
+              "[AchievementContext] Failed to set local achievements flag:",
+              err
+            )
+          );
+        }
         return next;
       });
     },
@@ -262,16 +312,40 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
     gamesRef.current = games;
   }, [games]);
 
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   useEffect(() => {
     const unlisten = listen<{ gameId: string }>("game-exited", async (event) => {
       const { gameId } = event.payload;
       const game = gamesRef.current.find((g) => g.id === gameId);
-      if (game && game.steamAppId && game.platform === "Steam") {
+      if (!game) return;
+
+      // Owned Steam games → authoritative Steam Web API sync.
+      if (game.steamAppId && game.platform === "Steam") {
         try {
           await syncGameAchievements(game.id, game.steamAppId);
-          console.log(`[AchievementContext] Auto-synced achievements for ${game.name} on exit`);
+          console.log(`[AchievementContext] Auto-synced Steam achievements for ${game.name} on exit`);
         } catch (err) {
-          console.warn(`[AchievementContext] Failed to auto-sync achievements on exit for ${game.name}:`, err);
+          console.warn(`[AchievementContext] Failed to auto-sync Steam achievements on exit for ${game.name}:`, err);
+        }
+      }
+
+      // Non-Steam games with a Steam AppID (cracked / downloaded) → scan
+      // local crack/emulator achievement files. Owned Steam games are
+      // covered by the authoritative Steam sync above.
+      if (
+        game.steamAppId &&
+        game.platform !== "Steam" &&
+        settingsRef.current.localAchievementsEnabled
+      ) {
+        try {
+          await syncLocalAchievements(game.id);
+          console.log(`[AchievementContext] Synced local achievements for ${game.name} on exit`);
+        } catch (err) {
+          console.warn(`[AchievementContext] Failed to sync local achievements on exit for ${game.name}:`, err);
         }
       }
     });
@@ -279,7 +353,47 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [syncGameAchievements]);
+  }, [syncGameAchievements, syncLocalAchievements]);
+
+  // Backend watcher events: reload the affected game's cache, and toast
+  // on newly-unlocked achievements.
+  useEffect(() => {
+    const unlistenUpdated = listen<{ gameId: string }>(
+      "achievements-updated",
+      () => {
+        reloadCache();
+      }
+    );
+    const unlistenUnlocked = listen<{
+      gameId: string;
+      gameName: string;
+      achievements: { displayName: string; icon: string; isRare: boolean }[];
+    }>("achievement-unlocked", (event) => {
+      if (!settingsRef.current.notifyOnUnlock) return;
+      const { gameName, achievements } = event.payload;
+      if (!achievements?.length) return;
+      const label =
+        achievements.length === 1
+          ? `🏆 ${achievements[0].displayName} unlocked in ${gameName}`
+          : `🏆 ${achievements.length} achievements unlocked in ${gameName}`;
+      showToast(label, "success");
+    });
+
+    return () => {
+      unlistenUpdated.then((fn) => fn());
+      unlistenUnlocked.then((fn) => fn());
+    };
+  }, [reloadCache, showToast]);
+
+  // Push the persisted local-achievement toggle to the Rust watcher on
+  // startup so the two stay in sync across restarts.
+  useEffect(() => {
+    invoke("set_local_achievements_enabled", {
+      enabled: settingsRef.current.localAchievementsEnabled,
+    }).catch(() => {});
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <AchievementContext.Provider
@@ -287,6 +401,7 @@ export function AchievementProvider({ children }: { children: ReactNode }) {
         cache,
         getGameAchievements,
         syncGameAchievements,
+        syncLocalAchievements,
         syncAllAchievements,
         isSyncing,
         syncProgress,

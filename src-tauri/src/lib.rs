@@ -34,6 +34,8 @@ mod source_manager;
 mod store_checker;
 mod torrent_engine;
 mod achievements;
+mod local_achievements;
+mod achievement_watcher;
 mod downloader;
 mod tray;
 mod system_screenshots;
@@ -2564,6 +2566,10 @@ pub fn run() {
             achievements::fetch_achievements,
             achievements::save_achievements_cache,
             achievements::load_achievements_cache,
+            achievements::sync_local_achievements,
+            achievement_watcher::scan_all_local_achievements,
+            achievement_watcher::get_local_achievements_enabled,
+            achievement_watcher::set_local_achievements_enabled,
             downloader::test_debrid_key,
             downloader::check_debrid_cache,
             downloader::direct_download_start,
@@ -2702,6 +2708,14 @@ pub fn run() {
                 game_watcher,
                 app.handle().clone(),
             );
+
+            // ── Local (crack / emulator) achievement watcher ──────────
+            // Ports Hydra's achievement watcher: pre-scans on startup to
+            // pick up offline unlocks, then polls crack/emulator files
+            // for changes and merges them into the achievements cache
+            // (schema fetched anonymously from the Hydra API). Emits
+            // `achievements-updated` / `achievement-unlocked` events.
+            achievement_watcher::start(app.handle().clone());
 
             // â”€â”€ Source manager â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // Phase 2: the in-memory state maps are gone. All reads

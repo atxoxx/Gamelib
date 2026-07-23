@@ -37,7 +37,9 @@ export default function AchievementsPage() {
   // Build enriched game list with achievement data
   const gamesWithAchievements = useMemo(() => {
     return games
-      .filter((g) => g.steamAppId)
+      // Include games that have a Steam AppID (Steam or cracked, which
+      // can locate achievements) OR already have cached achievement data.
+      .filter((g) => g.steamAppId || cache.games[g.id])
       .map((g) => {
         const data = cache.games[g.id];
         return {

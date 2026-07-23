@@ -108,7 +108,8 @@ export default function SettingsPage() {
   const { showToast } = useToast();
   const { availableGpus, selectedGpu, setSelectedGpu, refreshGpus } = useActivity();
   const { games, addGames, updateGame } = useGames();
-  const { reloadCache } = useAchievements();
+  const { reloadCache, settings: achievementSettings, updateSettings: updateAchievementSettings } =
+    useAchievements();
   const { sources } = useSources();
   const { unit: sizeUnit, setUnit: setSizeUnit } = useSizeUnit();
   const { currentTheme, setTheme, themes, systemSync, setSystemSync } = useTheme();
@@ -2782,6 +2783,41 @@ export default function SettingsPage() {
                     Strips global unlock percentages and rarity rings
                     from the Achievements tab and Game page so
                     achievement lists read like a clean checklist.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Local (crack / emulator) achievement tracking — watches
+             *  crack/emulator achievement files on disk and merges them
+             *  into the achievements cache (schema from the Hydra API),
+             *  so cracked / downloaded games unlock achievements too. */}
+            <div className="settings-launcher-card">
+              <label className="settings-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={achievementSettings.localAchievementsEnabled}
+                  onChange={(e) => {
+                    updateAchievementSettings({
+                      localAchievementsEnabled: e.target.checked,
+                    });
+                    showToast(
+                      e.target.checked
+                        ? "Local achievement tracking enabled"
+                        : "Local achievement tracking disabled",
+                      "info",
+                    );
+                  }}
+                />
+                <div className="settings-checkbox-text">
+                  <span className="settings-checkbox-title">
+                    Track achievements for cracked / downloaded games
+                  </span>
+                  <span className="settings-checkbox-desc">
+                    Watches local crack &amp; emulator achievement files
+                    (Goldberg, CODEX, RUNE, OnlineFix, and more) and
+                    unlocks achievements for non-Steam games. Achievement
+                    details are fetched anonymously from the Hydra API.
                   </span>
                 </div>
               </label>

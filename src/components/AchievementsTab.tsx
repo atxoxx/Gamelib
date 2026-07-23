@@ -1,5 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useAchievements } from "../context/AchievementContext";
+import { useGames } from "../context/GameContext";
 import { useBigScreen } from "../context/BigScreenContext";
 import { useFocusable } from "../hooks/useFocusable";
 import {
@@ -16,12 +18,20 @@ type FilterKey = "all" | "unlocked" | "locked";
 
 export default function AchievementsTab({ game }: { game: Game }) {
   const { isBigScreen } = useBigScreen();
-  const { getGameAchievements, syncGameAchievements, isSyncing } = useAchievements();
+  const { getGameAchievements, syncGameAchievements, syncLocalAchievements, isSyncing } =
+    useAchievements();
+  const { updateGame } = useGames();
   const { showToast } = useToast();
 
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("default");
   const [syncing, setSyncing] = useState(false);
+  // Auto-load state: try to populate the achievement list for any game
+  // (resolving a Steam AppID by name when the game doesn't have one).
+  const [autoState, setAutoState] = useState<"idle" | "loading" | "noappid" | "done">(
+    "idle"
+  );
+  const autoTriedRef = useRef<string | null>(null);
 
   const achievementData = getGameAchievements(game.id);
   const achievements = achievementData?.achievements ?? [];
@@ -54,14 +64,40 @@ export default function AchievementsTab({ game }: { game: Game }) {
     return list;
   }, [achievements, filter, sort]);
 
-  async function handleSync() {
-    if (!game.steamAppId) {
-      showToast("This game has no Steam AppID", "error");
-      return;
+  // Resolve a Steam AppID for this game: use the persisted one, else
+  // look it up by name and persist it so the watcher can track it too.
+  async function resolveAppId(): Promise<number | null> {
+    if (game.steamAppId) return game.steamAppId;
+    try {
+      const found = await invoke<number | null>("lookup_steam_app_id_for_game", {
+        gameName: game.name,
+      });
+      if (found) {
+        updateGame(game.id, { steamAppId: found });
+        return found;
+      }
+    } catch {
+      /* ignore — treated as "no appid" */
     }
+    return null;
+  }
+
+  async function handleSync() {
     setSyncing(true);
     try {
-      await syncGameAchievements(game.id, game.steamAppId);
+      // Owned Steam games use the authoritative Steam Web API; other
+      // games read local crack/emulator files with the schema from the
+      // Hydra API. Both resolve to the same cache keyed by game id.
+      if (game.platform === "Steam" && game.steamAppId) {
+        await syncGameAchievements(game.id, game.steamAppId);
+      } else {
+        const appid = await resolveAppId();
+        if (!appid) {
+          showToast("Couldn't find achievements for this game", "error");
+          return;
+        }
+        await syncLocalAchievements(game.id, appid);
+      }
       showToast("Achievements synced!", "success");
     } catch (err) {
       showToast(`Achievement sync failed: ${err}`, "error");
@@ -69,6 +105,40 @@ export default function AchievementsTab({ game }: { game: Game }) {
       setSyncing(false);
     }
   }
+
+  // Auto-load achievements the first time the tab is opened for a game
+  // that has no cached data yet — so achievements are visible for all
+  // games without requiring a manual sync.
+  useEffect(() => {
+    if (achievementData) return;
+    if (autoTriedRef.current === game.id) return;
+    autoTriedRef.current = game.id;
+    let cancelled = false;
+    (async () => {
+      setAutoState("loading");
+      try {
+        let appid = game.steamAppId ?? null;
+        if (!appid) {
+          appid = await invoke<number | null>("lookup_steam_app_id_for_game", {
+            gameName: game.name,
+          });
+          if (appid && !cancelled) updateGame(game.id, { steamAppId: appid });
+        }
+        if (!appid) {
+          if (!cancelled) setAutoState("noappid");
+          return;
+        }
+        await syncLocalAchievements(game.id, appid);
+        if (!cancelled) setAutoState("done");
+      } catch {
+        if (!cancelled) setAutoState("done");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.id, achievementData]);
 
   const emptySyncFocus = useFocusable(handleSync);
   const toolbarSyncFocus = useFocusable(handleSync);
@@ -91,8 +161,36 @@ export default function AchievementsTab({ game }: { game: Game }) {
     return counts;
   }, [achievements]);
 
-  // ─── Empty state ──────────────────────────────────────────────────
-  if (!game.steamAppId) {
+  // ─── Auto-load / empty states ─────────────────────────────────────
+  if (!achievementData) {
+    if (autoState === "loading") {
+      return (
+        <div className="achievements-empty">
+          <div className="achievements-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 15l-2 5-1-3-3-1 5-2z" />
+              <path d="M18.364 5.636a9 9 0 0 1-12.728 12.728" />
+            </svg>
+          </div>
+          <h3>Loading achievements…</h3>
+          <p>Looking up achievements for this game.</p>
+        </div>
+      );
+    }
+    if (autoState === "noappid") {
+      return (
+        <div className="achievements-empty">
+          <div className="achievements-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 15l-2 5-1-3-3-1 5-2z" />
+              <path d="M18.364 5.636a9 9 0 0 1-12.728 12.728" />
+            </svg>
+          </div>
+          <h3>Achievements not found</h3>
+          <p>Couldn't match this game to a Steam AppID.<br />Try syncing your Steam library.</p>
+        </div>
+      );
+    }
     return (
       <div className="achievements-empty">
         <div className="achievements-empty-icon">
@@ -101,8 +199,11 @@ export default function AchievementsTab({ game }: { game: Game }) {
             <path d="M18.364 5.636a9 9 0 0 1-12.728 12.728" />
           </svg>
         </div>
-        <h3>Achievements not available</h3>
-        <p>Achievements are currently supported for Steam games only.<br />This game has no Steam integration.</p>
+        <h3>No achievements yet</h3>
+        <p>Sync now to load this game's achievements.</p>
+        <button className="achievements-btn" onClick={handleSync} disabled={syncing}>
+          {syncing ? "Syncing…" : "Sync Achievements"}
+        </button>
       </div>
     );
   }
@@ -117,7 +218,11 @@ export default function AchievementsTab({ game }: { game: Game }) {
           </svg>
         </div>
         <h3>No achievements data</h3>
-        <p>Click "Sync" to fetch achievements from Steam.</p>
+        <p>
+          {game.platform === "Steam"
+            ? 'Click "Sync" to fetch achievements from Steam.'
+            : 'Click "Sync" to read local crack/emulator achievement files.'}
+        </p>
         <button
           className="achievements-sync-btn"
           {...(isBigScreen ? emptySyncFocus : { onClick: handleSync })}
@@ -135,7 +240,7 @@ export default function AchievementsTab({ game }: { game: Game }) {
                 <polyline points="1 20 1 14 7 14" />
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
               </svg>
-              Sync from Steam
+              {game.platform === "Steam" ? "Sync from Steam" : "Sync achievements"}
             </>
           )}
         </button>

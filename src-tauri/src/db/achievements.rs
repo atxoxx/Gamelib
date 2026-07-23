@@ -42,6 +42,29 @@ pub fn upsert(
     Ok(())
 }
 
+/// Read a single cached game as `(steam_app_id, payload_json, last_synced)`.
+/// Returns `None` when the game has no cached achievement row yet.
+pub fn get(db: &Db, game_id: &str) -> Result<Option<(u32, String, Option<u64>)>, String> {
+    let conn = db.conn().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT steam_app_id, payload_json, last_synced
+               FROM achievements_cache WHERE game_id = ?1",
+        )
+        .map_err(|e| format!("achievements get prepare: {e}"))?;
+    let mut rows = stmt
+        .query(params![game_id])
+        .map_err(|e| format!("achievements get query: {e}"))?;
+    if let Some(r) = rows.next().map_err(|e| format!("achievements get row: {e}"))? {
+        let steam_app_id: u32 = r.get(0).map_err(|e| format!("achievements get c0: {e}"))?;
+        let payload: String = r.get(1).map_err(|e| format!("achievements get c1: {e}"))?;
+        let last_synced: Option<i64> =
+            r.get(2).map_err(|e| format!("achievements get c2: {e}"))?;
+        return Ok(Some((steam_app_id, payload, last_synced.map(|n| n as u64))));
+    }
+    Ok(None)
+}
+
 /// Read every cached game as `(game_id, steam_app_id, payload_json)`.
 pub fn list_all(db: &Db) -> Result<Vec<(String, u32, String)>, String> {
     let conn = db.conn().map_err(|e| e.to_string())?;
@@ -105,7 +128,18 @@ pub fn upsert_many_from_payload(
                 .and_then(|v| v.as_u64())
                 .map(|n| n as u32)
                 .unwrap_or(0);
-            let serialized = serde_json::to_string(payload)
+            // Union incoming `achieved` state with any already-persisted
+            // unlocks so a whole-cache save (e.g. a Steam re-sync) can
+            // never relock an achievement the local crack watcher
+            // unlocked (or vice-versa). Achievements are monotonic —
+            // once unlocked, always unlocked.
+            let mut payload = payload.clone();
+            if let Ok(existing) = read_payload_row(&tx, game_id) {
+                if let Some(existing) = existing {
+                    union_achieved_into(&mut payload, &existing);
+                }
+            }
+            let serialized = serde_json::to_string(&payload)
                 .map_err(|e| format!("serialize achievements: {e}"))?;
             let last_synced = payload
                 .get("lastSynced")
@@ -122,6 +156,97 @@ pub fn upsert_many_from_payload(
     }
     tx.commit().map_err(|e| format!("achievements batch commit: {e}"))?;
     Ok(())
+}
+
+/// Read the persisted payload JSON for one game inside a transaction.
+fn read_payload_row(
+    tx: &rusqlite::Transaction,
+    game_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let mut stmt = tx
+        .prepare("SELECT payload_json FROM achievements_cache WHERE game_id = ?1")
+        .map_err(|e| format!("achievements read_payload prepare: {e}"))?;
+    let mut rows = stmt
+        .query(params![game_id])
+        .map_err(|e| format!("achievements read_payload query: {e}"))?;
+    if let Some(r) = rows
+        .next()
+        .map_err(|e| format!("achievements read_payload row: {e}"))?
+    {
+        let payload: String = r
+            .get(0)
+            .map_err(|e| format!("achievements read_payload col: {e}"))?;
+        let value = serde_json::from_str(&payload)
+            .map_err(|e| format!("achievements read_payload parse: {e}"))?;
+        return Ok(Some(value));
+    }
+    Ok(None)
+}
+
+/// Merge already-unlocked achievements from `existing` into `incoming`,
+/// keeping `incoming`'s schema/metadata but never relocking. Recomputes
+/// the `unlocked`/`locked`/`total` counters afterward.
+fn union_achieved_into(incoming: &mut serde_json::Value, existing: &serde_json::Value) {
+    let existing_unlocked: std::collections::HashMap<String, u64> = existing
+        .get("achievements")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|a| a.get("achieved").and_then(|v| v.as_bool()).unwrap_or(false))
+                .filter_map(|a| {
+                    let name = a.get("apiName").and_then(|v| v.as_str())?.to_uppercase();
+                    let ut = a.get("unlockTime").and_then(|v| v.as_u64()).unwrap_or(0);
+                    Some((name, ut))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if existing_unlocked.is_empty() {
+        return;
+    }
+
+    let Some(arr) = incoming
+        .get_mut("achievements")
+        .and_then(|v| v.as_array_mut())
+    else {
+        return;
+    };
+
+    let mut unlocked_count: u64 = 0;
+    for a in arr.iter_mut() {
+        let name = a
+            .get("apiName")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_uppercase())
+            .unwrap_or_default();
+        let already = a.get("achieved").and_then(|v| v.as_bool()).unwrap_or(false);
+        if let Some(&ut) = existing_unlocked.get(&name) {
+            if let Some(obj) = a.as_object_mut() {
+                obj.insert("achieved".into(), serde_json::Value::Bool(true));
+                let cur = obj
+                    .get("unlockTime")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if cur == 0 && ut > 0 {
+                    obj.insert("unlockTime".into(), serde_json::Value::Number(ut.into()));
+                }
+            }
+        }
+        if a.get("achieved").and_then(|v| v.as_bool()).unwrap_or(already) {
+            unlocked_count += 1;
+        }
+    }
+
+    let total = arr.len() as u64;
+    if let Some(obj) = incoming.as_object_mut() {
+        obj.insert("unlocked".into(), serde_json::Value::Number(unlocked_count.into()));
+        obj.insert(
+            "locked".into(),
+            serde_json::Value::Number((total - unlocked_count).into()),
+        );
+        obj.insert("total".into(), serde_json::Value::Number(total.into()));
+    }
 }
 
 /// Read every cached row and assemble the legacy
