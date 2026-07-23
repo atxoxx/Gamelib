@@ -14,9 +14,9 @@ import ReviewsTab from "../components/ReviewsTab";
 import DownloadButton from "../components/DownloadButton";
 import CrackWatchCard from "../components/CrackWatchCard";
 import ProtonDBCard from "../components/ProtonDBCard";
-import SteamPlayerCount from "../components/SteamPlayerCount";
 import GameRelationsCard from "../components/GameRelationsCard";
 import {
+  GameHero,
   InfoKpiCard,
   RatingsKpiCard,
   SpecsCard,
@@ -111,8 +111,6 @@ export default function StoreGameDetail() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [logoFailed, setLogoFailed] = useState(false);
-  const [coverErrored, setCoverErrored] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -207,7 +205,6 @@ export default function StoreGameDetail() {
   useEffect(() => {
     setData(null);
     setActiveTab("overview");
-    setLogoFailed(false);
     fetchData();
   }, [fetchData]);
 
@@ -310,99 +307,20 @@ export default function StoreGameDetail() {
         </button>
       </div>
 
-      {/* ── Hero — refined Steam-style banner with floating cover ── */}
-      <div className="game-hero game-hero--compact game-hero--store">
-        <div className="game-hero__banner">
-          {/* Immersive ambient backdrop tinted by the game art */}
-          {(data.images.hero || data.images.banner || data.images.cover) && (
-            <div
-              className="game-hero__ambient"
-              style={{ backgroundImage: `url(${data.images.hero ?? data.images.banner ?? data.images.cover})` }}
-              aria-hidden="true"
-            />
-          )}
-          {/* Full-bleed hero/banner image */}
-          {(data.images.hero || data.images.banner) && (
-            <div
-              className="game-banner-bg"
-              style={{ backgroundImage: `url(${data.images.hero ?? data.images.banner})` }}
-            />
-          )}
-
-          {/* Live Steam player count badge */}
-          <div className="hero-player-count">
-            <SteamPlayerCount appId={steamAppId} />
-          </div>
-
-          {/* Banner art (crisp crop of the hero/cover image) */}
-          <div className="game-banner">
-            {(data.images.hero ?? data.images.banner ?? data.images.cover) ? (
-              <img
-                src={data.images.hero ?? data.images.banner ?? data.images.cover ?? ""}
-                alt={data.title}
-                className="game-cover-img"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-              />
-            ) : (
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" opacity={0.2}>
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            )}
-          </div>
-
-          {/* Floating 2:3 cover breaking out of the banner's bottom edge */}
-          {data.images.cover && !coverErrored && (
-            <div className="game-hero__cover" aria-hidden="true">
-              <img
-                src={data.images.cover}
-                alt=""
-                className="game-hero__cover-img"
-                onError={() => setCoverErrored(true)}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Info row below banner: logo/title + meta + actions */}
-        <div className={`game-hero__info-row${data.images.cover && !coverErrored ? " game-hero__info-row--with-cover" : ""}`}>
-          <div className="game-hero__title-block">
-            <span className="brand-eyebrow">GameLib Store</span>
-            {data.images.logo && !logoFailed ? (
-              <img
-                src={data.images.logo}
-                alt={data.title}
-                className="game-hero-logo"
-                width={200}
-                height={60}
-                onError={() => setLogoFailed(true)}
-              />
-            ) : (
-              <h1 className="game-hero-title brand-text">{data.title}</h1>
-            )}
-          </div>
-          <div className="game-hero-meta">
-            {data.developer && (
-              <>
-                <span>{data.developer}</span>
-                <span className="game-hero-meta-dot" />
-              </>
-            )}
-            {data.publisher && (
-              <>
-                <span>{data.publisher}</span>
-                <span className="game-hero-meta-dot" />
-              </>
-            )}
-            {releaseYear && (
-              <>
-                <span>{releaseYear}</span>
-                <span className="game-hero-meta-dot" />
-              </>
-            )}
-            <span>{data.sourceName}</span>
-          </div>
-          <div className="game-hero__actions" style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center", flexWrap: "wrap" }}>
-            {isInLibrary ? (
+      {/* ── Hero — shared GameHero (unified with the Library game page) ── */}
+      <GameHero
+        name={data.title}
+        bannerUrl={data.images.hero ?? data.images.banner ?? null}
+        coverUrl={data.images.cover ?? null}
+        logoUrl={data.images.logo ?? null}
+        accentSrc={data.images.cover ?? data.images.hero ?? data.images.banner ?? null}
+        eyebrow="GameLib Store"
+        steamAppId={steamAppId ?? null}
+        metaItems={[data.developer, data.publisher, releaseYear, data.sourceName].filter(
+          (v): v is string => Boolean(v),
+        )}
+        actions={
+          isInLibrary ? (
               <button
                 className="game-launch-btn"
                 onClick={() => navigate(`/library/${libraryGameId}`)}
@@ -423,15 +341,13 @@ export default function StoreGameDetail() {
                 </button>
                 <DownloadButton
                   gameName={data.title}
-                  steamAppId={steamAppId}
+                  steamAppId={steamAppId ?? undefined}
                   variant="prominent"
                   label="Find Download"
                 />
               </>
             )}
-          </div>
-        </div>
-      </div>
+      />
 
       {/* ── Tabs ─────────────────────────────────────────────────── */}
       <div className="game-tabs">

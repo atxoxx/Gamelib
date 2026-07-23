@@ -6,6 +6,7 @@ import { useBigScreen } from "../context/BigScreenContext";
 import BigScreenGamePage from "../components/game/BigScreenGamePage";
 import { EditGameModal } from "../components/game/EditGameModal";
 import { useSizeUnit } from "../hooks/useSizeUnit";
+import { useSteamAppId } from "../hooks/useSteamAppId";
 import { type Game } from "../types/game";
 import WebLinksTab from "../components/WebLinksTab";
 import ReviewsTab from "../components/ReviewsTab";
@@ -85,6 +86,7 @@ function GameDetail({ game }: { game: Game }) {
   const { showToast } = useToast();
   const { launchGame, enrichGameMetadata, removeGame } = useGames();
   const { unit: sizeUnit } = useSizeUnit();
+  const { appId: heroSteamAppId } = useSteamAppId(game);
   // Confirm-remove flow state. Clicking the Remove button in the
   // top bar opens the ConfirmModal; only on confirm do we actually
   // wipe the game (matches the destructive-action discipline used
@@ -299,7 +301,7 @@ function GameDetail({ game }: { game: Game }) {
         </div>
       </div>
 
-      <GameHero game={game} onLaunch={handleLaunch} />
+      <GameHero game={game} steamAppId={heroSteamAppId} onLaunch={handleLaunch} />
 
       {/* Tabs — sticky bar with an animated sliding indicator.
           The indicator span reads --tab-indicator-left / --width
